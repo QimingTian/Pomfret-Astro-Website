@@ -49,3 +49,6 @@ __pycache__/
 # Exceeds GitHub 100 MB single-file limit; replace with hosted asset URL if needed
 public/DJI_0149.MP4
 
+# Local private backups (never commit)
+.local-private/
+

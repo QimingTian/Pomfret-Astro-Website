@@ -2,11 +2,6 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import dynamic from 'next/dynamic'
-
-const ThemeToggle = dynamic(() => import('@/components/ThemeToggle'), {
-  ssr: false,
-})
 
 const CORRECT_PASSWORD = 'VISTAobs'
 
@@ -29,9 +24,6 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-white dark:bg-gray-900">
-      <div className="absolute top-4 right-4">
-        <ThemeToggle />
-      </div>
       <div className="w-full max-w-md px-8">
         <div className="text-center mb-12">
           <h1 className="text-4xl font-semibold mb-3 text-apple-dark dark:text-white">Pomfret Astro</h1>

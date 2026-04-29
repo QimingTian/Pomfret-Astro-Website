@@ -9,9 +9,9 @@ export default function CameraPage() {
 
   if (!controller) {
     return (
-      <div className="flex flex-col h-full">
-        <h1 className="text-2xl font-semibold text-apple-dark dark:text-white px-8 pt-8 pb-4">All Sky Camera</h1>
-        <div className="flex-1 px-8 pb-8 min-h-[400px]">
+      <div className="flex h-full flex-col lg:-translate-x-3">
+        <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-4">All Sky Camera</h1>
+        <div className="flex-1 pb-8 min-h-[400px]">
           <div className="w-full h-full min-h-[400px] bg-black dark:bg-black rounded-lg overflow-hidden" />
         </div>
       </div>
@@ -19,9 +19,9 @@ export default function CameraPage() {
   }
 
   return (
-    <div className="flex flex-col h-full">
-      <h1 className="text-2xl font-semibold text-apple-dark dark:text-white px-8 pt-8 pb-4">All Sky Camera</h1>
-      <div className="flex-1 px-8 pb-8 min-h-0">
+    <div className="flex h-full flex-col lg:-translate-x-3">
+      <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-4">All Sky Camera</h1>
+      <div className="flex-1 pb-8 min-h-0">
         <div className="w-full h-full space-y-3 mt-6">
           <div className="w-full h-full min-h-[420px] max-h-[calc(100vh-16rem)] relative bg-black overflow-hidden rounded-lg">
             <MJPEGStream

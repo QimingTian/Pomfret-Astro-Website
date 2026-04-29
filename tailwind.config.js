@@ -9,10 +9,10 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        'apple-gray': '#f5f5f7',
-        'apple-dark': '#1d1d1f',
-        'apple-blue': '#0071e3',
-        'apple-blue-hover': '#0077ed',
+        'apple-gray': '#D4CDCB',
+        'apple-dark': '#17181F',
+        'apple-blue': '#000000',
+        'apple-blue-hover': '#000000',
       },
     },
   },

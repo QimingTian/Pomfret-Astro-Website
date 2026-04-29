@@ -3,11 +3,11 @@
 import { useEffect, useState } from 'react'
 import { useAppStore } from '@/lib/store'
 import type { WeatherModel } from '@/lib/types'
-import { TemperatureIcon, HumidityIcon, CloudIcon, WindIcon } from '@/components/WeatherIcons'
 
 function NOAAGoesCloudMap() {
   const store = useAppStore()
-  const imageURL = 'https://cdn.star.nesdis.noaa.gov/GOES16/ABI/CONUS/GEOCOLOR/latest.jpg'
+  // NOAA official animated CONUS loop (GOES16 URL currently redirects to GOES19).
+  const imageURL = 'https://cdn.star.nesdis.noaa.gov/GOES19/ABI/CONUS/GEOCOLOR/GOES19-CONUS-GEOCOLOR-625x375.gif'
   const [refreshKey, setRefreshKey] = useState(Date.now())
 
   const handleImageLoad = () => {
@@ -37,17 +37,15 @@ function NOAAGoesCloudMap() {
   }, [])
 
   return (
-    <div className="bg-apple-gray dark:bg-gray-800 rounded-2xl p-6">
+    <div>
       <div className="mb-4">
-        <h3 className="text-lg font-semibold text-apple-dark dark:text-white">
-          NOAA GOES-East Satellite Cloud Map (CONUS)
-        </h3>
+        <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-4">Cloud Map</h1>
       </div>
 
       <div className="relative w-full rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-700" style={{ height: '400px' }}>
         <img
           src={`/api/noaa-goes?url=${encodeURIComponent(imageURL)}&t=${refreshKey}`}
-          alt="NOAA GOES-East Satellite Cloud Map"
+          alt="NOAA GOES-East Satellite Cloud Map Animation"
           key={refreshKey}
           className="absolute"
           style={{
@@ -59,10 +57,7 @@ function NOAAGoesCloudMap() {
           onLoad={handleImageLoad}
         />
       </div>
-
-      <p className="text-xs text-gray-500 dark:text-gray-500 mt-3">
-        Powered by NOAA GOES-East Satellite - Continental US Region
-      </p>
+      <p className="text-xs text-gray-500 dark:text-gray-500 mt-3">Powered by NOAA GOES</p>
     </div>
   )
 }
@@ -129,9 +124,9 @@ export default function WeatherPage() {
   }
 
   return (
-    <div className="p-8">
+    <div className="pb-8 lg:-translate-x-3">
       <div className="mb-6">
-        <h1 className="text-3xl font-semibold text-apple-dark dark:text-white mb-2">Weather</h1>
+        <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-4">Weather</h1>
         <p className="text-gray-600 dark:text-gray-400">Pomfret, CT</p>
         <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">Powered by Open-Meteo</p>
         {weather.observationTime && (
@@ -147,54 +142,55 @@ export default function WeatherPage() {
         </div>
       ) : (
         <div className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {[
-            {
-              title: 'Temperature',
-              value: formatValue(weather.temperatureC, '°C'),
-              icon: TemperatureIcon,
-            },
-            {
-              title: 'Apparent Temperature',
-              value: formatValue(weather.apparentTemperatureC, '°C'),
-              icon: TemperatureIcon,
-            },
-            {
-              title: 'Humidity',
-              value: formatValue(weather.humidityPercent, '%'),
-              icon: HumidityIcon,
-            },
-            {
-              title: 'Cloud Cover',
-              value: formatValue(weather.cloudCoverPercent, '%'),
-              icon: CloudIcon,
-            },
-            {
-              title: 'Wind Speed',
-              value: formatValue(weather.windSpeed, ' km/h'),
-              icon: WindIcon,
-            },
-            {
-              title: 'Wind Gust',
-              value: formatValue(weather.windGust, ' km/h'),
-              icon: WindIcon,
-            },
-          ].map((metric) => {
-            const IconComponent = metric.icon
-            return (
-              <div key={metric.title} className="bg-apple-gray dark:bg-gray-800 rounded-2xl p-6">
-                <div className="flex items-center gap-3 mb-3">
-                  <IconComponent className="w-6 h-6 text-gray-600 dark:text-gray-400" />
-                  <h3 className="text-lg font-medium text-apple-dark dark:text-white">{metric.title}</h3>
-                </div>
-                <p className="text-3xl font-semibold text-apple-dark dark:text-white">{metric.value}</p>
-              </div>
-            )
-          })}
+          <div>
+            {(() => {
+              const metrics = [
+                { title: 'Temperature', value: formatValue(weather.temperatureC, '°C') },
+                { title: 'Apparent Temperature', value: formatValue(weather.apparentTemperatureC, '°C') },
+                { title: 'Humidity', value: formatValue(weather.humidityPercent, '%') },
+                { title: 'Cloud Cover', value: formatValue(weather.cloudCoverPercent, '%') },
+                { title: 'Wind Speed', value: formatValue(weather.windSpeed, ' km/h') },
+                { title: 'Wind Gust', value: formatValue(weather.windGust, ' km/h') },
+              ]
+
+              return (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-3">
+                    {metrics.slice(0, 3).map((metric, index) => (
+                      <div
+                        key={metric.title}
+                        className={`p-6 text-center flex flex-col items-center justify-center ${index < 2 ? 'md:border-r md:border-white/35' : ''}`}
+                      >
+                        <div className="mb-3">
+                          <h3 className="text-lg font-medium text-white">{metric.title}</h3>
+                        </div>
+                        <p className="text-3xl font-semibold text-apple-dark dark:text-white">{metric.value}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="border-t border-white/35" />
+                  <div className="grid grid-cols-1 md:grid-cols-3">
+                    {metrics.slice(3).map((metric, index) => (
+                      <div
+                        key={metric.title}
+                        className={`p-6 text-center flex flex-col items-center justify-center ${index < 2 ? 'md:border-r md:border-white/35' : ''}`}
+                      >
+                        <div className="mb-3">
+                          <h3 className="text-lg font-medium text-white">{metric.title}</h3>
+                        </div>
+                        <p className="text-3xl font-semibold text-apple-dark dark:text-white">{metric.value}</p>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )
+            })()}
           </div>
 
           {/* NOAA GOES Cloud Map Section */}
-          <NOAAGoesCloudMap />
+          <div className="mt-6 border-t border-black/10 dark:border-white/10 pt-8">
+            <NOAAGoesCloudMap />
+          </div>
         </div>
       )}
     </div>

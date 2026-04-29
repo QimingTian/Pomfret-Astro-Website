@@ -34,3 +34,18 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# optional local imaging queue file (see IMAGING_QUEUE_FILE)
+.data/
+
+# Local reference trees (NINA / Siril / ExoPlanets upstream clones — not shipped with the site)
+ExoPlanets/
+nina/
+siril-1.4.2/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Exceeds GitHub 100 MB single-file limit; replace with hosted asset URL if needed
+public/DJI_0149.MP4
+

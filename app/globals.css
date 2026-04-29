@@ -3,13 +3,13 @@
 @tailwind utilities;
 
 :root {
-  --foreground-rgb: 0, 0, 0;
-  --background-rgb: 255, 255, 255;
+  --foreground-rgb: 23, 24, 31;   /* #17181F */
+  --background-rgb: 212, 205, 203; /* #D4CDCB */
 }
 
 .dark {
-  --foreground-rgb: 255, 255, 255;
-  --background-rgb: 17, 24, 39;
+  --foreground-rgb: 212, 205, 203; /* #D4CDCB */
+  --background-rgb: 8, 9, 10;      /* #08090a */
 }
 
 * {
@@ -25,13 +25,14 @@ body {
   background: rgb(var(--background-rgb));
   color: rgb(var(--foreground-rgb));
   min-height: 100vh;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition: background-color 0.35s ease, color 0.35s ease;
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', 'Helvetica', 'Arial', sans-serif;
+  font-family: 'SF Pro Text', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Helvetica', 'Arial', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  letter-spacing: 0.01em;
 }
 
 a {
@@ -39,3 +40,162 @@ a {
   text-decoration: none;
 }
 
+h1,
+h2,
+h3 {
+  font-family: 'SF Pro Display', 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Helvetica', 'Arial', sans-serif;
+  letter-spacing: 0.01em;
+}
+
+/* Dark-only brand direction: no blue accents, pure black/white UI. */
+.dark .bg-apple-blue,
+.dark .bg-apple-blue-hover,
+.dark .dark\:bg-blue-600,
+.dark .dark\:bg-blue-900\/30,
+.dark .bg-blue-50 {
+  background-color: #000000 !important;
+}
+
+.dark .text-apple-blue,
+.dark .dark\:text-blue-300,
+.dark .dark\:text-blue-400,
+.dark .text-blue-600,
+.dark .text-blue-700 {
+  color: #ffffff !important;
+}
+
+.dark .border-apple-blue,
+.dark .dark\:border-blue-400,
+.dark .border-blue-500,
+.dark .dark\:border-blue-500 {
+  border-color: rgba(255, 255, 255, 0.4) !important;
+}
+
+/* Enforce pure-black dark surfaces where Tailwind gray dark backgrounds are still used. */
+.dark .dark\:bg-gray-900,
+.dark .dark\:bg-gray-800,
+.dark .dark\:bg-gray-700 {
+  background-color: #000000 !important;
+}
+
+/* Enforce all typography in dark mode to white + SF Pro. */
+.dark,
+.dark body,
+.dark h1,
+.dark h2,
+.dark h3,
+.dark h4,
+.dark h5,
+.dark h6,
+.dark p,
+.dark label,
+.dark small,
+.dark th,
+.dark td,
+.dark li,
+.dark summary {
+  font-family: 'SF Pro Text', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Helvetica', 'Arial', sans-serif !important;
+}
+
+.dark .font-mono,
+.dark .font-serif {
+  font-family: 'SF Pro Text', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Helvetica', 'Arial', sans-serif !important;
+}
+
+/* Page-level main titles: brighter, larger, slightly raised */
+.dark .dashboard-surface h1 {
+  color: #ffffff !important;
+  font-size: clamp(2.1rem, 2.6vw, 2.8rem) !important;
+  line-height: 1.08 !important;
+  transform: translateY(-3px);
+}
+
+.dark .text-apple-dark,
+.dark .text-gray-100,
+.dark .text-gray-200,
+.dark .text-gray-300,
+.dark .text-gray-400,
+.dark .text-gray-500,
+.dark .text-gray-600,
+.dark .text-gray-700,
+.dark .text-gray-800,
+.dark .text-gray-900 {
+  color: #9da0a7 !important;
+}
+
+/* Text fields: remove white fill, keep visible border on black background. */
+.dark input,
+.dark select,
+.dark textarea {
+  background-color: transparent !important;
+  border: 0 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.45) !important;
+  border-radius: 0 !important;
+  color: #ffffff !important;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: rgba(255, 255, 255, 0.58) !important;
+}
+
+.dark input:focus,
+.dark select:focus,
+.dark textarea:focus {
+  border-bottom-color: #ffffff !important;
+  outline: none !important;
+}
+
+/* New Imaging Session fields: keep boxed controls instead of underline-only style. */
+.dark .boxed-fields input,
+.dark .boxed-fields select,
+.dark .boxed-fields textarea {
+  border: 1px solid rgba(255, 255, 255, 0.3) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.3) !important;
+  border-radius: 0.5rem !important;
+}
+
+.dark .boxed-fields input:focus,
+.dark .boxed-fields select:focus,
+.dark .boxed-fields textarea:focus {
+  border-color: rgba(255, 255, 255, 0.6) !important;
+  border-bottom-color: rgba(255, 255, 255, 0.6) !important;
+}
+
+/* Cards/panels: always visible border against black background. */
+.dark .border,
+.dark .border-gray-100,
+.dark .border-gray-200,
+.dark .border-gray-300,
+.dark .border-gray-400,
+.dark .border-gray-500,
+.dark .border-gray-600,
+.dark .border-gray-700,
+.dark .border-gray-800,
+.dark .border-gray-900 {
+  border-color: rgba(255, 255, 255, 0.3) !important;
+}
+
+/* Admin activity log: white scrollbar thumb (Firefox + WebKit). */
+.admin-activity-log-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #fff rgba(255, 255, 255, 0.12);
+}
+
+.admin-activity-log-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.admin-activity-log-scroll::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+}
+
+.admin-activity-log-scroll::-webkit-scrollbar-thumb {
+  background: #fff;
+  border-radius: 4px;
+}
+
+.admin-activity-log-scroll::-webkit-scrollbar-thumb:hover {
+  background: #e8e8e8;
+}

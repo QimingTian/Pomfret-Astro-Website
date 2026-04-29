@@ -3,4 +3,5 @@ node_modules
 .vercel
 *.log
 .DS_Store
+public/DJI_0149.MP4
 

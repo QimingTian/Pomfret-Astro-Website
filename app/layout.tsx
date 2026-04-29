@@ -3,8 +3,25 @@ import './globals.css'
 import { ThemeProvider } from '@/components/ThemeProvider'
 
 export const metadata: Metadata = {
-  title: 'Pomfret Astro - VISTA Observatory',
-  description: 'Pomfret School VISTA Observatory Control System',
+  title: 'Pomfret Astro',
+  description: 'Pomfret School Observatory Control System',
+  metadataBase: new URL('https://www.pomfretastro.org'),
+  alternates: {
+    canonical: '/',
+  },
+  openGraph: {
+    title: 'Pomfret Astro',
+    description: 'Pomfret School Observatory Control System',
+    url: 'https://www.pomfretastro.org',
+    siteName: 'Pomfret Astro',
+    locale: 'en_US',
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary',
+    title: 'Pomfret Astro',
+    description: 'Pomfret School Observatory Control System',
+  },
   icons: {
     icon: [
       { url: '/icon.png', type: 'image/png' },
@@ -20,7 +37,7 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className="dark" suppressHydrationWarning>
       <body>
         <ThemeProvider>
           {children}

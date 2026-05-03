@@ -14,20 +14,22 @@ const nextConfig = {
   // Stellarium Web hardcodes CDNs that only allow Origin: https://stellarium-web.org.
   // Same-origin proxy so fetch/XHR from pomfretastro.org succeeds (see public/stellarium/index.html).
   async rewrites() {
-    return [
-      {
-        source: '/stellarium-cdn-do/:path*',
-        destination: 'https://stellarium.sfo2.cdn.digitaloceanspaces.com/:path*',
-      },
-      {
-        source: '/stellarium-cdn-cf/:path*',
-        destination: 'https://d3ufh70wg9uzo4.cloudfront.net/:path*',
-      },
-      {
-        source: '/stellarium-cdn-noctua/:path*',
-        destination: 'https://api.noctuasky.com/:path*',
-      },
-    ]
+    return {
+      beforeFiles: [
+        {
+          source: '/stellarium-cdn-do/:path*',
+          destination: 'https://stellarium.sfo2.cdn.digitaloceanspaces.com/:path*',
+        },
+        {
+          source: '/stellarium-cdn-cf/:path*',
+          destination: 'https://d3ufh70wg9uzo4.cloudfront.net/:path*',
+        },
+        {
+          source: '/stellarium-cdn-noctua/:path*',
+          destination: 'https://api.noctuasky.com/:path*',
+        },
+      ],
+    }
   },
   images: {
     domains: ['localhost'],

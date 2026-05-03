@@ -56,19 +56,53 @@
     }
     return u
   }
+  function cloneRequestWithUrl(req, nu) {
+    return new Request(nu, {
+      method: req.method,
+      headers: req.headers,
+      body: req.method !== 'GET' && req.method !== 'HEAD' ? req.body : undefined,
+      mode: req.mode,
+      credentials: req.credentials,
+      cache: req.cache,
+      redirect: req.redirect,
+      referrer: req.referrer,
+      referrerPolicy: req.referrerPolicy,
+      integrity: req.integrity,
+      keepalive: req.keepalive,
+      signal: req.signal
+    })
+  }
   var origFetch = window.fetch.bind(window)
-  window.fetch = function (input, init) {
+  function patchedFetch(input, init) {
     if (typeof Request !== 'undefined' && input instanceof Request) {
       var nu = mapUrl(input.url)
-      if (nu !== input.url) input = new Request(nu, input)
-    } else if (typeof input === 'string') input = mapUrl(input)
+      if (nu !== input.url) return origFetch(cloneRequestWithUrl(input, nu), init)
+      return origFetch(input, init)
+    }
+    if (typeof input === 'string') return origFetch(mapUrl(input), init)
     return origFetch(input, init)
   }
+  window.fetch = patchedFetch
+  if (typeof globalThis !== 'undefined') globalThis.fetch = patchedFetch
   var xopen = XMLHttpRequest.prototype.open
   XMLHttpRequest.prototype.open = function (method, url) {
     var rest = Array.prototype.slice.call(arguments, 2)
     return xopen.apply(this, [method, mapUrl(url)].concat(rest))
   }
+  try {
+    var desc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src')
+    if (desc && desc.set) {
+      var origSrcSet = desc.set
+      Object.defineProperty(HTMLImageElement.prototype, 'src', {
+        configurable: true,
+        enumerable: desc.enumerable,
+        get: desc.get,
+        set: function (v) {
+          origSrcSet.call(this, mapUrl(String(v)))
+        }
+      })
+    }
+  } catch (_) {}
 })()
 </script>
 <div id="nightmode"></div>

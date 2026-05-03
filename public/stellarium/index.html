@@ -37,6 +37,40 @@
 </style>
 </head>
 <body>
+<script>
+(function () {
+  // Official Stellarium Web CDNs return Access-Control-Allow-Origin only for stellarium-web.org.
+  // Third-party embeds get CORS-blocked fetches → no star data / fonts → black sky. Same-origin
+  // rewrites in next.config.js forward these paths; we remap URLs before chunk-vendors / app load.
+  var P = location.origin
+  var MAP = [
+    ['https://stellarium.sfo2.cdn.digitaloceanspaces.com', P + '/stellarium-cdn-do'],
+    ['https://d3ufh70wg9uzo4.cloudfront.net', P + '/stellarium-cdn-cf'],
+    ['https://api.noctuasky.com', P + '/stellarium-cdn-noctua']
+  ]
+  function mapUrl(u) {
+    if (typeof u !== 'string') return u
+    for (var i = 0; i < MAP.length; i++) {
+      var from = MAP[i][0], to = MAP[i][1]
+      if (u === from || u.indexOf(from + '/') === 0) return to + u.slice(from.length)
+    }
+    return u
+  }
+  var origFetch = window.fetch.bind(window)
+  window.fetch = function (input, init) {
+    if (typeof Request !== 'undefined' && input instanceof Request) {
+      var nu = mapUrl(input.url)
+      if (nu !== input.url) input = new Request(nu, input)
+    } else if (typeof input === 'string') input = mapUrl(input)
+    return origFetch(input, init)
+  }
+  var xopen = XMLHttpRequest.prototype.open
+  XMLHttpRequest.prototype.open = function (method, url) {
+    var rest = Array.prototype.slice.call(arguments, 2)
+    return xopen.apply(this, [method, mapUrl(url)].concat(rest))
+  }
+})()
+</script>
 <div id="nightmode"></div>
 <noscript><strong>We're sorry but stellarium-web doesn't work properly without JavaScript enabled. Please enable it to continue.</strong></noscript>
 <div id="app"><router-view></router-view></div>

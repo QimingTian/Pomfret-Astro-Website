@@ -9,6 +9,7 @@
 <link href="https://fonts.googleapis.com/css?family=Roboto:100,300,400,500,700,900" rel="stylesheet">
 <link rel="icon" type="image/x-icon" href="/stellarium/favicon.ico">
 <meta name="theme-color" content="#000">
+<link rel="preload" href="/stellarium/js/stellarium-web-engine.9b8f0e47.wasm" as="fetch" type="application/wasm" crossorigin>
 <style type="text/css">
   html, body { margin: 0; padding: 0; background: #000; }
   #nightmode {
@@ -74,6 +75,9 @@
   }
   var origFetch = window.fetch.bind(window)
   function patchedFetch(input, init) {
+    if (typeof URL !== 'undefined' && input instanceof URL) {
+      return origFetch(mapUrl(input.href), init)
+    }
     if (typeof Request !== 'undefined' && input instanceof Request) {
       var nu = mapUrl(input.url)
       if (nu !== input.url) return origFetch(cloneRequestWithUrl(input, nu), init)
@@ -87,7 +91,8 @@
   var xopen = XMLHttpRequest.prototype.open
   XMLHttpRequest.prototype.open = function (method, url) {
     var rest = Array.prototype.slice.call(arguments, 2)
-    return xopen.apply(this, [method, mapUrl(url)].concat(rest))
+    var u = typeof url === 'string' ? mapUrl(url) : url
+    return xopen.apply(this, [method, u].concat(rest))
   }
   try {
     var desc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src')
@@ -98,11 +103,18 @@
         enumerable: desc.enumerable,
         get: desc.get,
         set: function (v) {
-          origSrcSet.call(this, mapUrl(String(v)))
+          if (typeof v !== 'string') {
+            origSrcSet.call(this, v)
+            return
+          }
+          origSrcSet.call(this, mapUrl(v))
         }
       })
     }
   } catch (_) {}
+  window.addEventListener('unhandledrejection', function (ev) {
+    console.error('[stellarium]', ev.reason)
+  })
 })()
 </script>
 <div id="nightmode"></div>

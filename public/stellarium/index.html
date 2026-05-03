@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stellarium Web — Pomfret Astro</title>
+<meta name="description" content="Interactive sky atlas for Pomfret Astro, self-hosted build of Stellarium Web.">
+<link href="https://fonts.googleapis.com/css?family=Roboto:100,300,400,500,700,900" rel="stylesheet">
+<link rel="icon" type="image/x-icon" href="/stellarium/favicon.ico">
+<meta name="theme-color" content="#000">
+<style type="text/css">
+  html, body { margin: 0; padding: 0; background: #000; }
+  #nightmode {
+    background: #ff2200;
+    pointer-events: none;
+    height: 100vh;
+    width: 100vw;
+    position: absolute;
+    z-index: 1000;
+    mix-blend-mode: multiply;
+    visibility: hidden;
+  }
+</style>
+<link href="/stellarium/js/chunk-2d2253ec.6784855b.js" rel="prefetch">
+<link href="/stellarium/css/app.3714d66a.css" rel="preload" as="style">
+<link href="/stellarium/css/chunk-vendors.bd381c0a.css" rel="preload" as="style">
+<link href="/stellarium/js/app.44b5ed00.js" rel="preload" as="script">
+<link href="/stellarium/js/chunk-vendors.a9e667ff.js" rel="preload" as="script">
+<link href="/stellarium/css/chunk-vendors.bd381c0a.css" rel="stylesheet">
+<link href="/stellarium/css/app.3714d66a.css" rel="stylesheet">
+<style type="text/css">
+  /* Stock build uses #stel-canvas { z-index: -10 }. In our dashboard iframe the canvas paints
+     behind #app / Vuetify and the sky stays black. Toolbar / search use z-index 1–2 so 0 stays under UI. */
+  #stel-canvas { z-index: 0 !important; }
+  .v-application--wrap { background: transparent !important; }
+</style>
+</head>
+<body>
+<div id="nightmode"></div>
+<noscript><strong>We're sorry but stellarium-web doesn't work properly without JavaScript enabled. Please enable it to continue.</strong></noscript>
+<div id="app"><router-view></router-view></div>
+<script src="/stellarium/js/chunk-vendors.a9e667ff.js"></script>
+<script src="/stellarium/js/app.44b5ed00.js"></script>
+<script>
+(function () {
+  // Bridge the in-app Stellarium engine handle onto window so the parent frame
+  // (Pomfret Atlas page) can drive it via same-origin access.
+  function tryExpose() {
+    var appEl = document.getElementById('app');
+    if (!appEl) return false;
+    var root = appEl.__vue__;
+    if (!root || !root.$store) return false;
+    var stel = root.$store.state.stel;
+    if (!stel || !stel.core) return false;
+    window.stel = stel;
+    window.$stelRoot = root;
+    try {
+      window.parent && window.parent.postMessage({ source: 'pomfret-stellarium', type: 'ready' }, '*');
+    } catch (_) {}
+    return true;
+  }
+  var tries = 0;
+  var timer = setInterval(function () {
+    if (tryExpose() || ++tries > 120) clearInterval(timer);
+  }, 400);
+  function nudgeResize() {
+    try {
+      window.dispatchEvent(new Event('resize'));
+    } catch (_) {}
+  }
+  window.addEventListener('load', function () {
+    nudgeResize();
+    setTimeout(nudgeResize, 100);
+    setTimeout(nudgeResize, 500);
+    setTimeout(nudgeResize, 1500);
+  });
+})();
+</script>
+</body>
+</html>

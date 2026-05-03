@@ -1,1 +1,1 @@
-(this["webpackJsonp"]=this["webpackJsonp"]||[]).push([["chunk-2d2253ec"],{e429:function(e,s,n){e.exports=n.p+"js/stellarium-web-engine.9b8f0e47.wasm"}}]);
+(this["webpackJsonp"]=this["webpackJsonp"]||[]).push([["chunk-2d2253ec"],{e429:function(e,s,n){var u=n.p+"js/stellarium-web-engine.9b8f0e47.wasm";try{console.info("[pomfret-stellarium] wasm chunk url",u)}catch(_){}e.exports=u}}]);

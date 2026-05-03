@@ -86,7 +86,14 @@
       if (nu !== input.url) return origFetch(cloneRequestWithUrl(input, nu), init)
       return origFetch(input, init)
     }
-    if (typeof input === 'string') return origFetch(mapUrl(input), init)
+    if (typeof input === 'string') {
+      if (input.indexOf('.wasm') !== -1) {
+        try {
+          console.info('[pomfret-stellarium] fetch wasm', input, init && init.credentials)
+        } catch (_) {}
+      }
+      return origFetch(mapUrl(input), init)
+    }
     return origFetch(input, init)
   }
   window.fetch = patchedFetch
@@ -115,8 +122,27 @@
       })
     }
   } catch (_) {}
+  if (typeof WebAssembly !== 'undefined' && typeof WebAssembly.instantiateStreaming === 'function') {
+    var _ins = WebAssembly.instantiateStreaming
+    WebAssembly.instantiateStreaming = function (response, importObject) {
+      try {
+        console.info(
+          '[pomfret-stellarium] instantiateStreaming',
+          response && response.url,
+          response && response.status,
+          response && response.headers && response.headers.get && response.headers.get('content-type')
+        )
+      } catch (logErr) {
+        console.warn('[pomfret-stellarium] instantiateStreaming log', logErr)
+      }
+      return _ins.call(WebAssembly, response, importObject).catch(function (err) {
+        console.error('[pomfret-stellarium] instantiateStreaming failed', err)
+        throw err
+      })
+    }
+  }
   window.addEventListener('unhandledrejection', function (ev) {
-    console.error('[stellarium]', ev.reason)
+    console.error('[pomfret-stellarium] unhandledrejection', ev.reason)
   })
 })()
 </script>

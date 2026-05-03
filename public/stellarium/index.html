@@ -132,7 +132,9 @@
   function tryExpose() {
     var appEl = document.getElementById('app');
     if (!appEl) return false;
-    var root = appEl.__vue__;
+    var v = appEl.__vue__;
+    if (!v) return false;
+    var root = v.$root || v;
     if (!root || !root.$store) return false;
     var stel = root.$store.state.stel;
     if (!stel || !stel.core) return false;

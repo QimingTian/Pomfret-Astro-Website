@@ -13,7 +13,9 @@ const STELLARIUM_SRC = (() => {
     lng: String(POMFRET_LONGITUDE),
     elev: String(POMFRET_ALTITUDE_METERS),
   })
-  return `/stellarium/index.html?${params.toString()}`
+  // Use directory URL + router base /stellarium/ (see public/stellarium/js/app.*.js).
+  // /stellarium/index.html leaves pathname .../index.html so Vue history mode with base '/' matched no route → black iframe.
+  return `/stellarium/?${params.toString()}`
 })()
 
 type MountSample = {

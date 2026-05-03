@@ -1,6 +1,16 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  async redirects() {
+    return [
+      {
+        source: '/stellarium/index.html',
+        destination: '/stellarium/',
+        permanent: false,
+      },
+      { source: '/stellarium', destination: '/stellarium/', permanent: false },
+    ]
+  },
   async headers() {
     // Without application/wasm, hosts often serve .wasm as octet-stream → browser downloads
     // the file instead of feeding instantiateStreaming(); Stellarium stays black.
@@ -16,6 +26,8 @@ const nextConfig = {
   async rewrites() {
     return {
       beforeFiles: [
+        // Serve SPA shell at /stellarium/?q=… so Vue Router pathname /stellarium/ matches base /stellarium/
+        { source: '/stellarium/', destination: '/stellarium/index.html' },
         {
           source: '/stellarium-cdn-do/:path*',
           destination: 'https://stellarium.sfo2.cdn.digitaloceanspaces.com/:path*',

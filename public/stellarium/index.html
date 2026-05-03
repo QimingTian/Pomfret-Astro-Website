@@ -155,26 +155,50 @@
 (function () {
   // Bridge the in-app Stellarium engine handle onto window so the parent frame
   // (Pomfret Atlas page) can drive it via same-origin access.
-  function tryExpose() {
-    var appEl = document.getElementById('app');
-    if (!appEl) return false;
-    var v = appEl.__vue__;
-    if (!v) return false;
-    var root = v.$root || v;
-    if (!root || !root.$store) return false;
-    var stel = root.$store.state.stel;
-    if (!stel || !stel.core) return false;
-    window.stel = stel;
-    window.$stelRoot = root;
-    try {
-      window.parent && window.parent.postMessage({ source: 'pomfret-stellarium', type: 'ready' }, '*');
-    } catch (_) {}
-    return true;
+  function findVueRootWithStel() {
+    var rootEl = document.getElementById('app');
+    if (!rootEl) return null
+    var candidates = [rootEl].concat(rootEl.querySelectorAll ? Array.prototype.slice.call(rootEl.querySelectorAll('*')) : [])
+    for (var i = 0; i < candidates.length; i++) {
+      var el = candidates[i]
+      if (!el || !el.__vue__) continue
+      var cand = el.__vue__.$root || el.__vue__
+      if (cand && cand.$store && cand.$store.state && cand.$store.state.stel && cand.$store.state.stel.core) return cand
+    }
+    return null
   }
-  var tries = 0;
+  function closeNavDrawer(root) {
+    try {
+      if (root && root.$store) {
+        root.$store.commit('setValue', { varName: 'showNavigationDrawer', newValue: false })
+      }
+    } catch (_) {}
+  }
+  var readyPosted = false
+  function tryExpose() {
+    var root = findVueRootWithStel()
+    if (!root) return false
+    var stel = root.$store.state.stel
+    window.stel = stel
+    window.$stelRoot = root
+    closeNavDrawer(root)
+    if (!readyPosted) {
+      readyPosted = true
+      ;[0, 400, 1200, 2800].forEach(function (ms) {
+        setTimeout(function () {
+          closeNavDrawer(root)
+        }, ms)
+      })
+      try {
+        window.parent && window.parent.postMessage({ source: 'pomfret-stellarium', type: 'ready' }, '*')
+      } catch (_) {}
+    }
+    return true
+  }
+  var tries = 0
   var timer = setInterval(function () {
-    if (tryExpose() || ++tries > 120) clearInterval(timer);
-  }, 400);
+    if (tryExpose() || ++tries > 200) clearInterval(timer)
+  }, 200)
   function nudgeResize() {
     try {
       window.dispatchEvent(new Event('resize'));

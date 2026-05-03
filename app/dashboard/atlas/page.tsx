@@ -7,16 +7,6 @@ const POMFRET_LATITUDE = 41.9159
 const POMFRET_LONGITUDE = -71.9626
 const POMFRET_ALTITUDE_METERS = 150
 
-const STELLARIUM_SRC = (() => {
-  const params = new URLSearchParams({
-    lat: String(POMFRET_LATITUDE),
-    lng: String(POMFRET_LONGITUDE),
-    elev: String(POMFRET_ALTITUDE_METERS),
-  })
-  // Hash router (bundled app) so /stellarium/index.html?… works without Next redirects that caused ERR_TOO_MANY_REDIRECTS.
-  return `/stellarium/index.html?${params.toString()}`
-})()
-
 type MountSample = {
   connected?: boolean
   raHours?: number | null
@@ -158,6 +148,20 @@ export default function AtlasPage() {
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
   const [viewerReady, setViewerReady] = useState(false)
   const [stelReady, setStelReady] = useState(false)
+  const [viewerSrc, setViewerSrc] = useState<string | null>(null)
+
+  useEffect(() => {
+    const params = new URLSearchParams({
+      lat: String(POMFRET_LATITUDE),
+      lng: String(POMFRET_LONGITUDE),
+      elev: String(POMFRET_ALTITUDE_METERS),
+      // Stellarium Web defaults to “time after sunset” until location is set; `date` locks sim time to now
+      // so parent ribbon / wall clock align with reality (see App.vue setStateFromQueryArgs + startTimeIsSet).
+      date: new Date().toISOString(),
+    })
+    setStelReady(false)
+    setViewerSrc(`/stellarium/index.html?${params.toString()}`)
+  }, [])
 
   useEffect(() => {
     const onMessage = (ev: MessageEvent) => {
@@ -241,13 +245,14 @@ export default function AtlasPage() {
       : undefined
   const readySet = useMemo(() => new Set(weather?.readyHourStartsSec ?? []), [weather?.readyHourStartsSec])
 
-  const handleRibbonClick = (ev: React.MouseEvent<HTMLDivElement>) => {
+  const handleRibbonClick = (ev: React.MouseEvent<HTMLDivElement> | React.KeyboardEvent<HTMLDivElement>) => {
     if (!nightStartSec || !nightEndSec) return
     const stel = getStel()
     const observer = stel?.core?.observer
     if (!observer) return
     const rect = ev.currentTarget.getBoundingClientRect()
-    const frac = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width))
+    const clientX = 'clientX' in ev ? ev.clientX : rect.left + rect.width / 2
+    const frac = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
     const whenSec = nightStartSec + frac * (nightEndSec - nightStartSec)
     const mjd = whenSec / 86400 + 2440587.5 - 2400000.5
     observer.utc = mjd
@@ -288,7 +293,7 @@ export default function AtlasPage() {
           <div className="relative rounded-xl border border-black/10 dark:border-white/10 bg-black">
             <iframe
               ref={iframeRef}
-              src={STELLARIUM_SRC}
+              src={viewerSrc ?? undefined}
               title="Stellarium sky atlas"
               onLoad={(e) => {
                 setViewerReady(true)
@@ -423,7 +428,7 @@ export default function AtlasPage() {
               tabIndex={0}
               onClick={handleRibbonClick}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') handleRibbonClick(e as unknown as React.MouseEvent<HTMLDivElement>)
+                if (e.key === 'Enter' || e.key === ' ') handleRibbonClick(e)
               }}
               className="relative h-10 w-full cursor-pointer overflow-hidden rounded-lg border border-white/10 bg-black/40"
             >

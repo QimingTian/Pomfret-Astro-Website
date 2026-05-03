@@ -278,7 +278,8 @@ export default function AtlasPage() {
         <p className="text-sm text-gray-600 dark:text-gray-400">
           Interactive sky atlas centered on Pomfret Observatory ({POMFRET_LATITUDE.toFixed(4)}°,{' '}
           {POMFRET_LONGITUDE.toFixed(4)}°). Live telescope pointing, queued targets, and tonight&apos;s
-          observing window are overlaid on top of a self-hosted Stellarium Web build.
+          observing window are overlaid on a self-hosted Stellarium Web build; star catalogs load from{' '}
+          <code className="rounded bg-black/5 px-1 dark:bg-white/10">/skydata</code> (same-origin as the site).
         </p>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">

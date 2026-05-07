@@ -65,14 +65,14 @@ export default function GalleryPage() {
       </div>
       {selectedImage && (
         <div
-          className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-6"
+          className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-3 sm:p-6"
           onClick={closeImage}
         >
-          <div className="relative w-full max-w-6xl flex flex-col items-center gap-6">
+          <div className="relative w-full max-w-6xl flex flex-col items-center gap-3 sm:gap-6">
             <img
               src={selectedImage.src}
               alt={selectedImage.alt}
-              className="max-h-[65vh] w-auto max-w-full object-contain"
+              className="max-h-[70vh] w-auto max-w-full object-contain"
               onClick={(e) => e.stopPropagation()}
             />
             <p className="text-white text-sm sm:text-base text-center">{selectedImage.description}</p>

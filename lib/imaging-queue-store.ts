@@ -7,7 +7,8 @@ import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 import { getTonightAstronomicalNightWindow, getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import { altitudeAllowedCoverageMs, altitudeCoverageMsAtMinAltitude, firstAltitudeAllowedTimeMs } from '@/lib/target-altitude'
 
-export type ImagingRequestStatus = 'pending' | 'claimed' | 'completed' | 'failed'
+/** Queue lifecycle: mutually exclusive (no separate scheduleStatus flag). */
+export type ImagingRequestStatus = 'pending' | 'scheduled' | 'in_progress' | 'completed' | 'failed'
 
 export interface ImagingRequest {
   id: string
@@ -31,6 +32,7 @@ export interface ImagingRequest {
   /** Full NINA sequence JSON (only present for requests created after this feature). */
   ninaSequenceJson?: string
   sessionPasswordHash?: string
+  /** @deprecated Migrated into `status === 'scheduled'`; stripped on load. */
   scheduleStatus?: 'scheduled' | 'unscheduled'
   plannedStartIso?: string | null
   scheduleReasons?: string[]
@@ -40,8 +42,8 @@ export interface ImagingRequest {
 /** Strip large JSON from API list responses; expose download path instead. */
 export function toPublicImagingRequest(
   r: ImagingRequest
-): Omit<ImagingRequest, 'ninaSequenceJson' | 'sessionPasswordHash'> & { ninaSequencePath?: string } {
-  const { ninaSequenceJson, sessionPasswordHash, ...rest } = r
+): Omit<ImagingRequest, 'ninaSequenceJson' | 'sessionPasswordHash' | 'scheduleStatus'> & { ninaSequencePath?: string } {
+  const { ninaSequenceJson, sessionPasswordHash, scheduleStatus: _legacySchedule, ...rest } = r
   return {
     ...rest,
     ninaSequencePath: `/api/imaging/queue/${r.id}/nina-sequence`,
@@ -54,6 +56,19 @@ const MAX_FILTER = 64
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const STACKED_MASTER_REQUIRED_EXPOSURE_SECONDS = 600
 const VARIABLE_STAR_ESTIMATE_ALTITUDE_DEG = 40
+export const VARIABLE_STAR_SESSION_OVERHEAD_SEC = 15 * 60
+
+function variableStarDurationFromClientEstimate(inputEst: unknown): { ok: true; seconds: number } | { ok: false } {
+  if (typeof inputEst !== 'number' || !Number.isFinite(inputEst)) return { ok: false }
+  const est = Math.round(inputEst)
+  if (est < VARIABLE_STAR_SESSION_OVERHEAD_SEC + 30 * 60) return { ok: false }
+  const blockSec = est - VARIABLE_STAR_SESSION_OVERHEAD_SEC
+  const blockH = blockSec / 3600
+  const halves = blockH * 2
+  if (Math.abs(halves - Math.round(halves)) > 0.02) return { ok: false }
+  if (blockH < 0.5 - 1e-6) return { ok: false }
+  return { ok: true, seconds: Math.max(60, est) }
+}
 
 type GlobalWithQueue = typeof globalThis & { __pomfret_imaging_queue__?: ImagingRequest[] }
 
@@ -83,19 +98,23 @@ async function loadQueueFromKvIntoMemory(): Promise<void> {
 async function ensureLoadedFromDisk(): Promise<void> {
   if (kvEnabled()) {
     await loadQueueFromKvIntoMemory()
-    return
+  } else if (!queueFile || diskLoaded) {
+    // no-op
+  } else {
+    diskLoaded = true
+    const mem = getMemory()
+    try {
+      const raw = await readFile(queueFile, 'utf-8')
+      const parsed = JSON.parse(raw) as { requests?: ImagingRequest[] }
+      const list = Array.isArray(parsed.requests) ? parsed.requests : []
+      mem.splice(0, mem.length, ...list.slice(-MAX_QUEUE))
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code
+      if (code !== 'ENOENT') throw e
+    }
   }
-  if (!queueFile || diskLoaded) return
-  diskLoaded = true
-  const mem = getMemory()
-  try {
-    const raw = await readFile(queueFile, 'utf-8')
-    const parsed = JSON.parse(raw) as { requests?: ImagingRequest[] }
-    const list = Array.isArray(parsed.requests) ? parsed.requests : []
-    mem.splice(0, mem.length, ...list.slice(-MAX_QUEUE))
-  } catch (e) {
-    const code = (e as NodeJS.ErrnoException).code
-    if (code !== 'ENOENT') throw e
+  if (normalizeQueueInMemory()) {
+    await persist()
   }
 }
 
@@ -118,6 +137,35 @@ function nowIso() {
   return new Date().toISOString()
 }
 
+/** One-time shape fix: legacy `pending` + `scheduleStatus` → unified `status`; drop `scheduleStatus`. */
+function normalizeImagingRequest(r: ImagingRequest): ImagingRequest {
+  let status: ImagingRequestStatus = r.status
+  if (status === 'pending' && r.scheduleStatus === 'scheduled') {
+    status = 'scheduled'
+  }
+  if ((r.status as string) === 'claimed') {
+    status = 'in_progress'
+  }
+  const next: ImagingRequest = {
+    ...r,
+    status,
+    plannedStartIso: r.plannedStartIso ?? null,
+  }
+  delete (next as { scheduleStatus?: unknown }).scheduleStatus
+  return next
+}
+
+function normalizeQueueInMemory(): boolean {
+  const mem = getMemory()
+  let dirty = false
+  for (let i = 0; i < mem.length; i++) {
+    const before = JSON.stringify(mem[i])
+    mem[i] = normalizeImagingRequest(mem[i]!)
+    if (before !== JSON.stringify(mem[i])) dirty = true
+  }
+  return dirty
+}
+
 export async function listAll(): Promise<ImagingRequest[]> {
   await ensureLoadedFromDisk()
   return [...getMemory()]
@@ -125,7 +173,9 @@ export async function listAll(): Promise<ImagingRequest[]> {
 
 export async function listPending(): Promise<ImagingRequest[]> {
   const all = await listAll()
-  return all.filter((r) => r.status === 'pending').sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  return all
+    .filter((r) => r.status === 'pending' || r.status === 'scheduled')
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
 }
 
 export async function getRequestById(id: string): Promise<ImagingRequest | undefined> {
@@ -184,13 +234,9 @@ export async function patchRequestScheduleInsight(
   const idx = mem.findIndex((r) => r.id === id)
   if (idx === -1) return false
   const current = mem[idx]
-  const next: ImagingRequest = {
-    ...current,
-    scheduleStatus: insight.status,
-    plannedStartIso: insight.plannedStartIso,
-    scheduleReasons: insight.reasons,
-    updatedAt: nowIso(),
-  }
+  const queueStatus: ImagingRequestStatus = insight.status === 'scheduled' ? 'scheduled' : 'pending'
+  const next: ImagingRequest = { ...current, status: queueStatus, plannedStartIso: insight.plannedStartIso, scheduleReasons: insight.reasons, updatedAt: nowIso() }
+  delete (next as { scheduleStatus?: unknown }).scheduleStatus
   mem[idx] = next
   await persist()
   return true
@@ -211,6 +257,8 @@ export interface CreateImagingInput {
   lastName?: string | null
   email?: string | null
   sequenceTemplate?: 'dso' | 'variable_star'
+  /** Variable star: total seconds = (N×0.5 h block) + 15 min overhead; validated when `sequenceTemplate` is `variable_star`. */
+  estimatedDurationSeconds?: number
 }
 
 function targetLabelFromCoords(raHours: number, decDeg: number): string {
@@ -347,26 +395,30 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
   const id = crypto.randomUUID()
   const estimatedDurationSeconds =
     sequenceTemplate === 'variable_star'
-      ? Math.max(
-          0,
-          Math.round(
-            altitudeCoverageMsAtMinAltitude(
-              raHours,
-              decDeg,
-              getTonightAstronomicalNightWindow(new Date()).astronomicalDuskUtc.getTime(),
-              getTonightAstronomicalNightWindow(new Date()).astronomicalDawnUtc.getTime(),
-              VARIABLE_STAR_ESTIMATE_ALTITUDE_DEG
-            ) / 1000
+      ? (() => {
+          const custom = variableStarDurationFromClientEstimate(input.estimatedDurationSeconds)
+          if (custom.ok) return custom.seconds
+          return Math.max(
+            0,
+            Math.round(
+              altitudeCoverageMsAtMinAltitude(
+                raHours,
+                decDeg,
+                getTonightAstronomicalNightWindow(new Date()).astronomicalDuskUtc.getTime(),
+                getTonightAstronomicalNightWindow(new Date()).astronomicalDawnUtc.getTime(),
+                VARIABLE_STAR_ESTIMATE_ALTITUDE_DEG
+              ) / 1000
+            )
           )
-        )
+        })()
       : normalizedFilterPlans.reduce((sum, p) => sum + p.count * p.exposureSeconds, 0) + 15 * 60
 
-  const { nauticalDuskUtc, astronomicalDawnUtc } = getTonightSchedulingWindow(new Date())
+  const { nauticalDuskUtc, nauticalDawnUtc } = getTonightSchedulingWindow(new Date())
   const nightAltitudeAllowedMs = altitudeAllowedCoverageMs(
     raHours,
     decDeg,
     nauticalDuskUtc.getTime(),
-    astronomicalDawnUtc.getTime()
+    nauticalDawnUtc.getTime()
   )
   const requiredAltitudeAllowedMs = estimatedDurationSeconds * 1000 * 0.8
   if (nightAltitudeAllowedMs < requiredAltitudeAllowedMs) {
@@ -383,7 +435,7 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
 
   const durationMs = estimatedDurationSeconds * 1000
   const idealWindowStartMs = nauticalDuskUtc.getTime()
-  const idealWindowEndMs = astronomicalDawnUtc.getTime()
+  const idealWindowEndMs = nauticalDawnUtc.getTime()
   const idealNightFeasible = canFitInIdealNight(raHours, decDeg, durationMs, idealWindowStartMs, idealWindowEndMs)
   if (!idealNightFeasible) {
     return {
@@ -418,6 +470,10 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
         exposureSeconds: p.exposureSeconds,
         exposureCount: p.count,
       })),
+      variableStarObservingSeconds:
+        sequenceTemplate === 'variable_star'
+          ? Math.max(0, estimatedDurationSeconds - VARIABLE_STAR_SESSION_OVERHEAD_SEC)
+          : undefined,
     })
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Failed to build NINA sequence'
@@ -465,7 +521,7 @@ export async function updatePendingRequestById(
   const idx = mem.findIndex((r) => r.id === id)
   if (idx === -1) return { error: 'Not found', status: 404 }
   const current = mem[idx]
-  if (current.status !== 'pending') {
+  if (current.status !== 'pending' && current.status !== 'scheduled') {
     return { error: "Session already started, can't edit session", status: 409 }
   }
 
@@ -535,25 +591,29 @@ export async function updatePendingRequestById(
 
   const estimatedDurationSeconds =
     sequenceTemplate === 'variable_star'
-      ? Math.max(
-          0,
-          Math.round(
-            altitudeCoverageMsAtMinAltitude(
-              raHours,
-              decDeg,
-              getTonightAstronomicalNightWindow(new Date()).astronomicalDuskUtc.getTime(),
-              getTonightAstronomicalNightWindow(new Date()).astronomicalDawnUtc.getTime(),
-              VARIABLE_STAR_ESTIMATE_ALTITUDE_DEG
-            ) / 1000
+      ? (() => {
+          const custom = variableStarDurationFromClientEstimate(input.estimatedDurationSeconds)
+          if (custom.ok) return custom.seconds
+          return Math.max(
+            0,
+            Math.round(
+              altitudeCoverageMsAtMinAltitude(
+                raHours,
+                decDeg,
+                getTonightAstronomicalNightWindow(new Date()).astronomicalDuskUtc.getTime(),
+                getTonightAstronomicalNightWindow(new Date()).astronomicalDawnUtc.getTime(),
+                VARIABLE_STAR_ESTIMATE_ALTITUDE_DEG
+              ) / 1000
+            )
           )
-        )
+        })()
       : normalizedFilterPlans.reduce((sum, p) => sum + p.count * p.exposureSeconds, 0) + 15 * 60
-  const { nauticalDuskUtc, astronomicalDawnUtc } = getTonightSchedulingWindow(new Date())
+  const { nauticalDuskUtc, nauticalDawnUtc } = getTonightSchedulingWindow(new Date())
   const nightAltitudeAllowedMs = altitudeAllowedCoverageMs(
     raHours,
     decDeg,
     nauticalDuskUtc.getTime(),
-    astronomicalDawnUtc.getTime()
+    nauticalDawnUtc.getTime()
   )
   if (nightAltitudeAllowedMs < estimatedDurationSeconds * 1000 * 0.8) {
     return { error: 'Session is too long for this target altitude profile tonight. Please shorten it.' }
@@ -567,7 +627,7 @@ export async function updatePendingRequestById(
     decDeg,
     estimatedDurationSeconds * 1000,
     nauticalDuskUtc.getTime(),
-    astronomicalDawnUtc.getTime()
+    nauticalDawnUtc.getTime()
   )
   if (!idealNightFeasible) {
     return {
@@ -601,6 +661,10 @@ export async function updatePendingRequestById(
         exposureSeconds: p.exposureSeconds,
         exposureCount: p.count,
       })),
+      variableStarObservingSeconds:
+        sequenceTemplate === 'variable_star'
+          ? Math.max(0, estimatedDurationSeconds - VARIABLE_STAR_SESSION_OVERHEAD_SEC)
+          : undefined,
     })
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Failed to build NINA sequence'
@@ -609,6 +673,9 @@ export async function updatePendingRequestById(
 
   const next: ImagingRequest = {
     ...current,
+    status: 'pending',
+    plannedStartIso: null,
+    scheduleReasons: undefined,
     updatedAt: nowIso(),
     target,
     raHours,
@@ -626,6 +693,7 @@ export async function updatePendingRequestById(
     sessionPasswordHash,
     sequenceTemplate,
   }
+  delete (next as { scheduleStatus?: unknown }).scheduleStatus
   mem[idx] = next
   await persist()
   return next
@@ -647,11 +715,11 @@ export async function updateStatus(
     return { error: 'Request is already finished' }
   }
 
-  if (status === 'claimed' && current.status !== 'pending') {
-    return { error: 'Can only claim pending requests' }
+  if (status === 'in_progress' && current.status !== 'pending' && current.status !== 'scheduled') {
+    return { error: 'Can only move pending or scheduled requests to in progress' }
   }
-  if ((status === 'completed' || status === 'failed') && current.status === 'pending') {
-    return { error: 'Claim before completing or failing' }
+  if ((status === 'completed' || status === 'failed') && current.status !== 'in_progress') {
+    return { error: 'Complete or fail only from in progress' }
   }
 
   const next: ImagingRequest = {

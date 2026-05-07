@@ -24,6 +24,7 @@ export interface NinaSequenceParams {
   }>
   templateKind?: 'dso' | 'variable_star'
   targetName?: string
+  variableStarObservingSeconds?: number
 }
 
 function roundSeconds(x: number): number {
@@ -58,6 +59,27 @@ function asRecord(v: unknown): Record<string, unknown> {
     throw new Error('Expected object')
   }
   return v as Record<string, unknown>
+}
+
+/**
+ * NINA exports often set `Target` to `{ $ref: "…" }` while the real
+ * `InputCoordinates` live on a sibling (e.g. `ExoPlanetInputTarget`).
+ * Inline `InputTarget` still has `Target.InputCoordinates` directly.
+ */
+function resolveSequencerTarget(dso: Record<string, unknown>): Record<string, unknown> {
+  const raw = dso['Target']
+  const base = asRecord(raw)
+  if (base['InputCoordinates'] != null) return base
+  const refId = base['$ref']
+  if (typeof refId !== 'string') {
+    throw new Error('Template: Target has no InputCoordinates and no $ref')
+  }
+  for (const value of Object.values(dso)) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue
+    const rec = value as Record<string, unknown>
+    if (rec['$id'] === refId && rec['InputCoordinates'] != null) return rec
+  }
+  throw new Error(`Template: could not resolve Target $ref "${refId}"`)
 }
 
 function asArray(v: unknown): unknown[] {
@@ -248,6 +270,25 @@ function applyNinaCoordinates(coordsObj: Record<string, unknown>, raDecimalHours
   coordsObj['DecSeconds'] = dec.DecSeconds
 }
 
+/** Some ExoPlanets containers also carry DSO.Coordinates (NINA.Astrometry.Coordinates). Keep it in sync. */
+function applyExoPlanetCoordinates(coordsObj: Record<string, unknown>, raDecimalHours: number, decDegDecimal: number) {
+  const ra = raDecimalToNina(raDecimalHours)
+  const dec = decDecimalToNina(decDegDecimal)
+  const raHours = ra.RAHours + ra.RAMinutes / 60 + ra.RASeconds / 3600
+  const raDegrees = raHours * 15
+  const decAbs = dec.DecDegrees + dec.DecMinutes / 60 + dec.DecSeconds / 3600
+  const decSigned = dec.NegativeDec ? -decAbs : decAbs
+  const sign = dec.NegativeDec ? '-' : '+'
+  const pad2 = (n: number) => String(Math.trunc(Math.abs(n))).padStart(2, '0')
+  const raSec = ra.RASeconds.toFixed(3).padStart(6, '0')
+  const decSec = dec.DecSeconds.toFixed(2).padStart(5, '0')
+  coordsObj['RA'] = raHours
+  coordsObj['RADegrees'] = raDegrees
+  coordsObj['Dec'] = decSigned
+  coordsObj['RAString'] = `${pad2(ra.RAHours)}:${pad2(ra.RAMinutes)}:${raSec}`
+  coordsObj['DecString'] = `${sign}${pad2(dec.DecDegrees)}° ${pad2(dec.DecMinutes)}' ${decSec}"`
+}
+
 function dateToObservatoryHms(date: Date): { hours: number; minutes: number; seconds: number } {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York',
@@ -286,17 +327,24 @@ function lastAltitudeAllowedTimeMs(
 function applyVariableStarStartEndTimes(
   dso: Record<string, unknown>,
   raHoursDecimal: number,
-  decDegDecimal: number
+  decDegDecimal: number,
+  observingDurationMs?: number
 ) {
   const { astronomicalDuskUtc, astronomicalDawnUtc } = getTonightAstronomicalNightWindow(new Date())
   const winStartMs = astronomicalDuskUtc.getTime()
   const winEndMs = astronomicalDawnUtc.getTime()
 
   const startAllowedMs = firstAltitudeAllowedTimeMs(raHoursDecimal, decDegDecimal, winStartMs, winEndMs) ?? winStartMs
-  const endAllowedMs = lastAltitudeAllowedTimeMs(raHoursDecimal, decDegDecimal, winStartMs, winEndMs) ?? winEndMs
-
   const clampedStartMs = Math.max(winStartMs, Math.min(startAllowedMs, winEndMs))
-  const clampedEndMs = Math.max(clampedStartMs, Math.min(endAllowedMs, winEndMs))
+
+  let clampedEndMs: number
+  if (typeof observingDurationMs === 'number' && Number.isFinite(observingDurationMs) && observingDurationMs > 0) {
+    clampedEndMs = Math.min(clampedStartMs + observingDurationMs, winEndMs)
+    clampedEndMs = Math.max(clampedEndMs, clampedStartMs)
+  } else {
+    const endAllowedMs = lastAltitudeAllowedTimeMs(raHoursDecimal, decDegDecimal, winStartMs, winEndMs) ?? winEndMs
+    clampedEndMs = Math.max(clampedStartMs, Math.min(endAllowedMs, winEndMs))
+  }
 
   const waitForTransit = findFirstByType(dso, 'NINA.Plugin.ExoPlanets.Sequencer.Utility.WaitForTransit')
   if (waitForTransit) {
@@ -354,7 +402,7 @@ export function buildNinaSequenceJson(params: NinaSequenceParams): string {
   const dso = findFirstTargetInstructionContainer(targetArea)
   if (!dso) throw new Error('Template: target instruction container (DSO / ExoPlanet / VariableStar) not found')
 
-  const target = asRecord(dso['Target'])
+  const target = resolveSequencerTarget(dso)
   if (params.targetName && params.targetName.trim()) {
     target['TargetName'] = params.targetName.trim()
   }
@@ -380,9 +428,24 @@ export function buildNinaSequenceJson(params: NinaSequenceParams): string {
   if (centerCoords) {
     applyNinaCoordinates(centerCoords, params.raHoursDecimal, params.decDegDecimal)
   }
+  const exoPlanetDso = dso['ExoPlanetDSO']
+  if (exoPlanetDso && typeof exoPlanetDso === 'object' && !Array.isArray(exoPlanetDso)) {
+    const exoDsoRec = exoPlanetDso as Record<string, unknown>
+    const exoCoords = exoDsoRec['Coordinates']
+    if (exoCoords && typeof exoCoords === 'object' && !Array.isArray(exoCoords)) {
+      applyExoPlanetCoordinates(
+        exoCoords as Record<string, unknown>,
+        params.raHoursDecimal,
+        params.decDegDecimal
+      )
+    }
+  }
 
   if (templateKind === 'variable_star') {
-    applyVariableStarStartEndTimes(dso, params.raHoursDecimal, params.decDegDecimal)
+    const obsSec = params.variableStarObservingSeconds
+    const observingMs =
+      typeof obsSec === 'number' && Number.isFinite(obsSec) && obsSec > 0 ? Math.round(obsSec * 1000) : undefined
+    applyVariableStarStartEndTimes(dso, params.raHoursDecimal, params.decDegDecimal, observingMs)
     const switchFilter = findFirstByType(dsoItemValues, 'NINA.Sequencer.SequenceItem.FilterWheel.SwitchFilter')
     if (!switchFilter) throw new Error('Template: SwitchFilter not found')
     switchFilter['Filter'] = buildFilterInfoObject(root, usedIds, normalizedPlans[0].filterName)

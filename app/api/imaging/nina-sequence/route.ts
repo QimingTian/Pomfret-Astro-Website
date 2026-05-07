@@ -1,27 +1,28 @@
 import { NextResponse } from 'next/server'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
-import { imagingCorsHeaders, imagingCorsOptions } from '@/lib/imaging-queue-auth'
+import { imagingCorsHeadersResolved, imagingCorsOptions } from '@/lib/imaging-queue-auth'
 import { buildNinaSequenceJson } from '@/lib/build-nina-sequence-json'
 import { boardUpsertInProgress, listBoardEntries } from '@/lib/imaging-session-board'
-import { consumeRequestById, listPending, type ImagingRequest } from '@/lib/imaging-queue-store'
+import {
+  consumeRequestById,
+  listPending,
+  VARIABLE_STAR_SESSION_OVERHEAD_SEC,
+  type ImagingRequest,
+} from '@/lib/imaging-queue-store'
 import {
   getObservatoryStatus,
   isObservatoryReady,
   touchObservatoryPoll,
 } from '@/lib/observatory-status-store'
+import { isAltitudeAllowed } from '@/lib/target-altitude'
+import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import {
-  altitudeAllowedCoverageMs,
-  firstAltitudeAllowedTimeMs,
-  isAltitudeAllowed,
-} from '@/lib/target-altitude'
-import { canFinishBeforeSunriseBuffer, getTonightSchedulingWindow } from '@/lib/sunrise-window'
-import { markEndNightSent, wasEndNightSent } from '@/lib/end-night-state'
-import { getAdminClosedWindowAt, getAdminClosedWindowsInRange } from '@/lib/admin-closed-window-store'
-import {
-  getTonightWeatherPermittedIntervals,
-  weatherCoverageOk,
-  type TimeInterval,
-} from '@/lib/tonight-weather-gate'
+  isEndNightDue,
+  markEndNightDue,
+  markEndNightSent,
+  wasEndNightSent,
+} from '@/lib/end-night-state'
+import { getAdminClosedWindowAt } from '@/lib/admin-closed-window-store'
 import endNightTemplate from '@/End Night Session.json'
 
 export const runtime = 'nodejs'
@@ -41,6 +42,15 @@ function sequenceJsonFor(r: ImagingRequest): string | null {
       exposureSeconds: r.exposureSeconds,
       exposureCount: r.count,
       pomfretQueueId: r.id,
+      templateKind: r.sequenceTemplate === 'variable_star' ? 'variable_star' : 'dso',
+      outputMode: r.outputMode,
+      targetName: r.target ?? undefined,
+      variableStarObservingSeconds:
+        r.sequenceTemplate === 'variable_star' &&
+        typeof r.estimatedDurationSeconds === 'number' &&
+        Number.isFinite(r.estimatedDurationSeconds)
+          ? Math.max(0, r.estimatedDurationSeconds - VARIABLE_STAR_SESSION_OVERHEAD_SEC)
+          : undefined,
     })
   }
   return null
@@ -66,202 +76,102 @@ function endNightSequenceJson(queueId: string): string {
 
 /**
  * Fixed URL for observatory computer.
- * Returns the next scheduled session's NINA sequence JSON and removes it from the API queue;
- * the session is kept on the Remote "Current sessions" board as in_progress until NINA posts completion.
+ * Returns the next **scheduled** pending session's NINA sequence JSON in `plannedStartIso` order.
+ * Schedule feasibility (weather, full-night altitude coverage, dawn window, etc.) is handled by reconcile /
+ * `computeScheduleInsight`; this endpoint enforces observatory readiness (for user sessions only), admin
+ * closed windows, and current target altitude ≥ 30° before handing JSON to NINA. End-night shutdown JSON
+ * bypasses observatory readiness; empty nights are offered at nautical dawn only.
  */
 export async function GET() {
   await touchObservatoryPoll()
-  const weatherIntervals = await getTonightWeatherPermittedIntervals()
-  if (weatherIntervals.status !== 'ok') {
-    return NextResponse.json(
-      { error: weatherIntervals.reason ?? 'Unable to evaluate tonight weather' },
-      { status: 409, headers: imagingCorsHeaders }
-    )
-  }
-  if (weatherIntervals.globalHardBlocked === true) {
-    return NextResponse.json(
-      { error: weatherIntervals.globalHardBlockReason ?? 'Tonight blocked by global weather trigger.' },
-      { status: 409, headers: imagingCorsHeaders }
-    )
-  }
   const adminWindowNow = await getAdminClosedWindowAt(Date.now())
   if (adminWindowNow) {
     const msg =
       typeof adminWindowNow.description === 'string' && adminWindowNow.description.trim()
         ? adminWindowNow.description.trim()
         : 'Closed by admin schedule control'
-    return NextResponse.json({ error: msg }, { status: 409, headers: imagingCorsHeaders })
+    return NextResponse.json({ error: msg }, { status: 409, headers: imagingCorsHeadersResolved() })
   }
   const status = await getObservatoryStatus()
   const pending = await listPending()
   const now = new Date()
+  const nowMs = now.getTime()
   const schedulingWindow = getTonightSchedulingWindow(now)
-  const deadlineMs = schedulingWindow.astronomicalDawnUtc.getTime()
-  const scheduleFloorMs = Math.max(now.getTime(), schedulingWindow.nauticalDuskUtc.getTime())
+  const nauticalDawnMs = schedulingWindow.nauticalDawnUtc.getTime()
+  const deadlineMs = nauticalDawnMs
+  const nightStartMs = schedulingWindow.nauticalDuskUtc.getTime()
   const nightKey = nightKeyFromWindowStart(schedulingWindow.nauticalDuskUtc)
-  const imagingPending = pending
 
-  if (!isObservatoryReady(status) && imagingPending.length > 0) {
-    return NextResponse.json(
-      { error: 'Observatory is closed' },
-      { status: 409, headers: imagingCorsHeaders }
+  const scheduledTonight = pending
+    .filter(
+      (r) =>
+        r.status === 'scheduled' &&
+        r.plannedStartIso != null &&
+        Number.isFinite(Date.parse(r.plannedStartIso))
     )
-  }
-
-  const estimateSeconds = (r: ImagingRequest): number => {
-    if (typeof r.estimatedDurationSeconds === 'number' && Number.isFinite(r.estimatedDurationSeconds)) {
-      return Math.max(r.estimatedDurationSeconds, 60)
-    }
-    const fromPlans =
-      Array.isArray(r.filterPlans) && r.filterPlans.length > 0
-        ? r.filterPlans.reduce((sum, p) => sum + p.count * p.exposureSeconds, 0) + 15 * 60
-        : r.exposureSeconds * r.count + 15 * 60
-    return Math.max(fromPlans, 60)
-  }
-  const weatherCoverageFor = (
-    permittedIntervals: TimeInterval[],
-    startMs: number,
-    durationMs: number
-  ): boolean => weatherCoverageOk(permittedIntervals, startMs, startMs + durationMs, 0.8)
-  const altitudeCoverageOk = (r: ImagingRequest, startMs: number, durationMs: number): boolean => {
-    const raHours = r.raHours
-    const decDeg = r.decDeg
-    if (typeof raHours !== 'number' || !Number.isFinite(raHours)) return true
-    if (typeof decDeg !== 'number' || !Number.isFinite(decDeg)) return true
-    const endMs = startMs + durationMs
-    const coveredMs = altitudeAllowedCoverageMs(raHours, decDeg, startMs, endMs)
-    return coveredMs >= durationMs * 0.8
-  }
-
-  type Interval = { startMs: number; endMs: number }
-  let freeIntervals: Interval[] = [{ startMs: scheduleFloorMs, endMs: deadlineMs }]
-  const adminClosedIntervals = await getAdminClosedWindowsInRange(scheduleFloorMs, deadlineMs)
-  if (adminClosedIntervals.length > 0) {
-    const next: Interval[] = []
-    for (const interval of freeIntervals) {
-      let chunks: Interval[] = [interval]
-      for (const c of adminClosedIntervals) {
-        const sliced: Interval[] = []
-        for (const chunk of chunks) {
-          if (c.endMs <= chunk.startMs || c.startMs >= chunk.endMs) {
-            sliced.push(chunk)
-            continue
-          }
-          if (c.startMs > chunk.startMs) sliced.push({ startMs: chunk.startMs, endMs: c.startMs })
-          if (c.endMs < chunk.endMs) sliced.push({ startMs: c.endMs, endMs: chunk.endMs })
-        }
-        chunks = sliced
-      }
-      next.push(...chunks)
-    }
-    freeIntervals = next.filter((x) => x.endMs > x.startMs).sort((a, b) => a.startMs - b.startMs)
-  }
-  const scheduled: Array<{ req: ImagingRequest; startMs: number }> = []
-  const unscheduled: ImagingRequest[] = []
-
-  for (const r of imagingPending) {
-    const durationMs = estimateSeconds(r) * 1000
-    const createdMs = Number.isFinite(Date.parse(r.createdAt)) ? Date.parse(r.createdAt) : scheduleFloorMs
-    let placed: { startMs: number; endMs: number } | null = null
-
-    for (const interval of freeIntervals) {
-      let startMs = Math.max(interval.startMs, createdMs, scheduleFloorMs)
-      if (
-        typeof r.raHours === 'number' &&
-        Number.isFinite(r.raHours) &&
-        typeof r.decDeg === 'number' &&
-        Number.isFinite(r.decDeg)
-      ) {
-        const riseAt = firstAltitudeAllowedTimeMs(r.raHours, r.decDeg, startMs, interval.endMs)
-        if (riseAt == null) continue
-        startMs = riseAt
-      }
-      const endMs = startMs + durationMs
-      if (endMs > interval.endMs || endMs > deadlineMs) continue
-      if (!weatherCoverageFor(weatherIntervals.permittedIntervals, startMs, durationMs)) continue
-      if (!altitudeCoverageOk(r, startMs, durationMs)) continue
-      placed = { startMs, endMs }
-      break
-    }
-
-    if (!placed) {
-      unscheduled.push(r)
-      continue
-    }
-
-    scheduled.push({ req: r, startMs: placed.startMs })
-    const nextFree: Interval[] = []
-    for (const interval of freeIntervals) {
-      if (placed.endMs <= interval.startMs || placed.startMs >= interval.endMs) {
-        nextFree.push(interval)
-        continue
-      }
-      if (placed.startMs > interval.startMs) {
-        nextFree.push({ startMs: interval.startMs, endMs: placed.startMs })
-      }
-      if (placed.endMs < interval.endMs) {
-        nextFree.push({ startMs: placed.endMs, endMs: interval.endMs })
-      }
-    }
-    freeIntervals = nextFree.filter((x) => x.endMs > x.startMs).sort((a, b) => a.startMs - b.startMs)
-  }
-
-  const candidateOrder = [...scheduled.sort((a, b) => a.startMs - b.startMs).map((x) => x.req), ...unscheduled]
+    .sort((a, b) => Date.parse(a.plannedStartIso!) - Date.parse(b.plannedStartIso!))
 
   let selected: ImagingRequest | null = null
   let blockingError: string | null = null
-  for (const candidate of candidateOrder) {
-    const raHours = candidate.raHours ?? 0
-    const decDeg = candidate.decDeg ?? 0
-    const altitudeCheck = isAltitudeAllowed(raHours, decDeg)
-    if (!altitudeCheck.ok) {
-      blockingError = `Target altitude ${altitudeCheck.altitudeDeg.toFixed(2)}° is below ${altitudeCheck.minAltitudeDeg}°`
-      continue
+
+  for (const candidate of scheduledTonight) {
+    const hasRaDec =
+      typeof candidate.raHours === 'number' &&
+      Number.isFinite(candidate.raHours) &&
+      typeof candidate.decDeg === 'number' &&
+      Number.isFinite(candidate.decDeg)
+    if (hasRaDec) {
+      const altitudeCheck = isAltitudeAllowed(candidate.raHours!, candidate.decDeg!)
+      if (!altitudeCheck.ok) {
+        blockingError = `Target altitude ${altitudeCheck.altitudeDeg.toFixed(2)}° is below ${altitudeCheck.minAltitudeDeg}° (${candidate.target}).`
+        continue
+      }
     }
 
-    const finishWindow = canFinishBeforeSunriseBuffer(candidate.exposureSeconds, candidate.count)
-    if (!finishWindow.ok) {
-      blockingError =
-        `Insufficient time before sunrise buffer: need ${finishWindow.requiredSeconds.toFixed(0)}s, ` +
-        `available ${Math.max(0, finishWindow.secondsUntilDeadline).toFixed(0)}s before ` +
-        `${finishWindow.deadlineUtc.toISOString()} (1h before sunrise).`
-      continue
-    }
-    if (!altitudeCoverageOk(candidate, now.getTime(), estimateSeconds(candidate) * 1000)) {
-      blockingError =
-        'Target altitude coverage is below 80% for this session duration at the current start time.'
-      continue
-    }
-    if (!weatherCoverageFor(weatherIntervals.permittedIntervals, now.getTime(), estimateSeconds(candidate) * 1000)) {
-      blockingError =
-        'Weather-permitted coverage is below 80% for this session duration at the current start time.'
-      continue
-    }
     selected = candidate
     break
   }
 
   if (!selected) {
+    if (scheduledTonight.length > 0) {
+      return NextResponse.json(
+        {
+          error:
+            blockingError ??
+            'No scheduled pending session available for download. Only sessions with status=scheduled and a valid plannedStartIso are delivered, in planned-start order.',
+        },
+        { status: 409, headers: imagingCorsHeadersResolved() }
+      )
+    }
+
     const alreadySent = await wasEndNightSent(nightKey)
     if (!alreadySent) {
       const board = await listBoardEntries()
       const hasTonightActivity = board.some((b) => {
         const createdMs = Date.parse(b.createdAt)
-        return Number.isFinite(createdMs) && createdMs >= scheduleFloorMs && createdMs < deadlineMs
+        return Number.isFinite(createdMs) && createdMs >= nightStartMs && createdMs < deadlineMs
       })
-      if (hasTonightActivity) {
+      const endNightDue = await isEndNightDue(nightKey)
+      const afterSessions = endNightDue || hasTonightActivity
+      const emptyNightAtNauticalDawn = !afterSessions && nowMs >= nauticalDawnMs
+
+      if (afterSessions || emptyNightAtNauticalDawn) {
         const queueId = `end-night-${nightKey}`
         const payload = endNightSequenceJson(queueId)
         await markEndNightSent(nightKey)
         void appendAuditLog({
           kind: 'nina.delivered',
           message: `End-night shutdown sequence delivered (${queueId}).`,
-          detail: { id: queueId, type: 'end_night' },
+          detail: {
+            id: queueId,
+            type: 'end_night',
+            trigger: afterSessions ? 'after_sessions' : 'empty_night_nautical_dawn',
+          },
         })
         return new NextResponse(payload, {
           status: 200,
           headers: {
-            ...imagingCorsHeaders,
+            ...imagingCorsHeadersResolved(),
             'Content-Type': 'application/json; charset=utf-8',
             'Cache-Control': 'no-store',
           },
@@ -270,21 +180,48 @@ export async function GET() {
     }
 
     return NextResponse.json(
-      { error: blockingError ?? 'No pending session available for download' },
-      { status: 409, headers: imagingCorsHeaders }
+      {
+        error:
+          blockingError ??
+          'No scheduled pending session available for download. Only sessions with status=scheduled and a valid plannedStartIso are delivered, in planned-start order.',
+      },
+      { status: 409, headers: imagingCorsHeadersResolved() }
+    )
+  }
+
+  if (!isObservatoryReady(status)) {
+    return NextResponse.json(
+      { error: 'Observatory is closed' },
+      { status: 409, headers: imagingCorsHeadersResolved() }
     )
   }
 
   const consumed = await consumeRequestById(selected.id)
   if (!consumed) {
-    return NextResponse.json({ error: 'No pending session available for download' }, { status: 409, headers: imagingCorsHeaders })
+    return NextResponse.json(
+      {
+        error:
+          'No scheduled pending session available for download (queue may have changed). Only status=scheduled rows are consumed.',
+      },
+      { status: 409, headers: imagingCorsHeadersResolved() }
+    )
+  }
+
+  const stillScheduled = (await listPending()).filter(
+    (r) =>
+      r.status === 'scheduled' &&
+      r.plannedStartIso != null &&
+      Number.isFinite(Date.parse(r.plannedStartIso))
+  )
+  if (stillScheduled.length === 0) {
+    await markEndNightDue(nightKey)
   }
 
   const sequenceJson = sequenceJsonFor(consumed)
   if (!sequenceJson) {
     return NextResponse.json(
       { error: 'NINA sequence not available for latest session' },
-      { status: 404, headers: imagingCorsHeaders }
+      { status: 404, headers: imagingCorsHeadersResolved() }
     )
   }
 
@@ -308,7 +245,7 @@ export async function GET() {
 
   void appendAuditLog({
     kind: 'nina.delivered',
-    message: `NINA sequence delivered by schedule order and removed from queue: ${consumed.target} (${consumed.id}).`,
+    message: `NINA sequence delivered (scheduled queue, planned-start order) and removed from queue: ${consumed.target} (${consumed.id}).`,
     detail: {
       id: consumed.id,
       target: consumed.target,
@@ -320,7 +257,7 @@ export async function GET() {
   return new NextResponse(sequenceJson, {
     status: 200,
     headers: {
-      ...imagingCorsHeaders,
+      ...imagingCorsHeadersResolved(),
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store',
     },

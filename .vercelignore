@@ -5,3 +5,9 @@ node_modules
 .DS_Store
 public/DJI_0149.MP4
 
+# Local toolchains / upstream clones (same as .gitignore) — never ship to Vercel; they explode
+# the upload file count (emsdk alone is ~20k+ files) and trigger:
+# "files should NOT have more than 15000 items"
+emsdk/
+stellarium-web-engine/
+

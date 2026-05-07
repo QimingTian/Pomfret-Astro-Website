@@ -25,7 +25,7 @@ export function OPTIONS() {
   return imagingCorsOptions()
 }
 
-const allowed: ImagingRequestStatus[] = ['claimed', 'completed', 'failed']
+const allowed: ImagingRequestStatus[] = ['in_progress', 'completed', 'failed']
 
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
   const id = params.id
@@ -138,6 +138,10 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     lastName: typeof b.lastName === 'string' ? b.lastName : b.lastName == null ? null : String(b.lastName),
     email: typeof b.email === 'string' ? b.email : b.email == null ? null : String(b.email),
     sequenceTemplate: b.sessionType === 'variable_star' ? 'variable_star' : 'dso',
+    estimatedDurationSeconds:
+      typeof b.estimatedDurationSeconds === 'number' && Number.isFinite(b.estimatedDurationSeconds)
+        ? b.estimatedDurationSeconds
+        : undefined,
   }
 
   const updated = await updatePendingRequestById(id, payload)

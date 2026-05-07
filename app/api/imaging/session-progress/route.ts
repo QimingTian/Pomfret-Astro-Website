@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
+import { sendCompletionEmail } from '@/lib/imaging-completion-email'
 import { publishProgress } from '@/lib/imaging-progress-live'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import { boardMarkCompleted, getBoardEntry, getSoleInProgressBoardId } from '@/lib/imaging-session-board'
@@ -121,6 +122,26 @@ export async function POST(request: NextRequest) {
           kind: 'queue.status',
           message: `Session ${queueId} completed (end signal from NINA).`,
           detail: { id: queueId, target: board.target },
+        })
+        void sendCompletionEmail({
+          queueId,
+          target: board.target,
+          email: board.email,
+          firstName: board.firstName,
+          completedAtIso: new Date().toISOString(),
+        }).then((result) => {
+          if (!result.sent) {
+            return appendAuditLog({
+              kind: 'session.progress',
+              message: `Completion email skipped/failed for ${queueId}: ${result.reason ?? 'unknown reason'}`,
+              detail: { queueId, reason: result.reason ?? null },
+            })
+          }
+          return appendAuditLog({
+            kind: 'session.progress',
+            message: `Completion email sent for ${queueId}.`,
+            detail: { queueId, email: board.email ?? null },
+          })
         })
         publishProgress(queueId, { type: 'status', queueStatus: 'completed' })
       }

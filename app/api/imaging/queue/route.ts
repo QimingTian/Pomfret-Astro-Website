@@ -7,42 +7,18 @@ import {
 import {
   createRequest,
   deleteRequestById,
+  getRequestById,
   listAll,
   listPending,
   patchRequestScheduleInsight,
   toPublicImagingRequest,
   type CreateImagingInput,
 } from '@/lib/imaging-queue-store'
+import { computeScheduleInsight } from '@/lib/imaging-queue-schedule-insight'
 import { getObservatoryStatus, isObservatoryReady } from '@/lib/observatory-status-store'
-import { altitudeAllowedCoverageMs, firstAltitudeAllowedTimeMs, isAltitudeAllowed } from '@/lib/target-altitude'
-import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
-import {
-  getTonightWeatherPermittedIntervals,
-  weatherPermittedCoverageMs,
-  weatherCoverageOk,
-  type TimeInterval,
-} from '@/lib/tonight-weather-gate'
+import { getTonightWeatherPermittedIntervals } from '@/lib/tonight-weather-gate'
 
 export const runtime = 'nodejs'
-
-type ScheduleInsight = {
-  status: 'scheduled' | 'unscheduled'
-  plannedStartIso: string | null
-  reasons: string[]
-}
-
-function estimateDurationSeconds(
-  req: Pick<CreateImagingInput, 'exposureSeconds' | 'count' | 'filterPlans'> & { estimatedDurationSeconds?: number }
-): number {
-  if (typeof req.estimatedDurationSeconds === 'number' && Number.isFinite(req.estimatedDurationSeconds)) {
-    return Math.max(60, req.estimatedDurationSeconds)
-  }
-  const fromPlans =
-    Array.isArray(req.filterPlans) && req.filterPlans.length > 0
-      ? req.filterPlans.reduce((sum, p) => sum + Number(p.count) * Number(p.exposureSeconds), 0) + 15 * 60
-      : Number(req.exposureSeconds) * Number(req.count) + 15 * 60
-  return Math.max(60, Math.round(fromPlans))
-}
 
 async function detectSunsetSunrisePrecipGate(): Promise<{ active: boolean | null; hitHours: number[] }> {
   const url =
@@ -77,150 +53,6 @@ async function detectSunsetSunrisePrecipGate(): Promise<{ active: boolean | null
     return { active: hitHours.length > 0, hitHours }
   } catch {
     return { active: null, hitHours: [] }
-  }
-}
-
-function computeScheduleInsight(
-  pending: Array<{
-    id: string
-    createdAt: string
-    raHours?: number | null
-    decDeg?: number | null
-    exposureSeconds: number
-    count: number
-    filterPlans?: Array<{ filterName: string; exposureSeconds: number; count: number }>
-    estimatedDurationSeconds?: number
-  }>,
-  targetId: string,
-  weatherPermittedIntervals: TimeInterval[]
-): ScheduleInsight {
-  const now = new Date()
-  const nowMs = now.getTime()
-  const window = getTonightSchedulingWindow(now)
-  const windowStartMs = window.nauticalDuskUtc.getTime()
-  const deadlineMs = window.astronomicalDawnUtc.getTime()
-  let freeIntervals: Array<{ startMs: number; endMs: number }> = [
-    { startMs: Math.max(nowMs, windowStartMs), endMs: deadlineMs },
-  ]
-  const ordered = [...pending].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-  const queueIndex = ordered.findIndex((r) => r.id === targetId)
-
-  for (const req of ordered) {
-    const durationMs = estimateDurationSeconds(req) * 1000
-    const createdMs = Number.isFinite(Date.parse(req.createdAt)) ? Date.parse(req.createdAt) : nowMs
-    let placement: { startMs: number; endMs: number } | null = null
-    let placementContext:
-      | {
-          intervalStartMs: number
-          baselineStartMs: number
-          riseAtMs: number | null
-          weatherCoveragePct: number
-        }
-      | null = null
-    let failedByAltitudeRise = 0
-    let failedByIntervalLength = 0
-    let failedByAltitudeCoverage = 0
-    let failedByWeatherCoverage = 0
-    for (const interval of freeIntervals) {
-      const baselineStartMs = Math.max(interval.startMs, createdMs, nowMs, windowStartMs)
-      let startMs = baselineStartMs
-      let riseAtMs: number | null = null
-      if (typeof req.raHours === 'number' && Number.isFinite(req.raHours) && typeof req.decDeg === 'number' && Number.isFinite(req.decDeg)) {
-        const riseAt = firstAltitudeAllowedTimeMs(req.raHours, req.decDeg, startMs, interval.endMs)
-        if (riseAt == null) {
-          failedByAltitudeRise += 1
-          continue
-        }
-        riseAtMs = riseAt
-        startMs = riseAt
-      }
-      const endMs = startMs + durationMs
-      if (endMs > interval.endMs || endMs > deadlineMs) {
-        failedByIntervalLength += 1
-        continue
-      }
-      const weatherCoveredMs = weatherPermittedCoverageMs(weatherPermittedIntervals, startMs, endMs)
-      const weatherCoveragePct = durationMs > 0 ? (weatherCoveredMs / durationMs) * 100 : 0
-      if (!weatherCoverageOk(weatherPermittedIntervals, startMs, endMs, 0.8)) {
-        failedByWeatherCoverage += 1
-        continue
-      }
-      if (typeof req.raHours === 'number' && Number.isFinite(req.raHours) && typeof req.decDeg === 'number' && Number.isFinite(req.decDeg)) {
-        const coveredMs = altitudeAllowedCoverageMs(req.raHours, req.decDeg, startMs, endMs)
-        if (coveredMs < durationMs * 0.8) {
-          failedByAltitudeCoverage += 1
-          continue
-        }
-      }
-      placement = { startMs, endMs }
-      placementContext = {
-        intervalStartMs: interval.startMs,
-        baselineStartMs,
-        riseAtMs,
-        weatherCoveragePct,
-      }
-      break
-    }
-
-    if (req.id === targetId) {
-      if (!placement) {
-        const reasons: string[] = []
-        if (queueIndex > 0) reasons.push(`Queued behind ${queueIndex} earlier session(s).`)
-        if (createdMs >= deadlineMs) reasons.push('Submitted after astronomical-dawn scheduling cutoff.')
-        if (failedByAltitudeRise > 0) {
-          reasons.push('Target does not rise above 30° in available free intervals.')
-        }
-        if (failedByAltitudeCoverage > 0) {
-          reasons.push('Target altitude coverage is below 80% for required duration in available free intervals.')
-        }
-        if (failedByIntervalLength > 0) {
-          reasons.push('No free interval is long enough to fit session duration before astronomical dawn.')
-        }
-        if (failedByWeatherCoverage > 0) {
-          reasons.push('No interval has weather-permitted coverage >= 80% of session duration.')
-        }
-        if (reasons.length === 0) reasons.push('No schedulable interval satisfies all constraints.')
-        return { status: 'unscheduled', plannedStartIso: null, reasons }
-      }
-
-      const reasons: string[] = []
-      if (queueIndex > 0) reasons.push(`Queued behind ${queueIndex} earlier session(s).`)
-      if (placementContext) {
-        if (placementContext.intervalStartMs > nowMs) {
-          reasons.push(`Earliest free queue slot opens at ${new Date(placementContext.intervalStartMs).toISOString()}.`)
-        }
-        if (placementContext.riseAtMs != null && placementContext.riseAtMs > placementContext.baselineStartMs) {
-          reasons.push(`Target reaches 30° at ${new Date(placementContext.riseAtMs).toISOString()}.`)
-        }
-        reasons.push(
-          `Weather-permitted coverage over session window is ${placementContext.weatherCoveragePct.toFixed(0)}% (required >= 80%).`
-        )
-      }
-      if (typeof req.raHours === 'number' && Number.isFinite(req.raHours) && typeof req.decDeg === 'number' && Number.isFinite(req.decDeg)) {
-        const altNow = isAltitudeAllowed(req.raHours, req.decDeg)
-        if (!altNow.ok) reasons.push(`Target currently below 30° (${altNow.altitudeDeg.toFixed(1)}°).`)
-      }
-      if (reasons.length === 0) reasons.push('Scheduled at earliest available slot under current rules.')
-      return { status: 'scheduled', plannedStartIso: new Date(placement.startMs).toISOString(), reasons }
-    }
-
-    if (!placement) continue
-    const nextIntervals: Array<{ startMs: number; endMs: number }> = []
-    for (const interval of freeIntervals) {
-      if (placement.endMs <= interval.startMs || placement.startMs >= interval.endMs) {
-        nextIntervals.push(interval)
-        continue
-      }
-      if (placement.startMs > interval.startMs) nextIntervals.push({ startMs: interval.startMs, endMs: placement.startMs })
-      if (placement.endMs < interval.endMs) nextIntervals.push({ startMs: placement.endMs, endMs: interval.endMs })
-    }
-    freeIntervals = nextIntervals.filter((x) => x.endMs > x.startMs).sort((a, b) => a.startMs - b.startMs)
-  }
-
-  return {
-    status: 'unscheduled',
-    plannedStartIso: null,
-    reasons: ['Could not compute schedule placement for this session.'],
   }
 }
 
@@ -314,6 +146,10 @@ export async function POST(request: NextRequest) {
     lastName: typeof b.lastName === 'string' ? b.lastName : b.lastName == null ? null : String(b.lastName),
     email: typeof b.email === 'string' ? b.email : b.email == null ? null : String(b.email),
     sequenceTemplate: b.sessionType === 'variable_star' ? 'variable_star' : 'dso',
+    estimatedDurationSeconds:
+      typeof b.estimatedDurationSeconds === 'number' && Number.isFinite(b.estimatedDurationSeconds)
+        ? b.estimatedDurationSeconds
+        : undefined,
   }
 
   const whenClosedBehavior =
@@ -435,5 +271,6 @@ export async function POST(request: NextRequest) {
     },
   })
 
-  return withImagingCors({ ok: true as const, request: toPublicImagingRequest(result) }, 201)
+  const persisted = await getRequestById(result.id)
+  return withImagingCors({ ok: true as const, request: toPublicImagingRequest(persisted ?? result) }, 201)
 }

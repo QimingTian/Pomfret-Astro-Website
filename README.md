@@ -151,6 +151,13 @@ Create `.env.local` (or platform-managed env vars) for the needed features:
 ### Scheduled cleanup / cron
 - `CRON_SECRET`
 
+### Completion email notifications (optional)
+- `RESEND_API_KEY` - API key for [Resend](https://resend.com/)
+- `IMAGING_MAIL_FROM` - sender identity, e.g. `Pomfret Astro <noreply@pomfretastro.org>`
+
+When configured, `/api/imaging/session-progress` sends an email to the session email once
+the session transitions to `completed`.
+
 > Keep all secrets out of source control. Use local env files and deployment provider secret management.
 
 ---

@@ -42,6 +42,11 @@ ExoPlanets/
 nina/
 siril-1.4.2/
 
+# Stellarium Web Engine build toolchain (emsdk) and upstream source clone — build artifacts
+# are committed under public/stellarium/js/.
+emsdk/
+stellarium-web-engine/
+
 # Python bytecode
 __pycache__/
 *.py[cod]

@@ -5,6 +5,7 @@ export type VariableStarRow = {
   name: string
   raHours: number
   decDeg: number
+  varType: string | null
   periodDays: number | null
   minMag: number | null
   maxMag: number | null
@@ -88,6 +89,7 @@ function parseIndexCsv(text: string): VariableStarRow[] {
   const idxMinMag = header.findIndex((h) => h === 'Min Mag')
   const idxMaxMag = header.findIndex((h) => h === 'Max Mag')
   const idxPeriod = header.findIndex((h) => h === 'Period (d)')
+  const idxVarType = header.findIndex((h) => h === 'Var. Type')
   const idxHighPriority = header.findIndex((h) => h === 'High Priority')
   if (idxName === -1 || idxRa === -1 || idxDec === -1) return []
   const out: VariableStarRow[] = []
@@ -104,6 +106,8 @@ function parseIndexCsv(text: string): VariableStarRow[] {
     const minMag = parseCatalogMagField(idxMinMag >= 0 ? cols[idxMinMag] : undefined)
     const maxMag = parseCatalogMagField(idxMaxMag >= 0 ? cols[idxMaxMag] : undefined)
     const periodDays = parsePeriodDaysField(idxPeriod >= 0 ? cols[idxPeriod] : undefined)
+    const varTypeRaw = idxVarType >= 0 ? String(cols[idxVarType] ?? '').trim() : ''
+    const varType = varTypeRaw.length > 0 ? varTypeRaw.toUpperCase() : null
     const highPriority = idxHighPriority >= 0 && String(cols[idxHighPriority] ?? '').trim().length > 0
     const coreSignature = [
       name,
@@ -115,7 +119,7 @@ function parseIndexCsv(text: string): VariableStarRow[] {
     ].join('|')
     if (seenCoreSignatures.has(coreSignature)) continue
     seenCoreSignatures.add(coreSignature)
-    out.push({ name, raHours, decDeg, periodDays, minMag, maxMag, highPriority })
+    out.push({ name, raHours, decDeg, varType, periodDays, minMag, maxMag, highPriority })
   }
   return out
 }

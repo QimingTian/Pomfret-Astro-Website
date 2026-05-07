@@ -120,6 +120,7 @@ async function lookupSimbadVariableStar(query: string): Promise<VariableStarRow 
     name: best.main_id.replace(/^V\*\s+/i, ''),
     raHours: best.ra / 15,
     decDeg: best.dec,
+    varType: null,
     periodDays: best.period != null && best.period > 0 ? best.period : null,
     minMag: best.vmin,
     maxMag: best.vmax,

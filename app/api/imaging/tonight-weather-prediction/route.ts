@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server'
+import { maybeReconcileQueueWhenScheduleWeatherColumnChanged } from '@/lib/imaging-queue-weather-column-reconcile'
+import { MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS } from '@/lib/tonight-weather-gate'
 
 export const runtime = 'nodejs'
 
@@ -119,8 +121,22 @@ export async function GET(request: Request) {
       }
     }
 
+    const beforeAstroNight = nowSec < precipCheckStartSec
+    const countsTowardGlobalNight = (i: number): boolean => {
+      const t = times[i]
+      const inAstro =
+        Number.isFinite(precipCheckStartSec) &&
+        Number.isFinite(precipCheckEndSec) &&
+        t >= precipCheckStartSec &&
+        t < precipCheckEndSec
+      if (!inAstro) return true
+      const hourFullyEnded = t + 3600 <= nowSec
+      return beforeAstroNight || !hourFullyEnded
+    }
+
     const precipitationHits = (precipCheckIndices.length > 0 ? precipCheckIndices : nightIndices)
       .map((i) => {
+        if (!countsTowardGlobalNight(i)) return null
         const precip = Number(precipProb[i])
         const cloud = Number(clouds[i])
         if (!Number.isFinite(precip) || precip < 10) return null
@@ -154,6 +170,17 @@ export async function GET(request: Request) {
         (nowSec >= windowStartSec && nowSec < windowEndSec)
     }
     if (isNighttimeNow) {
+      if (hasExternalWindow) {
+        const precipitationHitHourStartsSec = precipitationHits.map((h) => h.hourStartSec).sort((a, b) => a - b)
+        await maybeReconcileQueueWhenScheduleWeatherColumnChanged(windowStartSec, windowEndSec, {
+          prediction: 'unavailable',
+          hasAnyPrecipitationTonight,
+          readyHourStartsSec,
+          nightHourStartsSec,
+          notPermittedHourReasons,
+          precipitationHitHourStartsSec,
+        })
+      }
       return NextResponse.json({
         ok: true as const,
         prediction: 'unavailable',
@@ -171,6 +198,7 @@ export async function GET(request: Request) {
       let allNightPrecipUnder10 = true
       let windOver10HourCount = 0
       for (const i of nightIndices) {
+        if (!countsTowardGlobalNight(i)) continue
         const p = Number(precipProb[i])
         if (!Number.isFinite(p) || p >= 10) {
           allNightPrecipUnder10 = false
@@ -184,14 +212,15 @@ export async function GET(request: Request) {
       const windAllowedByHours = windOver10HourCount <= 3
 
       let consecutiveUnder10 = 0
-      let hasFourConsecutiveUnder10 = false
+      let hasMinConsecutiveUnder10 = false
       if (allNightPrecipUnder10 && windAllowedByHours) {
         for (const i of nightIndices) {
+          if (!countsTowardGlobalNight(i)) continue
           const c = Number(clouds[i])
           if (c < 10) {
             consecutiveUnder10 += 1
-            if (consecutiveUnder10 >= 4) {
-              hasFourConsecutiveUnder10 = true
+            if (consecutiveUnder10 >= MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS) {
+              hasMinConsecutiveUnder10 = true
               break
             }
           } else {
@@ -200,7 +229,19 @@ export async function GET(request: Request) {
         }
       }
 
-      permitted = allNightPrecipUnder10 && windAllowedByHours && hasFourConsecutiveUnder10
+      permitted = allNightPrecipUnder10 && windAllowedByHours && hasMinConsecutiveUnder10
+    }
+
+    if (hasExternalWindow) {
+      const precipitationHitHourStartsSec = precipitationHits.map((h) => h.hourStartSec).sort((a, b) => a - b)
+      await maybeReconcileQueueWhenScheduleWeatherColumnChanged(windowStartSec, windowEndSec, {
+        prediction: permitted ? 'permitted' : 'not_permitted',
+        hasAnyPrecipitationTonight,
+        readyHourStartsSec,
+        nightHourStartsSec,
+        notPermittedHourReasons,
+        precipitationHitHourStartsSec,
+      })
     }
 
     return NextResponse.json({
@@ -213,8 +254,9 @@ export async function GET(request: Request) {
       hasAnyPrecipitationTonight,
       precipitationHits,
       rule:
-        "Tonight (today sunset → tomorrow sunrise, Pomfret): (1) some run of 4 consecutive hours with cloud_cover < 10%; " +
-        '(2) every hour precipitation_probability < 10%; (3) hours with wind_speed_10m > 10 m/s must be <= 3.',
+        `Tonight (today sunset → tomorrow sunrise, Pomfret): (1) some run of ${MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS} consecutive hours with cloud_cover < 10%; ` +
+        '(2) every hour precipitation_probability < 10%; (3) hours with wind_speed_10m > 10 m/s must be <= 3. ' +
+        'After sunset, only remaining night hours count for (1)–(3) (fully past hours are ignored).',
     })
   } catch (error) {
     console.error('[tonight-weather-prediction] failed', error)

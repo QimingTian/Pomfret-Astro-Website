@@ -8,9 +8,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "deploy": "vercel --prod --yes",
-    "sync:stellarium-skydata": "bash scripts/sync-stellarium-skydata.sh",
-    "sync:stellarium-img": "node scripts/sync-stellarium-img.mjs"
+    "deploy": "vercel --prod --yes --archive=tgz",
+    "sync:stellarium-skydata": "bash scripts/sync-stellarium-skydata.sh"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1036.0",

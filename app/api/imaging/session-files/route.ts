@@ -1,11 +1,6 @@
 import { NextRequest } from 'next/server'
 
-import {
-  imagingCorsHeaders,
-  imagingCorsOptions,
-  imagingQueueAuthorized,
-  withImagingCors,
-} from '@/lib/imaging-queue-auth'
+import { imagingCorsOptions, imagingQueueAuthorized, withImagingCors } from '@/lib/imaging-queue-auth'
 import { upsertR2ObjectKey, upsertR2PreviewObjectKey } from '@/lib/r2-session-download'
 
 export const runtime = 'nodejs'

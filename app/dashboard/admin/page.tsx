@@ -238,7 +238,7 @@ export default function AdminPage() {
               />
               <div className="space-y-1">
                 <p className="text-base font-semibold text-white">James Tian</p>
-                <p className="text-sm text-gray-700 dark:text-gray-300">Operator, Tech Support</p>
+                <p className="text-sm text-gray-700 dark:text-gray-300">Operator, Tech</p>
                 <p className="text-sm text-gray-700 dark:text-gray-300">qtian.28@pomfret.org</p>
               </div>
             </article>
@@ -250,7 +250,7 @@ export default function AdminPage() {
               />
               <div className="space-y-1">
                 <p className="text-base font-semibold text-white">Lucas Shi</p>
-                <p className="text-sm text-gray-700 dark:text-gray-300">Tech Assistant</p>
+                <p className="text-sm text-gray-700 dark:text-gray-300">Development Team</p>
                 <p className="text-sm text-gray-700 dark:text-gray-300">jshi.29@pomfret.org</p>
               </div>
             </article>

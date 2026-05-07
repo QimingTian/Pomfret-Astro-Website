@@ -15,9 +15,10 @@ export default function DashboardLayout({
 
   const navItems = [
     { href: '/dashboard/camera', label: 'Camera' },
-    { href: '/dashboard/gallery', label: 'Gallery' },
     { href: '/dashboard/weather', label: 'Weather' },
+    { href: '/dashboard/atlas', label: 'Atlas' },
     { href: '/dashboard/remote', label: 'Remote' },
+    { href: '/dashboard/gallery', label: 'Gallery' },
     { href: '/dashboard/admin', label: 'Admin' },
   ]
 

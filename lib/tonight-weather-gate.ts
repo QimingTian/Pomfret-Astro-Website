@@ -2,6 +2,9 @@ const LAT = 41.9159
 const LON = -71.9626
 const KMH_TO_MS = 1 / 3.6
 
+/** Global hard gate: require this many consecutive night hours with cloud_cover < 10%. */
+export const MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS = 2
+
 type OpenMeteoResponse = {
   hourly?: {
     time?: number[]
@@ -34,9 +37,13 @@ export type TonightWeatherIntervalsResult = {
 
 /**
  * Rule (Pomfret tonight, sunset -> next sunrise):
- * 1) some run of 4 consecutive hours with cloud_cover < 10%
+ * 1) some run of MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS consecutive hours with cloud_cover < 10%
  * 2) every hour precipitation_probability < 10%
  * 3) hours with wind_speed_10m > 10 m/s must be <= 3
+ *
+ * Forward-looking global gate: before sunset, all forecast night hours count. After sunset (already
+ * in night), hours that have fully ended (hour end <= now) do not count toward (1)-(3) — only
+ * remaining night matters, so a bad hour in the past cannot veto the rest of the night.
  */
 export async function evaluateTonightWeatherGate(): Promise<TonightWeatherGateResult> {
   const intervals = await getTonightWeatherPermittedIntervals()
@@ -123,41 +130,49 @@ export async function getTonightWeatherPermittedIntervals(): Promise<TonightWeat
       return { status: 'unknown', permittedIntervals: [], reason: 'No forecast samples for tonight window' }
     }
 
+    const nowMs = Date.now()
+    const beforeAstroNight = nowMs < nightStartMs
+
     const permittedIntervals: TimeInterval[] = []
     let anyPrecipOver10 = false
     let windOver10Count = 0
     let consecutiveCloudUnder10 = 0
-    let hasFourConsecutiveCloudUnder10 = false
+    let hasMinConsecutiveCloudClearRun = false
     for (const i of nightIndices) {
+      const hourStartMs = times[i] * 1000
+      const hourEndMs = hourStartMs + 60 * 60 * 1000
+      const hourFullyEnded = hourEndMs <= nowMs
+      const countsTowardGlobalHard = beforeAstroNight || !hourFullyEnded
+
       const c = Number(clouds[i])
       const p = Number(precip[i])
       const wKmh = Number(wind[i])
       const wMs = Number.isFinite(wKmh) ? wKmh * KMH_TO_MS : Number.NaN
-      if (!Number.isFinite(p) || p >= 10) anyPrecipOver10 = true
-      if (!Number.isFinite(wMs) || wMs > 10) windOver10Count += 1
-      if (Number.isFinite(c) && c < 10) {
-        consecutiveCloudUnder10 += 1
-        if (consecutiveCloudUnder10 >= 4) hasFourConsecutiveCloudUnder10 = true
-      } else {
-        consecutiveCloudUnder10 = 0
+      if (countsTowardGlobalHard) {
+        if (!Number.isFinite(p) || p >= 10) anyPrecipOver10 = true
+        if (!Number.isFinite(wMs) || wMs > 10) windOver10Count += 1
+        if (Number.isFinite(c) && c < 10) {
+          consecutiveCloudUnder10 += 1
+          if (consecutiveCloudUnder10 >= MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS) hasMinConsecutiveCloudClearRun = true
+        } else {
+          consecutiveCloudUnder10 = 0
+        }
       }
       const isPermitted = Number.isFinite(c) && c < 10 && Number.isFinite(p) && p < 10 && Number.isFinite(wMs) && wMs <= 10
       if (!isPermitted) continue
-      const hourStartMs = times[i] * 1000
-      const hourEndMs = hourStartMs + 60 * 60 * 1000
       const startMs = Math.max(hourStartMs, nightStartMs)
       const endMs = Math.min(hourEndMs, nightEndMs)
       if (endMs > startMs) permittedIntervals.push({ startMs, endMs })
     }
     const windTooMuch = windOver10Count > 3
-    const cloudRunMissing = !hasFourConsecutiveCloudUnder10
+    const cloudRunMissing = !hasMinConsecutiveCloudClearRun
     const globalHardBlocked = anyPrecipOver10 || windTooMuch || cloudRunMissing
     const globalHardBlockReason = anyPrecipOver10
       ? 'Global weather trigger: at least one night hour has precipitation probability >= 10%.'
       : windTooMuch
         ? 'Global weather trigger: more than 3 night hours have wind speed > 10 m/s.'
         : cloudRunMissing
-          ? 'Global weather trigger: no 4-hour consecutive run with cloud cover < 10%.'
+          ? `Global weather trigger: no ${MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS}-hour consecutive run with cloud cover < 10%.`
           : ''
 
     return {

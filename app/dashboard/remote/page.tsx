@@ -8,12 +8,27 @@ import {
   OBS_LON_DEG,
   TONIGHT_OBSERVABLE_MIN_COVERAGE_MS,
 } from '@/lib/target-altitude'
-import { getTonightAstronomicalNightWindow } from '@/lib/sunrise-window'
+import {
+  getTonightAstronomicalNightWindow,
+  getTonightScheduleEveningAstronomyUtc,
+  getTonightScheduleMorningAstronomyUtc,
+  getTonightSchedulingWindow,
+} from '@/lib/sunrise-window'
 import { VariableStarPreviewCharts, type VariableStarChartStar } from './variable-star-preview-charts'
+import { TelescopeStatusPanel } from './telescope-status-panel'
+import {
+  findRemoteSavedSession,
+  upsertRemoteSavedSession,
+  type RemoteSavedSessionFormV1,
+} from '@/lib/remote-saved-session'
 
 const jsonHeaders: HeadersInit = { 'Content-Type': 'application/json' }
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const STACKED_MASTER_REQUIRED_EXPOSURE_SECONDS = 600
+const VARIABLE_STAR_SESSION_OVERHEAD_HOURS = 15 / 60
+/** Pomfret Astro calibration library (Google Drive). */
+const POMFRET_CALIBRATION_LIBRARY_DRIVE_URL =
+  'https://drive.google.com/drive/folders/1nWZly4-op0yazXUoyr8sAAB9Rm8Jl2D4'
 
 type SessionProgressLine = { at: string; text: string }
 type ProgressStreamEvent =
@@ -56,6 +71,11 @@ type VariableStarFilterUi =
   | 'short_period'
   | 'mid_period'
   | 'long_period'
+  | 'type_na'
+  | 'type_lc'
+  | 'type_m'
+  | 'type_src'
+  | 'type_ea'
 
 function sexagesimalPartsFromRadec(raHours: number, decDeg: number) {
   const totalRaSec = raHours * 3600
@@ -155,7 +175,7 @@ function queueStatusLabel(status: string): string {
     case 'completed':
       return 'Completed'
     case 'claimed':
-      return 'Claimed'
+      return 'In progress'
     case 'failed':
       return 'Failed'
     default:
@@ -169,6 +189,7 @@ function queueStatusBadgeClass(status: string): string {
   if (status === 'in_progress') return 'text-blue-700 dark:text-blue-400'
   if (status === 'completed') return 'text-green-700 dark:text-green-400'
   if (status === 'failed') return 'text-red-700 dark:text-red-400'
+  if (status === 'claimed') return 'text-blue-700 dark:text-blue-400'
   return 'text-gray-500 dark:text-gray-500'
 }
 
@@ -269,6 +290,14 @@ function computeTonightWindow(now: Date): { startMs: number; endMs: number } {
   return { startMs: scheduleStart.getTime(), endMs: scheduleEnd.getTime() }
 }
 
+function formatTonightXAxisHour(ms: number): string {
+  const d = new Date(ms)
+  const h24 = d.getHours()
+  const h12 = h24 % 12 || 12
+  const ampm = h24 < 12 ? 'AM' : 'PM'
+  return `${h12}${ampm}`
+}
+
 function mergeWithFrozenPastHours(previous: string[], incoming: string[], now: Date): string[] {
   const { startMs, endMs } = computeTonightWindow(now)
   const nowMs = now.getTime()
@@ -298,6 +327,70 @@ function estimateDurationSecondsFromPlans(
   if (!Array.isArray(plans) || plans.length === 0) return 15 * 60
   const imagingSeconds = plans.reduce((sum, p) => sum + p.count * p.exposureSeconds, 0)
   return Math.max(imagingSeconds + 15 * 60, 15 * 60)
+}
+
+type TerminalSessionLike = {
+  id: string
+  status: string
+  createdAt: string
+  plannedStartIso?: string | null
+  estimatedDurationSeconds?: number
+  filterPlans?: Array<{ filterName: string; exposureSeconds: number; count: number }>
+}
+
+function sessionDurationMsFromItem(item: {
+  estimatedDurationSeconds?: number
+  filterPlans?: Array<{ filterName: string; exposureSeconds: number; count: number }>
+}): number {
+  const estimatedSeconds =
+    typeof item.estimatedDurationSeconds === 'number' && Number.isFinite(item.estimatedDurationSeconds)
+      ? item.estimatedDurationSeconds
+      : estimateDurationSecondsFromPlans(item.filterPlans)
+  return Math.max(estimatedSeconds, 60) * 1000
+}
+
+/** Placement for in_progress / completed when the weather-aware packer cannot run or fails.
+ *  Prefer an existing lock, then planned start, then created time, then "now" for in_progress. */
+function fallbackPlacementForTerminalSession(
+  item: TerminalSessionLike,
+  locked: Record<string, { startMs: number; endMs: number }>,
+  windowStartMs: number,
+  schedulingDeadlineMs: number,
+  nowMs: number,
+): { startMs: number; endMs: number } | null {
+  const existing = locked[item.id]
+  if (
+    existing &&
+    Number.isFinite(existing.startMs) &&
+    Number.isFinite(existing.endMs) &&
+    existing.endMs > existing.startMs
+  ) {
+    return { startMs: existing.startMs, endMs: existing.endMs }
+  }
+
+  const durationMs = sessionDurationMsFromItem(item)
+  let startMs: number | null = null
+  if (item.plannedStartIso) {
+    const t = Date.parse(item.plannedStartIso)
+    if (Number.isFinite(t)) startMs = t
+  }
+  if (startMs == null) {
+    const c = Date.parse(item.createdAt)
+    if (Number.isFinite(c)) startMs = c
+  }
+  if (startMs == null && item.status === 'in_progress') {
+    startMs = nowMs
+  }
+  if (startMs == null) return null
+
+  let s = Math.max(startMs, windowStartMs)
+  let e = Math.min(s + durationMs, schedulingDeadlineMs)
+  if (e <= s) {
+    s = Math.max(windowStartMs, schedulingDeadlineMs - 5 * 60 * 1000)
+    e = schedulingDeadlineMs
+  }
+  if (e <= s) return null
+  return { startMs: s, endMs: e }
 }
 
 function currentAltitudeDegAt(raHours: number, decDeg: number, now: Date): number {
@@ -352,6 +445,74 @@ function altitudeAllowedCoverageMsForInterval(
   return covered
 }
 
+function variableStarNightHalfHourLadder(nauticalDuskUtc: Date, nauticalDawnUtc: Date): {
+  allOptions: number[]
+  nightHours: number
+  nightHalfSteps: number
+} {
+  const startMs = nauticalDuskUtc.getTime()
+  const endMs = nauticalDawnUtc.getTime()
+  const nightHours = (endMs - startMs) / 3600000
+  const nightHalfSteps = Math.max(1, Math.floor(nightHours * 2 + 1e-6))
+  const allOptions: number[] = []
+  for (let k = 1; k <= nightHalfSteps; k++) allOptions.push(k * 0.5)
+  return { allOptions, nightHours, nightHalfSteps }
+}
+
+function variableStarDurationButtonModel(
+  raHours: number,
+  decDeg: number,
+  nauticalDuskUtc: Date,
+  nauticalDawnUtc: Date
+) {
+  const startMs = nauticalDuskUtc.getTime()
+  const endMs = nauticalDawnUtc.getTime()
+  const { allOptions, nightHours, nightHalfSteps } = variableStarNightHalfHourLadder(nauticalDuskUtc, nauticalDawnUtc)
+  const above30Ms = altitudeAllowedCoverageMsForInterval(raHours, decDeg, startMs, endMs, 30)
+  const above30Hours = above30Ms / 3600000
+  const maxEnabledBlockHours = Math.min(nightHours, above30Hours)
+  const starHalfSteps = Math.max(0, Math.floor(maxEnabledBlockHours * 2 + 1e-6))
+  return { above30Ms, nightHours, above30Hours, nightHalfSteps, starHalfSteps, allOptions }
+}
+
+function parseCoordsFromFormParts(
+  raHourPart: string,
+  raMinutePart: string,
+  raSecondPart: string,
+  decSign: string,
+  decDegreePart: string,
+  decMinutePart: string,
+  decSecondPart: string
+): { ok: true; raHours: number; decDeg: number } | { ok: false; message: string } {
+  const h = Number(raHourPart)
+  const m = Number(raMinutePart)
+  const s = Number(raSecondPart)
+  if (!Number.isFinite(h) || !Number.isFinite(m) || !Number.isFinite(s)) {
+    return { ok: false, message: 'RA requires numeric Hour, Min, and Sec.' }
+  }
+  if (h < 0 || h > 23 || m < 0 || m > 59 || s < 0 || s >= 60) {
+    return { ok: false, message: 'RA range: Hour 0-23, Min 0-59, Sec 0-59.999.' }
+  }
+  const raHours = h + m / 60 + s / 3600
+
+  const dd = Number(decDegreePart)
+  const dm = Number(decMinutePart)
+  const ds = Number(decSecondPart)
+  if (!Number.isFinite(dd) || !Number.isFinite(dm) || !Number.isFinite(ds)) {
+    return { ok: false, message: 'Dec requires numeric Deg, Min, and Sec.' }
+  }
+  if (dd < 0 || dd > 90 || dm < 0 || dm > 59 || ds < 0 || ds >= 60) {
+    return { ok: false, message: 'Dec range: Deg 0-90, Min 0-59, Sec 0-59.999.' }
+  }
+  let decDeg = dd + dm / 60 + ds / 3600
+  if (decSign === '-') decDeg = -decDeg
+  return {
+    ok: true,
+    raHours: Number(raHours.toFixed(8)),
+    decDeg: Number(decDeg.toFixed(8)),
+  }
+}
+
 export default function RemotePage() {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null)
@@ -373,6 +534,14 @@ export default function RemotePage() {
   const [statusLoadError, setStatusLoadError] = useState<string | null>(null)
   const [showClosedModal, setShowClosedModal] = useState(false)
   const [showAltitudeModal, setShowAltitudeModal] = useState(false)
+  const [showSaveRemoteSessionModal, setShowSaveRemoteSessionModal] = useState(false)
+  const [showRunRemoteSessionModal, setShowRunRemoteSessionModal] = useState(false)
+  const [saveModalName, setSaveModalName] = useState('')
+  const [saveModalPassword, setSaveModalPassword] = useState('')
+  const [saveModalError, setSaveModalError] = useState<string | null>(null)
+  const [runModalName, setRunModalName] = useState('')
+  const [runModalPassword, setRunModalPassword] = useState('')
+  const [runModalError, setRunModalError] = useState<string | null>(null)
   const [lastComputedAltitude, setLastComputedAltitude] = useState<number | null>(null)
   const [queueItems, setQueueItems] = useState<
     Array<{
@@ -391,7 +560,6 @@ export default function RemotePage() {
       outputMode?: 'raw_zip' | 'stacked_master' | 'none'
       estimatedDurationSeconds?: number
       filterPlans?: Array<{ filterName: string; exposureSeconds: number; count: number }>
-      scheduleStatus?: 'scheduled' | 'unscheduled'
       plannedStartIso?: string | null
       scheduleReasons?: string[]
       hasDownload?: boolean
@@ -441,6 +609,9 @@ export default function RemotePage() {
   const [variableStarFilterSelection, setVariableStarFilterSelection] = useState<VariableStarFilterUi[]>([])
   const [variableStarFilterDropdownOpen, setVariableStarFilterDropdownOpen] = useState(false)
   const variableStarFilterDropdownRef = useRef<HTMLDivElement>(null)
+  const [variableStarBlockHours, setVariableStarBlockHours] = useState(1)
+  /** Until user taps a session duration pill, show `--` for estimated duration (not the clamped default). */
+  const [variableStarDurationUserSelected, setVariableStarDurationUserSelected] = useState(false)
 
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [terminalSessionId, setTerminalSessionId] = useState<string | null>(null)
@@ -474,6 +645,12 @@ export default function RemotePage() {
     const hasMidPeriod = selected.has('mid_period')
     const hasLongPeriod = selected.has('long_period')
     const hasAnyPeriodFilter = hasShortPeriod || hasMidPeriod || hasLongPeriod
+    const hasTypeNa = selected.has('type_na')
+    const hasTypeLc = selected.has('type_lc')
+    const hasTypeM = selected.has('type_m')
+    const hasTypeSrc = selected.has('type_src')
+    const hasTypeEa = selected.has('type_ea')
+    const hasAnyTypeFilter = hasTypeNa || hasTypeLc || hasTypeM || hasTypeSrc || hasTypeEa
     const wantsTonightObservable = selected.has('tonight_observable')
 
     let filtered = sortedVariableStars
@@ -493,7 +670,20 @@ export default function RemotePage() {
       })
     }
 
-    if (!wantsTonightObservable && !hasAnyPeriodFilter) return filtered
+    // Type filters are OR within the type group, then AND with other groups.
+    if (hasAnyTypeFilter) {
+      filtered = filtered.filter((s) => {
+        const t = (s.varType ?? '').toUpperCase()
+        if (hasTypeNa && t.includes('NA')) return true
+        if (hasTypeLc && t.includes('LC')) return true
+        if (hasTypeM && t === 'M') return true
+        if (hasTypeSrc && t.includes('SRC')) return true
+        if (hasTypeEa && t.includes('EA')) return true
+        return false
+      })
+    }
+
+    if (!wantsTonightObservable && !hasAnyPeriodFilter && !hasAnyTypeFilter) return filtered
 
     const { astronomicalDuskUtc, astronomicalDawnUtc } = getTonightAstronomicalNightWindow(new Date())
     const startMs = astronomicalDuskUtc.getTime()
@@ -528,6 +718,36 @@ export default function RemotePage() {
   useEffect(() => {
     setVariableStarListSelection('')
   }, [variableStarFilterKey])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const prefillTarget = params.get('prefillTarget')
+    const prefillRa = params.get('prefillRa')
+    const prefillDec = params.get('prefillDec')
+    if (!prefillTarget && !prefillRa && !prefillDec) return
+    if (prefillTarget) setRequestName(prefillTarget)
+    const ra = prefillRa != null ? Number(prefillRa) : NaN
+    const dec = prefillDec != null ? Number(prefillDec) : NaN
+    if (Number.isFinite(ra) && Number.isFinite(dec)) {
+      applySexagesimalPartsFromRadec(
+        ra,
+        dec,
+        setRaHourPart,
+        setRaMinutePart,
+        setRaSecondPart,
+        setDecSign,
+        setDecDegreePart,
+        setDecMinutePart,
+        setDecSecondPart
+      )
+    }
+    const url = new URL(window.location.href)
+    url.searchParams.delete('prefillTarget')
+    url.searchParams.delete('prefillRa')
+    url.searchParams.delete('prefillDec')
+    window.history.replaceState({}, '', url.toString())
+  }, [])
 
   useEffect(() => {
     if (!variableStarListSelection) return
@@ -790,7 +1010,6 @@ export default function RemotePage() {
         sessionType?: unknown
         estimatedDurationSeconds?: unknown
         filterPlans?: unknown
-        scheduleStatus?: unknown
         plannedStartIso?: unknown
         scheduleReasons?: unknown
         hasDownload?: unknown
@@ -806,7 +1025,13 @@ export default function RemotePage() {
             id: String(x.id),
             target: typeof x.target === 'string' ? x.target : 'Unknown target',
             createdAt: typeof x.createdAt === 'string' ? x.createdAt : new Date().toISOString(),
-            status: typeof x.status === 'string' ? x.status : 'pending',
+            status: (() => {
+              const s = typeof x.status === 'string' ? x.status : 'pending'
+              if (s === 'claimed') return 'in_progress'
+              if (s === 'pending' || s === 'scheduled' || s === 'in_progress' || s === 'completed' || s === 'failed')
+                return s
+              return 'pending'
+            })(),
             firstName: typeof x.firstName === 'string' ? x.firstName : null,
             lastName: typeof x.lastName === 'string' ? x.lastName : null,
             email: typeof x.email === 'string' ? x.email : null,
@@ -824,10 +1049,6 @@ export default function RemotePage() {
             estimatedDurationSeconds:
               typeof x.estimatedDurationSeconds === 'number' && Number.isFinite(x.estimatedDurationSeconds)
                 ? x.estimatedDurationSeconds
-                : undefined,
-            scheduleStatus:
-              x.scheduleStatus === 'scheduled' || x.scheduleStatus === 'unscheduled'
-                ? (x.scheduleStatus as 'scheduled' | 'unscheduled')
                 : undefined,
             plannedStartIso: typeof x.plannedStartIso === 'string' ? x.plannedStartIso : null,
             scheduleReasons: Array.isArray(x.scheduleReasons)
@@ -867,6 +1088,7 @@ export default function RemotePage() {
       queueItems.some(
         (i) =>
           i.status === 'pending' ||
+          i.status === 'scheduled' ||
           i.status === 'in_progress' ||
           (i.status === 'completed' && i.hasDownload !== true)
       ),
@@ -898,16 +1120,14 @@ export default function RemotePage() {
       cursor.setHours(cursor.getHours() + 1)
     }
 
-    const baseUtc = new Date(Date.UTC(start.getFullYear(), start.getMonth(), start.getDate()))
-    const nextUtc = new Date(Date.UTC(end.getFullYear(), end.getMonth(), end.getDate()))
-    const sunset = solarEventUtcForDate(baseUtc, 90.833, false)
-    const civilDusk = solarEventUtcForDate(baseUtc, 96, false)
-    const nauticalDusk = solarEventUtcForDate(baseUtc, 102, false)
-    const astronomicalDark = solarEventUtcForDate(baseUtc, 108, false)
-    const astronomicalDawn = solarEventUtcForDate(nextUtc, 108, true)
-    const nauticalDawn = solarEventUtcForDate(nextUtc, 102, true)
-    const civilDawn = solarEventUtcForDate(nextUtc, 96, true)
-    const sunrise = solarEventUtcForDate(nextUtc, 90.833, true)
+    const { sunsetUtc: sunset, civilDuskUtc: civilDusk, nauticalDuskUtc: nauticalDusk, astronomicalDarkUtc: astronomicalDark } =
+      getTonightScheduleEveningAstronomyUtc(now)
+    const {
+      sunriseUtc: sunrise,
+      civilDawnUtc: civilDawn,
+      nauticalDawnUtc: nauticalDawn,
+      astronomicalDawnUtc: astronomicalDawn,
+    } = getTonightScheduleMorningAstronomyUtc(now)
 
     const eventBlocks = [
       { label: 'Sunset', startTime: sunset },
@@ -951,6 +1171,238 @@ export default function RemotePage() {
 
     return { start, end, hours: points, eventBlocks, adminClosedBlocks, nowTopPct, nauticalDawn, nauticalDusk, astronomicalDawn }
   }, [scheduleNowMs, adminClosedWindows])
+
+  const variableStarDurationPick = useMemo(() => {
+    if (sessionType !== 'variable_star') return null
+    const { nauticalDuskUtc, nauticalDawnUtc } = getTonightSchedulingWindow(new Date(scheduleNowMs))
+    const { allOptions, nightHours, nightHalfSteps } = variableStarNightHalfHourLadder(nauticalDuskUtc, nauticalDawnUtc)
+    const parsed = parseCoordsFromFormParts(
+      raHourPart,
+      raMinutePart,
+      raSecondPart,
+      decSign,
+      decDegreePart,
+      decMinutePart,
+      decSecondPart
+    )
+    if (!parsed.ok) {
+      return {
+        coordsOk: false as const,
+        allOptions,
+        nightHours,
+        nightHalfSteps,
+        starHalfSteps: 0,
+        above30Ms: 0,
+        above30Hours: 0,
+      }
+    }
+    const model = variableStarDurationButtonModel(parsed.raHours, parsed.decDeg, nauticalDuskUtc, nauticalDawnUtc)
+    return { coordsOk: true as const, raHours: parsed.raHours, decDeg: parsed.decDeg, ...model }
+  }, [
+    sessionType,
+    scheduleNowMs,
+    raHourPart,
+    raMinutePart,
+    raSecondPart,
+    decSign,
+    decDegreePart,
+    decMinutePart,
+    decSecondPart,
+  ])
+
+  useEffect(() => {
+    if (sessionType !== 'variable_star') return
+    if (!variableStarDurationPick?.coordsOk) return
+    const { allOptions, starHalfSteps } = variableStarDurationPick
+    if (allOptions.length === 0 || starHalfSteps < 1) return
+    const maxEnabled = starHalfSteps * 0.5
+    setVariableStarBlockHours((prev) => {
+      const enabled = allOptions.filter((o) => o <= maxEnabled + 1e-9)
+      if (enabled.length === 0) return prev
+      if (enabled.includes(prev)) return prev
+      let best = enabled[0]
+      for (const o of enabled) {
+        if (o <= prev) best = o
+        else break
+      }
+      return best
+    })
+  }, [sessionType, variableStarDurationPick])
+
+  useEffect(() => {
+    if (sessionType !== 'variable_star') setVariableStarDurationUserSelected(false)
+  }, [sessionType])
+
+  useEffect(() => {
+    if (sessionType === 'variable_star' && !variableStarDurationPick?.coordsOk) {
+      setVariableStarDurationUserSelected(false)
+    }
+  }, [sessionType, variableStarDurationPick?.coordsOk])
+
+  const dsoEstimatedDurationPreviewSeconds = useMemo(() => {
+    if (sessionType !== 'dso') return null
+    if (filterPlans.length === 0) return null
+    const normalized: Array<{ filterName: string; count: number; exposureSeconds: number }> = []
+    for (const plan of filterPlans) {
+      const filterName = plan.filterName.trim()
+      const frames = Math.round(Number(plan.count))
+      const exposure = Math.round(Number(plan.exposureSeconds))
+      if (!filterName) return null
+      if (!Number.isFinite(frames) || frames < 1 || frames > 500) return null
+      if (!Number.isFinite(exposure) || exposure < 1 || exposure > 3600) return null
+      if (outputMode === 'stacked_master' && exposure !== STACKED_MASTER_REQUIRED_EXPOSURE_SECONDS) return null
+      normalized.push({ filterName, count: frames, exposureSeconds: exposure })
+    }
+    return estimateDurationSecondsFromPlans(normalized)
+  }, [sessionType, filterPlans, outputMode])
+
+  const canSaveRemoteSessionSpec = useMemo(() => {
+    if (!requestName.trim()) return false
+    const emailTrimmed = email.trim()
+    if (!emailTrimmed || !EMAIL_REGEX.test(emailTrimmed)) return false
+    if (!sessionPassword.trim()) return false
+    const coord = parseCoordsFromFormParts(
+      raHourPart,
+      raMinutePart,
+      raSecondPart,
+      decSign,
+      decDegreePart,
+      decMinutePart,
+      decSecondPart
+    )
+    if (!coord.ok) return false
+    if (sessionType === 'variable_star') {
+      if (!variableStarDurationPick?.coordsOk) return false
+      const { starHalfSteps, allOptions } = variableStarDurationPick
+      if (starHalfSteps < 1) return false
+      const maxEnabled = starHalfSteps * 0.5
+      if (!allOptions.includes(variableStarBlockHours) || variableStarBlockHours > maxEnabled + 1e-9) return false
+      return true
+    }
+    if (filterPlans.length === 0) return false
+    for (const plan of filterPlans) {
+      const filterName = plan.filterName.trim()
+      const frames = Math.round(Number(plan.count))
+      const exposure = Math.round(Number(plan.exposureSeconds))
+      if (!filterName) return false
+      if (!Number.isFinite(frames) || frames < 1 || frames > 500) return false
+      if (!Number.isFinite(exposure) || exposure < 1 || exposure > 3600) return false
+      if (outputMode === 'stacked_master' && exposure !== STACKED_MASTER_REQUIRED_EXPOSURE_SECONDS) return false
+    }
+    return true
+  }, [
+    requestName,
+    email,
+    sessionPassword,
+    raHourPart,
+    raMinutePart,
+    raSecondPart,
+    decSign,
+    decDegreePart,
+    decMinutePart,
+    decSecondPart,
+    sessionType,
+    variableStarDurationPick,
+    variableStarBlockHours,
+    filterPlans,
+    outputMode,
+  ])
+
+  const captureRemoteSavedForm = useCallback((): RemoteSavedSessionFormV1 => {
+    return {
+      sessionType: sessionType === 'variable_star' ? 'variable_star' : 'dso',
+      requestName,
+      firstName,
+      lastName,
+      email,
+      raHourPart,
+      raMinutePart,
+      raSecondPart,
+      decSign,
+      decDegreePart,
+      decMinutePart,
+      decSecondPart,
+      sessionPassword,
+      outputMode,
+      filterPlans: filterPlans.map((p) => ({ ...p })),
+      variableStarBlockHours,
+      variableStarListSelection,
+      variableStarFilterSelection: [...variableStarFilterSelection],
+      catalogQuery,
+    }
+  }, [
+    sessionType,
+    requestName,
+    firstName,
+    lastName,
+    email,
+    raHourPart,
+    raMinutePart,
+    raSecondPart,
+    decSign,
+    decDegreePart,
+    decMinutePart,
+    decSecondPart,
+    sessionPassword,
+    outputMode,
+    filterPlans,
+    variableStarBlockHours,
+    variableStarListSelection,
+    variableStarFilterSelection,
+    catalogQuery,
+  ])
+
+  const applyRemoteSavedForm = useCallback(
+    (form: RemoteSavedSessionFormV1) => {
+      setEditingSessionId(null)
+      setSubmitError(null)
+      setSessionType(form.sessionType === 'variable_star' ? 'variable_star' : 'dso')
+      setRequestName(form.requestName)
+      setFirstName(form.firstName)
+      setLastName(form.lastName)
+      setEmail(form.email)
+      setRaHourPart(form.raHourPart)
+      setRaMinutePart(form.raMinutePart)
+      setRaSecondPart(form.raSecondPart)
+      setDecSign(form.decSign)
+      setDecDegreePart(form.decDegreePart)
+      setDecMinutePart(form.decMinutePart)
+      setDecSecondPart(form.decSecondPart)
+      setSessionPassword(form.sessionPassword)
+      setOutputMode(form.outputMode)
+      setFilterPlans(
+        form.filterPlans.length > 0
+          ? form.filterPlans.map((p) => ({ ...p }))
+          : [{ filterName: 'G', count: '10', exposureSeconds: '60' }]
+      )
+      setVariableStarBlockHours(form.variableStarBlockHours)
+      setVariableStarDurationUserSelected(form.sessionType === 'variable_star')
+      setVariableStarListSelection(form.variableStarListSelection)
+      setVariableStarFilterSelection(form.variableStarFilterSelection as VariableStarFilterUi[])
+      setCatalogQuery(form.catalogQuery)
+      setCatalogLookupResult(null)
+      setCatalogLookupError(null)
+      if (form.sessionType === 'variable_star') {
+        const row = variableStarCatalog.find(
+          (r) => r.name === form.variableStarListSelection || r.name === form.catalogQuery.trim()
+        )
+        if (row) {
+          setVariableStarPreviewStar(rowToVariableChartStar(row))
+          setVariableStarLastFoundName(row.name)
+          setVariableStarLastFoundSource('catalog')
+        } else {
+          setVariableStarPreviewStar(null)
+          setVariableStarLastFoundName(null)
+          setVariableStarLastFoundSource(null)
+        }
+      } else {
+        setVariableStarPreviewStar(null)
+        setVariableStarLastFoundName(null)
+        setVariableStarLastFoundSource(null)
+      }
+    },
+    [variableStarCatalog]
+  )
 
   const weatherBlocks = useMemo(() => {
     const effectiveNightHourKeys =
@@ -1038,16 +1490,60 @@ export default function RemotePage() {
   }, [readyWeatherHourKeys, nightWeatherHourKeys, tonightSchedule, tonightWeatherPrediction, notPermittedReasonByHourKey])
 
   const sessionSchedulePlan = useMemo(() => {
-    if (tonightWeatherPrediction === 'not_permitted' || hasAnyPrecipitationTonight) {
-      return {
-        blocks: [] as Array<{ id: string; startMs: number; endMs: number; topPct: number; heightPct: number; label: string }>,
-        newlyLocked: {} as Record<string, { startMs: number; endMs: number }>,
-      }
-    }
-
     const windowStartMs = tonightSchedule.start.getTime()
     const windowEndMs = tonightSchedule.end.getTime()
     const schedulingDeadlineMs = Math.min(windowEndMs, tonightSchedule.astronomicalDawn.getTime())
+
+    // Bad weather must not wipe in_progress / completed bars: those stay on the tonight strip using
+    // saved locks or a stable fallback (planned start → created → now for in_progress).
+    if (tonightWeatherPrediction === 'not_permitted' || hasAnyPrecipitationTonight) {
+      const nowMs = Date.now()
+      const blocks: Array<{ id: string; startMs: number; endMs: number; topPct: number; heightPct: number; label: string }> =
+        []
+      const newlyLocked: Record<string, { startMs: number; endMs: number }> = {}
+
+      for (const item of queueItems) {
+        if (item.status !== 'in_progress' && item.status !== 'completed') continue
+        const placed = fallbackPlacementForTerminalSession(
+          item,
+          lockedSessionSchedule,
+          windowStartMs,
+          schedulingDeadlineMs,
+          nowMs,
+        )
+        if (!placed) continue
+        const startMs = Math.max(placed.startMs, windowStartMs)
+        const endMs = Math.min(placed.endMs, schedulingDeadlineMs)
+        if (endMs <= startMs) continue
+        const topPct = ((startMs - windowStartMs) / (windowEndMs - windowStartMs)) * 100
+        const heightPct = ((endMs - startMs) / (windowEndMs - windowStartMs)) * 100
+        blocks.push({ id: item.id, startMs, endMs, topPct, heightPct, label: item.target })
+        if (!lockedSessionSchedule[item.id]) {
+          newlyLocked[item.id] = { startMs, endMs }
+        }
+      }
+      // Still show server-scheduled pending sessions (plannedStartIso) so the strip matches queue state
+      // even when the UI is in "weather not permitted" mode — previously only in_progress/completed appeared.
+      for (const item of queueItems) {
+        if (item.status !== 'scheduled') continue
+        const startMsRaw = item.plannedStartIso ? Date.parse(item.plannedStartIso) : Number.NaN
+        if (!Number.isFinite(startMsRaw)) continue
+        const estimatedSeconds =
+          typeof item.estimatedDurationSeconds === 'number' && Number.isFinite(item.estimatedDurationSeconds)
+            ? item.estimatedDurationSeconds
+            : estimateDurationSecondsFromPlans(item.filterPlans)
+        const durationMs = Math.max(estimatedSeconds, 60) * 1000
+        const startMs = Math.max(startMsRaw, windowStartMs)
+        const endMs = Math.min(startMs + durationMs, schedulingDeadlineMs)
+        if (endMs <= startMs) continue
+        const topPct = ((startMs - windowStartMs) / (windowEndMs - windowStartMs)) * 100
+        const heightPct = ((endMs - startMs) / (windowEndMs - windowStartMs)) * 100
+        blocks.push({ id: item.id, startMs, endMs, topPct, heightPct, label: item.target })
+      }
+      blocks.sort((a, b) => a.startMs - b.startMs)
+      return { blocks, newlyLocked }
+    }
+
     const nauticalDuskMs = tonightSchedule.nauticalDusk.getTime()
     const readyHourKeySet = new Set(readyWeatherHourKeys)
     const readyHourStartsMs = tonightSchedule.hours
@@ -1180,7 +1676,12 @@ export default function RemotePage() {
     const lockable = queueItems
       .filter((item) => item.status === 'in_progress' || item.status === 'completed')
       .filter((item) => {
+        if (item.status === 'in_progress') return true
         if (lockedSessionSchedule[item.id]) return true
+        if (item.plannedStartIso) {
+          const plannedMs = Date.parse(item.plannedStartIso)
+          if (Number.isFinite(plannedMs)) return true
+        }
         const createdMs = Date.parse(item.createdAt)
         if (!Number.isFinite(createdMs)) return false
         return createdMs >= windowStartMs && createdMs < windowEndMs
@@ -1191,9 +1692,21 @@ export default function RemotePage() {
       let placed = lockedSessionSchedule[item.id]
       if (!placed) {
         const computed = placeInFreeIntervals(item, Math.max(windowStartMs, nauticalDuskMs))
-        if (!computed) continue
-        placed = computed
-        newlyLocked[item.id] = placed
+        if (computed) {
+          placed = computed
+          newlyLocked[item.id] = placed
+        } else {
+          const fb = fallbackPlacementForTerminalSession(
+            item,
+            lockedSessionSchedule,
+            windowStartMs,
+            schedulingDeadlineMs,
+            Date.now(),
+          )
+          if (!fb) continue
+          placed = fb
+          newlyLocked[item.id] = placed
+        }
       }
 
       const startMs = Math.max(placed.startMs, windowStartMs)
@@ -1208,7 +1721,7 @@ export default function RemotePage() {
     }
 
     const scheduledPending = queueItems
-      .filter((item) => item.status === 'pending' && item.scheduleStatus === 'scheduled')
+      .filter((item) => item.status === 'scheduled')
       .map((item) => {
         const startMsRaw = item.plannedStartIso ? Date.parse(item.plannedStartIso) : Number.NaN
         if (!Number.isFinite(startMsRaw)) return null
@@ -1497,36 +2010,20 @@ export default function RemotePage() {
   }, [terminalLines, terminalSessionId])
 
   async function parseCoordinates(): Promise<{ raHours: number; decDeg: number } | null> {
-    const h = Number(raHourPart)
-    const m = Number(raMinutePart)
-    const s = Number(raSecondPart)
-    if (!Number.isFinite(h) || !Number.isFinite(m) || !Number.isFinite(s)) {
-      setSubmitError('RA requires numeric Hour, Min, and Sec.')
+    const r = parseCoordsFromFormParts(
+      raHourPart,
+      raMinutePart,
+      raSecondPart,
+      decSign,
+      decDegreePart,
+      decMinutePart,
+      decSecondPart
+    )
+    if (!r.ok) {
+      setSubmitError(r.message)
       return null
     }
-    if (h < 0 || h > 23 || m < 0 || m > 59 || s < 0 || s >= 60) {
-      setSubmitError('RA range: Hour 0-23, Min 0-59, Sec 0-59.999.')
-      return null
-    }
-    const raHours = h + m / 60 + s / 3600
-
-    const dd = Number(decDegreePart)
-    const dm = Number(decMinutePart)
-    const ds = Number(decSecondPart)
-    if (!Number.isFinite(dd) || !Number.isFinite(dm) || !Number.isFinite(ds)) {
-      setSubmitError('Dec requires numeric Deg, Min, and Sec.')
-      return null
-    }
-    if (dd < 0 || dd > 90 || dm < 0 || dm > 59 || ds < 0 || ds >= 60) {
-      setSubmitError('Dec range: Deg 0-90, Min 0-59, Sec 0-59.999.')
-      return null
-    }
-    let decDeg = dd + dm / 60 + ds / 3600
-    if (decSign === '-') decDeg = -decDeg
-    return {
-      raHours: Number(raHours.toFixed(8)),
-      decDeg: Number(decDeg.toFixed(8)),
-    }
+    return { raHours: r.raHours, decDeg: r.decDeg }
   }
 
   async function submitRequest(
@@ -1575,21 +2072,26 @@ export default function RemotePage() {
       return
     }
 
-    const tonightWindow = computeTonightWindow(new Date())
+    if (sessionType === 'variable_star') {
+      if (!variableStarDurationPick || !variableStarDurationPick.coordsOk) {
+        setSubmitError('Enter valid RA and Dec for a variable star session.')
+        return
+      }
+      const { starHalfSteps, allOptions } = variableStarDurationPick
+      if (starHalfSteps < 1) {
+        setSubmitError("This target is not high enough in tonight's scheduling window for the chosen duration.")
+        return
+      }
+      const maxEnabled = starHalfSteps * 0.5
+      if (!allOptions.includes(variableStarBlockHours) || variableStarBlockHours > maxEnabled + 1e-9) {
+        setSubmitError("Pick a session duration that fits tonight's visibility (the enabled buttons above).")
+        return
+      }
+    }
+
     const estimatedDurationSeconds =
       sessionType === 'variable_star'
-        ? Math.max(
-            0,
-            Math.round(
-              altitudeAllowedCoverageMsForInterval(
-                coords.raHours,
-                coords.decDeg,
-                tonightWindow.startMs,
-                tonightWindow.endMs,
-                40
-              ) / 1000
-            )
-          )
+        ? Math.round((variableStarBlockHours + VARIABLE_STAR_SESSION_OVERHEAD_HOURS) * 3600)
         : estimateDurationSecondsFromPlans(normalizedPlans)
 
     const endpoint = editingSessionId ? `/api/imaging/queue/${encodeURIComponent(editingSessionId)}` : '/api/imaging/queue'
@@ -1639,6 +2141,7 @@ export default function RemotePage() {
     setSessionPassword('')
     setOutputMode('raw_zip')
     setSessionType('dso')
+    setVariableStarBlockHours(1)
     setVariableStarPreviewStar(null)
     setVariableStarLastFoundName(null)
     setVariableStarListSelection('')
@@ -1745,6 +2248,18 @@ export default function RemotePage() {
       setDecDegreePart(String(decD))
       setDecMinutePart(String(decM))
       setDecSecondPart(String(Number(decS.toFixed(3))))
+    }
+    if (item.sessionType === 'variable_star') {
+      const est = item.estimatedDurationSeconds
+      if (typeof est === 'number' && Number.isFinite(est) && est > 15 * 60) {
+        const blockH = est / 3600 - VARIABLE_STAR_SESSION_OVERHEAD_HOURS
+        const snapped = Math.round(blockH * 2) / 2
+        setVariableStarBlockHours(Number.isFinite(snapped) && snapped >= 0.5 ? snapped : 1)
+      } else {
+        setVariableStarBlockHours(1)
+      }
+    } else {
+      setVariableStarBlockHours(1)
     }
     setOutputMode(item.outputMode ?? 'raw_zip')
     if (Array.isArray(item.filterPlans) && item.filterPlans.length > 0) {
@@ -1865,12 +2380,69 @@ export default function RemotePage() {
     }
   }
 
+  const dsoTonightAltitudePreview = useMemo(() => {
+    if (sessionType !== 'dso' || !catalogLookupResult) return null
+    const h = Number(raHourPart)
+    const m = Number(raMinutePart)
+    const s = Number(raSecondPart)
+    const dd = Number(decDegreePart)
+    const dm = Number(decMinutePart)
+    const ds = Number(decSecondPart)
+    if (
+      !Number.isFinite(h) ||
+      !Number.isFinite(m) ||
+      !Number.isFinite(s) ||
+      !Number.isFinite(dd) ||
+      !Number.isFinite(dm) ||
+      !Number.isFinite(ds)
+    ) {
+      return null
+    }
+    if (h < 0 || h > 23 || m < 0 || m > 59 || s < 0 || s >= 60) return null
+    if (dd < 0 || dd > 90 || dm < 0 || dm > 59 || ds < 0 || ds >= 60) return null
+    const raHours = h + m / 60 + s / 3600
+    let decDeg = dd + dm / 60 + ds / 3600
+    if (decSign === '-') decDeg = -decDeg
+
+    const now = new Date()
+    const { astronomicalDuskUtc, astronomicalDawnUtc } = getTonightAstronomicalNightWindow(now)
+    const duskMs = astronomicalDuskUtc.getTime()
+    const dawnMs = astronomicalDawnUtc.getTime()
+    if (dawnMs <= duskMs) return null
+
+    const STEP_MS = 5 * 60 * 1000
+    const samples: Array<{ ms: number; alt: number }> = []
+    for (let ms = duskMs; ms <= dawnMs; ms += STEP_MS) {
+      samples.push({ ms, alt: currentAltitudeDegAt(raHours, decDeg, new Date(ms)) })
+    }
+    if (samples[samples.length - 1]?.ms !== dawnMs) {
+      samples.push({ ms: dawnMs, alt: currentAltitudeDegAt(raHours, decDeg, new Date(dawnMs)) })
+    }
+    return {
+      duskMs,
+      dawnMs,
+      xTickMs: Array.from({ length: 7 }, (_, i) => duskMs + ((dawnMs - duskMs) * i) / 6),
+      samples,
+    }
+  }, [
+    sessionType,
+    catalogLookupResult,
+    raHourPart,
+    raMinutePart,
+    raSecondPart,
+    decSign,
+    decDegreePart,
+    decMinutePart,
+    decSecondPart,
+  ])
+
   return (
-    <div className="pb-8">
-      <div className="grid gap-6 lg:-translate-x-3 lg:grid-cols-[minmax(0,3fr)_1px_minmax(0,2fr)] lg:items-start">
-        <section className="max-w-3xl">
+    <div className="pb-4 sm:pb-8">
+      <div className="grid gap-4 sm:gap-6 lg:-translate-x-3 lg:grid-cols-[minmax(0,3fr)_1px_minmax(0,2fr)] lg:items-start">
+        <section className="max-w-3xl min-w-0">
           <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-4">New Imaging Session</h1>
-        <p className="mb-4 text-sm text-gray-600 dark:text-gray-400">
+          <div className="flex flex-col gap-4">
+            <p className="text-sm text-gray-600 dark:text-gray-400">
           Observatory status:{' '}
           <span
             className={
@@ -1904,11 +2476,11 @@ export default function RemotePage() {
                 ? 'Loading...'
                 : 'Not permitted'}
           </span>
-        </p>
-        {statusLoadError && (
-          <p className="mb-3 text-sm text-red-600 dark:text-red-400">{statusLoadError}</p>
-        )}
-          <form onSubmit={handleSubmit} className="boxed-fields grid gap-4 sm:grid-cols-2">
+            </p>
+            {statusLoadError && (
+              <p className="text-sm text-red-600 dark:text-red-400">{statusLoadError}</p>
+            )}
+            <form onSubmit={handleSubmit} className="boxed-fields grid gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2 space-y-2">
             <span className="text-sm font-medium text-white">Session Type</span>
             <div className="flex flex-wrap gap-2">
@@ -1926,6 +2498,7 @@ export default function RemotePage() {
                   setVariableStarFilterSelection([])
                   setCatalogLookupError(null)
                   setCatalogLookupResult(null)
+                  setVariableStarBlockHours(1)
                 }}
                 className={`rounded-full border px-4 py-2 text-sm font-medium ${
                   sessionType === 'dso'
@@ -1939,9 +2512,31 @@ export default function RemotePage() {
                 type="button"
                 aria-pressed={sessionType === 'variable_star'}
                 onClick={() => {
+                  setEditingSessionId(null)
+                  setRequestName('')
+                  setFirstName('')
+                  setLastName('')
+                  setEmail('')
+                  setRaHourPart('')
+                  setRaMinutePart('')
+                  setRaSecondPart('')
+                  setDecSign('+')
+                  setDecDegreePart('')
+                  setDecMinutePart('')
+                  setDecSecondPart('')
+                  setSessionPassword('')
+                  setCatalogQuery('')
+                  setCatalogLookupResult(null)
+                  setCatalogLookupError(null)
+                  setVariableStarPreviewStar(null)
+                  setVariableStarLastFoundName(null)
+                  setVariableStarLastFoundSource(null)
+                  setVariableStarListSelection('')
+                  setVariableStarFilterSelection([])
                   setSessionType('variable_star')
                   setOutputMode('raw_zip')
                   setFilterPlans([{ filterName: 'G', count: '10', exposureSeconds: '60' }])
+                  setVariableStarBlockHours(1)
                 }}
                 className={`rounded-full border px-4 py-2 text-sm font-medium ${
                   sessionType === 'variable_star'
@@ -2032,6 +2627,11 @@ export default function RemotePage() {
                             { value: 'short_period', label: 'Short Period' },
                             { value: 'mid_period', label: 'Mid Period (1-100 Days)' },
                             { value: 'long_period', label: 'Long Period (100+ Days)' },
+                            { value: 'type_na', label: 'Type: NA (Nova)' },
+                            { value: 'type_lc', label: 'Type: LC (Irregular Slow)' },
+                            { value: 'type_m', label: 'Type: M (Mira)' },
+                            { value: 'type_src', label: 'Type: SRC (Semiregular Supergiant)' },
+                            { value: 'type_ea', label: 'Type: EA (Algol Eclipsing Binary)' },
                           ] as const).map((option) => {
                             const checked = variableStarFilterSelection.includes(option.value)
                             return (
@@ -2143,6 +2743,59 @@ export default function RemotePage() {
                 Found <span className="font-semibold">{catalogLookupResult.canonicalName}</span>. Coordinates auto-filled.
               </p>
             )}
+            {sessionType === 'dso' && catalogLookupResult && dsoTonightAltitudePreview && (
+              <div className="sm:col-span-2 space-y-1">
+                <p className="text-sm font-medium text-white">Tonight</p>
+                <div className="rounded-lg border border-black/10 p-2 dark:border-white/10">
+                  {(() => {
+                    const VB_W = 420
+                    const VB_H = 168
+                    const PAD_L = 30
+                    const PAD_R = 26
+                    const PAD_T = 24
+                    const PAD_B = 22
+                    const plotW = VB_W - PAD_L - PAD_R
+                    const plotH = VB_H - PAD_T - PAD_B
+                    const xTickY0 = PAD_T + plotH
+                    const spanMs = Math.max(1, dsoTonightAltitudePreview.dawnMs - dsoTonightAltitudePreview.duskMs)
+                    const x = (ms: number) => PAD_L + ((ms - dsoTonightAltitudePreview.duskMs) / spanMs) * plotW
+                    const yAlt = (alt: number) => PAD_T + ((90 - Math.max(0, Math.min(90, alt))) / 90) * plotH
+                    const points = dsoTonightAltitudePreview.samples
+                      .map((p) => `${x(p.ms).toFixed(1)},${yAlt(p.alt).toFixed(1)}`)
+                      .join(' ')
+                    return (
+                      <svg className="block w-full -translate-x-1 -translate-y-1 text-gray-600" viewBox={`0 0 ${VB_W} ${VB_H}`} aria-hidden>
+                        <rect x={PAD_L} y={PAD_T} width={plotW} height={plotH} fill="none" stroke="currentColor" strokeOpacity={0.2} />
+                        <line x1={PAD_L} y1={xTickY0} x2={PAD_L + plotW} y2={xTickY0} stroke="currentColor" strokeOpacity={0.35} />
+                        {[0, 30, 60, 90].map((deg) => {
+                          const y = PAD_T + ((90 - deg) / 90) * plotH
+                          return (
+                            <g key={deg}>
+                              <line x1={PAD_L} y1={y} x2={PAD_L + plotW} y2={y} stroke="currentColor" strokeOpacity={0.08} />
+                              <text x={PAD_L + plotW + 6} y={y + 3} fill="rgb(156 163 175)" fontSize={8} textAnchor="start">
+                                {`${deg}°`}
+                              </text>
+                            </g>
+                          )
+                        })}
+                        <polyline fill="none" stroke="rgb(251 191 36)" strokeWidth="1.4" points={points} />
+                        {dsoTonightAltitudePreview.xTickMs.map((ms) => {
+                          const xi = x(ms)
+                          return (
+                            <g key={ms}>
+                              <line x1={xi} y1={xTickY0} x2={xi} y2={xTickY0 + 4} stroke="currentColor" strokeOpacity={0.4} />
+                              <text x={xi} y={xTickY0 + 10} fill="rgb(156 163 175)" fontSize={8} textAnchor="middle" dominantBaseline="hanging">
+                                {formatTonightXAxisHour(ms)}
+                              </text>
+                            </g>
+                          )
+                        })}
+                      </svg>
+                    )
+                  })()}
+                </div>
+              </div>
+            )}
             {sessionType === 'variable_star' && variableStarLastFoundName && (
               <p className="text-sm text-green-400">
                 Found <span className="font-semibold">{variableStarLastFoundName}</span>{' '}
@@ -2223,6 +2876,57 @@ export default function RemotePage() {
               />
             </div>
           </div>
+          {sessionType === 'variable_star' && variableStarDurationPick && (
+            <div className="sm:col-span-2 grid gap-2">
+              <span className="text-sm font-medium text-white">Session duration</span>
+              <div
+                className="grid w-full gap-2"
+                style={{
+                  gridTemplateColumns: `repeat(${Math.max(1, Math.ceil(variableStarDurationPick.allOptions.length / 2))}, minmax(0, 1fr))`,
+                }}
+              >
+                {variableStarDurationPick.allOptions.map((h) => {
+                  const halfStepsForH = Math.round(h * 2)
+                  const enabled =
+                    variableStarDurationPick.coordsOk && halfStepsForH <= variableStarDurationPick.starHalfSteps
+                  const selected = enabled && variableStarBlockHours === h
+                  return (
+                    <button
+                      key={h}
+                      type="button"
+                      disabled={!enabled}
+                      aria-disabled={!enabled}
+                      onClick={() => {
+                        if (enabled) {
+                          setVariableStarBlockHours(h)
+                          setVariableStarDurationUserSelected(true)
+                        }
+                      }}
+                      className={`w-full rounded-full border px-3 py-2 text-sm font-medium ${
+                        selected
+                          ? 'border-white/60 bg-[#151616] text-white'
+                          : enabled
+                            ? 'border-gray-300 dark:border-gray-600 bg-[#151616] text-gray-300 hover:text-white'
+                            : 'cursor-not-allowed border-gray-600/50 bg-[#151616]/80 text-gray-600'
+                      }`}
+                    >
+                      {`${h} h`}
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="text-xs text-gray-500">
+                Estimated duration:{' '}
+                {!variableStarDurationPick.coordsOk ||
+                variableStarDurationPick.starHalfSteps < 1 ||
+                !variableStarDurationUserSelected
+                  ? '--'
+                  : formatDurationShort(
+                      (variableStarBlockHours + VARIABLE_STAR_SESSION_OVERHEAD_HOURS) * 3600
+                    )}
+              </p>
+            </div>
+          )}
           {sessionType === 'dso' && (
             <div className="sm:col-span-2 grid gap-3">
               <span className="text-sm font-medium text-white">Filters *</span>
@@ -2309,6 +3013,12 @@ export default function RemotePage() {
                   </div>
                 </div>
               )}
+              <p className="text-xs text-gray-500">
+                Estimated duration:{' '}
+                {dsoEstimatedDurationPreviewSeconds == null
+                  ? '--'
+                  : formatDurationShort(dsoEstimatedDurationPreviewSeconds)}
+              </p>
             </div>
           )}
           <div className="sm:col-span-2 grid gap-3 sm:grid-cols-2 sm:items-start">
@@ -2374,16 +3084,43 @@ export default function RemotePage() {
               {submitSuccess}
             </p>
           )}
-          <div className="sm:col-span-2">
+          <div className="sm:col-span-2 flex flex-wrap items-center gap-2">
             <button
               type="submit"
               disabled={submitting}
-              className="rounded-full bg-[#151616] text-white px-4 py-2 text-sm font-medium hover:bg-[#1b1c1c] disabled:opacity-50"
+              className="inline-flex items-center justify-center rounded-full border border-white/25 bg-[#151616] px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#1b1c1c] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {submitting ? (editingSessionId ? 'Finishing...' : 'Starting...') : editingSessionId ? 'Finish Editing' : 'Start Session'}
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setRunModalError(null)
+                setRunModalName('')
+                setRunModalPassword('')
+                setShowRunRemoteSessionModal(true)
+              }}
+              className="inline-flex items-center justify-center rounded-full border border-white/25 bg-[#151616] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#1b1c1c]"
+            >
+              Run A Saved Session
+            </button>
+            <button
+              type="button"
+              disabled={!canSaveRemoteSessionSpec}
+              onClick={() => {
+                if (!canSaveRemoteSessionSpec) return
+                setSaveModalError(null)
+                setSaveModalName(requestName.trim())
+                setSaveModalPassword(sessionPassword)
+                setShowSaveRemoteSessionModal(true)
+              }}
+              className="inline-flex items-center justify-center rounded-full border border-white/25 bg-[#151616] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#1b1c1c] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Save Session
+            </button>
           </div>
-          </form>
+            </form>
+          </div>
         </section>
         <div className="hidden lg:block h-full min-h-[16rem] w-px bg-black/10 dark:bg-white/10" />
         <section className="max-w-2xl">
@@ -2398,11 +3135,11 @@ export default function RemotePage() {
               return (
                 <>
             <div className="absolute left-[4.75rem] top-0 bottom-0 w-px bg-black/10 dark:bg-white/10" />
-            <div className="absolute -right-16 top-0 bottom-0 w-px bg-black/10 dark:bg-white/10" />
+            <div className="absolute right-0 lg:-right-16 top-0 bottom-0 w-px bg-black/10 dark:bg-white/10" />
             {hourLines.map((slot, index) => (
               <div key={`hour-line-${slot.hourKey}-${index}`}>
                 <div
-                  className="absolute left-[4.75rem] -right-16 h-px bg-black/10 dark:bg-white/10"
+                  className="absolute left-[4.75rem] right-0 lg:-right-16 h-px bg-black/10 dark:bg-white/10"
                   style={{ top: `${slot.topPct}%` }}
                 />
                 <p
@@ -2415,7 +3152,7 @@ export default function RemotePage() {
             ))}
             {tonightSchedule.nowTopPct !== null && (
               <div
-                className="absolute left-[4.75rem] -right-16 h-0.5 bg-red-500/90 z-[1]"
+                className="absolute left-[4.75rem] right-0 lg:-right-16 h-0.5 bg-red-500/90 z-[1]"
                 style={{ top: `${tonightSchedule.nowTopPct}%` }}
               />
             )}
@@ -2427,7 +3164,7 @@ export default function RemotePage() {
                 </div>
               ))}
             </div>
-            <div className="pointer-events-none absolute left-[4.75rem] -right-16 top-0 bottom-0">
+            <div className="pointer-events-none absolute left-[4.75rem] right-0 lg:-right-16 top-0 bottom-0">
               {weatherBlocks.map((block, idx) => (
                 <div
                   key={`weather-${block.kind}-${idx}`}
@@ -2485,92 +3222,114 @@ export default function RemotePage() {
         </section>
       </div>
       <div className="mt-6 border-t border-black/10 dark:border-white/10 lg:-translate-x-3" />
-      <section className="mt-8 max-w-3xl lg:-translate-x-3">
-        <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-4">Current Sessions</h1>
-        {queueItems.length === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-500">No sessions.</p>
-        ) : (
-          <ul className="space-y-2">
-            {queueItems.map((item) => (
-              <li
-                key={item.id}
-                className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2 text-sm"
+      <div className="mt-6 sm:mt-8 grid gap-4 sm:gap-6 lg:-translate-x-3 lg:grid-cols-[minmax(0,3fr)_1px_minmax(0,2fr)] lg:items-start">
+        <section className="max-w-3xl min-w-0">
+          <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-4">Current Sessions</h1>
+          <div className="flex flex-col gap-4">
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              This list includes every session that is pending, scheduled, in progress, or completed. Completed sessions
+              are retained for{' '}
+              <span className="font-semibold text-red-600 dark:text-red-400">48 hours</span> after completion, then
+              removed automatically. When your session finishes, you will receive an email—please download your data
+              while it is still available. For the observatory master calibration library (bias, darks, flats),{' '}
+              <a
+                href={POMFRET_CALIBRATION_LIBRARY_DRIVE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-green-600 underline decoration-green-600/70 underline-offset-2 hover:text-green-500 dark:text-green-400 dark:hover:text-green-300"
               >
-                {(() => {
-                  const displayStatus =
-                    item.status === 'pending' && item.scheduleStatus === 'scheduled'
-                      ? 'scheduled'
-                      : item.status
-                  const sessionTypeLabel = item.sessionType === 'variable_star' ? 'Variable Star' : 'Deep Sky Object'
-                  return (
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-medium text-white">{`${item.target} | ${sessionTypeLabel}`}</span>
-                  <span className={`text-xs font-semibold uppercase ${queueStatusBadgeClass(displayStatus)}`}>
-                    {queueStatusLabel(displayStatus)}
-                  </span>
-                </div>
-                  )
-                })()}
-                <div className="mt-2 flex flex-wrap items-center gap-3">
-                  {item.hasDownload && item.downloadPath && (
+                here
+              </a>
+              .
+            </p>
+            {queueItems.length === 0 ? (
+              <p className="text-sm text-gray-500 dark:text-gray-500">No sessions.</p>
+            ) : (
+              <ul className="space-y-2">
+              {queueItems.map((item) => {
+                const displayStatus = item.status === 'claimed' ? 'in_progress' : item.status
+                const sessionTypeLabel = item.sessionType === 'variable_star' ? 'Variable Star' : 'Deep Sky Object'
+                return (
+                <li
+                  key={item.id}
+                  className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2 text-sm"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-medium text-white">{`${item.target} | ${sessionTypeLabel}`}</span>
+                    <span className={`text-xs font-semibold uppercase ${queueStatusBadgeClass(displayStatus)}`}>
+                      {queueStatusLabel(displayStatus)}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-3">
+                    {item.hasDownload && item.downloadPath && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAuthModalSessionId(item.id)
+                          setAuthModalAction('download')
+                          setAuthError(null)
+                          setAuthPassword(sessionPasswords[item.id] ?? '')
+                        }}
+                        className="rounded-full border border-white/25 bg-[#151616] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#1b1c1c]"
+                      >
+                        Download file
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => {
                         setAuthModalSessionId(item.id)
-                        setAuthModalAction('download')
+                        setAuthModalAction('progress')
                         setAuthError(null)
                         setAuthPassword(sessionPasswords[item.id] ?? '')
                       }}
                       className="rounded-full border border-white/25 bg-[#151616] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#1b1c1c]"
                     >
-                      Download file
+                      Check progress
                     </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAuthModalSessionId(item.id)
-                      setAuthModalAction('progress')
-                      setAuthError(null)
-                      setAuthPassword(sessionPasswords[item.id] ?? '')
-                    }}
-                    className="rounded-full border border-white/25 bg-[#151616] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#1b1c1c]"
-                  >
-                    Check progress
-                  </button>
-                  {item.status === 'pending' && (
+                    {(item.status === 'pending' || item.status === 'scheduled') && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAuthModalSessionId(item.id)
+                          setAuthModalAction('edit')
+                          setAuthError(null)
+                          setAuthPassword(sessionPasswords[item.id] ?? '')
+                        }}
+                        className="rounded-full border border-white/25 bg-[#151616] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#1b1c1c]"
+                      >
+                        Edit session
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => {
-                        setAuthModalSessionId(item.id)
-                        setAuthModalAction('edit')
-                        setAuthError(null)
-                        setAuthPassword(sessionPasswords[item.id] ?? '')
+                        setDeleteError(null)
+                        setDeleteTargetId(item.id)
+                        setDeletePassword('')
+                        setShowDeleteModal(true)
                       }}
-                      className="rounded-full border border-white/25 bg-[#151616] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#1b1c1c]"
+                      className="rounded-full border border-red-500/50 bg-[#151616] px-3 py-1.5 text-xs font-medium text-red-300 hover:bg-[#1b1c1c] hover:text-red-200"
                     >
-                      Edit session
+                      Delete session
                     </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDeleteError(null)
-                      setDeleteTargetId(item.id)
-                      setDeletePassword('')
-                      setShowDeleteModal(true)
-                    }}
-                    className="rounded-full border border-red-500/50 bg-[#151616] px-3 py-1.5 text-xs font-medium text-red-300 hover:bg-[#1b1c1c] hover:text-red-200"
-                  >
-                    Delete session
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-        {deleteError && <p className="mt-3 text-sm text-red-600 dark:text-red-400">{deleteError}</p>}
-      </section>
+                  </div>
+                </li>
+                )
+              })}
+              </ul>
+            )}
+          </div>
+          {deleteError && <p className="mt-3 text-sm text-red-600 dark:text-red-400">{deleteError}</p>}
+        </section>
+        <div className="hidden lg:block h-full min-h-[16rem] w-px bg-black/10 dark:bg-white/10" />
+        <section className="min-w-0 w-full">
+          <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-4">Telescope Status</h1>
+          <div className="lg:mr-[-4rem]">
+            <TelescopeStatusPanel />
+          </div>
+        </section>
+      </div>
 
       {terminalSessionId && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
@@ -2736,7 +3495,7 @@ export default function RemotePage() {
             <p className="text-sm text-gray-400">
               {authModalAction === 'edit'
                 ? 'Enter session password or admin password to edit this pending session.'
-                : 'Enter this session password to continue.'}
+                : 'Enter this session password or admin password to continue.'}
             </p>
             <label className="block space-y-1">
               <span className="text-sm font-medium text-white">Session/Admin Password</span>
@@ -2777,7 +3536,7 @@ export default function RemotePage() {
       {showDeleteModal && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
           <form
-            className="w-full max-w-md rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-6 space-y-4"
+            className="w-full max-w-md rounded-xl bg-[#09090a] border border-gray-700 p-6 space-y-4"
             onSubmit={async (e) => {
               e.preventDefault()
               if (!deleteTargetId) return
@@ -2795,20 +3554,20 @@ export default function RemotePage() {
               }
             }}
           >
-            <h2 className="text-lg font-semibold text-apple-dark dark:text-white">Delete Session</h2>
-            <p className="text-sm text-gray-600 dark:text-gray-400">
+            <h2 className="text-lg font-semibold text-white">Delete Session</h2>
+            <p className="text-sm text-gray-400">
               Enter the admin password or this session&apos;s password to delete.
             </p>
             <label className="block space-y-1">
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Password</span>
+              <span className="text-sm font-medium text-white">Password</span>
               <input
                 type="password"
                 value={deletePassword}
                 onChange={(e) => setDeletePassword(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
+                className="w-full rounded-lg border border-gray-600 bg-transparent px-3 py-2 text-sm text-white placeholder:text-gray-500"
               />
             </label>
-            {deleteError && <p className="text-sm text-red-600 dark:text-red-400">{deleteError}</p>}
+            {deleteError && <p className="text-sm text-red-400">{deleteError}</p>}
             <div className="flex items-center justify-end gap-3">
               <button
                 type="button"
@@ -2818,7 +3577,7 @@ export default function RemotePage() {
                   setDeletePassword('')
                   setDeleteError(null)
                 }}
-                className="rounded-full border border-gray-300 dark:border-white/25 bg-white dark:bg-[#151616] px-4 py-2 text-sm font-medium text-gray-800 dark:text-white hover:bg-gray-50 dark:hover:bg-[#1b1c1c] disabled:opacity-60"
+                className="rounded-full border border-white/25 bg-[#151616] px-4 py-2 text-sm font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-60"
                 disabled={deleteSubmitting}
               >
                 Cancel
@@ -2834,6 +3593,139 @@ export default function RemotePage() {
           </form>
         </div>
       )}
+
+      {showSaveRemoteSessionModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-xl bg-[#09090a] border border-gray-700 p-6 space-y-4">
+            <h2 className="text-lg font-semibold text-white">Save Session</h2>
+            <p className="text-sm text-gray-400">Confirm the name and password stored with this preset on this device.</p>
+            <label className="block space-y-1">
+              <span className="text-sm font-medium text-white">Session name</span>
+              <input
+                type="text"
+                value={saveModalName}
+                onChange={(e) => setSaveModalName(e.target.value)}
+                className="w-full rounded-lg border border-gray-600 bg-transparent px-3 py-2 text-sm text-white placeholder:text-gray-500"
+              />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-sm font-medium text-white">Session password</span>
+              <input
+                type="password"
+                value={saveModalPassword}
+                onChange={(e) => setSaveModalPassword(e.target.value)}
+                className="w-full rounded-lg border border-gray-600 bg-transparent px-3 py-2 text-sm text-white placeholder:text-gray-500"
+              />
+            </label>
+            {saveModalError && <p className="text-sm text-red-400">{saveModalError}</p>}
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowSaveRemoteSessionModal(false)
+                  setSaveModalError(null)
+                }}
+                className="rounded-full border border-white/25 bg-[#151616] px-4 py-2 text-sm font-medium text-white hover:bg-[#1b1c1c]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const name = saveModalName.trim()
+                  const pwd = saveModalPassword
+                  if (!name) {
+                    setSaveModalError('Session name is required.')
+                    return
+                  }
+                  if (!pwd.trim()) {
+                    setSaveModalError('Session password is required.')
+                    return
+                  }
+                  const form = captureRemoteSavedForm()
+                  form.requestName = name
+                  form.sessionPassword = pwd
+                  upsertRemoteSavedSession({ name, password: pwd, form })
+                  setRequestName(name)
+                  setSessionPassword(pwd)
+                  setShowSaveRemoteSessionModal(false)
+                  setSaveModalError(null)
+                  setSubmitError(null)
+                  setSubmitSuccess(`Saved session "${name}" on this device.`)
+                }}
+                className="rounded-full border border-white/60 bg-[#151616] px-4 py-2 text-sm font-medium text-white hover:bg-[#1b1c1c]"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRunRemoteSessionModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-xl bg-[#09090a] border border-gray-700 p-6 space-y-4">
+            <h2 className="text-lg font-semibold text-white">Run A Saved Session</h2>
+            <p className="text-sm text-gray-400">Enter the saved session name and password to load the form.</p>
+            <label className="block space-y-1">
+              <span className="text-sm font-medium text-white">Session name</span>
+              <input
+                type="text"
+                value={runModalName}
+                onChange={(e) => setRunModalName(e.target.value)}
+                className="w-full rounded-lg border border-gray-600 bg-transparent px-3 py-2 text-sm text-white placeholder:text-gray-500"
+              />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-sm font-medium text-white">Session password</span>
+              <input
+                type="password"
+                value={runModalPassword}
+                onChange={(e) => setRunModalPassword(e.target.value)}
+                className="w-full rounded-lg border border-gray-600 bg-transparent px-3 py-2 text-sm text-white placeholder:text-gray-500"
+              />
+            </label>
+            {runModalError && <p className="text-sm text-red-400">{runModalError}</p>}
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRunRemoteSessionModal(false)
+                  setRunModalError(null)
+                }}
+                className="rounded-full border border-white/25 bg-[#151616] px-4 py-2 text-sm font-medium text-white hover:bg-[#1b1c1c]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const name = runModalName.trim()
+                  const pwd = runModalPassword
+                  if (!name || !pwd) {
+                    setRunModalError('Name and password are required.')
+                    return
+                  }
+                  const found = findRemoteSavedSession(name, pwd)
+                  if (!found) {
+                    setRunModalError('No saved session matches that name and password.')
+                    return
+                  }
+                  applyRemoteSavedForm(found.form)
+                  setShowRunRemoteSessionModal(false)
+                  setRunModalError(null)
+                  setSubmitError(null)
+                  setSubmitSuccess(`Loaded saved session "${found.name}".`)
+                }}
+                className="rounded-full border border-white/60 bg-[#151616] px-4 py-2 text-sm font-medium text-white hover:bg-[#1b1c1c]"
+              >
+                Load
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showClosedModal && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
           <div className="w-full max-w-lg rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-6 space-y-4">

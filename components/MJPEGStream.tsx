@@ -50,11 +50,11 @@ export default function MJPEGStream({ url, className, minimal = false, fill = fa
   }, [url])
 
   return (
-    <div className={`relative bg-black ${className || ''}`}>
+    <div className={`relative h-full w-full min-h-0 min-w-0 bg-black ${className || ''}`}>
       <img
         ref={imgRef}
         alt=""
-        className={`w-full h-full ${fill ? 'object-cover' : 'object-contain'}`}
+        className={`block h-full w-full min-h-0 min-w-0 ${fill ? 'object-cover' : 'object-contain'}`}
         onError={() => setLoading(true)}
       />
       {!minimal && loading && (

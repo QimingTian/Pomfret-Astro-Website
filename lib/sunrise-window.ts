@@ -1,5 +1,29 @@
 import { OBS_LAT_DEG, OBS_LON_DEG } from '@/lib/target-altitude'
 
+/** Civil calendar + solar gates for Pomfret; must match Remote “tonight schedule” expectations. */
+export const OBSERVATORY_TIME_ZONE = 'America/New_York'
+
+/**
+ * UTC `Date` at 00:00:00 for the observatory's **local** civil calendar day containing `now`
+ * (same Y-M-D as America/New_York wall date). Used as `solarEventUtcForDate` anchor so nautical
+ * dawn/dusk match local evening; avoids treating UTC-midnight as “new day” while US evening
+ * is still before local nautical dusk (which incorrectly cleared daytime-closed → Ready).
+ */
+export function observatoryLocalCalendarAnchorUtc(now: Date): Date {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: OBSERVATORY_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+  const s = formatter.format(now)
+  const [y, m, d] = s.split('-').map((part) => Number(part))
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) {
+    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  }
+  return new Date(Date.UTC(y, m - 1, d))
+}
+
 function degToRad(deg: number): number {
   return (deg * Math.PI) / 180
 }
@@ -67,7 +91,7 @@ function nauticalDuskUtcForDate(date: Date): Date {
   return solarEventUtcForDate(date, 102, false)
 }
 
-/** Nautical dawn/dusk (UTC) and daytime-closed band (nautical dawn … nautical dusk) for UTC day of `now`. */
+/** Nautical dawn/dusk (UTC) and daytime-closed band (nautical dawn … nautical dusk) for observatory local day of `now`. */
 export function getDaytimeClosedWindowDetail(now = new Date()): {
   within: boolean
   nauticalDawnUtc: string
@@ -77,7 +101,7 @@ export function getDaytimeClosedWindowDetail(now = new Date()): {
   closedStartUtc: string
   closedEndUtc: string
 } {
-  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  const today = observatoryLocalCalendarAnchorUtc(now)
   const nauticalDawn = nauticalDawnUtcForDate(today)
   const nauticalDusk = nauticalDuskUtcForDate(today)
   const sunrise = sunriseUtcForDate(today)
@@ -154,9 +178,11 @@ export function getTonightAstronomicalNightWindow(now = new Date()): {
   return { astronomicalDuskUtc, astronomicalDawnUtc, durationSeconds }
 }
 
-/** Scheduling window helper for session ordering logic. */
+/** Imaging queue / placement window: **nautical dusk → nautical dawn** (same calendar anchor as elsewhere). */
 export function getTonightSchedulingWindow(now = new Date()): {
   nauticalDuskUtc: Date
+  nauticalDawnUtc: Date
+  /** Still computed for callers that need astronomical morning; queue deadline uses `nauticalDawnUtc`. */
   astronomicalDawnUtc: Date
 } {
   const nowUtcMidnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
@@ -169,8 +195,9 @@ export function getTonightSchedulingWindow(now = new Date()): {
   nextUtcDate.setUTCDate(nextUtcDate.getUTCDate() + 1)
 
   const nauticalDuskUtc = solarEventUtcForDate(baseUtcDate, 102, false)
+  const nauticalDawnUtc = solarEventUtcForDate(nextUtcDate, 102, true)
   const astronomicalDawnUtc = solarEventUtcForDate(nextUtcDate, 108, true)
-  return { nauticalDuskUtc, astronomicalDawnUtc }
+  return { nauticalDuskUtc, nauticalDawnUtc, astronomicalDawnUtc }
 }
 
 /**
@@ -189,5 +216,63 @@ export function getCivilTwilightNightWindowUtc(now = new Date()): { civilDuskUtc
   return {
     civilDuskUtc: solarEventUtcForDate(baseUtcDate, 96, false),
     civilDawnUtc: solarEventUtcForDate(nextUtcDate, 96, true),
+  }
+}
+
+/**
+ * Evening solar / twilight instants on the same anchor as Remote `tonightSchedule`:
+ * local 16:00 window start, `todaySunrise` gate using `Date.UTC(now.getFullYear(), …)` (browser local calendar),
+ * then `baseUtc` from that window’s start date. Zeniths: official sunset 90.833°, civil 96°, nautical 102°, astronomical 108°.
+ */
+export function getTonightScheduleEveningAstronomyUtc(now = new Date()): {
+  sunsetUtc: Date
+  civilDuskUtc: Date
+  nauticalDuskUtc: Date
+  astronomicalDarkUtc: Date
+} {
+  const start = new Date(now)
+  start.setHours(16, 0, 0, 0)
+  const nowUtcMidnight = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
+  const todaySunrise = solarEventUtcForDate(nowUtcMidnight, 90.833, true)
+  if (now.getTime() < todaySunrise.getTime()) {
+    start.setDate(start.getDate() - 1)
+  }
+  const baseUtc = new Date(Date.UTC(start.getFullYear(), start.getMonth(), start.getDate()))
+  return {
+    sunsetUtc: solarEventUtcForDate(baseUtc, 90.833, false),
+    civilDuskUtc: solarEventUtcForDate(baseUtc, 96, false),
+    nauticalDuskUtc: solarEventUtcForDate(baseUtc, 102, false),
+    astronomicalDarkUtc: solarEventUtcForDate(baseUtc, 108, false),
+  }
+}
+
+/**
+ * Next-morning solar / twilight instants on the same anchor as `getTonightScheduleEveningAstronomyUtc`
+ * (Remote `tonightSchedule` window: local 16:00 start → +24h → 08:00 end). `nextUtc` is the UTC midnight
+ * of the schedule end's local calendar day. Zeniths: official sunrise 90.833°, civil 96°, nautical 102°,
+ * astronomical 108°.
+ */
+export function getTonightScheduleMorningAstronomyUtc(now = new Date()): {
+  sunriseUtc: Date
+  civilDawnUtc: Date
+  nauticalDawnUtc: Date
+  astronomicalDawnUtc: Date
+} {
+  const start = new Date(now)
+  start.setHours(16, 0, 0, 0)
+  const nowUtcMidnight = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
+  const todaySunrise = solarEventUtcForDate(nowUtcMidnight, 90.833, true)
+  if (now.getTime() < todaySunrise.getTime()) {
+    start.setDate(start.getDate() - 1)
+  }
+  const end = new Date(start)
+  end.setDate(end.getDate() + 1)
+  end.setHours(8, 0, 0, 0)
+  const nextUtc = new Date(Date.UTC(end.getFullYear(), end.getMonth(), end.getDate()))
+  return {
+    sunriseUtc: solarEventUtcForDate(nextUtc, 90.833, true),
+    civilDawnUtc: solarEventUtcForDate(nextUtc, 96, true),
+    nauticalDawnUtc: solarEventUtcForDate(nextUtc, 102, true),
+    astronomicalDawnUtc: solarEventUtcForDate(nextUtc, 108, true),
   }
 }

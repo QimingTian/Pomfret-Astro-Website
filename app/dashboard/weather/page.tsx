@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import AllSkyCameraView from '@/components/AllSkyCameraView'
 import { useAppStore } from '@/lib/store'
 import type { WeatherModel } from '@/lib/types'
 
@@ -186,13 +187,16 @@ export default function WeatherPage() {
               )
             })()}
           </div>
-
-          {/* NOAA GOES Cloud Map Section */}
-          <div className="mt-6 border-t border-black/10 dark:border-white/10 pt-8">
-            <NOAAGoesCloudMap />
-          </div>
         </div>
       )}
+
+      <div className="mt-8 border-t border-black/10 dark:border-white/10 pt-8">
+        <NOAAGoesCloudMap />
+      </div>
+
+      <div className="mt-8 border-t border-black/10 dark:border-white/10 pt-8" id="all-sky-camera">
+        <AllSkyCameraView />
+      </div>
     </div>
   )
 }

@@ -12,27 +12,52 @@ body {
   padding: 0;
   width: 100%;
   min-height: 100%;
+  height: 100%;
   background: #000;
   color: #fff;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
 }
 
 main {
-  width: 100%;
-  min-height: 100dvh;
-}
-
-.frame {
   position: relative;
   width: 100%;
   min-height: 100dvh;
+  height: 100dvh;
   background: #000;
+  overflow: hidden;
+}
+
+.frame-page {
+  position: relative;
+  width: 100%;
+  min-height: 100dvh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.frame-shell {
+  position: relative;
+  width: 100%;
+  min-height: 100dvh;
+  height: 100dvh;
+  background: #000;
+  overflow: hidden;
+}
+
+.stream-stage {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 94%;
+  height: 94%;
+  transform: translate(-50%, -50%);
   overflow: hidden;
 }
 
 .stream {
   position: absolute;
-  inset: 0;
+  left: 0;
+  top: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -48,6 +73,8 @@ main {
   font-size: 12px;
   line-height: 1.5;
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+  color: #fff;
+  max-width: min(92vw, 340px);
 }
 
 .status-dot {
@@ -64,4 +91,169 @@ main {
 
 .status-offline {
   background: #ef4444;
+}
+
+.overlay-key {
+  color: #fff;
+}
+
+.overlay-value {
+  color: #34d399;
+}
+
+.overlay-value-green {
+  color: #34d399;
+}
+
+.overlay-value-red {
+  color: #f87171;
+}
+
+.compass {
+  position: absolute;
+  left: 12px;
+  bottom: 10px;
+  z-index: 2;
+  width: 76px;
+  height: 76px;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.95), 0 0 14px rgba(0, 0, 0, 0.55);
+}
+
+.compass-cross-v {
+  position: absolute;
+  left: 50%;
+  top: 22%;
+  bottom: 22%;
+  width: 2px;
+  transform: translateX(-50%);
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.compass-cross-h {
+  position: absolute;
+  top: 50%;
+  left: 22%;
+  right: 22%;
+  height: 2px;
+  transform: translateY(-50%);
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.compass-letter {
+  position: absolute;
+  color: rgba(255, 255, 255, 0.95);
+  font-weight: 700;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.compass-n {
+  left: 50%;
+  top: 0;
+  transform: translateX(-50%);
+}
+
+.compass-e {
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.compass-w {
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.compass-s {
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+}
+
+/* Landscape: keep stage width (94%), stretch full viewport height; cover may crop sides. */
+@media (orientation: landscape) {
+  .stream-stage {
+    top: 0;
+    height: 100%;
+    transform: translateX(-50%);
+  }
+}
+
+/*
+ * Portrait: fixed full-screen stage (ignores any ancestor % / min-height quirks on mobile).
+ * Image box uses swapped viewport units so a landscape MJPEG + rotate(90deg) fills the tall screen
+ * instead of shrinking to a “square in the middle”.
+ */
+@media (orientation: portrait) {
+  .stream-stage {
+    position: fixed;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: 100%;
+    max-width: 100vw;
+    max-height: 100dvh;
+    transform: none;
+    z-index: 1;
+  }
+
+  .stream {
+    left: 50%;
+    top: 50%;
+    /* Logical “landscape” box matching phone’s physical height × width, then rotate into portrait */
+    width: 100dvh;
+    height: 100dvw;
+    max-width: 100dvh;
+    max-height: 100dvw;
+    transform: translate(-50%, -50%) rotate(90deg);
+    transform-origin: center center;
+    object-fit: cover;
+  }
+
+  .overlay {
+    left: 0;
+    right: auto;
+    text-align: left;
+  }
+
+  .compass {
+    left: 12px;
+    right: auto;
+  }
+
+  /* Portrait: 上东 / 下西 / 左北 / 右南（横屏仍为北在上、东在左） */
+  .compass-n {
+    left: 0;
+    top: 50%;
+    right: auto;
+    bottom: auto;
+    transform: translateY(-50%);
+  }
+
+  .compass-e {
+    left: 50%;
+    top: 0;
+    right: auto;
+    bottom: auto;
+    transform: translateX(-50%);
+  }
+
+  .compass-w {
+    left: 50%;
+    top: auto;
+    right: auto;
+    bottom: 0;
+    transform: translateX(-50%);
+  }
+
+  .compass-s {
+    right: 0;
+    top: 50%;
+    left: auto;
+    bottom: auto;
+    transform: translateY(-50%);
+  }
 }

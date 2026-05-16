@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 import { publishPreview } from '@/lib/imaging-preview-live'
+import { publishProgress } from '@/lib/imaging-progress-live'
+import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { isImagingAdminPassword } from '@/lib/imaging-admin-auth'
 import { validateSessionPassword } from '@/lib/imaging-session-access'
 import { imagingCorsOptions, imagingQueueAuthorized, withImagingCors } from '@/lib/imaging-queue-auth'
 import { getPreviewImage, upsertPreviewImage } from '@/lib/imaging-preview-store'
+import { totalExposureFramesForQueueId } from '@/lib/imaging-total-frames'
 
 export const runtime = 'nodejs'
 
@@ -95,7 +98,16 @@ export async function POST(request: NextRequest) {
     return withImagingCors({ ok: false as const, error: 'Preview payload too large' }, 413)
   }
 
-  await upsertPreviewImage(queueId, imageId, contentType, dataBase64)
+  const frameNumber = await upsertPreviewImage(queueId, imageId, contentType, dataBase64)
+  const total = await totalExposureFramesForQueueId(queueId)
+  const lineText = total != null ? `Image ${frameNumber}/${total}` : `Image ${frameNumber}`
+  const at = new Date().toISOString()
+  await appendAuditLog({
+    kind: 'session.progress',
+    message: `Preview frame ${frameNumber} for ${queueId}.`,
+    detail: { queueId, message: lineText },
+  })
+  publishProgress(queueId, { type: 'line', at, text: lineText })
   publishPreview(queueId, new Date().toISOString())
   return withImagingCors({ ok: true as const, queueId })
 }

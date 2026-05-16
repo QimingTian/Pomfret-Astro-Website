@@ -9,6 +9,8 @@ type PreviewEntry = {
   updatedAt: string
   contentType: string
   dataBase64: string
+  /** Monotonic count of successful preview uploads for this queueId (for terminal Image n/…). */
+  frameNumber?: number
 }
 
 type Payload = { byQueueId: Record<string, PreviewEntry> }
@@ -52,16 +54,20 @@ export async function upsertPreviewImage(
   imageId: string,
   contentType: string,
   dataBase64: string
-): Promise<void> {
+): Promise<number> {
   const byQueueId = await readMap()
+  const prev = byQueueId[queueId]
+  const frameNumber = (prev?.frameNumber ?? 0) + 1
   byQueueId[queueId] = {
     imageId,
     queueId,
     updatedAt: new Date().toISOString(),
     contentType,
     dataBase64,
+    frameNumber,
   }
   await writeMap(byQueueId)
+  return frameNumber
 }
 
 export async function getPreviewImage(queueId: string): Promise<PreviewEntry | null> {

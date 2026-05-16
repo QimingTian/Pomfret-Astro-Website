@@ -393,6 +393,31 @@ function fallbackPlacementForTerminalSession(
   return { startMs: s, endMs: e }
 }
 
+/** Completed rows only belong on the current 4pm→8am strip if their time range overlaps that window. */
+function completedSessionOverlapsTonightStripWindow(
+  item: TerminalSessionLike,
+  windowStartMs: number,
+  windowEndMs: number,
+  locked: Record<string, { startMs: number; endMs: number }>,
+): boolean {
+  const durationMs = sessionDurationMsFromItem(item)
+  const lock = locked[item.id]
+  if (
+    lock &&
+    Number.isFinite(lock.startMs) &&
+    Number.isFinite(lock.endMs) &&
+    lock.endMs > lock.startMs
+  ) {
+    if (lock.endMs > windowStartMs && lock.startMs < windowEndMs) return true
+  }
+  if (item.plannedStartIso) {
+    const t = Date.parse(item.plannedStartIso)
+    if (Number.isFinite(t) && t + durationMs > windowStartMs && t < windowEndMs) return true
+  }
+  const c = Date.parse(item.createdAt)
+  return Number.isFinite(c) && c + durationMs > windowStartMs && c < windowEndMs
+}
+
 function currentAltitudeDegAt(raHours: number, decDeg: number, now: Date): number {
   const raDeg = raHours * 15
   const jd = now.getTime() / 86400000 + 2440587.5
@@ -622,7 +647,8 @@ export default function RemotePage() {
   const [terminalPreviewUrl, setTerminalPreviewUrl] = useState<string | null>(null)
   const [terminalPreviewError, setTerminalPreviewError] = useState<string | null>(null)
   const [terminalPreviewUpdatedAt, setTerminalPreviewUpdatedAt] = useState<string | null>(null)
-  const terminalPreviewUpdatedAtRef = useRef<string | null>(null)
+  /** Dedupe preview refetches: same server `updatedAt` can repeat across uploads; include payload slice so new frames still count. */
+  const terminalPreviewLastFingerprintRef = useRef<string | null>(null)
   const terminalEndRef = useRef<HTMLDivElement>(null)
   const [authModalSessionId, setAuthModalSessionId] = useState<string | null>(null)
   const [authModalAction, setAuthModalAction] = useState<'progress' | 'download' | 'edit' | null>(null)
@@ -1504,6 +1530,12 @@ export default function RemotePage() {
 
       for (const item of queueItems) {
         if (item.status !== 'in_progress' && item.status !== 'completed') continue
+        if (
+          item.status === 'completed' &&
+          !completedSessionOverlapsTonightStripWindow(item, windowStartMs, windowEndMs, lockedSessionSchedule)
+        ) {
+          continue
+        }
         const placed = fallbackPlacementForTerminalSession(
           item,
           lockedSessionSchedule,
@@ -1677,14 +1709,7 @@ export default function RemotePage() {
       .filter((item) => item.status === 'in_progress' || item.status === 'completed')
       .filter((item) => {
         if (item.status === 'in_progress') return true
-        if (lockedSessionSchedule[item.id]) return true
-        if (item.plannedStartIso) {
-          const plannedMs = Date.parse(item.plannedStartIso)
-          if (Number.isFinite(plannedMs)) return true
-        }
-        const createdMs = Date.parse(item.createdAt)
-        if (!Number.isFinite(createdMs)) return false
-        return createdMs >= windowStartMs && createdMs < windowEndMs
+        return completedSessionOverlapsTonightStripWindow(item, windowStartMs, windowEndMs, lockedSessionSchedule)
       })
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
 
@@ -1771,6 +1796,8 @@ export default function RemotePage() {
   ])
 
   useEffect(() => {
+    const windowStartMs = tonightSchedule.start.getTime()
+    const windowEndMs = tonightSchedule.end.getTime()
     setLockedSessionSchedule((prev) => {
       const activeLockableIds = new Set(
         queueItems.filter((x) => x.status === 'in_progress' || x.status === 'completed').map((x) => x.id)
@@ -1780,11 +1807,19 @@ export default function RemotePage() {
       let changed = false
 
       for (const [id, placement] of Object.entries(prev)) {
-        if (activeLockableIds.has(id)) {
-          next[id] = placement
-        } else {
+        if (!activeLockableIds.has(id)) {
           changed = true
+          continue
         }
+        const item = queueItems.find((x) => x.id === id)
+        if (
+          item?.status === 'completed' &&
+          !completedSessionOverlapsTonightStripWindow(item, windowStartMs, windowEndMs, prev)
+        ) {
+          changed = true
+          continue
+        }
+        next[id] = placement
       }
 
       for (const [id, placement] of Object.entries(sessionSchedulePlan.newlyLocked)) {
@@ -1796,7 +1831,7 @@ export default function RemotePage() {
 
       return changed ? next : prev
     })
-  }, [queueItems, sessionSchedulePlan.newlyLocked])
+  }, [queueItems, sessionSchedulePlan.newlyLocked, tonightSchedule.start, tonightSchedule.end])
 
   const sessionScheduleBlocks = useMemo(() => {
     const baseBlocks = [...sessionSchedulePlan.blocks]
@@ -1876,28 +1911,35 @@ export default function RemotePage() {
       const password = passwordOverride ?? sessionPasswords[id] ?? ''
       if (!password) return
       try {
-        const res = await fetch(`/api/imaging/preview?queueId=${encodeURIComponent(id)}&mode=json`, {
-          headers: { 'x-session-password': password },
-        })
+        const res = await fetch(
+          `/api/imaging/preview?queueId=${encodeURIComponent(id)}&mode=json&_=${Date.now()}`,
+          {
+            headers: { 'x-session-password': password },
+            cache: 'no-store',
+          }
+        )
         const data = await res.json().catch(() => ({}))
         if (!res.ok || data?.ok !== true || typeof data.dataBase64 !== 'string') {
           if (res.status === 404) {
             setTerminalPreviewUrl(null)
             setTerminalPreviewError(null)
             setTerminalPreviewUpdatedAt(null)
-            terminalPreviewUpdatedAtRef.current = null
+            terminalPreviewLastFingerprintRef.current = null
             return
           }
           setTerminalPreviewError(typeof data.error === 'string' ? data.error : 'Preview unavailable.')
           return
         }
         const updatedAt = typeof data.updatedAt === 'string' ? data.updatedAt : null
-        if (updatedAt && updatedAt === terminalPreviewUpdatedAtRef.current) {
+        const dataBase64 = data.dataBase64 as string
+        const fingerprint = `${updatedAt ?? ''}|${dataBase64.length}|${dataBase64.slice(0, 240)}|${dataBase64.slice(-240)}`
+        if (fingerprint === terminalPreviewLastFingerprintRef.current) {
           setTerminalPreviewError(null)
           return
         }
+        terminalPreviewLastFingerprintRef.current = fingerprint
         const contentType = typeof data.contentType === 'string' ? data.contentType : 'image/jpeg'
-        const nextPreviewUrl = `data:${contentType};base64,${data.dataBase64}`
+        const nextPreviewUrl = `data:${contentType};base64,${dataBase64}`
         await new Promise<void>((resolve) => {
           const image = new window.Image()
           image.onload = () => resolve()
@@ -1906,7 +1948,6 @@ export default function RemotePage() {
         })
         setTerminalPreviewError(null)
         setTerminalPreviewUpdatedAt(updatedAt)
-        terminalPreviewUpdatedAtRef.current = updatedAt
         setTerminalPreviewUrl(nextPreviewUrl)
       } catch {
         setTerminalPreviewError('Preview unavailable.')
@@ -1923,7 +1964,7 @@ export default function RemotePage() {
     setTerminalPreviewUrl(null)
     setTerminalPreviewError(null)
     setTerminalPreviewUpdatedAt(null)
-    terminalPreviewUpdatedAtRef.current = null
+    terminalPreviewLastFingerprintRef.current = null
     void loadTerminalProgress(terminalSessionId, sessionPasswords[terminalSessionId])
     void loadTerminalPreview(terminalSessionId, sessionPasswords[terminalSessionId])
   }, [terminalSessionId, loadTerminalPreview, loadTerminalProgress, sessionPasswords])
@@ -3360,36 +3401,47 @@ export default function RemotePage() {
             )}
             <div className="flex flex-1 min-h-[20rem] flex-col">
               <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[1.25fr_1fr]">
-                <div className="border-b border-gray-800 md:border-b-0 md:border-r md:border-r-gray-800">
-                <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-white">Terminal</div>
-                <div className="h-full overflow-auto p-3 font-mono text-xs leading-relaxed">
-                  {terminalLines.length === 0 && !terminalError && (
-                    <p className="flex min-h-full items-center justify-center text-center text-gray-500">
-                      {terminalQueueStatus === 'pending' || terminalQueueStatus == null
-                        ? 'Waiting For Observatory Signal.'
-                        : terminalQueueStatus === 'completed'
-                          ? 'Session completed. No further live updates.'
-                          : 'Waiting for observatory POSTs…'}
-                    </p>
-                  )}
-                  {terminalLines.map((line, i) => (
-                    <div key={`${line.at}-${i}`} className="whitespace-pre-wrap break-words border-l-2 border-green-700/40 pl-2 mb-2">
-                      <span className="text-gray-500">[{new Date(line.at).toLocaleTimeString()}]</span>{' '}
-                      <span className="text-green-400">{line.text}</span>
+                <div className="flex h-full min-h-0 flex-col border-b border-gray-800 md:border-b-0 md:border-r md:border-r-gray-800">
+                  <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-white">Terminal</div>
+                  {terminalLines.length === 0 && !terminalError ? (
+                    <div className="flex flex-1 min-h-0 flex-col items-center justify-center p-3 pt-0">
+                      <p className="text-center text-sm text-gray-500">
+                        {terminalQueueStatus === 'pending' || terminalQueueStatus == null
+                          ? 'Waiting For Observatory Signal.'
+                          : terminalQueueStatus === 'completed'
+                            ? 'Session completed. No further live updates.'
+                            : 'Waiting for observatory POSTs…'}
+                      </p>
                     </div>
-                  ))}
-                  <div ref={terminalEndRef} />
+                  ) : (
+                    <div className="min-h-0 flex-1 overflow-auto p-3 font-mono text-xs leading-relaxed">
+                      {terminalLines.map((line, i) => (
+                        <div key={`${line.at}-${i}-${line.text.slice(0, 24)}`} className="whitespace-pre-wrap break-words border-l-2 border-green-700/40 pl-2 mb-2">
+                          <span className="text-gray-500">[{new Date(line.at).toLocaleTimeString()}]</span>{' '}
+                          <span className="text-green-400">{line.text}</span>
+                        </div>
+                      ))}
+                      <div ref={terminalEndRef} />
+                    </div>
+                  )}
                 </div>
-              </div>
                 <div className="flex h-full min-h-0 flex-col">
                   <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-white">Latest Image</div>
                   <div className="flex-1 p-3 pt-0 flex flex-col items-center justify-center">
                     {terminalPreviewUrl ? (
-                      <img
-                        src={terminalPreviewUrl}
-                        alt="Latest session preview"
-                        className="w-full max-h-[55vh] object-contain"
-                      />
+                      <>
+                        <img
+                          src={terminalPreviewUrl}
+                          alt="Latest session preview"
+                          className="w-full max-h-[55vh] object-contain"
+                        />
+                        <p className="mt-2 w-full text-center text-xs">
+                          <span className="text-gray-500">Updated on </span>
+                          {terminalPreviewUpdatedAt
+                            ? new Date(terminalPreviewUpdatedAt).toLocaleString()
+                            : '—'}
+                        </p>
+                      </>
                     ) : (
                       <p className="text-sm text-gray-500">No Image.</p>
                     )}

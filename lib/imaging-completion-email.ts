@@ -98,3 +98,87 @@ export async function sendCompletionEmail(input: CompletionEmailInput): Promise<
   }
 }
 
+type SessionStartedEmailInput = {
+  queueId: string
+  target: string
+  email?: string | null
+  firstName?: string | null
+  startedAtIso: string
+}
+
+/**
+ * Notifies the participant when NINA has pulled the sequence (session on the board → in progress).
+ */
+export async function sendSessionStartedEmail(
+  input: SessionStartedEmailInput
+): Promise<{ sent: boolean; reason?: string }> {
+  const recipient = (input.email ?? '').trim()
+  if (!recipient || !isLikelyEmail(recipient)) {
+    return { sent: false, reason: 'No valid recipient email' }
+  }
+
+  const apiKey = env('RESEND_API_KEY')
+  const from = env('IMAGING_MAIL_FROM')
+  if (!apiKey || !from) {
+    return { sent: false, reason: 'Mail env not configured' }
+  }
+
+  const first = (input.firstName ?? '').trim()
+  const greet = first ? `Hi ${first},` : 'Hi,'
+  const startedLocal = new Date(input.startedAtIso).toLocaleString('en-US', { timeZone: 'America/New_York' })
+  const targetSafe = escapeHtml(input.target)
+  const queueIdSafe = escapeHtml(input.queueId)
+  const subject = `Pomfret Astro session started: ${input.target}`
+  const text = [
+    greet,
+    '',
+    `Your imaging session has started at the observatory (NINA sequence delivered).`,
+    `Target: ${input.target}`,
+    `Session ID: ${input.queueId}`,
+    `Started: ${startedLocal} (America/New_York)`,
+    '',
+    'You can return to the Remote dashboard to follow progress.',
+    '',
+    'Clear skies,',
+    'Pomfret Astro',
+  ].join('\n')
+
+  const html = `
+    <p>${greet}</p>
+    <p>Your imaging session has started at the observatory (NINA sequence delivered).</p>
+    <ul>
+      <li><strong>Target:</strong> ${targetSafe}</li>
+      <li><strong>Session ID:</strong> ${queueIdSafe}</li>
+      <li><strong>Started:</strong> ${startedLocal} (America/New_York)</li>
+    </ul>
+    <p>You can return to the Remote dashboard to follow progress.</p>
+    <p>Clear skies,<br/>Pomfret Astro</p>
+  `
+
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from,
+        to: [recipient],
+        subject,
+        text,
+        html,
+      }),
+      cache: 'no-store',
+    })
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '')
+      return { sent: false, reason: `Provider rejected request (${res.status}): ${detail.slice(0, 200)}` }
+    }
+    return { sent: true }
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : 'Unknown mail error'
+    return { sent: false, reason }
+  }
+}
+

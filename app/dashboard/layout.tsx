@@ -14,7 +14,6 @@ export default function DashboardLayout({
   const [menuOpen, setMenuOpen] = useState(false)
 
   const navItems = [
-    { href: '/dashboard/camera', label: 'Camera' },
     { href: '/dashboard/weather', label: 'Weather' },
     { href: '/dashboard/atlas', label: 'Atlas' },
     { href: '/dashboard/remote', label: 'Remote' },

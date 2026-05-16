@@ -25,6 +25,10 @@ Standalone mobile web app (PWA shell) for All Sky Camera only.
 
    `https://cam.pomfretastro.org/camera/stream`
 
+   Optional observatory status API URL:
+
+   `https://www.pomfretastro.org/api/imaging/observatory-status`
+
 3. Start dev server:
 
    ```bash

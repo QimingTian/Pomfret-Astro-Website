@@ -1,3 +1,6 @@
+import { getAdminClosedWindowsInRange } from '@/lib/admin-closed-window-store'
+import { subtractOccupiedFromFree } from '@/lib/imaging-queue-free-intervals'
+
 const LAT = 41.9159
 const LON = -71.9626
 const KMH_TO_MS = 1 / 3.6
@@ -175,9 +178,19 @@ export async function getTonightWeatherPermittedIntervals(): Promise<TonightWeat
           ? `Global weather trigger: no ${MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS}-hour consecutive run with cloud cover < 10%.`
           : ''
 
+    let effectivePermittedIntervals: TimeInterval[] = [...permittedIntervals]
+    try {
+      const adminClosedWindows = await getAdminClosedWindowsInRange(nightStartMs, nightEndMs)
+      for (const w of adminClosedWindows) {
+        effectivePermittedIntervals = subtractOccupiedFromFree(effectivePermittedIntervals, w)
+      }
+    } catch {
+      // If admin window store read fails, fall back to weather-only intervals.
+    }
+
     return {
       status: 'ok',
-      permittedIntervals,
+      permittedIntervals: effectivePermittedIntervals,
       nightStartMs,
       nightEndMs,
       globalHardBlocked,

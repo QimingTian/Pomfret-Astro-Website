@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
+import { sendSessionStartedEmail } from '@/lib/imaging-completion-email'
 import { imagingCorsHeadersResolved, imagingCorsOptions } from '@/lib/imaging-queue-auth'
 import { buildNinaSequenceJson } from '@/lib/build-nina-sequence-json'
 import { boardUpsertInProgress, listBoardEntries } from '@/lib/imaging-session-board'
@@ -241,6 +242,28 @@ export async function GET() {
     filterPlans: consumed.filterPlans,
     estimatedDurationSeconds: consumed.estimatedDurationSeconds,
     sessionPasswordHash: consumed.sessionPasswordHash,
+  })
+
+  const startedAtIso = new Date().toISOString()
+  void sendSessionStartedEmail({
+    queueId: consumed.id,
+    target: consumed.target,
+    email: consumed.email,
+    firstName: consumed.firstName,
+    startedAtIso,
+  }).then((result) => {
+    if (!result.sent) {
+      return appendAuditLog({
+        kind: 'session.progress',
+        message: `Start email skipped/failed for ${consumed.id}: ${result.reason ?? 'unknown reason'}`,
+        detail: { queueId: consumed.id, reason: result.reason ?? null },
+      })
+    }
+    return appendAuditLog({
+      kind: 'session.progress',
+      message: `Start email sent for ${consumed.id}.`,
+      detail: { queueId: consumed.id, email: consumed.email ?? null },
+    })
   })
 
   void appendAuditLog({

@@ -90,6 +90,17 @@ export async function listAuditLog(limit = 250): Promise<AuditLogEntry[]> {
 
 export type SessionProgressLine = { at: string; text: string }
 
+/** Internal mail result rows — not shown in Remote session terminal (detail is only queueId + email/reason). */
+function isSessionProgressMailNotificationEntry(e: AuditLogEntry): boolean {
+  const m = e.message
+  return (
+    m.includes('Completion email sent for') ||
+    m.includes('Completion email skipped/failed for') ||
+    m.includes('Start email sent for') ||
+    m.includes('Start email skipped/failed for')
+  )
+}
+
 /** Same KV-backed store as Admin activity log; filtered by `queueId` in entry detail. */
 export async function listSessionProgressLinesFromAudit(
   queueId: string,
@@ -98,6 +109,7 @@ export async function listSessionProgressLinesFromAudit(
   const entries = await listAuditLog(Math.min(Math.max(1, limit), MAX_ENTRIES))
   const matched = entries.filter((e) => {
     if (e.kind !== 'session.progress') return false
+    if (isSessionProgressMailNotificationEntry(e)) return false
     const d =
       e.detail && typeof e.detail === 'object' && !Array.isArray(e.detail)
         ? (e.detail as Record<string, unknown>)

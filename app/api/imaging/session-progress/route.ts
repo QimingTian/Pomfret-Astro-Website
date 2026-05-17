@@ -3,6 +3,12 @@ import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { sendCompletionEmail } from '@/lib/imaging-completion-email'
 import { publishProgress } from '@/lib/imaging-progress-live'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
+import { parseProjectNightSubId } from '@/lib/imaging-project-ids'
+import { reconcilePendingScheduleStatus } from '@/lib/imaging-queue-reconcile'
+import {
+  getProjectByNightSubId,
+  markNightCompleted,
+} from '@/lib/imaging-project-store'
 import { boardMarkCompleted, getBoardEntry, getSoleInProgressBoardId } from '@/lib/imaging-session-board'
 import { isSessionCompletedSignal, progressLineText, readQueueIdFromDetail } from '@/lib/session-progress-signal'
 
@@ -99,7 +105,6 @@ export async function POST(request: NextRequest) {
             'Session progress update'
           : 'Session progress update'
 
-  // Same durable store as Admin (`imaging-audit-log`); Admin UI hides `session.progress` rows.
   await appendAuditLog({
     kind: 'session.progress',
     message: msg,
@@ -114,6 +119,51 @@ export async function POST(request: NextRequest) {
   }
 
   if (queueId && isSessionCompletedSignal(detail)) {
+    const nightSub = parseProjectNightSubId(queueId)
+    if (nightSub) {
+      const match = await getProjectByNightSubId(queueId)
+      if (match && match.night.status === 'in_progress') {
+        const result = await markNightCompleted(match.project.id, queueId)
+        if (result) {
+          publishProgress(queueId, { type: 'status', queueStatus: 'completed' })
+          void appendAuditLog({
+            kind: 'queue.status',
+            message: `Project night ${queueId} completed (end signal from NINA).`,
+            detail: { id: queueId, projectId: match.project.id, target: match.project.target },
+          })
+          if (result.projectCompleted) {
+            const board = await getBoardEntry(match.project.id)
+            if (board?.status === 'in_progress') {
+              await boardMarkCompleted(match.project.id)
+            }
+            void sendCompletionEmail({
+              queueId: match.project.id,
+              target: match.project.target,
+              email: match.project.email,
+              firstName: match.project.firstName,
+              completedAtIso: new Date().toISOString(),
+            }).then((emailResult) => {
+              if (!emailResult.sent) {
+                return appendAuditLog({
+                  kind: 'session.progress',
+                  message: `Completion email skipped/failed for ${match.project.id}: ${emailResult.reason ?? 'unknown reason'}`,
+                  detail: { queueId: match.project.id, reason: emailResult.reason ?? null },
+                })
+              }
+              return appendAuditLog({
+                kind: 'session.progress',
+                message: `Completion email sent for project ${match.project.id}.`,
+                detail: { queueId: match.project.id, email: match.project.email ?? null },
+              })
+            })
+            publishProgress(match.project.id, { type: 'status', queueStatus: 'completed' })
+            void reconcilePendingScheduleStatus()
+          }
+        }
+      }
+      return withImagingCors({ ok: true as const })
+    }
+
     const board = await getBoardEntry(queueId)
     if (board?.status === 'in_progress') {
       const ok = await boardMarkCompleted(queueId)

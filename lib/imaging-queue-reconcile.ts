@@ -1,6 +1,9 @@
 import { appendAuditLog } from '@/lib/imaging-audit-log'
+import { getScheduleReservedIntervalsForActiveProject } from '@/lib/imaging-project-altitude-hold'
+import { reconcileProjectSchedules } from '@/lib/imaging-project-planner'
 import { computeScheduleInsight } from '@/lib/imaging-queue-schedule-insight'
 import { listPending, patchRequestScheduleInsight, type ImagingRequest } from '@/lib/imaging-queue-store'
+import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import { getTonightWeatherPermittedIntervals, type TimeInterval } from '@/lib/tonight-weather-gate'
 
 /**
@@ -10,9 +13,24 @@ import { getTonightWeatherPermittedIntervals, type TimeInterval } from '@/lib/to
  */
 export async function reconcilePendingScheduleStatus(): Promise<void> {
   const pending = await listPending()
-  if (pending.length === 0) return
 
   const weatherIntervals = await getTonightWeatherPermittedIntervals()
+  const now = new Date()
+  const window = getTonightSchedulingWindow(now)
+  const nowMs = now.getTime()
+  let freeIntervals: Array<{ startMs: number; endMs: number }> = [
+    {
+      startMs: Math.max(nowMs, window.nauticalDuskUtc.getTime()),
+      endMs: window.nauticalDawnUtc.getTime(),
+    },
+  ]
+
+  if (weatherIntervals.status === 'ok') {
+    await reconcileProjectSchedules(freeIntervals, weatherIntervals.permittedIntervals, now)
+  }
+
+  if (pending.length === 0) return
+
   const nextById = new Map<string, { status: 'scheduled' | 'unscheduled'; plannedStartIso: string | null; reasons: string[] }>()
 
   if (weatherIntervals.status !== 'ok') {
@@ -34,13 +52,18 @@ export async function reconcilePendingScheduleStatus(): Promise<void> {
   } else {
     const orderedBySubmission = [...pending].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
     const permitted = weatherIntervals.permittedIntervals as TimeInterval[]
+    const reservedIntervals = await getScheduleReservedIntervalsForActiveProject(now)
     let working: ImagingRequest[] = pending.map((p) => ({ ...p }))
 
     for (const r of orderedBySubmission) {
+      if (r.projectMode) {
+        continue
+      }
+
       const slice = working.map((p) =>
         p.id === r.id ? { ...p, status: 'pending' as const, plannedStartIso: null } : p
       )
-      const insight = computeScheduleInsight(slice, r.id, permitted)
+      const insight = computeScheduleInsight(slice, r.id, permitted, { reservedIntervals })
       nextById.set(r.id, insight)
 
       const idx = working.findIndex((w) => w.id === r.id)

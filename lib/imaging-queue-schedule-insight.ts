@@ -43,10 +43,16 @@ function estimateDurationSeconds(
  * Single source of truth for “can this session be placed tonight?” used by POST and reconcile.
  * `targetId` — which row to return insight for. Other pending rows are simulated in submission order.
  */
+export type ComputeScheduleInsightOptions = {
+  /** Time reserved for an in-progress project target while it is ≥30° (other sessions may not use). */
+  reservedIntervals?: Array<{ startMs: number; endMs: number }>
+}
+
 export function computeScheduleInsight(
   pending: SchedulePendingRow[],
   targetId: string,
-  weatherPermittedIntervals: TimeInterval[]
+  weatherPermittedIntervals: TimeInterval[],
+  options?: ComputeScheduleInsightOptions
 ): ScheduleInsight {
   const now = new Date()
   const nowMs = now.getTime()
@@ -56,6 +62,9 @@ export function computeScheduleInsight(
   let freeIntervals: Array<{ startMs: number; endMs: number }> = [
     { startMs: Math.max(nowMs, windowStartMs), endMs: deadlineMs },
   ]
+  for (const occupied of options?.reservedIntervals ?? []) {
+    freeIntervals = subtractOccupiedFromFree(freeIntervals, occupied)
+  }
   const ordered = [...pending].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
   const queueIndex = ordered.findIndex((r) => r.id === targetId)
   const committedEarlierBeforeTarget = ordered.reduce((acc, r, i) => {
@@ -218,6 +227,11 @@ export function computeScheduleInsight(
         }
         if (failedByIntervalLength > 0) {
           reasons.push('No free interval is long enough to fit session duration before nautical dawn.')
+        }
+        if ((options?.reservedIntervals?.length ?? 0) > 0 && failedByIntervalLength > 0) {
+          reasons.push(
+            'Part of tonight is reserved for an in-progress multi-night project while its target is above 30° altitude.'
+          )
         }
         if (failedByWeatherCoverage > 0) {
           reasons.push('No interval has weather-permitted coverage >= 80% of session duration.')

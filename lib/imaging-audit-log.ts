@@ -97,7 +97,9 @@ function isSessionProgressMailNotificationEntry(e: AuditLogEntry): boolean {
     m.includes('Completion email sent for') ||
     m.includes('Completion email skipped/failed for') ||
     m.includes('Start email sent for') ||
-    m.includes('Start email skipped/failed for')
+    m.includes('Start email skipped/failed for') ||
+    m.includes('Failure email sent for') ||
+    m.includes('Failure email skipped/failed for')
   )
 }
 

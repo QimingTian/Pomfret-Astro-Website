@@ -14,8 +14,12 @@ import {
   toPublicImagingRequest,
   type CreateImagingInput,
 } from '@/lib/imaging-queue-store'
+import { createImagingProject, getProjectById } from '@/lib/imaging-project-store'
+import { planAndScheduleProjectTonight } from '@/lib/imaging-project-planner'
+import { getScheduleReservedIntervalsForActiveProject } from '@/lib/imaging-project-altitude-hold'
 import { computeScheduleInsight } from '@/lib/imaging-queue-schedule-insight'
 import { getObservatoryStatus, isObservatoryReady } from '@/lib/observatory-status-store'
+import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import { getTonightWeatherPermittedIntervals } from '@/lib/tonight-weather-gate'
 
 export const runtime = 'nodejs'
@@ -150,6 +154,7 @@ export async function POST(request: NextRequest) {
       typeof b.estimatedDurationSeconds === 'number' && Number.isFinite(b.estimatedDurationSeconds)
         ? b.estimatedDurationSeconds
         : undefined,
+    projectMode: b.projectMode === true,
   }
 
   const whenClosedBehavior =
@@ -181,19 +186,70 @@ export async function POST(request: NextRequest) {
     return withImagingCors({ ok: false as const, error: result.error }, 400)
   }
 
+  if (result.projectMode && result.raHours != null && result.decDeg != null && result.sessionPasswordHash) {
+    await createImagingProject({
+      id: result.id,
+      target: result.target,
+      raHours: result.raHours,
+      decDeg: result.decDeg,
+      outputMode: result.outputMode ?? 'raw_zip',
+      filterPlans: result.filterPlans ?? [],
+      estimatedDurationSeconds: result.estimatedDurationSeconds ?? 0,
+      firstName: result.firstName,
+      lastName: result.lastName,
+      email: result.email,
+      sessionPasswordHash: result.sessionPasswordHash,
+    })
+  }
+
   const [pendingNow, precipGate, weatherIntervals] = await Promise.all([
     listPending(),
     detectSunsetSunrisePrecipGate(),
     getTonightWeatherPermittedIntervals(),
   ])
-  const insight =
-    weatherIntervals.status === 'ok'
-      ? computeScheduleInsight(pendingNow, result.id, weatherIntervals.permittedIntervals)
-      : {
-          status: 'unscheduled' as const,
-          plannedStartIso: null,
-          reasons: [weatherIntervals.reason ?? 'Unable to evaluate tonight weather.'],
-        }
+
+  let insight:
+    | { status: 'scheduled' | 'unscheduled'; plannedStartIso: string | null; reasons: string[] }
+    | undefined
+
+  if (weatherIntervals.status === 'ok' && result.projectMode) {
+    const project = await getProjectById(result.id)
+    if (project) {
+      const now = new Date()
+      const window = getTonightSchedulingWindow(now)
+      const nowMs = now.getTime()
+      const freeIntervals = [
+        {
+          startMs: Math.max(nowMs, window.nauticalDuskUtc.getTime()),
+          endMs: window.nauticalDawnUtc.getTime(),
+        },
+      ]
+      insight = await planAndScheduleProjectTonight(
+        project.id,
+        freeIntervals,
+        weatherIntervals.permittedIntervals,
+        now
+      )
+    }
+  }
+
+  if (!insight) {
+    const reservedIntervals =
+      weatherIntervals.status === 'ok'
+        ? await getScheduleReservedIntervalsForActiveProject()
+        : []
+    insight =
+      weatherIntervals.status === 'ok'
+        ? computeScheduleInsight(pendingNow, result.id, weatherIntervals.permittedIntervals, {
+            reservedIntervals,
+          })
+        : {
+            status: 'unscheduled' as const,
+            plannedStartIso: null,
+            reasons: [weatherIntervals.reason ?? 'Unable to evaluate tonight weather.'],
+          }
+  }
+
   const unscheduledByWeather =
     weatherIntervals.status !== 'ok' ||
     weatherIntervals.globalHardBlocked === true ||
@@ -203,6 +259,7 @@ export async function POST(request: NextRequest) {
 
   if (
     insight.status === 'unscheduled' &&
+    !result.projectMode &&
     isObservatoryReady(obsStatus) &&
     whenClosedBehavior !== 'queue_until_ready' &&
     !unscheduledByWeather

@@ -37,6 +37,8 @@ export interface ImagingRequest {
   plannedStartIso?: string | null
   scheduleReasons?: string[]
   sequenceTemplate?: 'dso' | 'variable_star'
+  /** Multi-night DSO project; queue row is consumed on first NINA delivery only. */
+  projectMode?: boolean
 }
 
 /** Strip large JSON from API list responses; expose download path instead. */
@@ -259,6 +261,8 @@ export interface CreateImagingInput {
   sequenceTemplate?: 'dso' | 'variable_star'
   /** Variable star: total seconds = (N×0.5 h block) + 15 min overhead; validated when `sequenceTemplate` is `variable_star`. */
   estimatedDurationSeconds?: number
+  /** DSO multi-night project: skip single-night duration / ideal-night feasibility checks. */
+  projectMode?: boolean
 }
 
 function targetLabelFromCoords(raHours: number, decDeg: number): string {
@@ -317,6 +321,8 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
 
   const sequenceTemplate: 'dso' | 'variable_star' =
     input.sequenceTemplate === 'variable_star' ? 'variable_star' : 'dso'
+  const projectMode =
+    sequenceTemplate === 'dso' && input.projectMode === true
   const filterRaw =
     sequenceTemplate === 'variable_star'
       ? 'L'
@@ -413,34 +419,36 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
         })()
       : normalizedFilterPlans.reduce((sum, p) => sum + p.count * p.exposureSeconds, 0) + 15 * 60
 
-  const { nauticalDuskUtc, nauticalDawnUtc } = getTonightSchedulingWindow(new Date())
-  const nightAltitudeAllowedMs = altitudeAllowedCoverageMs(
-    raHours,
-    decDeg,
-    nauticalDuskUtc.getTime(),
-    nauticalDawnUtc.getTime()
-  )
-  const requiredAltitudeAllowedMs = estimatedDurationSeconds * 1000 * 0.8
-  if (nightAltitudeAllowedMs < requiredAltitudeAllowedMs) {
-    return {
-      error:
-        'Session is too long for this target altitude profile tonight. Please shorten it.',
+  if (!projectMode) {
+    const { nauticalDuskUtc, nauticalDawnUtc } = getTonightSchedulingWindow(new Date())
+    const nightAltitudeAllowedMs = altitudeAllowedCoverageMs(
+      raHours,
+      decDeg,
+      nauticalDuskUtc.getTime(),
+      nauticalDawnUtc.getTime()
+    )
+    const requiredAltitudeAllowedMs = estimatedDurationSeconds * 1000 * 0.8
+    if (nightAltitudeAllowedMs < requiredAltitudeAllowedMs) {
+      return {
+        error:
+          'Session is too long for this target altitude profile tonight. Please shorten it.',
+      }
     }
-  }
 
-  const tonightWindow = getTonightAstronomicalNightWindow(new Date())
-  if (estimatedDurationSeconds > tonightWindow.durationSeconds) {
-    return { error: 'Session is too long to finish in one night. Please shorten it.' }
-  }
+    const tonightWindow = getTonightAstronomicalNightWindow(new Date())
+    if (estimatedDurationSeconds > tonightWindow.durationSeconds) {
+      return { error: 'Session is too long to finish in one night. Please shorten it.' }
+    }
 
-  const durationMs = estimatedDurationSeconds * 1000
-  const idealWindowStartMs = nauticalDuskUtc.getTime()
-  const idealWindowEndMs = nauticalDawnUtc.getTime()
-  const idealNightFeasible = canFitInIdealNight(raHours, decDeg, durationMs, idealWindowStartMs, idealWindowEndMs)
-  if (!idealNightFeasible) {
-    return {
-      error:
-        'Session has no valid imaging window tonight even under ideal conditions (clear weather and empty schedule). Please shorten it or change target.',
+    const durationMs = estimatedDurationSeconds * 1000
+    const idealWindowStartMs = nauticalDuskUtc.getTime()
+    const idealWindowEndMs = nauticalDawnUtc.getTime()
+    const idealNightFeasible = canFitInIdealNight(raHours, decDeg, durationMs, idealWindowStartMs, idealWindowEndMs)
+    if (!idealNightFeasible) {
+      return {
+        error:
+          'Session has no valid imaging window tonight even under ideal conditions (clear weather and empty schedule). Please shorten it or change target.',
+      }
     }
   }
 
@@ -502,6 +510,7 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
     ninaSequenceJson,
     sessionPasswordHash,
     sequenceTemplate,
+    ...(projectMode ? { projectMode: true as const } : {}),
   }
 
   mem.push(req)

@@ -2,6 +2,7 @@ import { listSessionProgressLinesFromAudit } from '@/lib/imaging-audit-log'
 import { isImagingAdminPassword } from '@/lib/imaging-admin-auth'
 import { validateSessionPassword } from '@/lib/imaging-session-access'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
+import { getProjectByNightSubId } from '@/lib/imaging-project-store'
 import { getBoardEntry } from '@/lib/imaging-session-board'
 import { getRequestById } from '@/lib/imaging-queue-store'
 
@@ -30,12 +31,18 @@ export async function GET(request: Request, { params }: { params: { id: string }
 
   const req = await getRequestById(id)
   const board = await getBoardEntry(id)
-  if (!req && !board) {
+  const nightMatch = await getProjectByNightSubId(id)
+  if (!req && !board && !nightMatch) {
     return withImagingCors({ ok: false as const, error: 'Not found' }, 404)
   }
 
   const lines = await listSessionProgressLinesFromAudit(id)
-  const queueStatus = req?.status ?? board?.status ?? 'pending'
+  const queueStatus =
+    req?.status ??
+    board?.status ??
+    nightMatch?.night.status ??
+    nightMatch?.project.status ??
+    'pending'
 
   return withImagingCors({
     ok: true as const,

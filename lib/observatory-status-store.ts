@@ -5,6 +5,7 @@ import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 import { OBS_LAT_DEG, OBS_LON_DEG } from '@/lib/target-altitude'
 import { getDaytimeClosedWindowDetail, isWithinDaytimeClosedWindow } from '@/lib/sunrise-window'
 import { isWithinAdminClosedWindow } from '@/lib/admin-closed-window-store'
+import { onObservatoryFinalStatusChanged } from '@/lib/imaging-session-failure'
 
 export type ObservatoryStatus =
   | 'ready'
@@ -325,6 +326,12 @@ export async function getObservatoryStatus(): Promise<ObservatoryStatus> {
       nowMs: now,
       pollTimeoutApplied: final === 'busy_in_use' && base !== 'busy_in_use',
     })
+  }
+
+  try {
+    await onObservatoryFinalStatusChanged(final)
+  } catch {
+    // never block status reads
   }
 
   return final

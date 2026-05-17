@@ -1,17 +1,27 @@
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 
 type GlobalState = typeof globalThis & {
-  __pomfret_end_night_sent__?: Record<string, boolean>
+  __pomfret_end_night_sent_after_sessions__?: Record<string, boolean>
+  __pomfret_end_night_sent_dawn__?: Record<string, boolean>
   __pomfret_end_night_due__?: Record<string, boolean>
 }
 
-const KEY_PREFIX = 'imaging-end-night-sent'
+/** After last scheduled session is consumed for the night. */
+const KEY_AFTER_SESSIONS = 'imaging-end-night-sent'
+/** Nautical dawn shutdown — independent; may run even if after-sessions end night already ran. */
+const KEY_DAWN = 'imaging-end-night-sent-dawn'
 const DUE_KEY_PREFIX = 'imaging-end-night-due'
 
-function memoryMap(): Record<string, boolean> {
+function afterSessionsMemory(): Record<string, boolean> {
   const g = globalThis as GlobalState
-  if (!g.__pomfret_end_night_sent__) g.__pomfret_end_night_sent__ = {}
-  return g.__pomfret_end_night_sent__
+  if (!g.__pomfret_end_night_sent_after_sessions__) g.__pomfret_end_night_sent_after_sessions__ = {}
+  return g.__pomfret_end_night_sent_after_sessions__
+}
+
+function dawnMemory(): Record<string, boolean> {
+  const g = globalThis as GlobalState
+  if (!g.__pomfret_end_night_sent_dawn__) g.__pomfret_end_night_sent_dawn__ = {}
+  return g.__pomfret_end_night_sent_dawn__
 }
 
 function dueMemoryMap(): Record<string, boolean> {
@@ -20,23 +30,45 @@ function dueMemoryMap(): Record<string, boolean> {
   return g.__pomfret_end_night_due__
 }
 
-function keyForNight(nightKey: string): string {
-  return `${KEY_PREFIX}:${nightKey}`
+function keyAfterSessions(nightKey: string): string {
+  return `${KEY_AFTER_SESSIONS}:${nightKey}`
+}
+
+function keyDawn(nightKey: string): string {
+  return `${KEY_DAWN}:${nightKey}`
 }
 
 function dueKeyForNight(nightKey: string): string {
   return `${DUE_KEY_PREFIX}:${nightKey}`
 }
 
-export async function wasEndNightSent(nightKey: string): Promise<boolean> {
+async function readSentFlag(
+  nightKey: string,
+  mem: Record<string, boolean>,
+  kvKey: string
+): Promise<boolean> {
   if (!nightKey) return false
-  const mem = memoryMap()
   if (mem[nightKey]) return true
   if (!kvEnabled()) return false
-  const remote = await kvGetJson<{ sent?: unknown }>(keyForNight(nightKey))
+  const remote = await kvGetJson<{ sent?: unknown }>(kvKey)
   const sent = remote?.sent === true
   if (sent) mem[nightKey] = true
   return sent
+}
+
+async function writeSentFlag(nightKey: string, mem: Record<string, boolean>, kvKey: string): Promise<void> {
+  if (!nightKey) return
+  mem[nightKey] = true
+  if (!kvEnabled()) return
+  await kvSetJson(kvKey, { sent: true, at: new Date().toISOString() })
+}
+
+export async function wasEndNightAfterSessionsSent(nightKey: string): Promise<boolean> {
+  return readSentFlag(nightKey, afterSessionsMemory(), keyAfterSessions(nightKey))
+}
+
+export async function wasEndNightDawnSent(nightKey: string): Promise<boolean> {
+  return readSentFlag(nightKey, dawnMemory(), keyDawn(nightKey))
 }
 
 /** Set when the last scheduled session for this night was consumed — next poll should deliver end night. */
@@ -67,11 +99,13 @@ async function clearEndNightDue(nightKey: string): Promise<void> {
   await kvSetJson(dueKeyForNight(nightKey), { due: false, clearedAt: new Date().toISOString() })
 }
 
-export async function markEndNightSent(nightKey: string): Promise<void> {
+export async function markEndNightAfterSessionsSent(nightKey: string): Promise<void> {
   if (!nightKey) return
-  const mem = memoryMap()
-  mem[nightKey] = true
+  await writeSentFlag(nightKey, afterSessionsMemory(), keyAfterSessions(nightKey))
   await clearEndNightDue(nightKey)
-  if (!kvEnabled()) return
-  await kvSetJson(keyForNight(nightKey), { sent: true, at: new Date().toISOString() })
+}
+
+export async function markEndNightDawnSent(nightKey: string): Promise<void> {
+  if (!nightKey) return
+  await writeSentFlag(nightKey, dawnMemory(), keyDawn(nightKey))
 }

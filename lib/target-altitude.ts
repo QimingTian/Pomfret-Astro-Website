@@ -106,6 +106,37 @@ export function altitudeAllowedCoverageMs(
   )
 }
 
+/** Contiguous UTC intervals in [startMs, endMs) where target altitude is >= minAltitudeDeg. */
+export function intervalsWhereAltitudeAtOrAbove(
+  raHours: number,
+  decDeg: number,
+  startMs: number,
+  endMs: number,
+  minAltitudeDeg = MIN_ALTITUDE_DEG,
+  stepMs = 5 * 60 * 1000
+): Array<{ startMs: number; endMs: number }> {
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return []
+  const step = Math.max(60_000, Math.floor(stepMs))
+  const out: Array<{ startMs: number; endMs: number }> = []
+  let runStart: number | null = null
+
+  for (let t = startMs; t < endMs; t += step) {
+    const segEnd = Math.min(t + step, endMs)
+    const mid = t + (segEnd - t) / 2
+    const altitude = currentAltitudeDeg(raHours, decDeg, new Date(mid))
+    const allowed = altitude >= minAltitudeDeg
+
+    if (allowed) {
+      if (runStart == null) runStart = t
+    } else if (runStart != null) {
+      out.push({ startMs: runStart, endMs: t })
+      runStart = null
+    }
+  }
+  if (runStart != null) out.push({ startMs: runStart, endMs })
+  return out
+}
+
 /** First time in [startMs, endMs] where altitude is >= MIN_ALTITUDE_DEG. */
 export function firstAltitudeAllowedTimeMs(
   raHours: number,

@@ -1,7 +1,12 @@
+import {
+  fallbackScheduleBarPlacement,
+  type ScheduleBarPlacement,
+} from '@/lib/imaging-schedule-bar'
+import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 
 /** Sessions removed from the API queue after NINA download, still shown on Remote. */
-export type SessionBoardStatus = 'in_progress' | 'completed'
+export type SessionBoardStatus = 'in_progress' | 'completed' | 'failed'
 
 export type SessionBoardEntry = {
   id: string
@@ -21,8 +26,15 @@ export type SessionBoardEntry = {
   filterPlans?: Array<{ filterName: string; exposureSeconds: number; count: number }>
   estimatedDurationSeconds?: number
   completedAt?: string
+  failedAt?: string
   downloadedAt?: string
   sessionPasswordHash?: string
+  /** Frozen Tonight's Schedule bar for this strip night (survives refresh / other devices). */
+  scheduleStripNightKey?: string | null
+  scheduleBarStartMs?: number | null
+  scheduleBarEndMs?: number | null
+  /** Multi-night DSO project (board id = project id). */
+  projectMode?: boolean
 }
 
 const KEY = 'imaging-session-board'
@@ -52,7 +64,9 @@ function normalizeEntries(raw: unknown): SessionBoardEntry[] {
       typeof (e as SessionBoardEntry).target === 'string' &&
       typeof (e as SessionBoardEntry).createdAt === 'string' &&
       typeof (e as SessionBoardEntry).updatedAt === 'string' &&
-      ((e as SessionBoardEntry).status === 'in_progress' || (e as SessionBoardEntry).status === 'completed') &&
+      ((e as SessionBoardEntry).status === 'in_progress' ||
+        (e as SessionBoardEntry).status === 'completed' ||
+        (e as SessionBoardEntry).status === 'failed') &&
       ((e as SessionBoardEntry).firstName == null || typeof (e as SessionBoardEntry).firstName === 'string') &&
       ((e as SessionBoardEntry).lastName == null || typeof (e as SessionBoardEntry).lastName === 'string') &&
       ((e as SessionBoardEntry).email == null || typeof (e as SessionBoardEntry).email === 'string') &&
@@ -69,10 +83,107 @@ function normalizeEntries(raw: unknown): SessionBoardEntry[] {
       ((e as SessionBoardEntry).estimatedDurationSeconds == null ||
         typeof (e as SessionBoardEntry).estimatedDurationSeconds === 'number') &&
       ((e as SessionBoardEntry).completedAt == null || typeof (e as SessionBoardEntry).completedAt === 'string') &&
+      ((e as SessionBoardEntry).failedAt == null || typeof (e as SessionBoardEntry).failedAt === 'string') &&
       ((e as SessionBoardEntry).downloadedAt == null || typeof (e as SessionBoardEntry).downloadedAt === 'string') &&
       ((e as SessionBoardEntry).sessionPasswordHash == null ||
-        typeof (e as SessionBoardEntry).sessionPasswordHash === 'string')
+        typeof (e as SessionBoardEntry).sessionPasswordHash === 'string') &&
+      ((e as SessionBoardEntry).scheduleStripNightKey == null ||
+        typeof (e as SessionBoardEntry).scheduleStripNightKey === 'string') &&
+      ((e as SessionBoardEntry).scheduleBarStartMs == null ||
+        typeof (e as SessionBoardEntry).scheduleBarStartMs === 'number') &&
+      ((e as SessionBoardEntry).scheduleBarEndMs == null ||
+        typeof (e as SessionBoardEntry).scheduleBarEndMs === 'number')
   )
+}
+
+function applyScheduleBar(entry: SessionBoardEntry, bar: ScheduleBarPlacement): SessionBoardEntry {
+  return {
+    ...entry,
+    scheduleStripNightKey: bar.nightKey,
+    scheduleBarStartMs: bar.startMs,
+    scheduleBarEndMs: bar.endMs,
+  }
+}
+
+/**
+ * Save schedule bar placement. Terminal sessions (completed/failed) are immutable once set for that night.
+ */
+export async function boardSetScheduleBar(
+  id: string,
+  bar: ScheduleBarPlacement
+): Promise<{ ok: boolean; error?: string }> {
+  const prev = await readEntries()
+  const idx = prev.findIndex((e) => e.id === id)
+  if (idx === -1) return { ok: false, error: 'Not found' }
+  const current = prev[idx]!
+  if (current.status !== 'in_progress' && current.status !== 'completed' && current.status !== 'failed') {
+    return { ok: false, error: 'Session is not on the board' }
+  }
+  if (
+    (current.status === 'completed' || current.status === 'failed') &&
+    hasFrozenScheduleBar(current, bar.nightKey)
+  ) {
+    return { ok: true }
+  }
+  if (bar.endMs <= bar.startMs) return { ok: false, error: 'Invalid bar interval' }
+  const next = [...prev]
+  next[idx] = applyScheduleBar({ ...current, updatedAt: new Date().toISOString() }, bar)
+  await writeEntries(next)
+  return { ok: true }
+}
+
+function hasFrozenScheduleBar(entry: SessionBoardEntry, nightKey: string): boolean {
+  if (entry.scheduleStripNightKey !== nightKey) return false
+  const s = entry.scheduleBarStartMs
+  const e = entry.scheduleBarEndMs
+  return typeof s === 'number' && typeof e === 'number' && Number.isFinite(s) && Number.isFinite(e) && e > s
+}
+
+/** Backfill frozen bar for legacy completed/failed rows missing schedule fields. */
+export async function boardEnsureScheduleBarForTerminal(id: string): Promise<void> {
+  const entry = await getBoardEntry(id)
+  if (!entry) return
+  if (entry.status === 'completed' && entry.completedAt) {
+    const endMs = Date.parse(entry.completedAt)
+    if (Number.isFinite(endMs)) await freezeScheduleBarOnTerminal(id, endMs)
+    return
+  }
+  if (entry.status === 'failed' && entry.failedAt) {
+    const endMs = Date.parse(entry.failedAt)
+    if (Number.isFinite(endMs)) await freezeScheduleBarOnTerminal(id, endMs)
+  }
+}
+
+async function freezeScheduleBarOnTerminal(
+  id: string,
+  terminalEndMs: number,
+  now = new Date()
+): Promise<void> {
+  const prev = await readEntries()
+  const idx = prev.findIndex((e) => e.id === id)
+  if (idx === -1) return
+  const entry = prev[idx]!
+  const strip = getTonightScheduleStrip(now)
+  if (hasFrozenScheduleBar(entry, strip.nightKey)) return
+
+  let bar: ScheduleBarPlacement
+  if (
+    typeof entry.scheduleBarStartMs === 'number' &&
+    Number.isFinite(entry.scheduleBarStartMs) &&
+    entry.scheduleStripNightKey === strip.nightKey
+  ) {
+    bar = {
+      nightKey: strip.nightKey,
+      startMs: entry.scheduleBarStartMs,
+      endMs: Math.min(Math.max(terminalEndMs, entry.scheduleBarStartMs + 60_000), strip.schedulingDeadlineMs),
+    }
+  } else {
+    bar = fallbackScheduleBarPlacement(entry, terminalEndMs, now)
+  }
+
+  const next = [...prev]
+  next[idx] = applyScheduleBar(entry, bar)
+  await writeEntries(next)
 }
 
 async function readEntries(): Promise<SessionBoardEntry[]> {
@@ -128,6 +239,7 @@ export async function boardUpsertInProgress(input: {
   filterPlans?: Array<{ filterName: string; exposureSeconds: number; count: number }>
   estimatedDurationSeconds?: number
   sessionPasswordHash?: string
+  projectMode?: boolean
 }): Promise<void> {
   const ts = new Date().toISOString()
   const prev = await readEntries()
@@ -152,6 +264,7 @@ export async function boardUpsertInProgress(input: {
     completedAt: undefined,
     downloadedAt: undefined,
     sessionPasswordHash: input.sessionPasswordHash,
+    ...(input.projectMode ? { projectMode: true as const } : {}),
   }
   await writeEntries([...without, entry])
 }
@@ -162,9 +275,58 @@ export async function boardMarkCompleted(id: string): Promise<boolean> {
   if (idx === -1) return false
   const ts = new Date().toISOString()
   const next = [...prev]
-  next[idx] = { ...next[idx], status: 'completed', completedAt: ts, updatedAt: ts }
+  next[idx] = { ...next[idx], status: 'completed', completedAt: ts, updatedAt: ts, failedAt: undefined }
   await writeEntries(next)
+  await freezeScheduleBarOnTerminal(id, Date.parse(ts))
   return true
+}
+
+export async function boardMarkFailed(id: string, failedAtIso?: string): Promise<boolean> {
+  const prev = await readEntries()
+  const idx = prev.findIndex((e) => e.id === id && e.status === 'in_progress')
+  if (idx === -1) return false
+  const ts = failedAtIso ?? new Date().toISOString()
+  const next = [...prev]
+  next[idx] = { ...next[idx], status: 'failed', failedAt: ts, updatedAt: ts }
+  await writeEntries(next)
+  await freezeScheduleBarOnTerminal(id, Date.parse(ts))
+  return true
+}
+
+export type FailedBoardSnapshot = {
+  id: string
+  target: string
+  email?: string | null
+  firstName?: string | null
+  failedAt: string
+}
+
+/** Fail every `in_progress` board row (optional except id). Returns snapshots for notifications. */
+export async function boardFailAllInProgress(exceptId?: string): Promise<FailedBoardSnapshot[]> {
+  const prev = await readEntries()
+  const ts = new Date().toISOString()
+  const failed: FailedBoardSnapshot[] = []
+  let changed = false
+  const next = prev.map((e) => {
+    if (e.status !== 'in_progress') return e
+    if (exceptId && e.id === exceptId) return e
+    failed.push({
+      id: e.id,
+      target: e.target,
+      email: e.email ?? null,
+      firstName: e.firstName ?? null,
+      failedAt: ts,
+    })
+    changed = true
+    return { ...e, status: 'failed' as const, failedAt: ts, updatedAt: ts }
+  })
+  if (changed) {
+    await writeEntries(next)
+    for (const snap of failed) {
+      await freezeScheduleBarOnTerminal(snap.id, Date.parse(snap.failedAt))
+    }
+  }
+  return failed
 }
 
 export async function boardMarkDownloaded(id: string): Promise<boolean> {
@@ -204,8 +366,8 @@ export async function boardPurgeCompletedOlderThan(maxAgeMs: number): Promise<st
   const now = Date.now()
   const removedIds: string[] = []
   const filtered = prev.filter((e) => {
-    if (e.status !== 'completed') return true
-    const basis = e.completedAt ?? e.updatedAt
+    if (e.status !== 'completed' && e.status !== 'failed') return true
+    const basis = e.status === 'failed' ? (e.failedAt ?? e.updatedAt) : (e.completedAt ?? e.updatedAt)
     const at = Date.parse(basis)
     if (!Number.isFinite(at)) return true
     if (now - at >= maxAgeMs) {

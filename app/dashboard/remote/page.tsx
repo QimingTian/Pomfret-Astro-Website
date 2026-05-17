@@ -8,6 +8,7 @@ import {
   OBS_LON_DEG,
   TONIGHT_OBSERVABLE_MIN_COVERAGE_MS,
 } from '@/lib/target-altitude'
+import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import {
   getTonightAstronomicalNightWindow,
   getTonightScheduleEveningAstronomyUtc,
@@ -21,6 +22,7 @@ import {
   upsertRemoteSavedSession,
   type RemoteSavedSessionFormV1,
 } from '@/lib/remote-saved-session'
+import { parseProjectNightSubId } from '@/lib/imaging-project-ids'
 
 const jsonHeaders: HeadersInit = { 'Content-Type': 'application/json' }
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -334,8 +336,32 @@ type TerminalSessionLike = {
   status: string
   createdAt: string
   plannedStartIso?: string | null
+  failedAt?: string | null
+  scheduleStripNightKey?: string | null
+  scheduleBarStartMs?: number | null
+  scheduleBarEndMs?: number | null
   estimatedDurationSeconds?: number
   filterPlans?: Array<{ filterName: string; exposureSeconds: number; count: number }>
+}
+
+function serverScheduleBarForNight(
+  item: TerminalSessionLike,
+  nightKey: string
+): { startMs: number; endMs: number } | null {
+  if (item.scheduleStripNightKey !== nightKey) return null
+  const startMs = item.scheduleBarStartMs
+  const endMs = item.scheduleBarEndMs
+  if (typeof startMs !== 'number' || typeof endMs !== 'number' || !Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+    return null
+  }
+  if (endMs <= startMs) return null
+  return { startMs, endMs }
+}
+
+const SESSION_FAILED_TERMINAL_MESSAGE = 'Session failed -- contact support.'
+
+function isSessionFailedTerminalLine(text: string): boolean {
+  return text.trim() === SESSION_FAILED_TERMINAL_MESSAGE
 }
 
 function sessionDurationMsFromItem(item: {
@@ -385,6 +411,12 @@ function fallbackPlacementForTerminalSession(
 
   let s = Math.max(startMs, windowStartMs)
   let e = Math.min(s + durationMs, schedulingDeadlineMs)
+  if (item.status === 'failed' && item.failedAt) {
+    const failMs = Date.parse(item.failedAt)
+    if (Number.isFinite(failMs)) {
+      e = Math.min(e, failMs, schedulingDeadlineMs)
+    }
+  }
   if (e <= s) {
     s = Math.max(windowStartMs, schedulingDeadlineMs - 5 * 60 * 1000)
     e = schedulingDeadlineMs
@@ -592,6 +624,24 @@ export default function RemotePage() {
       hasPreview?: boolean
       previewPath?: string
       sessionType?: 'dso' | 'variable_star'
+      failedAt?: string | null
+      scheduleStripNightKey?: string | null
+      scheduleBarStartMs?: number | null
+      scheduleBarEndMs?: number | null
+      projectMode?: boolean
+      nights?: Array<{
+        id: string
+        nightIndex: number
+        nightKey: string
+        status: string
+        plannedStartIso?: string | null
+        scheduleStripNightKey?: string | null
+        scheduleBarStartMs?: number | null
+        scheduleBarEndMs?: number | null
+        failedAt?: string | null
+        estimatedDurationSeconds?: number
+        filterPlans?: Array<{ filterName: string; exposureSeconds: number; count: number }>
+      }>
     }>
   >([])
   const [lockedSessionSchedule, setLockedSessionSchedule] = useState<Record<string, { startMs: number; endMs: number }>>(
@@ -623,6 +673,8 @@ export default function RemotePage() {
   const [catalogLookupError, setCatalogLookupError] = useState<string | null>(null)
   const [catalogLookupResult, setCatalogLookupResult] = useState<ResolvedCatalogObject | null>(null)
   const [sessionType, setSessionType] = useState<ImagingSessionTypeUi>('dso')
+  const [projectMode, setProjectMode] = useState(false)
+  const [nightPickerProjectId, setNightPickerProjectId] = useState<string | null>(null)
   const [variableStarCatalog, setVariableStarCatalog] = useState<VariableStarRow[]>([])
   const [variableStarCatalogLoading, setVariableStarCatalogLoading] = useState(false)
   const [variableStarCatalogError, setVariableStarCatalogError] = useState<string | null>(null)
@@ -651,7 +703,9 @@ export default function RemotePage() {
   const terminalPreviewLastFingerprintRef = useRef<string | null>(null)
   const terminalEndRef = useRef<HTMLDivElement>(null)
   const [authModalSessionId, setAuthModalSessionId] = useState<string | null>(null)
-  const [authModalAction, setAuthModalAction] = useState<'progress' | 'download' | 'edit' | null>(null)
+  const [authModalAction, setAuthModalAction] = useState<
+    'progress' | 'project_progress' | 'download' | 'edit' | null
+  >(null)
   const [authPassword, setAuthPassword] = useState('')
   const [authError, setAuthError] = useState<string | null>(null)
   const [authSubmitting, setAuthSubmitting] = useState(false)
@@ -1042,6 +1096,12 @@ export default function RemotePage() {
         downloadPath?: unknown
         hasPreview?: unknown
         previewPath?: unknown
+        failedAt?: unknown
+        scheduleStripNightKey?: unknown
+        scheduleBarStartMs?: unknown
+        scheduleBarEndMs?: unknown
+        projectMode?: unknown
+        nights?: unknown
       }>
       const normalized = items
         .filter((x) => typeof x.id === 'string')
@@ -1097,6 +1157,66 @@ export default function RemotePage() {
             downloadPath: typeof x.downloadPath === 'string' ? x.downloadPath : undefined,
             hasPreview: x.hasPreview === true,
             previewPath: typeof x.previewPath === 'string' ? x.previewPath : undefined,
+            failedAt: typeof x.failedAt === 'string' ? x.failedAt : null,
+            scheduleStripNightKey: typeof x.scheduleStripNightKey === 'string' ? x.scheduleStripNightKey : null,
+            scheduleBarStartMs:
+              typeof x.scheduleBarStartMs === 'number' && Number.isFinite(x.scheduleBarStartMs)
+                ? x.scheduleBarStartMs
+                : null,
+            scheduleBarEndMs:
+              typeof x.scheduleBarEndMs === 'number' && Number.isFinite(x.scheduleBarEndMs)
+                ? x.scheduleBarEndMs
+                : null,
+            projectMode: x.projectMode === true,
+            nights: Array.isArray(x.nights)
+              ? x.nights
+                  .map((n) => {
+                    if (!n || typeof n !== 'object') return null
+                    const rec = n as Record<string, unknown>
+                    if (typeof rec.id !== 'string') return null
+                    return {
+                      id: rec.id,
+                      nightIndex: typeof rec.nightIndex === 'number' ? rec.nightIndex : 0,
+                      nightKey: typeof rec.nightKey === 'string' ? rec.nightKey : '',
+                      status: typeof rec.status === 'string' ? rec.status : 'planned',
+                      plannedStartIso: typeof rec.plannedStartIso === 'string' ? rec.plannedStartIso : null,
+                      scheduleStripNightKey:
+                        typeof rec.scheduleStripNightKey === 'string' ? rec.scheduleStripNightKey : null,
+                      scheduleBarStartMs:
+                        typeof rec.scheduleBarStartMs === 'number' && Number.isFinite(rec.scheduleBarStartMs)
+                          ? rec.scheduleBarStartMs
+                          : null,
+                      scheduleBarEndMs:
+                        typeof rec.scheduleBarEndMs === 'number' && Number.isFinite(rec.scheduleBarEndMs)
+                          ? rec.scheduleBarEndMs
+                          : null,
+                      failedAt: typeof rec.failedAt === 'string' ? rec.failedAt : null,
+                      estimatedDurationSeconds:
+                        typeof rec.estimatedDurationSeconds === 'number' &&
+                        Number.isFinite(rec.estimatedDurationSeconds)
+                          ? rec.estimatedDurationSeconds
+                          : undefined,
+                      filterPlans: Array.isArray(rec.filterPlans)
+                        ? rec.filterPlans
+                            .map((p) => {
+                              if (!p || typeof p !== 'object') return null
+                              const fp = p as Record<string, unknown>
+                              const filterName = typeof fp.filterName === 'string' ? fp.filterName : ''
+                              const exposureSeconds = Number(fp.exposureSeconds)
+                              const count = Number(fp.count)
+                              if (!filterName || !Number.isFinite(exposureSeconds) || !Number.isFinite(count)) {
+                                return null
+                              }
+                              return { filterName, exposureSeconds, count }
+                            })
+                            .filter(
+                              (p): p is { filterName: string; exposureSeconds: number; count: number } => p !== null
+                            )
+                        : undefined,
+                    }
+                  })
+                  .filter((n): n is NonNullable<typeof n> => n != null)
+              : undefined,
           }
         })
       setQueueItems(normalized)
@@ -1198,6 +1318,48 @@ export default function RemotePage() {
     return { start, end, hours: points, eventBlocks, adminClosedBlocks, nowTopPct, nauticalDawn, nauticalDusk, astronomicalDawn }
   }, [scheduleNowMs, adminClosedWindows])
 
+  const tonightNightKey = useMemo(
+    () => getTonightScheduleStrip(new Date(scheduleNowMs)).nightKey,
+    [scheduleNowMs]
+  )
+
+  const persistScheduleBarPlacement = useCallback(
+    async (queueId: string, nightKey: string, startMs: number, endMs: number) => {
+      try {
+        await fetch('/api/imaging/session-schedule-placement', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ queueId, nightKey, startMs, endMs }),
+        })
+      } catch {
+        // ignore network errors; server may already have frozen bar
+      }
+    },
+    []
+  )
+
+  useEffect(() => {
+    setLockedSessionSchedule((prev) => {
+      let changed = false
+      const next = { ...prev }
+      for (const item of queueItems) {
+        const bar = serverScheduleBarForNight(item, tonightNightKey)
+        if (!bar) continue
+        if (
+          item.status === 'completed' ||
+          item.status === 'failed' ||
+          item.status === 'in_progress'
+        ) {
+          if (next[item.id]?.startMs !== bar.startMs || next[item.id]?.endMs !== bar.endMs) {
+            next[item.id] = bar
+            changed = true
+          }
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [queueItems, tonightNightKey])
+
   const variableStarDurationPick = useMemo(() => {
     if (sessionType !== 'variable_star') return null
     const { nauticalDuskUtc, nauticalDawnUtc } = getTonightSchedulingWindow(new Date(scheduleNowMs))
@@ -1264,6 +1426,47 @@ export default function RemotePage() {
       setVariableStarDurationUserSelected(false)
     }
   }, [sessionType, variableStarDurationPick?.coordsOk])
+
+  useEffect(() => {
+    if (sessionType !== 'dso') setProjectMode(false)
+  }, [sessionType])
+
+  const scheduleStripItems = useMemo(() => {
+    type StripItem = (typeof queueItems)[number]
+    const expanded: StripItem[] = []
+    for (const item of queueItems) {
+      if (item.projectMode && item.nights && item.nights.length > 0) {
+        for (const night of item.nights) {
+          if (night.status === 'planned' && !night.plannedStartIso) continue
+          expanded.push({
+            ...item,
+            id: night.id,
+            target: `${item.target} — Session ${night.nightIndex}`,
+            status:
+              night.status === 'in_progress'
+                ? 'in_progress'
+                : night.status === 'completed'
+                  ? 'completed'
+                  : night.status === 'failed'
+                    ? 'failed'
+                    : night.status === 'scheduled'
+                      ? 'scheduled'
+                      : 'pending',
+            plannedStartIso: night.plannedStartIso ?? null,
+            estimatedDurationSeconds: night.estimatedDurationSeconds,
+            filterPlans: night.filterPlans,
+            failedAt: night.failedAt ?? null,
+            scheduleStripNightKey: night.scheduleStripNightKey ?? null,
+            scheduleBarStartMs: night.scheduleBarStartMs ?? null,
+            scheduleBarEndMs: night.scheduleBarEndMs ?? null,
+          })
+        }
+      } else if (!item.projectMode) {
+        expanded.push(item)
+      }
+    }
+    return expanded
+  }, [queueItems])
 
   const dsoEstimatedDurationPreviewSeconds = useMemo(() => {
     if (sessionType !== 'dso') return null
@@ -1520,6 +1723,12 @@ export default function RemotePage() {
     const windowEndMs = tonightSchedule.end.getTime()
     const schedulingDeadlineMs = Math.min(windowEndMs, tonightSchedule.astronomicalDawn.getTime())
 
+    const effectiveLocks: Record<string, { startMs: number; endMs: number }> = { ...lockedSessionSchedule }
+    for (const item of scheduleStripItems) {
+      const bar = serverScheduleBarForNight(item, tonightNightKey)
+      if (bar) effectiveLocks[item.id] = bar
+    }
+
     // Bad weather must not wipe in_progress / completed bars: those stay on the tonight strip using
     // saved locks or a stable fallback (planned start → created → now for in_progress).
     if (tonightWeatherPrediction === 'not_permitted' || hasAnyPrecipitationTonight) {
@@ -1528,35 +1737,35 @@ export default function RemotePage() {
         []
       const newlyLocked: Record<string, { startMs: number; endMs: number }> = {}
 
-      for (const item of queueItems) {
-        if (item.status !== 'in_progress' && item.status !== 'completed') continue
+      for (const item of scheduleStripItems) {
+        if (item.status !== 'in_progress' && item.status !== 'completed' && item.status !== 'failed') continue
         if (
-          item.status === 'completed' &&
-          !completedSessionOverlapsTonightStripWindow(item, windowStartMs, windowEndMs, lockedSessionSchedule)
+          (item.status === 'completed' || item.status === 'failed') &&
+          !completedSessionOverlapsTonightStripWindow(item, windowStartMs, windowEndMs, effectiveLocks)
         ) {
           continue
         }
-        const placed = fallbackPlacementForTerminalSession(
-          item,
-          lockedSessionSchedule,
-          windowStartMs,
-          schedulingDeadlineMs,
-          nowMs,
-        )
+        const placed =
+          serverScheduleBarForNight(item, tonightNightKey) ??
+          fallbackPlacementForTerminalSession(item, effectiveLocks, windowStartMs, schedulingDeadlineMs, nowMs)
         if (!placed) continue
         const startMs = Math.max(placed.startMs, windowStartMs)
-        const endMs = Math.min(placed.endMs, schedulingDeadlineMs)
+        let endMs = Math.min(placed.endMs, schedulingDeadlineMs)
+        if (item.status === 'failed' && item.failedAt && !serverScheduleBarForNight(item, tonightNightKey)) {
+          const failMs = Date.parse(item.failedAt)
+          if (Number.isFinite(failMs)) endMs = Math.min(endMs, failMs)
+        }
         if (endMs <= startMs) continue
         const topPct = ((startMs - windowStartMs) / (windowEndMs - windowStartMs)) * 100
         const heightPct = ((endMs - startMs) / (windowEndMs - windowStartMs)) * 100
         blocks.push({ id: item.id, startMs, endMs, topPct, heightPct, label: item.target })
-        if (!lockedSessionSchedule[item.id]) {
+        if (!effectiveLocks[item.id]) {
           newlyLocked[item.id] = { startMs, endMs }
         }
       }
       // Still show server-scheduled pending sessions (plannedStartIso) so the strip matches queue state
       // even when the UI is in "weather not permitted" mode — previously only in_progress/completed appeared.
-      for (const item of queueItems) {
+      for (const item of scheduleStripItems) {
         if (item.status !== 'scheduled') continue
         const startMsRaw = item.plannedStartIso ? Date.parse(item.plannedStartIso) : Number.NaN
         if (!Number.isFinite(startMsRaw)) continue
@@ -1651,7 +1860,7 @@ export default function RemotePage() {
     }
 
     const placeInFreeIntervals = (
-      item: (typeof queueItems)[number],
+      item: (typeof scheduleStripItems)[number],
       minStartMs: number
     ): { startMs: number; endMs: number } | null => {
       const createdMs = Number.isFinite(Date.parse(item.createdAt)) ? Date.parse(item.createdAt) : windowStartMs
@@ -1705,16 +1914,16 @@ export default function RemotePage() {
     }
 
     const newlyLocked: Record<string, { startMs: number; endMs: number }> = {}
-    const lockable = queueItems
-      .filter((item) => item.status === 'in_progress' || item.status === 'completed')
+    const lockable = scheduleStripItems
+      .filter((item) => item.status === 'in_progress' || item.status === 'completed' || item.status === 'failed')
       .filter((item) => {
         if (item.status === 'in_progress') return true
-        return completedSessionOverlapsTonightStripWindow(item, windowStartMs, windowEndMs, lockedSessionSchedule)
+        return completedSessionOverlapsTonightStripWindow(item, windowStartMs, windowEndMs, effectiveLocks)
       })
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
 
     for (const item of lockable) {
-      let placed = lockedSessionSchedule[item.id]
+      let placed = effectiveLocks[item.id]
       if (!placed) {
         const computed = placeInFreeIntervals(item, Math.max(windowStartMs, nauticalDuskMs))
         if (computed) {
@@ -1723,7 +1932,7 @@ export default function RemotePage() {
         } else {
           const fb = fallbackPlacementForTerminalSession(
             item,
-            lockedSessionSchedule,
+            effectiveLocks,
             windowStartMs,
             schedulingDeadlineMs,
             Date.now(),
@@ -1734,8 +1943,12 @@ export default function RemotePage() {
         }
       }
 
-      const startMs = Math.max(placed.startMs, windowStartMs)
-      const endMs = Math.min(placed.endMs, schedulingDeadlineMs)
+      let startMs = Math.max(placed.startMs, windowStartMs)
+      let endMs = Math.min(placed.endMs, schedulingDeadlineMs)
+      if (item.status === 'failed' && item.failedAt && !serverScheduleBarForNight(item, tonightNightKey)) {
+        const failMs = Date.parse(item.failedAt)
+        if (Number.isFinite(failMs)) endMs = Math.min(endMs, failMs)
+      }
       if (endMs <= startMs) continue
 
       freeIntervals = subtractInterval(freeIntervals, { startMs, endMs })
@@ -1745,7 +1958,7 @@ export default function RemotePage() {
       blocks.push({ id: item.id, startMs, endMs, topPct, heightPct, label: item.target })
     }
 
-    const scheduledPending = queueItems
+    const scheduledPending = scheduleStripItems
       .filter((item) => item.status === 'scheduled')
       .map((item) => {
         const startMsRaw = item.plannedStartIso ? Date.parse(item.plannedStartIso) : Number.NaN
@@ -1761,7 +1974,7 @@ export default function RemotePage() {
         return { item, startMs, endMs }
       })
       .filter(
-        (x): x is { item: (typeof queueItems)[number]; startMs: number; endMs: number } =>
+        (x): x is { item: (typeof scheduleStripItems)[number]; startMs: number; endMs: number } =>
           x != null
       )
       .sort((a, b) => a.startMs - b.startMs)
@@ -1786,9 +1999,10 @@ export default function RemotePage() {
     blocks.sort((a, b) => a.startMs - b.startMs)
     return { blocks, newlyLocked }
   }, [
-    queueItems,
+    scheduleStripItems,
     readyWeatherHourKeys,
     tonightSchedule,
+    tonightNightKey,
     lockedSessionSchedule,
     tonightWeatherPrediction,
     hasAnyPrecipitationTonight,
@@ -1800,7 +2014,9 @@ export default function RemotePage() {
     const windowEndMs = tonightSchedule.end.getTime()
     setLockedSessionSchedule((prev) => {
       const activeLockableIds = new Set(
-        queueItems.filter((x) => x.status === 'in_progress' || x.status === 'completed').map((x) => x.id)
+        scheduleStripItems
+          .filter((x) => x.status === 'in_progress' || x.status === 'completed' || x.status === 'failed')
+          .map((x) => x.id)
       )
 
       const next: Record<string, { startMs: number; endMs: number }> = {}
@@ -1811,13 +2027,21 @@ export default function RemotePage() {
           changed = true
           continue
         }
-        const item = queueItems.find((x) => x.id === id)
+        const item = scheduleStripItems.find((x) => x.id === id)
         if (
-          item?.status === 'completed' &&
+          (item?.status === 'completed' || item?.status === 'failed') &&
           !completedSessionOverlapsTonightStripWindow(item, windowStartMs, windowEndMs, prev)
         ) {
           changed = true
           continue
+        }
+        if (item?.status === 'failed' && item.failedAt) {
+          const failMs = Date.parse(item.failedAt)
+          if (Number.isFinite(failMs) && failMs > placement.startMs && failMs < placement.endMs) {
+            next[id] = { startMs: placement.startMs, endMs: failMs }
+            changed = true
+            continue
+          }
         }
         next[id] = placement
       }
@@ -1829,9 +2053,25 @@ export default function RemotePage() {
         }
       }
 
+      for (const [id, placement] of Object.entries(next)) {
+        const item = scheduleStripItems.find((x) => x.id === id)
+        if (!item) continue
+        if (item.status !== 'in_progress' && item.status !== 'completed' && item.status !== 'failed') continue
+        const frozen = serverScheduleBarForNight(item, tonightNightKey)
+        if (frozen) continue
+        void persistScheduleBarPlacement(id, tonightNightKey, placement.startMs, placement.endMs)
+      }
+
       return changed ? next : prev
     })
-  }, [queueItems, sessionSchedulePlan.newlyLocked, tonightSchedule.start, tonightSchedule.end])
+  }, [
+    scheduleStripItems,
+    sessionSchedulePlan.newlyLocked,
+    tonightSchedule.start,
+    tonightSchedule.end,
+    tonightNightKey,
+    persistScheduleBarPlacement,
+  ])
 
   const sessionScheduleBlocks = useMemo(() => {
     const baseBlocks = [...sessionSchedulePlan.blocks]
@@ -1863,10 +2103,32 @@ export default function RemotePage() {
 
     return baseBlocks
   }, [sessionSchedulePlan.blocks, tonightSchedule])
-  const terminalSessionDetail = useMemo(
-    () => queueItems.find((item) => item.id === terminalSessionId) ?? null,
-    [queueItems, terminalSessionId]
-  )
+  const terminalSessionDetail = useMemo(() => {
+    if (!terminalSessionId) return null
+    const direct = queueItems.find((item) => item.id === terminalSessionId)
+    if (direct) return direct
+    for (const item of queueItems) {
+      if (!item.nights) continue
+      const night = item.nights.find((n) => n.id === terminalSessionId)
+      if (!night) continue
+      return {
+        ...item,
+        id: night.id,
+        target: `${item.target} — Session ${night.nightIndex}`,
+        status:
+          night.status === 'in_progress'
+            ? 'in_progress'
+            : night.status === 'completed'
+              ? 'completed'
+              : night.status === 'failed'
+                ? 'failed'
+                : night.status,
+        filterPlans: night.filterPlans ?? item.filterPlans,
+        estimatedDurationSeconds: night.estimatedDurationSeconds ?? item.estimatedDurationSeconds,
+      }
+    }
+    return null
+  }, [queueItems, terminalSessionId])
 
   useEffect(() => {
     if (!sessionListNeedsLivePoll) return
@@ -1876,9 +2138,20 @@ export default function RemotePage() {
     return () => window.clearInterval(id)
   }, [sessionListNeedsLivePoll, refreshQueue])
 
+  const resolveSessionPassword = useCallback(
+    (sessionId: string): string => {
+      const direct = sessionPasswords[sessionId]
+      if (direct) return direct
+      const nightSub = parseProjectNightSubId(sessionId)
+      if (nightSub) return sessionPasswords[nightSub.projectId] ?? ''
+      return ''
+    },
+    [sessionPasswords]
+  )
+
   const loadTerminalProgress = useCallback(
     async (id: string, passwordOverride?: string) => {
-      const password = passwordOverride ?? sessionPasswords[id] ?? ''
+      const password = passwordOverride ?? resolveSessionPassword(id)
       if (!password) {
         setTerminalError('Session password required.')
         setTerminalLoading(false)
@@ -1903,12 +2176,12 @@ export default function RemotePage() {
         setTerminalLoading(false)
       }
     },
-    [refreshQueue, sessionPasswords]
+    [refreshQueue, resolveSessionPassword]
   )
 
   const loadTerminalPreview = useCallback(
     async (id: string, passwordOverride?: string) => {
-      const password = passwordOverride ?? sessionPasswords[id] ?? ''
+      const password = passwordOverride ?? resolveSessionPassword(id)
       if (!password) return
       try {
         const res = await fetch(
@@ -1953,7 +2226,7 @@ export default function RemotePage() {
         setTerminalPreviewError('Preview unavailable.')
       }
     },
-    [sessionPasswords]
+    [resolveSessionPassword]
   )
 
   useEffect(() => {
@@ -1965,13 +2238,14 @@ export default function RemotePage() {
     setTerminalPreviewError(null)
     setTerminalPreviewUpdatedAt(null)
     terminalPreviewLastFingerprintRef.current = null
-    void loadTerminalProgress(terminalSessionId, sessionPasswords[terminalSessionId])
-    void loadTerminalPreview(terminalSessionId, sessionPasswords[terminalSessionId])
-  }, [terminalSessionId, loadTerminalPreview, loadTerminalProgress, sessionPasswords])
+    const password = resolveSessionPassword(terminalSessionId)
+    void loadTerminalProgress(terminalSessionId, password)
+    void loadTerminalPreview(terminalSessionId, password)
+  }, [terminalSessionId, loadTerminalPreview, loadTerminalProgress, resolveSessionPassword])
 
   useEffect(() => {
     if (!terminalSessionId) return
-    const password = sessionPasswords[terminalSessionId] ?? ''
+    const password = resolveSessionPassword(terminalSessionId)
     if (!password) return
 
     const params = new URLSearchParams({ password })
@@ -1997,11 +2271,11 @@ export default function RemotePage() {
     return () => {
       source.close()
     }
-  }, [terminalSessionId, loadTerminalPreview, sessionPasswords])
+  }, [terminalSessionId, loadTerminalPreview, resolveSessionPassword])
 
   useEffect(() => {
     if (!terminalSessionId) return
-    const password = sessionPasswords[terminalSessionId] ?? ''
+    const password = resolveSessionPassword(terminalSessionId)
     if (!password) return
 
     const params = new URLSearchParams({ password })
@@ -2044,7 +2318,7 @@ export default function RemotePage() {
     return () => {
       source.close()
     }
-  }, [terminalSessionId, refreshQueue, sessionPasswords])
+  }, [terminalSessionId, refreshQueue, resolveSessionPassword])
 
   useEffect(() => {
     terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -2159,6 +2433,7 @@ export default function RemotePage() {
         outputMode,
         estimatedDurationSeconds,
         sessionType,
+        ...(sessionType === 'dso' && projectMode ? { projectMode: true } : {}),
       }),
     })
     const data = await res.json().catch(() => ({}))
@@ -2182,6 +2457,7 @@ export default function RemotePage() {
     setSessionPassword('')
     setOutputMode('raw_zip')
     setSessionType('dso')
+    setProjectMode(false)
     setVariableStarBlockHours(1)
     setVariableStarPreviewStar(null)
     setVariableStarLastFoundName(null)
@@ -2522,7 +2798,8 @@ export default function RemotePage() {
               <p className="text-sm text-red-600 dark:text-red-400">{statusLoadError}</p>
             )}
             <form onSubmit={handleSubmit} className="boxed-fields grid gap-4 sm:grid-cols-2">
-          <div className="sm:col-span-2 space-y-2">
+          <div className="sm:col-span-2 flex flex-wrap items-start gap-x-10 gap-y-4">
+            <div className="space-y-2 min-w-0">
             <span className="text-sm font-medium text-white">Session Type</span>
             <div className="flex flex-wrap gap-2">
               <button
@@ -2588,13 +2865,45 @@ export default function RemotePage() {
                 Variable Star Imaging
               </button>
             </div>
-            {sessionType === 'variable_star' && variableStarCatalogLoading && (
-              <p className="text-xs text-gray-400">Loading variable star catalog…</p>
-            )}
-            {sessionType === 'variable_star' && variableStarCatalogError && !variableStarCatalogLoading && (
-              <p className="text-xs text-red-400">{variableStarCatalogError}</p>
+            </div>
+            {sessionType === 'dso' && (
+              <div className="space-y-2">
+                <span className="text-sm font-medium text-white">Project Mode</span>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    aria-pressed={!projectMode}
+                    onClick={() => setProjectMode(false)}
+                    className={`rounded-full border px-4 py-2 text-sm font-medium ${
+                      !projectMode
+                        ? 'border-white/60 bg-[#151616] text-white'
+                        : 'border-gray-300 dark:border-gray-600 bg-[#151616] text-gray-300 hover:text-white'
+                    }`}
+                  >
+                    Off
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={projectMode}
+                    onClick={() => setProjectMode(true)}
+                    className={`rounded-full border px-4 py-2 text-sm font-medium ${
+                      projectMode
+                        ? 'border-white/60 bg-[#151616] text-white'
+                        : 'border-gray-300 dark:border-gray-600 bg-[#151616] text-gray-300 hover:text-white'
+                    }`}
+                  >
+                    On
+                  </button>
+                </div>
+              </div>
             )}
           </div>
+          {sessionType === 'variable_star' && variableStarCatalogLoading && (
+            <p className="sm:col-span-2 text-xs text-gray-400">Loading variable star catalog…</p>
+          )}
+          {sessionType === 'variable_star' && variableStarCatalogError && !variableStarCatalogLoading && (
+            <p className="sm:col-span-2 text-xs text-red-400">{variableStarCatalogError}</p>
+          )}
           <label className="sm:col-span-2 block space-y-1">
             <span className="text-sm font-medium text-white">Session Name *</span>
             <input
@@ -3234,18 +3543,24 @@ export default function RemotePage() {
                   <p className="text-center text-[10px] leading-4 text-white">{marker.label}</p>
                 </div>
               ))}
-              {sessionScheduleBlocks.map((block, idx) => (
-                <div
-                  key={`session-${idx}`}
-                  className="absolute left-[66.666%] right-0 rounded-md border border-white/25 bg-[#151616] px-2 py-0.5 flex items-center justify-center overflow-hidden"
-                  style={{
-                    top: `${block.topPct}%`,
-                    height: `${block.heightPct}%`,
-                  }}
-                >
-                  <p className="text-center text-[10px] leading-4 text-white">{block.label}</p>
-                </div>
-              ))}
+              {sessionScheduleBlocks.map((block, idx) => {
+                const blockSession = scheduleStripItems.find((x) => x.id === block.id)
+                const isFailed = blockSession?.status === 'failed'
+                return (
+                  <div
+                    key={`session-${idx}`}
+                    className={`absolute left-[66.666%] right-0 rounded-md border px-2 py-0.5 flex items-center justify-center overflow-hidden ${
+                      isFailed ? 'border-red-300/60 bg-[#3a1c1c]' : 'border-white/25 bg-[#151616]'
+                    }`}
+                    style={{
+                      top: `${block.topPct}%`,
+                      height: `${block.heightPct}%`,
+                    }}
+                  >
+                    <p className="text-center text-[10px] leading-4 text-white">{block.label}</p>
+                  </div>
+                )
+              })}
               {tonightSchedule.adminClosedBlocks.map((block) => (
                 <div
                   key={`admin-closed-${block.id}`}
@@ -3290,13 +3605,14 @@ export default function RemotePage() {
               {queueItems.map((item) => {
                 const displayStatus = item.status === 'claimed' ? 'in_progress' : item.status
                 const sessionTypeLabel = item.sessionType === 'variable_star' ? 'Variable Star' : 'Deep Sky Object'
+                const projectLabel = item.projectMode ? ' · Project Mode' : ''
                 return (
                 <li
                   key={item.id}
                   className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2 text-sm"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="font-medium text-white">{`${item.target} | ${sessionTypeLabel}`}</span>
+                    <span className="font-medium text-white">{`${item.target} | ${sessionTypeLabel}${projectLabel}`}</span>
                     <span className={`text-xs font-semibold uppercase ${queueStatusBadgeClass(displayStatus)}`}>
                       {queueStatusLabel(displayStatus)}
                     </span>
@@ -3319,6 +3635,13 @@ export default function RemotePage() {
                     <button
                       type="button"
                       onClick={() => {
+                        if (item.projectMode) {
+                          setAuthModalSessionId(item.id)
+                          setAuthModalAction('project_progress')
+                          setAuthError(null)
+                          setAuthPassword(sessionPasswords[item.id] ?? '')
+                          return
+                        }
                         setAuthModalSessionId(item.id)
                         setAuthModalAction('progress')
                         setAuthError(null)
@@ -3410,17 +3733,29 @@ export default function RemotePage() {
                           ? 'Waiting For Observatory Signal.'
                           : terminalQueueStatus === 'completed'
                             ? 'Session completed. No further live updates.'
-                            : 'Waiting for observatory POSTs…'}
+                            : terminalQueueStatus === 'failed'
+                              ? 'Session failed. No further live updates.'
+                              : 'Waiting for observatory POSTs…'}
                       </p>
                     </div>
                   ) : (
                     <div className="min-h-0 flex-1 overflow-auto p-3 font-mono text-xs leading-relaxed">
-                      {terminalLines.map((line, i) => (
-                        <div key={`${line.at}-${i}-${line.text.slice(0, 24)}`} className="whitespace-pre-wrap break-words border-l-2 border-green-700/40 pl-2 mb-2">
-                          <span className="text-gray-500">[{new Date(line.at).toLocaleTimeString()}]</span>{' '}
-                          <span className="text-green-400">{line.text}</span>
-                        </div>
-                      ))}
+                      {terminalLines.map((line, i) => {
+                        const failedLine = isSessionFailedTerminalLine(line.text)
+                        return (
+                          <div
+                            key={`${line.at}-${i}-${line.text.slice(0, 24)}`}
+                            className={`whitespace-pre-wrap break-words border-l-2 pl-2 mb-2 ${
+                              failedLine ? 'border-red-600/60' : 'border-green-700/40'
+                            }`}
+                          >
+                            <span className="text-gray-500">[{new Date(line.at).toLocaleTimeString()}]</span>{' '}
+                            <span className={failedLine ? 'text-red-400 font-semibold' : 'text-green-400'}>
+                              {line.text}
+                            </span>
+                          </div>
+                        )
+                      })}
                       <div ref={terminalEndRef} />
                     </div>
                   )}
@@ -3480,6 +3815,81 @@ export default function RemotePage() {
         </div>
       )}
 
+      {nightPickerProjectId && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div
+            role="dialog"
+            aria-labelledby="night-picker-title"
+            className="w-full max-w-md rounded-xl bg-[#09090a] border border-gray-700 p-6 space-y-4"
+          >
+            <h2 id="night-picker-title" className="text-lg font-semibold text-white">
+              Select session
+            </h2>
+            {(() => {
+              const pickerNights = (
+                queueItems.find((x) => x.id === nightPickerProjectId)?.nights ?? []
+              ).filter(
+                (n) =>
+                  n.status === 'scheduled' ||
+                  n.status === 'in_progress' ||
+                  n.status === 'completed'
+              )
+              if (pickerNights.length === 0) {
+                return (
+                  <p className="text-sm text-gray-400 py-2">No Session Scheduled</p>
+                )
+              }
+              return (
+                <ul className="space-y-2 max-h-64 overflow-y-auto">
+                  {pickerNights.map((night) => (
+                    <li key={night.id}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const projectId = nightPickerProjectId
+                          const password = projectId ? sessionPasswords[projectId] ?? '' : ''
+                          setNightPickerProjectId(null)
+                          if (!password) {
+                            setAuthModalSessionId(projectId)
+                            setAuthModalAction('project_progress')
+                            setAuthError('Session password required.')
+                            return
+                          }
+                          setSessionPasswords((prev) => ({
+                            ...prev,
+                            [night.id]: password,
+                            ...(projectId ? { [projectId]: password } : {}),
+                          }))
+                          setTerminalSessionId(night.id)
+                        }}
+                        className="w-full rounded-lg border border-gray-600 px-3 py-2 text-left text-sm text-white hover:bg-[#151616]"
+                      >
+                        <span className="font-medium">Session {night.nightIndex}</span>
+                        <span className="text-gray-400"> · {night.nightKey}</span>
+                        <span
+                          className={`ml-2 text-xs font-semibold uppercase ${queueStatusBadgeClass(
+                            night.status === 'in_progress' ? 'in_progress' : night.status
+                          )}`}
+                        >
+                          {queueStatusLabel(night.status)}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )
+            })()}
+            <button
+              type="button"
+              onClick={() => setNightPickerProjectId(null)}
+              className="w-full rounded-full border border-gray-600 px-4 py-2 text-sm text-gray-300 hover:text-white"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {authModalSessionId && authModalAction && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
           <form
@@ -3496,6 +3906,22 @@ export default function RemotePage() {
               setAuthError(null)
               try {
                 setSessionPasswords((prev) => ({ ...prev, [authModalSessionId]: password }))
+                if (authModalAction === 'project_progress') {
+                  const res = await fetch(
+                    `/api/imaging/queue/${encodeURIComponent(authModalSessionId)}/progress`,
+                    { headers: { 'x-session-password': password } }
+                  )
+                  const data = await res.json().catch(() => ({}))
+                  if (!res.ok || data?.ok !== true) {
+                    setAuthError(typeof data.error === 'string' ? data.error : 'Invalid session password.')
+                    return
+                  }
+                  setNightPickerProjectId(authModalSessionId)
+                  setAuthModalSessionId(null)
+                  setAuthModalAction(null)
+                  setAuthPassword('')
+                  return
+                }
                 if (authModalAction === 'progress') {
                   setTerminalSessionId(authModalSessionId)
                   await loadTerminalProgress(authModalSessionId, password)
@@ -3538,17 +3964,19 @@ export default function RemotePage() {
             }}
           >
             <h2 className="text-lg font-semibold text-white">
-              {authModalAction === 'progress'
-                ? 'Check Session Progress'
-                : authModalAction === 'edit'
-                  ? 'Edit Session'
-                  : 'Download Session File'}
+              {authModalAction === 'project_progress'
+                ? 'Check Project Progress'
+                : authModalAction === 'progress'
+                  ? 'Check Session Progress'
+                  : authModalAction === 'edit'
+                    ? 'Edit Session'
+                    : 'Download Session File'}
             </h2>
-            <p className="text-sm text-gray-400">
-              {authModalAction === 'edit'
-                ? 'Enter session password or admin password to edit this pending session.'
-                : 'Enter this session password or admin password to continue.'}
-            </p>
+            {authModalAction === 'edit' && (
+              <p className="text-sm text-gray-400">
+                Enter session password or admin password to edit this pending session.
+              </p>
+            )}
             <label className="block space-y-1">
               <span className="text-sm font-medium text-white">Session/Admin Password</span>
               <input

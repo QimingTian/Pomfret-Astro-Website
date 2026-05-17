@@ -1,3 +1,4 @@
+import { getProjectById, getProjectByNightSubId } from '@/lib/imaging-project-store'
 import { getBoardEntry } from '@/lib/imaging-session-board'
 import { getRequestById } from '@/lib/imaging-queue-store'
 import { verifySessionPasswordHash } from '@/lib/session-password'
@@ -8,13 +9,19 @@ export async function validateSessionPassword(
 ): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
   const req = await getRequestById(sessionId)
   const board = await getBoardEntry(sessionId)
-  const hash = req?.sessionPasswordHash ?? board?.sessionPasswordHash ?? null
+  const project = await getProjectById(sessionId)
+  const nightMatch = await getProjectByNightSubId(sessionId)
+  const hash =
+    req?.sessionPasswordHash ??
+    board?.sessionPasswordHash ??
+    project?.sessionPasswordHash ??
+    nightMatch?.project.sessionPasswordHash ??
+    null
 
-  if (!req && !board) {
+  if (!req && !board && !project && !nightMatch) {
     return { ok: false, status: 404, error: 'Session not found' }
   }
   if (!hash) {
-    // Backward compatibility for sessions created before password support.
     return { ok: true }
   }
   if (!providedPassword || providedPassword.trim() === '') {

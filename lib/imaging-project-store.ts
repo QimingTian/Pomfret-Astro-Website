@@ -573,3 +573,45 @@ export function tonightDurationSecondsFromPlans(plans: FilterPlanRow[]): number 
   if (plans.length === 0) return 0
   return plans.reduce((sum, p) => sum + p.count * p.exposureSeconds, 0) + 15 * 60
 }
+
+/** Tonight sub-session windows used to block other queue rows (not full multi-night estimate). */
+export type ProjectSubSessionOccupancy = {
+  projectId: string
+  target: string
+  nightIndex: number
+  startMs: number
+  endMs: number
+}
+
+export function collectTonightProjectSubSessionOccupancy(
+  projects: ImagingProject[],
+  nightKey: string,
+  windowStartMs: number,
+  deadlineMs: number
+): ProjectSubSessionOccupancy[] {
+  const out: ProjectSubSessionOccupancy[] = []
+  for (const project of projects) {
+    if (project.status !== 'in_progress' && project.status !== 'scheduled') continue
+    for (const night of project.nights) {
+      if (night.nightKey !== nightKey) continue
+      if (night.status !== 'scheduled' && night.status !== 'in_progress') continue
+      if (!night.plannedStartIso) continue
+      const startMs = Date.parse(night.plannedStartIso)
+      if (!Number.isFinite(startMs)) continue
+      const durationSeconds = tonightDurationSecondsFromPlans(night.filterPlansTonight)
+      if (durationSeconds <= 0) continue
+      const endMs = startMs + durationSeconds * 1000
+      const overlapStart = Math.max(startMs, windowStartMs)
+      const overlapEnd = Math.min(endMs, deadlineMs)
+      if (overlapEnd <= overlapStart) continue
+      out.push({
+        projectId: project.id,
+        target: project.target,
+        nightIndex: night.nightIndex,
+        startMs: overlapStart,
+        endMs: overlapEnd,
+      })
+    }
+  }
+  return out.sort((a, b) => a.startMs - b.startMs)
+}

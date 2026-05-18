@@ -1,7 +1,10 @@
 import { subtractOccupiedFromFree } from '@/lib/imaging-queue-free-intervals'
+import type { ProjectSubSessionOccupancy } from '@/lib/imaging-project-store'
 import { altitudeAllowedCoverageMs, firstAltitudeAllowedTimeMs, isAltitudeAllowed } from '@/lib/target-altitude'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import { weatherPermittedCoverageMs, weatherCoverageOk, type TimeInterval } from '@/lib/tonight-weather-gate'
+
+export type { ProjectSubSessionOccupancy }
 
 export type ScheduleInsight = {
   status: 'scheduled' | 'unscheduled'
@@ -30,6 +33,7 @@ type FreeInterval = { startMs: number; endMs: number }
 type CommittedOccupancy = {
   target: string
   projectMode: boolean
+  projectSessionIndex?: number
   startMs: number
   endMs: number
   durationSeconds: number
@@ -113,9 +117,13 @@ function buildUnscheduledReasons(input: {
     const blockLabel = formatDurationMs(block.endMs - block.startMs)
     const startIso = new Date(block.startMs).toISOString()
     const endIso = new Date(block.endMs).toISOString()
-    if (block.projectMode) {
+    if (block.projectMode && block.projectSessionIndex != null) {
       reasons.push(
-        `Earlier scheduled project "${block.target}" blocks ${startIso}–${endIso} (~${blockLabel}) using full multi-night duration (${formatDurationMs(block.durationSeconds * 1000)} estimated); timeline sub-sessions may end sooner.`
+        `Earlier scheduled project "${block.target}" Session ${block.projectSessionIndex} blocks ${startIso}–${endIso} (~${blockLabel}).`
+      )
+    } else if (block.projectMode) {
+      reasons.push(
+        `Earlier scheduled project "${block.target}" blocks ${startIso}–${endIso} (~${blockLabel}).`
       )
     } else {
       reasons.push(
@@ -188,6 +196,8 @@ function estimateDurationSeconds(
 export type ComputeScheduleInsightOptions = {
   /** Time reserved for an in-progress project target while it is ≥30° (other sessions may not use). */
   reservedIntervals?: Array<{ startMs: number; endMs: number }>
+  /** Tonight's project sub-sessions (actual start + duration), not full multi-night queue estimate. */
+  projectSubSessions?: ProjectSubSessionOccupancy[]
 }
 
 export function computeScheduleInsight(
@@ -210,8 +220,12 @@ export function computeScheduleInsight(
   }
   const ordered = [...pending].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
   const queueIndex = ordered.findIndex((r) => r.id === targetId)
+  const projectSubSessions = options?.projectSubSessions ?? []
   const committedEarlierBeforeTarget = ordered.reduce((acc, r, i) => {
     if (i >= queueIndex || queueIndex < 0) return acc
+    if (r.projectMode === true) {
+      return projectSubSessions.some((b) => b.projectId === r.id) ? acc + 1 : acc
+    }
     if (r.status !== 'scheduled' || r.plannedStartIso == null) return acc
     const t = Date.parse(r.plannedStartIso)
     if (!Number.isFinite(t)) return acc
@@ -219,8 +233,28 @@ export function computeScheduleInsight(
   }, 0)
 
   const committedOccupancy: CommittedOccupancy[] = []
+  for (const block of projectSubSessions) {
+    const projectQueueIndex = ordered.findIndex((r) => r.id === block.projectId)
+    if (queueIndex >= 0 && projectQueueIndex >= 0 && projectQueueIndex < queueIndex) {
+      const durationSeconds = Math.max(60, Math.round((block.endMs - block.startMs) / 1000))
+      committedOccupancy.push({
+        target: block.target,
+        projectMode: true,
+        projectSessionIndex: block.nightIndex,
+        startMs: block.startMs,
+        endMs: block.endMs,
+        durationSeconds,
+      })
+    }
+    freeIntervals = subtractOccupiedFromFree(freeIntervals, {
+      startMs: block.startMs,
+      endMs: block.endMs,
+    })
+  }
+
   for (let i = 0; i < ordered.length; i += 1) {
     const r = ordered[i]!
+    if (r.projectMode === true) continue
     if (r.status !== 'scheduled' || r.plannedStartIso == null) continue
     const pStart = Date.parse(r.plannedStartIso)
     if (!Number.isFinite(pStart)) continue
@@ -232,7 +266,7 @@ export function computeScheduleInsight(
     if (queueIndex < 0 || i < queueIndex) {
       committedOccupancy.push({
         target: r.target?.trim() || r.id,
-        projectMode: r.projectMode === true,
+        projectMode: false,
         startMs: overlapStart,
         endMs: overlapEnd,
         durationSeconds,
@@ -245,6 +279,7 @@ export function computeScheduleInsight(
 
   for (let reqIndex = 0; reqIndex < ordered.length; reqIndex += 1) {
     const req = ordered[reqIndex]!
+    if (req.projectMode === true) continue
     if (
       req.status === 'scheduled' &&
       req.plannedStartIso != null &&

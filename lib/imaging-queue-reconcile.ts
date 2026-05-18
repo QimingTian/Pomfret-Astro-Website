@@ -1,8 +1,13 @@
 import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { getScheduleReservedIntervalsForActiveProject } from '@/lib/imaging-project-altitude-hold'
 import { reconcileProjectSchedules } from '@/lib/imaging-project-planner'
+import {
+  collectTonightProjectSubSessionOccupancy,
+  listProjects,
+} from '@/lib/imaging-project-store'
 import { computeScheduleInsight } from '@/lib/imaging-queue-schedule-insight'
 import { listPending, patchRequestScheduleInsight, type ImagingRequest } from '@/lib/imaging-queue-store'
+import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import { getTonightWeatherPermittedIntervals, type TimeInterval } from '@/lib/tonight-weather-gate'
 
@@ -53,6 +58,13 @@ export async function reconcilePendingScheduleStatus(): Promise<void> {
     const orderedBySubmission = [...pending].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
     const permitted = weatherIntervals.permittedIntervals as TimeInterval[]
     const reservedIntervals = await getScheduleReservedIntervalsForActiveProject(now)
+    const strip = getTonightScheduleStrip(now)
+    const projectSubSessions = collectTonightProjectSubSessionOccupancy(
+      await listProjects(),
+      strip.nightKey,
+      window.nauticalDuskUtc.getTime(),
+      window.nauticalDawnUtc.getTime()
+    )
     let working: ImagingRequest[] = pending.map((p) => ({ ...p }))
 
     for (const r of orderedBySubmission) {
@@ -63,7 +75,10 @@ export async function reconcilePendingScheduleStatus(): Promise<void> {
       const slice = working.map((p) =>
         p.id === r.id ? { ...p, status: 'pending' as const, plannedStartIso: null } : p
       )
-      const insight = computeScheduleInsight(slice, r.id, permitted, { reservedIntervals })
+      const insight = computeScheduleInsight(slice, r.id, permitted, {
+        reservedIntervals,
+        projectSubSessions,
+      })
       nextById.set(r.id, insight)
 
       const idx = working.findIndex((w) => w.id === r.id)

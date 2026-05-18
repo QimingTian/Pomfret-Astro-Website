@@ -14,7 +14,13 @@ import {
   toPublicImagingRequest,
   type CreateImagingInput,
 } from '@/lib/imaging-queue-store'
-import { createImagingProject, getProjectById } from '@/lib/imaging-project-store'
+import {
+  collectTonightProjectSubSessionOccupancy,
+  createImagingProject,
+  getProjectById,
+  listProjects,
+} from '@/lib/imaging-project-store'
+import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { planAndScheduleProjectTonight } from '@/lib/imaging-project-planner'
 import { getScheduleReservedIntervalsForActiveProject } from '@/lib/imaging-project-altitude-hold'
 import { computeScheduleInsight } from '@/lib/imaging-queue-schedule-insight'
@@ -234,14 +240,27 @@ export async function POST(request: NextRequest) {
   }
 
   if (!insight) {
+    const now = new Date()
+    const window = getTonightSchedulingWindow(now)
     const reservedIntervals =
       weatherIntervals.status === 'ok'
-        ? await getScheduleReservedIntervalsForActiveProject()
+        ? await getScheduleReservedIntervalsForActiveProject(now)
+        : []
+    const strip = getTonightScheduleStrip(now)
+    const projectSubSessions =
+      weatherIntervals.status === 'ok'
+        ? collectTonightProjectSubSessionOccupancy(
+            await listProjects(),
+            strip.nightKey,
+            window.nauticalDuskUtc.getTime(),
+            window.nauticalDawnUtc.getTime()
+          )
         : []
     insight =
       weatherIntervals.status === 'ok'
         ? computeScheduleInsight(pendingNow, result.id, weatherIntervals.permittedIntervals, {
             reservedIntervals,
+            projectSubSessions,
           })
         : {
             status: 'unscheduled' as const,

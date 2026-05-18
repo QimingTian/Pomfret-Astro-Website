@@ -13,6 +13,8 @@ export type ScheduleInsight = {
 export type SchedulePendingRow = {
   id: string
   createdAt: string
+  target?: string
+  projectMode?: boolean
   raHours?: number | null
   decDeg?: number | null
   exposureSeconds: number
@@ -21,6 +23,146 @@ export type SchedulePendingRow = {
   estimatedDurationSeconds?: number
   status?: string
   plannedStartIso?: string | null
+}
+
+type FreeInterval = { startMs: number; endMs: number }
+
+type CommittedOccupancy = {
+  target: string
+  projectMode: boolean
+  startMs: number
+  endMs: number
+  durationSeconds: number
+}
+
+type SimulatedPlacement = {
+  target: string
+  startMs: number
+  endMs: number
+}
+
+function formatDurationMs(ms: number): string {
+  const totalMin = Math.max(0, Math.round(ms / 60_000))
+  const h = Math.floor(totalMin / 60)
+  const m = totalMin % 60
+  if (h > 0 && m > 0) return `${h}h ${m}m`
+  if (h > 0) return `${h}h`
+  return `${m}m`
+}
+
+function summarizeFreeIntervals(intervals: FreeInterval[]): {
+  count: number
+  totalMs: number
+  longestMs: number
+} {
+  let totalMs = 0
+  let longestMs = 0
+  for (const interval of intervals) {
+    const len = Math.max(0, interval.endMs - interval.startMs)
+    totalMs += len
+    if (len > longestMs) longestMs = len
+  }
+  return { count: intervals.length, totalMs, longestMs }
+}
+
+function clipIntervalMs(interval: FreeInterval, windowStartMs: number, deadlineMs: number): number {
+  const startMs = Math.max(interval.startMs, windowStartMs)
+  const endMs = Math.min(interval.endMs, deadlineMs)
+  return Math.max(0, endMs - startMs)
+}
+
+function buildUnscheduledReasons(input: {
+  durationMs: number
+  createdMs: number
+  deadlineMs: number
+  queueIndex: number
+  committedEarlierBeforeTarget: number
+  freeIntervals: FreeInterval[]
+  committedOccupancy: CommittedOccupancy[]
+  simulatedPlacements: SimulatedPlacement[]
+  reservedMsTonight: number
+  failedByAltitudeRise: number
+  failedByIntervalLength: number
+  failedByAltitudeCoverage: number
+  failedByWeatherCoverage: number
+  hasRaDec: boolean
+}): string[] {
+  const reasons: string[] = []
+  const requiredLabel = formatDurationMs(input.durationMs)
+  const free = summarizeFreeIntervals(input.freeIntervals)
+
+  if (input.freeIntervals.length === 0) {
+    reasons.push('No free scheduling window remains after earlier commitments and reservations.')
+  } else if (free.longestMs < input.durationMs) {
+    reasons.push(
+      `Session needs ${requiredLabel} contiguous time; longest open slot tonight is ${formatDurationMs(free.longestMs)} (${free.count} gap${free.count === 1 ? '' : 's'}, ${formatDurationMs(free.totalMs)} total free).`
+    )
+  } else {
+    reasons.push(
+      `Session needs ${requiredLabel}; ${formatDurationMs(free.totalMs)} free across ${free.count} slot${free.count === 1 ? '' : 's'} but no start time satisfies altitude and weather rules.`
+    )
+  }
+
+  if (input.reservedMsTonight > 0) {
+    reasons.push(
+      `${formatDurationMs(input.reservedMsTonight)} tonight is reserved while an in-progress multi-night project target is above 30° altitude.`
+    )
+  }
+
+  for (const block of input.committedOccupancy) {
+    const blockLabel = formatDurationMs(block.endMs - block.startMs)
+    const startIso = new Date(block.startMs).toISOString()
+    const endIso = new Date(block.endMs).toISOString()
+    if (block.projectMode) {
+      reasons.push(
+        `Earlier scheduled project "${block.target}" blocks ${startIso}–${endIso} (~${blockLabel}) using full multi-night duration (${formatDurationMs(block.durationSeconds * 1000)} estimated); timeline sub-sessions may end sooner.`
+      )
+    } else {
+      reasons.push(
+        `Earlier scheduled session "${block.target}" blocks ${startIso}–${endIso} (~${blockLabel}).`
+      )
+    }
+  }
+
+  for (const placed of input.simulatedPlacements) {
+    reasons.push(
+      `Earlier pending "${placed.target}" placed at ${new Date(placed.startMs).toISOString()}–${new Date(placed.endMs).toISOString()} (${formatDurationMs(placed.endMs - placed.startMs)}).`
+    )
+  }
+
+  if (input.createdMs >= input.deadlineMs) {
+    reasons.push('Submitted after nautical-dawn scheduling cutoff.')
+  }
+  if (input.failedByAltitudeRise > 0) {
+    reasons.push('Target does not rise above 30° in any remaining free interval.')
+  }
+  if (input.failedByAltitudeCoverage > 0) {
+    reasons.push('Target altitude coverage is below 80% for required duration in remaining free intervals.')
+  }
+  if (input.failedByIntervalLength > 0 && input.freeIntervals.length > 0) {
+    reasons.push('Every remaining free interval is shorter than session duration before nautical dawn.')
+  }
+  if (input.failedByWeatherCoverage > 0) {
+    reasons.push('No remaining slot has weather-permitted coverage >= 80% of session duration.')
+  }
+  if (!input.hasRaDec && input.failedByAltitudeRise === 0 && input.failedByAltitudeCoverage === 0) {
+    reasons.push('No RA/Dec on request; altitude rules not applied.')
+  }
+
+  if (input.queueIndex > 0) {
+    if (input.committedEarlierBeforeTarget > 0) {
+      reasons.push(
+        `Evaluated in queue order after ${input.committedEarlierBeforeTarget} earlier session(s) with a committed start time tonight.`
+      )
+    } else {
+      reasons.push(
+        `${input.queueIndex} earlier submission(s) were tried first; unscheduled earlier rows do not consume time.`
+      )
+    }
+  }
+
+  if (reasons.length === 0) reasons.push('No schedulable interval satisfies all constraints.')
+  return reasons
 }
 
 function estimateDurationSeconds(
@@ -59,10 +201,11 @@ export function computeScheduleInsight(
   const window = getTonightSchedulingWindow(now)
   const windowStartMs = window.nauticalDuskUtc.getTime()
   const deadlineMs = window.nauticalDawnUtc.getTime()
-  let freeIntervals: Array<{ startMs: number; endMs: number }> = [
-    { startMs: Math.max(nowMs, windowStartMs), endMs: deadlineMs },
-  ]
-  for (const occupied of options?.reservedIntervals ?? []) {
+  let freeIntervals: FreeInterval[] = [{ startMs: Math.max(nowMs, windowStartMs), endMs: deadlineMs }]
+  const reservedIntervals = options?.reservedIntervals ?? []
+  let reservedMsTonight = 0
+  for (const occupied of reservedIntervals) {
+    reservedMsTonight += clipIntervalMs(occupied, windowStartMs, deadlineMs)
     freeIntervals = subtractOccupiedFromFree(freeIntervals, occupied)
   }
   const ordered = [...pending].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
@@ -75,16 +218,30 @@ export function computeScheduleInsight(
     return acc + 1
   }, 0)
 
-  for (const r of ordered) {
+  const committedOccupancy: CommittedOccupancy[] = []
+  for (let i = 0; i < ordered.length; i += 1) {
+    const r = ordered[i]!
     if (r.status !== 'scheduled' || r.plannedStartIso == null) continue
     const pStart = Date.parse(r.plannedStartIso)
     if (!Number.isFinite(pStart)) continue
-    const pEnd = pStart + estimateDurationSeconds(r) * 1000
+    const durationSeconds = estimateDurationSeconds(r)
+    const pEnd = pStart + durationSeconds * 1000
     const overlapStart = Math.max(pStart, windowStartMs)
     const overlapEnd = Math.min(pEnd, deadlineMs)
     if (overlapEnd <= overlapStart) continue
+    if (queueIndex < 0 || i < queueIndex) {
+      committedOccupancy.push({
+        target: r.target?.trim() || r.id,
+        projectMode: r.projectMode === true,
+        startMs: overlapStart,
+        endMs: overlapEnd,
+        durationSeconds,
+      })
+    }
     freeIntervals = subtractOccupiedFromFree(freeIntervals, { startMs: overlapStart, endMs: overlapEnd })
   }
+
+  const simulatedPlacements: SimulatedPlacement[] = []
 
   for (let reqIndex = 0; reqIndex < ordered.length; reqIndex += 1) {
     const req = ordered[reqIndex]!
@@ -206,38 +363,26 @@ export function computeScheduleInsight(
 
     if (req.id === targetId) {
       if (!placement) {
-        const reasons: string[] = []
-        if (queueIndex > 0) {
-          if (committedEarlierBeforeTarget > 0) {
-            reasons.push(
-              `${committedEarlierBeforeTarget} earlier queued session(s) have a committed scheduled time and reduce the open window before this request.`
-            )
-          } else {
-            reasons.push(
-              `${queueIndex} earlier submission(s) in queue before yours. Sessions are tried in submission order; any that do not fit tonight are skipped without consuming time, so a later submission can still use the remaining window.`
-            )
-          }
+        return {
+          status: 'unscheduled',
+          plannedStartIso: null,
+          reasons: buildUnscheduledReasons({
+            durationMs,
+            createdMs,
+            deadlineMs,
+            queueIndex,
+            committedEarlierBeforeTarget,
+            freeIntervals,
+            committedOccupancy,
+            simulatedPlacements,
+            reservedMsTonight,
+            failedByAltitudeRise,
+            failedByIntervalLength,
+            failedByAltitudeCoverage,
+            failedByWeatherCoverage,
+            hasRaDec,
+          }),
         }
-        if (createdMs >= deadlineMs) reasons.push('Submitted after nautical-dawn scheduling cutoff.')
-        if (failedByAltitudeRise > 0) {
-          reasons.push('Target does not rise above 30° in available free intervals.')
-        }
-        if (failedByAltitudeCoverage > 0) {
-          reasons.push('Target altitude coverage is below 80% for required duration in available free intervals.')
-        }
-        if (failedByIntervalLength > 0) {
-          reasons.push('No free interval is long enough to fit session duration before nautical dawn.')
-        }
-        if ((options?.reservedIntervals?.length ?? 0) > 0 && failedByIntervalLength > 0) {
-          reasons.push(
-            'Part of tonight is reserved for an in-progress multi-night project while its target is above 30° altitude.'
-          )
-        }
-        if (failedByWeatherCoverage > 0) {
-          reasons.push('No interval has weather-permitted coverage >= 80% of session duration.')
-        }
-        if (reasons.length === 0) reasons.push('No schedulable interval satisfies all constraints.')
-        return { status: 'unscheduled', plannedStartIso: null, reasons }
       }
 
       const reasons: string[] = []
@@ -266,6 +411,13 @@ export function computeScheduleInsight(
     }
 
     if (!placement) continue
+    if (queueIndex >= 0 && reqIndex < queueIndex) {
+      simulatedPlacements.push({
+        target: req.target?.trim() || req.id,
+        startMs: placement.startMs,
+        endMs: placement.endMs,
+      })
+    }
     freeIntervals = subtractOccupiedFromFree(freeIntervals, placement)
   }
 

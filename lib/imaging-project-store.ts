@@ -1,5 +1,6 @@
 import { buildNinaSequenceJson } from '@/lib/build-nina-sequence-json'
 import { projectNightSubId } from '@/lib/imaging-project-ids'
+import { getRequestById } from '@/lib/imaging-queue-store'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 import type { ScheduleBarPlacement } from '@/lib/imaging-schedule-bar'
 
@@ -135,6 +136,12 @@ export async function getProjectByNightSubId(
   return undefined
 }
 
+/** Project still tied to an operator-visible session (queue row or on-board after NINA consume). */
+export async function isProjectVisibleToOperators(project: ImagingProject): Promise<boolean> {
+  if (project.onBoard) return true
+  return (await getRequestById(project.id)) != null
+}
+
 export async function getActiveInProgressProject(): Promise<ImagingProject | undefined> {
   const all = await readProjects()
   const active = all
@@ -147,14 +154,60 @@ export async function getActiveInProgressProject(): Promise<ImagingProject | und
   return active[0]
 }
 
+/** Remove imaging-project rows with no queue entry and not on board (e.g. after manual session delete). */
+export async function compactOrphanProjects(): Promise<string[]> {
+  const all = await readProjects()
+  const removedIds: string[] = []
+  const kept: ImagingProject[] = []
+  for (const project of all) {
+    if (await isProjectVisibleToOperators(project)) {
+      kept.push(project)
+      continue
+    }
+    removedIds.push(project.id)
+  }
+  if (removedIds.length > 0) await writeProjects(kept)
+  return removedIds
+}
+
+export async function deleteProjectById(id: string): Promise<boolean> {
+  const all = await readProjects()
+  const next = all.filter((p) => p.id !== id)
+  if (next.length === all.length) return false
+  await writeProjects(next)
+  return true
+}
+
 /** The one multi-night project allowed to plan sub-sessions; blocks all others until it completes or fails. */
 export async function getBlockingInProgressProject(
   exceptProjectId?: string
 ): Promise<ImagingProject | undefined> {
-  const active = await getActiveInProgressProject()
-  if (!active) return undefined
-  if (exceptProjectId && active.id === exceptProjectId) return undefined
-  return active
+  const all = await readProjects()
+  const candidates = all
+    .filter((p) => p.status === 'in_progress')
+    .sort((a, b) => {
+      if (a.onBoard && !b.onBoard) return -1
+      if (!a.onBoard && b.onBoard) return 1
+      return a.createdAt.localeCompare(b.createdAt)
+    })
+
+  for (const project of candidates) {
+    if (exceptProjectId && project.id === exceptProjectId) continue
+
+    if (!(await isProjectVisibleToOperators(project))) {
+      await deleteProjectById(project.id)
+      continue
+    }
+
+    if (remainingFramesTotal(project) <= 0) {
+      await patchProject(project.id, { status: 'completed' })
+      continue
+    }
+
+    return project
+  }
+
+  return undefined
 }
 
 export function projectSchedulingBlockedReason(blocker: ImagingProject): string {

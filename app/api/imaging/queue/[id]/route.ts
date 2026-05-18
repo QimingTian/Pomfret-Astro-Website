@@ -17,6 +17,7 @@ import {
   type CreateImagingInput,
   type ImagingRequestStatus,
 } from '@/lib/imaging-queue-store'
+import { deleteProjectById } from '@/lib/imaging-project-store'
 import { deleteR2ObjectForQueueId } from '@/lib/r2-session-download'
 
 export const runtime = 'nodejs'
@@ -191,6 +192,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
   await boardRemove(id)
   await deleteR2ObjectForQueueId(id)
   await removePreviewImage(id)
+  const projectRecordRemoved = await deleteProjectById(id)
 
   void appendAuditLog({
     kind: 'queue.deleted',
@@ -199,6 +201,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
       id,
       via: isAdmin ? 'admin_password' : 'session_password',
       source: isAdmin ? 'admin_manual' : 'user_manual',
+      ...(projectRecordRemoved ? { projectRecordRemoved: true } : {}),
     },
   })
 

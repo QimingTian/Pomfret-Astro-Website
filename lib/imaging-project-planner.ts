@@ -2,6 +2,7 @@ import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { projectNightSubId } from '@/lib/imaging-project-ids'
 import {
   buildNightNinaJson,
+  compactOrphanProjects,
   compactStaleProjectNights,
   getBlockingInProgressProject,
   getNextPendingProject,
@@ -880,6 +881,7 @@ export async function reconcileProjectSchedules(
   now = new Date()
 ): Promise<void> {
   await compactStaleProjectNights()
+  await compactOrphanProjects()
   let projects = await listProjects()
   const strip = getTonightScheduleStrip(now)
   const nightKey = strip.nightKey

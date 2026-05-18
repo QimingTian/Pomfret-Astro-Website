@@ -526,9 +526,9 @@ export function computeProjectTonightPlan(
 }
 
 function shouldRefreshTonightSubs(project: ImagingProject, nightKey: string): boolean {
-  if (hasInProgressSessionTonight(project, nightKey)) return false
   const tonight = project.nights.filter((n) => n.nightKey === nightKey)
   if (tonight.length === 0) return true
+  // Re-plan or clear `scheduled` subs when weather changes. in_progress/completed are kept by replaceScheduledSubsForNightKey.
   if (
     tonight.some(
       (n) => n.status === 'scheduled' || n.status === 'failed' || n.status === 'planned'
@@ -536,6 +536,7 @@ function shouldRefreshTonightSubs(project: ImagingProject, nightKey: string): bo
   ) {
     return true
   }
+  if (hasInProgressSessionTonight(project, nightKey)) return false
   if (
     tonight.every((n) => n.status === 'completed' || n.status === 'failed') &&
     remainingFramesTotal(project) > 0
@@ -543,6 +544,42 @@ function shouldRefreshTonightSubs(project: ImagingProject, nightKey: string): bo
     return true
   }
   return false
+}
+
+function subtractInProgressSubsTonight(
+  project: ImagingProject,
+  freeIntervals: Array<{ startMs: number; endMs: number }>,
+  nightKey: string
+): Array<{ startMs: number; endMs: number }> {
+  let free = freeIntervals
+  for (const n of project.nights) {
+    if (n.nightKey !== nightKey || n.status !== 'in_progress') continue
+    if (!n.plannedStartIso) continue
+    const startMs = Date.parse(n.plannedStartIso)
+    if (!Number.isFinite(startMs)) continue
+    const endMs = startMs + tonightDurationSecondsFromPlans(n.filterPlansTonight) * 1000
+    if (endMs <= startMs) continue
+    free = subtractOccupiedFromFree(free, { startMs, endMs })
+  }
+  return free
+}
+
+function hasScheduledSubsTonight(project: ImagingProject, nightKey: string): boolean {
+  return project.nights.some((n) => n.nightKey === nightKey && n.status === 'scheduled')
+}
+
+async function applyTonightPlansOrClearScheduled(
+  projectId: string,
+  nightKey: string,
+  plans: ProjectTonightPlan[]
+): Promise<void> {
+  if (plans.length > 0) {
+    await applyProjectTonightPlans(projectId, plans)
+    return
+  }
+  const project = await getProjectById(projectId)
+  if (!project || !hasScheduledSubsTonight(project, nightKey)) return
+  await replaceScheduledSubsForNightKey(projectId, nightKey, [])
 }
 
 export type ProjectScheduleInsight = {
@@ -850,7 +887,8 @@ async function reconcileOneProjectTonight(
   nightKey: string,
   now: Date
 ): Promise<ProjectTonightPlan[]> {
-  const plans = planTonightSubSessions(project, projectFree, weatherPermittedIntervals, now)
+  const plannerFree = subtractInProgressSubsTonight(project, projectFree, nightKey)
+  const plans = planTonightSubSessions(project, plannerFree, weatherPermittedIntervals, now)
   const insight =
     plans.length > 0
       ? {
@@ -868,8 +906,8 @@ async function reconcileOneProjectTonight(
 
   await patchRequestScheduleInsight(project.id, insight)
 
-  if (plans.length > 0 && shouldRefreshTonightSubs(project, nightKey)) {
-    await applyProjectTonightPlans(project.id, plans)
+  if (shouldRefreshTonightSubs(project, nightKey)) {
+    await applyTonightPlansOrClearScheduled(project.id, nightKey, plans)
   }
 
   return plans
@@ -899,9 +937,10 @@ export async function reconcileProjectSchedules(
 
   if (onBoard) {
     if (remainingFramesTotal(onBoard) > 0) {
-      const plans = planTonightSubSessions(onBoard, freeIntervals, weatherPermittedIntervals, now)
-      if (plans.length > 0 && shouldRefreshTonightSubs(onBoard, nightKey)) {
-        await applyProjectTonightPlans(onBoard.id, plans)
+      const plannerFree = subtractInProgressSubsTonight(onBoard, freeIntervals, nightKey)
+      const plans = planTonightSubSessions(onBoard, plannerFree, weatherPermittedIntervals, now)
+      if (shouldRefreshTonightSubs(onBoard, nightKey)) {
+        await applyTonightPlansOrClearScheduled(onBoard.id, nightKey, plans)
       }
     }
     for (const project of projects) {

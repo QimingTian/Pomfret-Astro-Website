@@ -1,14 +1,18 @@
 import { isImagingAdminPassword } from '@/lib/imaging-admin-auth'
-import { validateSessionPassword } from '@/lib/imaging-session-access'
-import { subscribeProgress, type LiveProgressEvent } from '@/lib/imaging-progress-live'
 import { listSessionProgressLinesFromAudit } from '@/lib/imaging-audit-log'
-import { getBoardEntry } from '@/lib/imaging-session-board'
-import { getRequestById } from '@/lib/imaging-queue-store'
+import { subscribeProgress, type LiveProgressEvent } from '@/lib/imaging-progress-live'
+import { resolveImagingSessionContext, validateSessionPassword } from '@/lib/imaging-session-access'
 
 export const runtime = 'nodejs'
 
+const AUDIT_POLL_MS = 2000
+
 function sseData(payload: unknown): string {
   return `data: ${JSON.stringify(payload)}\n\n`
+}
+
+function linesFingerprint(lines: Array<{ at: string; text: string }>): string {
+  return lines.map((l) => `${l.at}\t${l.text}`).join('\n')
 }
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
@@ -30,9 +34,8 @@ export async function GET(request: Request, { params }: { params: { id: string }
     }
   }
 
-  const req = await getRequestById(id)
-  const board = await getBoardEntry(id)
-  if (!req && !board) {
+  const session = await resolveImagingSessionContext(id)
+  if (!session) {
     return new Response(JSON.stringify({ ok: false, error: 'Not found' }), { status: 404 })
   }
 
@@ -41,13 +44,38 @@ export async function GET(request: Request, { params }: { params: { id: string }
       const encoder = new TextEncoder()
       const enqueue = (payload: unknown) => controller.enqueue(encoder.encode(sseData(payload)))
 
-      const lines = await listSessionProgressLinesFromAudit(id)
-      const queueStatus = req?.status ?? board?.status ?? 'pending'
+      let queueStatus = session.queueStatus
+      let lines = await listSessionProgressLinesFromAudit(id)
+      let fingerprint = linesFingerprint(lines)
       enqueue({ type: 'snapshot', queueStatus, lines })
 
       const unsubscribe = subscribeProgress(id, (event: LiveProgressEvent) => {
-        enqueue(event)
+        if (event.type === 'status') {
+          queueStatus = event.queueStatus
+          enqueue(event)
+          return
+        }
+        if (event.type === 'line') {
+          lines = [...lines, { at: event.at, text: event.text }]
+          fingerprint = linesFingerprint(lines)
+          enqueue(event)
+        }
       })
+
+      const pollAudit = setInterval(async () => {
+        try {
+          const fresh = await listSessionProgressLinesFromAudit(id)
+          const nextFp = linesFingerprint(fresh)
+          if (nextFp === fingerprint) return
+          fingerprint = nextFp
+          lines = fresh
+          const ctx = await resolveImagingSessionContext(id)
+          if (ctx) queueStatus = ctx.queueStatus
+          enqueue({ type: 'snapshot', queueStatus, lines: fresh })
+        } catch {
+          // ignore poll errors
+        }
+      }, AUDIT_POLL_MS)
 
       const keepAlive = setInterval(() => {
         enqueue({ type: 'ping' })
@@ -55,6 +83,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
 
       request.signal.addEventListener('abort', () => {
         clearInterval(keepAlive)
+        clearInterval(pollAudit)
         unsubscribe()
         controller.close()
       })

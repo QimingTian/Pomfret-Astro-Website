@@ -1,9 +1,7 @@
 import { isImagingAdminPassword } from '@/lib/imaging-admin-auth'
-import { validateSessionPassword } from '@/lib/imaging-session-access'
+import { resolveImagingSessionContext, validateSessionPassword } from '@/lib/imaging-session-access'
 import { getPreviewImage } from '@/lib/imaging-preview-store'
 import { subscribePreview } from '@/lib/imaging-preview-live'
-import { getBoardEntry } from '@/lib/imaging-session-board'
-import { getRequestById } from '@/lib/imaging-queue-store'
 
 export const runtime = 'nodejs'
 
@@ -30,9 +28,8 @@ export async function GET(request: Request, { params }: { params: { id: string }
     }
   }
 
-  const req = await getRequestById(id)
-  const board = await getBoardEntry(id)
-  if (!req && !board) {
+  const session = await resolveImagingSessionContext(id)
+  if (!session) {
     return new Response(JSON.stringify({ ok: false, error: 'Not found' }), { status: 404 })
   }
 

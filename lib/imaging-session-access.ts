@@ -1,7 +1,29 @@
 import { getProjectById, getProjectByNightSubId } from '@/lib/imaging-project-store'
 import { getBoardEntry } from '@/lib/imaging-session-board'
-import { getRequestById } from '@/lib/imaging-queue-store'
+import { getRequestById, type ImagingRequest } from '@/lib/imaging-queue-store'
 import { verifySessionPasswordHash } from '@/lib/session-password'
+
+/** Queue row, board row, project root, or project sub-session night id. */
+export async function resolveImagingSessionContext(sessionId: string): Promise<{
+  queueStatus: string
+  req: ImagingRequest | null
+} | null> {
+  const req = await getRequestById(sessionId)
+  const board = await getBoardEntry(sessionId)
+  const project = await getProjectById(sessionId)
+  const nightMatch = await getProjectByNightSubId(sessionId)
+  if (!req && !board && !project && !nightMatch) return null
+  return {
+    req: req ?? null,
+    queueStatus:
+      req?.status ??
+      board?.status ??
+      nightMatch?.night.status ??
+      nightMatch?.project.status ??
+      project?.status ??
+      'pending',
+  }
+}
 
 export async function validateSessionPassword(
   sessionId: string,

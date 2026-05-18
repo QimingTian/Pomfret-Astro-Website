@@ -1,10 +1,7 @@
 import { listSessionProgressLinesFromAudit } from '@/lib/imaging-audit-log'
 import { isImagingAdminPassword } from '@/lib/imaging-admin-auth'
-import { validateSessionPassword } from '@/lib/imaging-session-access'
+import { resolveImagingSessionContext, validateSessionPassword } from '@/lib/imaging-session-access'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
-import { getProjectByNightSubId } from '@/lib/imaging-project-store'
-import { getBoardEntry } from '@/lib/imaging-session-board'
-import { getRequestById } from '@/lib/imaging-queue-store'
 
 export const runtime = 'nodejs'
 
@@ -29,20 +26,13 @@ export async function GET(request: Request, { params }: { params: { id: string }
     }
   }
 
-  const req = await getRequestById(id)
-  const board = await getBoardEntry(id)
-  const nightMatch = await getProjectByNightSubId(id)
-  if (!req && !board && !nightMatch) {
+  const session = await resolveImagingSessionContext(id)
+  if (!session) {
     return withImagingCors({ ok: false as const, error: 'Not found' }, 404)
   }
 
   const lines = await listSessionProgressLinesFromAudit(id)
-  const queueStatus =
-    req?.status ??
-    board?.status ??
-    nightMatch?.night.status ??
-    nightMatch?.project.status ??
-    'pending'
+  const queueStatus = session.queueStatus
 
   return withImagingCors({
     ok: true as const,

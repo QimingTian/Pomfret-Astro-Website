@@ -2,6 +2,8 @@ export const OBS_LAT_DEG = 41 + 53 / 60 + 10 / 3600
 export const OBS_LON_DEG = -(71 + 57 / 60 + 54 / 3600) // West is negative
 
 export const MIN_ALTITUDE_DEG = 30
+/** Fraction of session duration that must have target >= MIN_ALTITUDE_DEG when scheduling a slot. */
+export const MIN_ALTITUDE_SESSION_COVERAGE_FRACTION = 1
 export const TONIGHT_OBSERVABLE_MIN_COVERAGE_MS = 30 * 60 * 1000
 
 function degToRad(deg: number): number {
@@ -103,6 +105,23 @@ export function altitudeAllowedCoverageMs(
     endMs,
     MIN_ALTITUDE_DEG,
     stepMs
+  )
+}
+
+export function requiredAltitudeCoverageMs(durationMs: number): number {
+  return durationMs * MIN_ALTITUDE_SESSION_COVERAGE_FRACTION
+}
+
+export function altitudeSessionCoverageOk(
+  raHours: number,
+  decDeg: number,
+  startMs: number,
+  endMs: number
+): boolean {
+  const duration = endMs - startMs
+  if (!Number.isFinite(duration) || duration <= 0) return false
+  return (
+    altitudeAllowedCoverageMs(raHours, decDeg, startMs, endMs) >= requiredAltitudeCoverageMs(duration)
   )
 }
 

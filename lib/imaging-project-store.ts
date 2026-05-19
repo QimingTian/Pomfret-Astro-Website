@@ -47,9 +47,12 @@ export type ImagingProject = {
   lastName?: string | null
   email?: string | null
   sessionPasswordHash?: string
+  userId?: string
   estimatedDurationSeconds?: number
   /** Set after first NINA consume; queue row is removed. */
   onBoard?: boolean
+  /** When the entire project finished (all nights done or project failed). */
+  completedAt?: string
 }
 
 const KEY = 'imaging-projects'
@@ -231,6 +234,21 @@ export async function getActiveOnBoardProject(): Promise<ImagingProject | undefi
   return all.find((p) => p.status === 'in_progress' && p.onBoard === true)
 }
 
+/**
+ * In-progress project with a sub-session NINA can receive (on-board or not).
+ * Night 2+ delivers via sub-session ids after the queue row was consumed on night 1.
+ */
+export async function getProjectAwaitingSubSessionDelivery(): Promise<ImagingProject | undefined> {
+  const onBoard = await getActiveOnBoardProject()
+  if (onBoard && getDeliverableNight(onBoard)) return onBoard
+
+  const candidates = (await readProjects())
+    .filter((p) => p.status === 'in_progress' && remainingFramesTotal(p) > 0)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+
+  return candidates.find((p) => getDeliverableNight(p) != null)
+}
+
 /** True while this strip night still has a project night to shoot (not completed). */
 export function projectHasOpenSessionsForNightKey(project: ImagingProject, nightKey: string): boolean {
   return project.nights.some(
@@ -264,7 +282,8 @@ export type CreateImagingProjectInput = {
   firstName?: string | null
   lastName?: string | null
   email?: string | null
-  sessionPasswordHash: string
+  sessionPasswordHash?: string
+  userId?: string
 }
 
 export async function createImagingProject(input: CreateImagingProjectInput): Promise<ImagingProject> {
@@ -290,7 +309,8 @@ export async function createImagingProject(input: CreateImagingProjectInput): Pr
     firstName: input.firstName ?? null,
     lastName: input.lastName ?? null,
     email: input.email ?? null,
-    sessionPasswordHash: input.sessionPasswordHash,
+    ...(input.sessionPasswordHash ? { sessionPasswordHash: input.sessionPasswordHash } : {}),
+    ...(input.userId ? { userId: input.userId } : {}),
     estimatedDurationSeconds: input.estimatedDurationSeconds,
     onBoard: false,
   }
@@ -298,6 +318,66 @@ export async function createImagingProject(input: CreateImagingProjectInput): Pr
   const without = all.filter((p) => p.id !== project.id)
   await writeProjects([...without, project])
   return project
+}
+
+/** Sync project store after editing a pending Project Mode queue row (clears open sub-sessions). */
+export async function applyPendingProjectQueueEdit(
+  projectId: string,
+  input: {
+    target: string
+    raHours: number
+    decDeg: number
+    outputMode: 'raw_zip' | 'stacked_master' | 'none'
+    filterPlans: FilterPlanRow[]
+    estimatedDurationSeconds: number
+    firstName: string | null
+    lastName: string | null
+    email: string | null
+    sessionPasswordHash?: string
+  }
+): Promise<ImagingProject | { error: string }> {
+  const project = await getProjectById(projectId)
+  if (!project) return { error: 'Project not found' }
+  if (!project.projectMode) return { error: 'Not a multi-night project' }
+  if (project.status !== 'pending' && project.status !== 'scheduled') {
+    return { error: "Project already started, can't edit session" }
+  }
+  if (project.nights.some((n) => n.status === 'in_progress')) {
+    return { error: "Project already started, can't edit session" }
+  }
+
+  const ts = new Date().toISOString()
+  const remainingByFilter: FilterRemainingRow[] = input.filterPlans.map((p) => ({
+    filterName: p.filterName,
+    exposureSeconds: p.exposureSeconds,
+    countRemaining: p.count,
+  }))
+  const nights = project.nights.filter((n) => n.status === 'completed')
+
+  const next: ImagingProject = {
+    ...project,
+    status: 'pending',
+    updatedAt: ts,
+    target: input.target,
+    raHours: input.raHours,
+    decDeg: input.decDeg,
+    outputMode: input.outputMode,
+    filterPlansTotal: input.filterPlans.map((p) => ({ ...p })),
+    remainingByFilter,
+    estimatedDurationSeconds: input.estimatedDurationSeconds,
+    firstName: input.firstName,
+    lastName: input.lastName,
+    email: input.email,
+    nights,
+    ...(input.sessionPasswordHash ? { sessionPasswordHash: input.sessionPasswordHash } : {}),
+  }
+  const all = await readProjects()
+  const idx = all.findIndex((p) => p.id === projectId)
+  if (idx === -1) return { error: 'Project not found' }
+  const updated = [...all]
+  updated[idx] = next
+  await writeProjects(updated)
+  return next
 }
 
 export async function patchProject(
@@ -310,16 +390,25 @@ export async function patchProject(
       | 'remainingByFilter'
       | 'onBoard'
       | 'updatedAt'
+      | 'completedAt'
     >
   >
 ): Promise<ImagingProject | undefined> {
   const all = await readProjects()
   const idx = all.findIndex((p) => p.id === id)
   if (idx === -1) return undefined
+  const prev = all[idx]!
+  const ts = patch.updatedAt ?? new Date().toISOString()
+  const status = patch.status ?? prev.status
+  let completedAt = patch.completedAt ?? prev.completedAt
+  if ((status === 'completed' || status === 'failed') && !completedAt) {
+    completedAt = ts
+  }
   const next: ImagingProject = {
-    ...all[idx]!,
+    ...prev,
     ...patch,
-    updatedAt: patch.updatedAt ?? new Date().toISOString(),
+    updatedAt: ts,
+    ...(completedAt ? { completedAt } : {}),
   }
   const updated = [...all]
   updated[idx] = {
@@ -506,6 +595,7 @@ export async function markNightCompleted(
     nights,
     remainingByFilter,
     status,
+    ...(projectCompleted ? { completedAt } : {}),
   })
   if (!updated) return undefined
   return { project: updated, projectCompleted }
@@ -521,8 +611,17 @@ export async function markNightFailed(projectId: string, nightSubId: string): Pr
   await patchProject(projectId, { nights, status: 'in_progress' })
 }
 
+export async function removeProjectNight(projectId: string, nightSubId: string): Promise<boolean> {
+  const project = await getProjectById(projectId)
+  if (!project) return false
+  const nights = dedupeProjectNights(project.nights).filter((n) => n.id !== nightSubId)
+  if (nights.length === project.nights.length) return false
+  await patchProject(projectId, { nights })
+  return true
+}
+
 export async function markProjectFailed(projectId: string): Promise<void> {
-  await patchProject(projectId, { status: 'failed' })
+  await patchProject(projectId, { status: 'failed', completedAt: new Date().toISOString() })
 }
 
 export async function setNightScheduleBar(

@@ -12,8 +12,8 @@ function mockProject(): ImagingProject {
   return {
     id: 'proj-1',
     projectMode: true,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
     status: 'pending',
     target: 'Test Target',
     raHours: 12,
@@ -70,6 +70,29 @@ test('planTonightSubSessions assigns increasing session indices', () => {
   for (let i = 1; i < plans.length; i++) {
     assert.ok(plans[i]!.nightIndex > plans[i - 1]!.nightIndex)
   }
+})
+
+test('planTonightSubSessions can start after predecessor when weather spans a short gap', () => {
+  const project = mockProject()
+  project.target = 'M101 Project'
+  project.raHours = 12.7
+  project.decDeg = 45
+  project.filterPlansTotal = [{ filterName: 'L', exposureSeconds: 600, count: 10 }]
+  project.remainingByFilter = [{ filterName: 'L', exposureSeconds: 600, countRemaining: 10 }]
+
+  const markarianEnd = Date.parse('2026-05-19T05:36:45.946Z')
+  const now = new Date('2026-05-19T01:52:43.000Z')
+  const { windowStart, windowEnd } = tonightSchedulingSpan(now)
+  // Clear weather continues through 1:36 AM; old spell splitting used a too-short 1:36–2:00 slice.
+  const weather = [{ startMs: windowStart, endMs: Date.parse('2026-05-19T08:00:00.000Z') }]
+  const free = [{ startMs: markarianEnd, endMs: windowEnd }]
+  const plans = planTonightSubSessions(project, free, weather, now)
+  assert.equal(plans.length, 1)
+  const startMs = Date.parse(plans[0]!.plannedStartIso)
+  assert.ok(
+    startMs <= markarianEnd + 60_000,
+    `expected start right after Markarian ends, got ${plans[0]!.plannedStartIso}`
+  )
 })
 
 test('planTonightSubSessions fills multiple clear spells and leftover time in a spell', () => {

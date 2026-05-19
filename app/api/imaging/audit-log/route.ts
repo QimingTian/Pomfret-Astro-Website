@@ -1,19 +1,18 @@
 import { NextRequest } from 'next/server'
+import { requireImagingAdmin } from '@/lib/imaging-admin-auth'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import { listAuditLog } from '@/lib/imaging-audit-log'
 
 export const runtime = 'nodejs'
-
-const ADMIN_PASSWORD = '1894'
 
 export function OPTIONS() {
   return imagingCorsOptions()
 }
 
 export async function GET(request: NextRequest) {
-  const password = request.headers.get('x-admin-password')
-  if (password !== ADMIN_PASSWORD) {
-    return withImagingCors({ ok: false as const, error: 'Unauthorized' }, 401)
+  const admin = await requireImagingAdmin(request)
+  if (!admin.ok) {
+    return withImagingCors({ ok: false as const, error: admin.error }, admin.status)
   }
 
   const raw = request.nextUrl.searchParams.get('limit')

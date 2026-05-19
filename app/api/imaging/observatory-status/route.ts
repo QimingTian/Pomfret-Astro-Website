@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { requireImagingAdmin } from '@/lib/imaging-admin-auth'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import {
@@ -12,7 +13,6 @@ import {
 
 export const runtime = 'nodejs'
 
-const ADMIN_PASSWORD = '1894'
 const allowedStatuses: ObservatoryStatus[] = [
   'ready',
   'busy_in_use',
@@ -33,9 +33,9 @@ export async function GET() {
 }
 
 export async function PATCH(request: NextRequest) {
-  const password = request.headers.get('x-admin-password')
-  if (password !== ADMIN_PASSWORD) {
-    return withImagingCors({ ok: false as const, error: 'Unauthorized' }, 401)
+  const admin = await requireImagingAdmin(request)
+  if (!admin.ok) {
+    return withImagingCors({ ok: false as const, error: admin.error }, admin.status)
   }
 
   let body: unknown

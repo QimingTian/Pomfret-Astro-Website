@@ -1,12 +1,16 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { MemberAuthPanel } from '@/components/member-auth-panel'
+import { useMember } from '@/hooks/use-member'
 import type { VariableStarRow } from '@/lib/variable-star-catalog'
 import {
   MIN_ALTITUDE_DEG,
   OBS_LAT_DEG,
   OBS_LON_DEG,
   TONIGHT_OBSERVABLE_MIN_COVERAGE_MS,
+  altitudeSessionCoverageOk,
 } from '@/lib/target-altitude'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import {
@@ -18,14 +22,17 @@ import {
 import { VariableStarPreviewCharts, type VariableStarChartStar } from './variable-star-preview-charts'
 import { TelescopeStatusPanel } from './telescope-status-panel'
 import {
-  findRemoteSavedSession,
-  upsertRemoteSavedSession,
+  fetchMemberSavedSessions,
+  loadMemberSavedSessionById,
+  loadMemberSavedSessionByName,
+  SAVED_SESSION_ID_QUERY,
+  saveMemberSavedSession,
+  type MemberSavedSessionApiEntry,
   type RemoteSavedSessionFormV1,
 } from '@/lib/remote-saved-session'
 import { parseProjectNightSubId } from '@/lib/imaging-project-ids'
 
 const jsonHeaders: HeadersInit = { 'Content-Type': 'application/json' }
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const STACKED_MASTER_REQUIRED_EXPOSURE_SECONDS = 600
 const VARIABLE_STAR_SESSION_OVERHEAD_HOURS = 15 / 60
 /** Pomfret Astro calibration library (Google Drive). */
@@ -180,6 +187,8 @@ function queueStatusLabel(status: string): string {
       return 'In progress'
     case 'failed':
       return 'Failed'
+    case 'rejected':
+      return 'Rejected'
     default:
       return status
   }
@@ -191,6 +200,7 @@ function queueStatusBadgeClass(status: string): string {
   if (status === 'in_progress') return 'text-blue-700 dark:text-blue-400'
   if (status === 'completed') return 'text-green-700 dark:text-green-400'
   if (status === 'failed') return 'text-red-700 dark:text-red-400'
+  if (status === 'rejected') return 'text-red-700 dark:text-red-400'
   if (status === 'claimed') return 'text-blue-700 dark:text-blue-400'
   return 'text-gray-500 dark:text-gray-500'
 }
@@ -570,7 +580,14 @@ function parseCoordsFromFormParts(
   }
 }
 
+
+
 export default function RemotePage() {
+  const router = useRouter()
+  const member = useMember()
+  const isLoggedIn = member.status === 'authenticated'
+  const isAdmin = member.status === 'authenticated' && member.isAdmin
+
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -594,11 +611,10 @@ export default function RemotePage() {
   const [showSaveRemoteSessionModal, setShowSaveRemoteSessionModal] = useState(false)
   const [showRunRemoteSessionModal, setShowRunRemoteSessionModal] = useState(false)
   const [saveModalName, setSaveModalName] = useState('')
-  const [saveModalPassword, setSaveModalPassword] = useState('')
   const [saveModalError, setSaveModalError] = useState<string | null>(null)
   const [runModalName, setRunModalName] = useState('')
-  const [runModalPassword, setRunModalPassword] = useState('')
   const [runModalError, setRunModalError] = useState<string | null>(null)
+  const [cloudSavedSessions, setCloudSavedSessions] = useState<MemberSavedSessionApiEntry[]>([])
   const [lastComputedAltitude, setLastComputedAltitude] = useState<number | null>(null)
   const [queueItems, setQueueItems] = useState<
     Array<{
@@ -629,6 +645,9 @@ export default function RemotePage() {
       scheduleBarStartMs?: number | null
       scheduleBarEndMs?: number | null
       projectMode?: boolean
+      userId?: string | null
+      projectFramesTotal?: number
+      projectFramesCaptured?: number
       nights?: Array<{
         id: string
         nightIndex: number
@@ -641,6 +660,8 @@ export default function RemotePage() {
         failedAt?: string | null
         estimatedDurationSeconds?: number
         filterPlans?: Array<{ filterName: string; exposureSeconds: number; count: number }>
+        hasDownload?: boolean
+        downloadPath?: string
       }>
     }>
   >([])
@@ -655,9 +676,6 @@ export default function RemotePage() {
 
   const [filterPlans, setFilterPlans] = useState<Array<{ filterName: string; count: string; exposureSeconds: string }>>([])
   const [requestName, setRequestName] = useState('')
-  const [firstName, setFirstName] = useState('')
-  const [lastName, setLastName] = useState('')
-  const [email, setEmail] = useState('')
   const [raHourPart, setRaHourPart] = useState('')
   const [raMinutePart, setRaMinutePart] = useState('')
   const [raSecondPart, setRaSecondPart] = useState('')
@@ -667,6 +685,84 @@ export default function RemotePage() {
   const [decSecondPart, setDecSecondPart] = useState('')
   const [sessionPassword, setSessionPassword] = useState('')
   const [outputMode, setOutputMode] = useState<'raw_zip' | 'stacked_master' | 'none'>('raw_zip')
+
+  const loggedInContact = useMemo(() => {
+    if (member.status !== 'authenticated') return null
+    return {
+      firstName: member.user.firstName.trim() || null,
+      lastName: member.user.lastName.trim() || null,
+      email: member.user.email,
+    }
+  }, [member])
+
+  const currentMemberId = member.status === 'authenticated' ? member.user.id : null
+  const currentMemberEmail = member.status === 'authenticated' ? member.user.email : null
+
+  const sessionOwnedByMe = useCallback(
+    (item: { userId?: string | null; email?: string | null }) => {
+      if (!isLoggedIn) return false
+      if (currentMemberId && item.userId && item.userId === currentMemberId) return true
+      if (
+        currentMemberEmail &&
+        item.email &&
+        item.email.trim().toLowerCase() === currentMemberEmail.trim().toLowerCase()
+      ) {
+        return true
+      }
+      return false
+    },
+    [isLoggedIn, currentMemberId, currentMemberEmail]
+  )
+
+  const canInteractWithSession = useCallback(
+    (item: { userId?: string | null; email?: string | null }) => {
+      if (isAdmin) return true
+      if (!isLoggedIn) return false
+      return sessionOwnedByMe(item)
+    },
+    [isAdmin, isLoggedIn, sessionOwnedByMe]
+  )
+
+  const canAccessSessionId = useCallback(
+    (sessionId: string): boolean => {
+      if (isAdmin) return true
+      const direct = queueItems.find((i) => i.id === sessionId)
+      if (direct && sessionOwnedByMe(direct)) return true
+      const nightSub = parseProjectNightSubId(sessionId)
+      if (nightSub) {
+        const project = queueItems.find((i) => i.id === nightSub.projectId)
+        if (project && sessionOwnedByMe(project)) return true
+      }
+      return false
+    },
+    [isAdmin, queueItems, sessionOwnedByMe]
+  )
+
+  const sessionActionButtonClass = useCallback((enabled: boolean, variant: 'default' | 'danger' = 'default') => {
+    const base = 'rounded-full border px-3 py-1.5 text-xs font-medium'
+    if (!enabled) {
+      return `${base} border-white/10 bg-[#151616] text-gray-500 cursor-not-allowed opacity-50`
+    }
+    if (variant === 'danger') {
+      return `${base} border-red-500/50 bg-[#151616] text-red-300 hover:bg-[#1b1c1c] hover:text-red-200`
+    }
+    return `${base} border-white/25 bg-[#151616] text-white hover:bg-[#1b1c1c]`
+  }, [])
+
+  const refreshCloudSavedSessions = useCallback(async () => {
+    if (!isLoggedIn) {
+      setCloudSavedSessions([])
+      return
+    }
+    const list = await fetchMemberSavedSessions()
+    setCloudSavedSessions(list)
+  }, [isLoggedIn])
+
+  useEffect(() => {
+    if (!isLoggedIn) return
+    void refreshCloudSavedSessions()
+  }, [isLoggedIn, refreshCloudSavedSessions])
+
   const [sessionPasswords, setSessionPasswords] = useState<Record<string, string>>({})
   const [catalogQuery, setCatalogQuery] = useState('')
   const [catalogLookupLoading, setCatalogLookupLoading] = useState(false)
@@ -675,6 +771,7 @@ export default function RemotePage() {
   const [sessionType, setSessionType] = useState<ImagingSessionTypeUi>('dso')
   const [projectMode, setProjectMode] = useState(false)
   const [nightPickerProjectId, setNightPickerProjectId] = useState<string | null>(null)
+  const [nightPickerPurpose, setNightPickerPurpose] = useState<'progress' | 'download' | null>(null)
   const [variableStarCatalog, setVariableStarCatalog] = useState<VariableStarRow[]>([])
   const [variableStarCatalogLoading, setVariableStarCatalogLoading] = useState(false)
   const [variableStarCatalogError, setVariableStarCatalogError] = useState<string | null>(null)
@@ -704,7 +801,7 @@ export default function RemotePage() {
   const terminalEndRef = useRef<HTMLDivElement>(null)
   const [authModalSessionId, setAuthModalSessionId] = useState<string | null>(null)
   const [authModalAction, setAuthModalAction] = useState<
-    'progress' | 'project_progress' | 'download' | 'edit' | null
+    'progress' | 'project_progress' | 'project_download' | 'download' | 'edit' | null
   >(null)
   const [authPassword, setAuthPassword] = useState('')
   const [authError, setAuthError] = useState<string | null>(null)
@@ -1084,6 +1181,7 @@ export default function RemotePage() {
         firstName?: unknown
         lastName?: unknown
         email?: unknown
+        userId?: unknown
         raHours?: unknown
         decDeg?: unknown
         outputMode?: unknown
@@ -1101,6 +1199,8 @@ export default function RemotePage() {
         scheduleBarStartMs?: unknown
         scheduleBarEndMs?: unknown
         projectMode?: unknown
+        projectFramesTotal?: unknown
+        projectFramesCaptured?: unknown
         nights?: unknown
       }>
       const normalized = items
@@ -1114,13 +1214,21 @@ export default function RemotePage() {
             status: (() => {
               const s = typeof x.status === 'string' ? x.status : 'pending'
               if (s === 'claimed') return 'in_progress'
-              if (s === 'pending' || s === 'scheduled' || s === 'in_progress' || s === 'completed' || s === 'failed')
+              if (
+                s === 'pending' ||
+                s === 'scheduled' ||
+                s === 'in_progress' ||
+                s === 'completed' ||
+                s === 'failed' ||
+                s === 'rejected'
+              )
                 return s
               return 'pending'
             })(),
             firstName: typeof x.firstName === 'string' ? x.firstName : null,
             lastName: typeof x.lastName === 'string' ? x.lastName : null,
             email: typeof x.email === 'string' ? x.email : null,
+            userId: typeof x.userId === 'string' ? x.userId : null,
             raHours:
               typeof x.raHours === 'number' && Number.isFinite(x.raHours) ? x.raHours : null,
             decDeg:
@@ -1168,6 +1276,14 @@ export default function RemotePage() {
                 ? x.scheduleBarEndMs
                 : null,
             projectMode: x.projectMode === true,
+            projectFramesTotal:
+              typeof x.projectFramesTotal === 'number' && Number.isFinite(x.projectFramesTotal)
+                ? x.projectFramesTotal
+                : undefined,
+            projectFramesCaptured:
+              typeof x.projectFramesCaptured === 'number' && Number.isFinite(x.projectFramesCaptured)
+                ? x.projectFramesCaptured
+                : undefined,
             nights: Array.isArray(x.nights)
               ? x.nights
                   .map((n) => {
@@ -1213,6 +1329,8 @@ export default function RemotePage() {
                               (p): p is { filterName: string; exposureSeconds: number; count: number } => p !== null
                             )
                         : undefined,
+                      hasDownload: rec.hasDownload === true,
+                      downloadPath: typeof rec.downloadPath === 'string' ? rec.downloadPath : undefined,
                     }
                   })
                   .filter((n): n is NonNullable<typeof n> => n != null)
@@ -1487,9 +1605,7 @@ export default function RemotePage() {
 
   const canSaveRemoteSessionSpec = useMemo(() => {
     if (!requestName.trim()) return false
-    const emailTrimmed = email.trim()
-    if (!emailTrimmed || !EMAIL_REGEX.test(emailTrimmed)) return false
-    if (!sessionPassword.trim()) return false
+    if (!loggedInContact?.email) return false
     const coord = parseCoordsFromFormParts(
       raHourPart,
       raMinutePart,
@@ -1521,8 +1637,7 @@ export default function RemotePage() {
     return true
   }, [
     requestName,
-    email,
-    sessionPassword,
+    loggedInContact,
     raHourPart,
     raMinutePart,
     raSecondPart,
@@ -1541,9 +1656,6 @@ export default function RemotePage() {
     return {
       sessionType: sessionType === 'variable_star' ? 'variable_star' : 'dso',
       requestName,
-      firstName,
-      lastName,
-      email,
       raHourPart,
       raMinutePart,
       raSecondPart,
@@ -1562,9 +1674,6 @@ export default function RemotePage() {
   }, [
     sessionType,
     requestName,
-    firstName,
-    lastName,
-    email,
     raHourPart,
     raMinutePart,
     raSecondPart,
@@ -1587,9 +1696,6 @@ export default function RemotePage() {
       setSubmitError(null)
       setSessionType(form.sessionType === 'variable_star' ? 'variable_star' : 'dso')
       setRequestName(form.requestName)
-      setFirstName(form.firstName)
-      setLastName(form.lastName)
-      setEmail(form.email)
       setRaHourPart(form.raHourPart)
       setRaMinutePart(form.raMinutePart)
       setRaSecondPart(form.raSecondPart)
@@ -1632,6 +1738,33 @@ export default function RemotePage() {
     },
     [variableStarCatalog]
   )
+
+  const loadedSavedSessionIdRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!isLoggedIn) return
+    if (typeof window === 'undefined') return
+    const id = new URLSearchParams(window.location.search).get(SAVED_SESSION_ID_QUERY)?.trim() ?? ''
+    if (!id) {
+      loadedSavedSessionIdRef.current = null
+      return
+    }
+    if (loadedSavedSessionIdRef.current === id) return
+
+    void (async () => {
+      loadedSavedSessionIdRef.current = id
+      const found = await loadMemberSavedSessionById(id)
+      router.replace('/dashboard/remote')
+      if (!found) {
+        setSubmitError('Saved session not found.')
+        return
+      }
+      applyRemoteSavedForm(found.form)
+      setRequestName(found.name)
+      setSubmitError(null)
+      setSubmitSuccess(`Loaded saved session "${found.name}".`)
+    })()
+  }, [isLoggedIn, applyRemoteSavedForm, router])
 
   const weatherBlocks = useMemo(() => {
     const effectiveNightHourKeys =
@@ -1903,8 +2036,7 @@ export default function RemotePage() {
           typeof item.decDeg === 'number' &&
           Number.isFinite(item.decDeg)
         ) {
-          const altitudeCoveredMs = altitudeAllowedCoverageMsForInterval(item.raHours, item.decDeg, startMs, endMs)
-          if (altitudeCoveredMs < durationMs * 0.8) continue
+          if (!altitudeSessionCoverageOk(item.raHours, item.decDeg, startMs, endMs)) continue
         }
 
         return { startMs, endMs }
@@ -2152,7 +2284,7 @@ export default function RemotePage() {
   const loadTerminalProgress = useCallback(
     async (id: string, passwordOverride?: string) => {
       const password = passwordOverride ?? resolveSessionPassword(id)
-      if (!password) {
+      if (!password && !isAdmin && !canAccessSessionId(id)) {
         setTerminalError('Session password required.')
         setTerminalLoading(false)
         return
@@ -2161,7 +2293,8 @@ export default function RemotePage() {
       setTerminalError(null)
       try {
         const res = await fetch(`/api/imaging/queue/${encodeURIComponent(id)}/progress`, {
-          headers: { 'x-session-password': password },
+          credentials: 'include',
+          headers: password ? { 'x-session-password': password } : {},
         })
         const data = await res.json().catch(() => ({}))
         if (!res.ok || data?.ok !== true) {
@@ -2176,18 +2309,36 @@ export default function RemotePage() {
         setTerminalLoading(false)
       }
     },
-    [refreshQueue, resolveSessionPassword]
+    [refreshQueue, resolveSessionPassword, isAdmin, canAccessSessionId]
+  )
+
+  const downloadSessionFile = useCallback(
+    async (queueId: string, password: string): Promise<string | null> => {
+      const res = await fetch(`/api/imaging/download?queueId=${encodeURIComponent(queueId)}&mode=json`, {
+        credentials: 'include',
+        headers: password ? { 'x-session-password': password } : {},
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || data?.ok !== true || typeof data.signedUrl !== 'string') {
+        return typeof data.error === 'string' ? data.error : 'Download failed.'
+      }
+      window.location.assign(data.signedUrl)
+      await refreshQueue()
+      return null
+    },
+    [refreshQueue]
   )
 
   const loadTerminalPreview = useCallback(
     async (id: string, passwordOverride?: string) => {
       const password = passwordOverride ?? resolveSessionPassword(id)
-      if (!password) return
+      if (!password && !isAdmin && !canAccessSessionId(id)) return
       try {
         const res = await fetch(
           `/api/imaging/preview?queueId=${encodeURIComponent(id)}&mode=json&_=${Date.now()}`,
           {
-            headers: { 'x-session-password': password },
+            credentials: 'include',
+            headers: password ? { 'x-session-password': password } : {},
             cache: 'no-store',
           }
         )
@@ -2226,7 +2377,7 @@ export default function RemotePage() {
         setTerminalPreviewError('Preview unavailable.')
       }
     },
-    [resolveSessionPassword]
+    [resolveSessionPassword, isAdmin, canAccessSessionId]
   )
 
   useEffect(() => {
@@ -2246,9 +2397,9 @@ export default function RemotePage() {
   useEffect(() => {
     if (!terminalSessionId) return
     const password = resolveSessionPassword(terminalSessionId)
-    if (!password) return
+    if (!password && !isAdmin && !canAccessSessionId(terminalSessionId)) return
 
-    const params = new URLSearchParams({ password })
+    const params = password ? new URLSearchParams({ password }) : new URLSearchParams()
     const streamUrl = `/api/imaging/queue/${encodeURIComponent(terminalSessionId)}/preview-stream?${params.toString()}`
     const source = new EventSource(streamUrl)
 
@@ -2271,14 +2422,14 @@ export default function RemotePage() {
     return () => {
       source.close()
     }
-  }, [terminalSessionId, loadTerminalPreview, resolveSessionPassword])
+  }, [terminalSessionId, loadTerminalPreview, resolveSessionPassword, isAdmin, canAccessSessionId])
 
   useEffect(() => {
     if (!terminalSessionId) return
     const password = resolveSessionPassword(terminalSessionId)
-    if (!password) return
+    if (!password && !isAdmin && !canAccessSessionId(terminalSessionId)) return
 
-    const params = new URLSearchParams({ password })
+    const params = password ? new URLSearchParams({ password }) : new URLSearchParams()
     const streamUrl = `/api/imaging/queue/${encodeURIComponent(terminalSessionId)}/progress-stream?${params.toString()}`
     const source = new EventSource(streamUrl)
 
@@ -2318,7 +2469,7 @@ export default function RemotePage() {
     return () => {
       source.close()
     }
-  }, [terminalSessionId, refreshQueue, resolveSessionPassword])
+  }, [terminalSessionId, refreshQueue, resolveSessionPassword, isAdmin, canAccessSessionId])
 
   useEffect(() => {
     terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -2377,13 +2528,8 @@ export default function RemotePage() {
       }
     }
     const firstPlan = normalizedPlans[0]
-    const emailTrimmed = email.trim()
-    if (!emailTrimmed) {
-      setSubmitError('Email is required.')
-      return
-    }
-    if (!EMAIL_REGEX.test(emailTrimmed)) {
-      setSubmitError('Please enter a valid email address.')
+    if (!loggedInContact?.email) {
+      setSubmitError('Sign in to submit a session.')
       return
     }
 
@@ -2413,9 +2559,10 @@ export default function RemotePage() {
     const editCredential = editingSessionId ? sessionPasswords[editingSessionId] ?? '' : ''
     const res = await fetch(endpoint, {
       method: editingSessionId ? 'PUT' : 'POST',
+      credentials: 'include',
       headers: {
         ...jsonHeaders,
-        ...(editingSessionId ? { 'x-edit-credential': editCredential } : {}),
+        ...(editingSessionId && editCredential && !isAdmin ? { 'x-edit-credential': editCredential } : {}),
       },
       body: JSON.stringify({
         count: firstPlan.count,
@@ -2423,13 +2570,13 @@ export default function RemotePage() {
         filter: firstPlan.filterName,
         filterPlans: normalizedPlans,
         target: requestName.trim() === '' ? null : requestName.trim(),
-        firstName: firstName.trim() === '' ? null : firstName.trim(),
-        lastName: lastName.trim() === '' ? null : lastName.trim(),
-        email: emailTrimmed,
+        firstName: loggedInContact.firstName,
+        lastName: loggedInContact.lastName,
+        email: loggedInContact.email,
         raHours: coords.raHours,
         decDeg: coords.decDeg,
         whenClosedBehavior,
-        sessionPassword,
+        ...(isLoggedIn && !sessionPassword.trim() ? {} : { sessionPassword }),
         outputMode,
         estimatedDurationSeconds,
         sessionType,
@@ -2444,9 +2591,6 @@ export default function RemotePage() {
 
     setFilterPlans([])
     setRequestName('')
-    setFirstName('')
-    setLastName('')
-    setEmail('')
     setRaHourPart('')
     setRaMinutePart('')
     setRaSecondPart('')
@@ -2479,7 +2623,8 @@ export default function RemotePage() {
   async function handleDeleteRequest(id: string, password: string) {
     const res = await fetch(`/api/imaging/queue/${id}`, {
       method: 'DELETE',
-      headers: { 'x-delete-credential': password.trim() },
+      credentials: 'include',
+      headers: password.trim() ? { 'x-delete-credential': password.trim() } : {},
     })
     const data = await res.json().catch(() => ({}))
     if (!res.ok) {
@@ -2492,6 +2637,113 @@ export default function RemotePage() {
     await refreshQueue()
   }
 
+  const openProjectPickerAfterAccess = useCallback(
+    async (projectId: string, purpose: 'progress' | 'download') => {
+      const res = await fetch(`/api/imaging/queue/${encodeURIComponent(projectId)}/progress`, {
+        credentials: 'include',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || data?.ok !== true) {
+        setDeleteError(typeof data.error === 'string' ? data.error : 'Could not access project session.')
+        return false
+      }
+      setNightPickerProjectId(projectId)
+      setNightPickerPurpose(purpose)
+      return true
+    },
+    []
+  )
+
+  const handleCheckProgressClick = useCallback(
+    async (item: (typeof queueItems)[number]) => {
+      if (!canInteractWithSession(item)) return
+      if (item.projectMode) {
+        if (isAdmin || sessionOwnedByMe(item)) {
+          await openProjectPickerAfterAccess(item.id, 'progress')
+          return
+        }
+        setAuthModalSessionId(item.id)
+        setAuthModalAction('project_progress')
+        setAuthError(null)
+        setAuthPassword(sessionPasswords[item.id] ?? '')
+        return
+      }
+      if (isAdmin || sessionOwnedByMe(item)) {
+        setTerminalSessionId(item.id)
+        await loadTerminalProgress(item.id, '')
+        return
+      }
+      setAuthModalSessionId(item.id)
+      setAuthModalAction('progress')
+      setAuthError(null)
+      setAuthPassword(sessionPasswords[item.id] ?? '')
+    },
+    [
+      canInteractWithSession,
+      isAdmin,
+      loadTerminalProgress,
+      openProjectPickerAfterAccess,
+      sessionOwnedByMe,
+      sessionPasswords,
+    ]
+  )
+
+  const handleDownloadClick = useCallback(
+    async (item: (typeof queueItems)[number]) => {
+      if (!canInteractWithSession(item)) return
+      if (item.projectMode) {
+        if (isAdmin || sessionOwnedByMe(item)) {
+          await openProjectPickerAfterAccess(item.id, 'download')
+          return
+        }
+        setAuthModalSessionId(item.id)
+        setAuthModalAction('project_download')
+        setAuthError(null)
+        setAuthPassword(sessionPasswords[item.id] ?? '')
+        return
+      }
+      if (isAdmin || sessionOwnedByMe(item)) {
+        const err = await downloadSessionFile(item.id, '')
+        if (err) setDeleteError(err)
+        return
+      }
+      setAuthModalSessionId(item.id)
+      setAuthModalAction('download')
+      setAuthError(null)
+      setAuthPassword(sessionPasswords[item.id] ?? '')
+    },
+    [
+      canInteractWithSession,
+      downloadSessionFile,
+      isAdmin,
+      openProjectPickerAfterAccess,
+      sessionOwnedByMe,
+      sessionPasswords,
+    ]
+  )
+
+  const handleEditSessionClick = useCallback(
+    (item: (typeof queueItems)[number]) => {
+      if (!canInteractWithSession(item)) return
+      if (isAdmin || sessionOwnedByMe(item)) {
+        beginEditSession(item)
+        return
+      }
+      setAuthModalSessionId(item.id)
+      setAuthModalAction('edit')
+      setAuthError(null)
+      setAuthPassword(sessionPasswords[item.id] ?? '')
+    },
+    [canInteractWithSession, isAdmin, sessionOwnedByMe, sessionPasswords]
+  )
+
+  const handleDeleteSessionClick = useCallback((item: (typeof queueItems)[number]) => {
+    setDeleteError(null)
+    setDeleteTargetId(item.id)
+    setDeletePassword('')
+    setShowDeleteModal(true)
+  }, [])
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSubmitError(null)
@@ -2500,10 +2752,6 @@ export default function RemotePage() {
     try {
       const coords = await parseCoordinates()
       if (!coords) return
-      if (!sessionPassword.trim() && !editingSessionId) {
-        setSubmitError('Session password is required.')
-        return
-      }
       if (editingSessionId) {
         await submitRequest('reject', coords)
         return
@@ -2535,6 +2783,7 @@ export default function RemotePage() {
 
   function beginEditSession(item: (typeof queueItems)[number]) {
     setEditingSessionId(item.id)
+    setProjectMode(item.projectMode === true)
     setSessionType(item.sessionType === 'variable_star' ? 'variable_star' : 'dso')
     setVariableStarPreviewStar(null)
     setVariableStarLastFoundName(null)
@@ -2543,9 +2792,6 @@ export default function RemotePage() {
     setCatalogLookupResult(null)
     setCatalogLookupError(null)
     setRequestName(item.target ?? '')
-    setFirstName(item.firstName ?? '')
-    setLastName(item.lastName ?? '')
-    setEmail(item.email ?? '')
     if (typeof item.raHours === 'number' && Number.isFinite(item.raHours)) {
       const totalRaSec = item.raHours * 3600
       const raH = Math.floor(totalRaSec / 3600)
@@ -2797,6 +3043,16 @@ export default function RemotePage() {
             {statusLoadError && (
               <p className="text-sm text-red-600 dark:text-red-400">{statusLoadError}</p>
             )}
+            {member.status === 'loading' ? (
+              <p className="py-14 text-center text-sm text-gray-500">…</p>
+            ) : !isLoggedIn ? (
+              <MemberAuthPanel
+                onSignedIn={(user) => {
+                  if (user) member.completeSignIn(user)
+                  else void member.refresh()
+                }}
+              />
+            ) : (
             <form onSubmit={handleSubmit} className="boxed-fields grid gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2 flex flex-wrap items-start gap-x-10 gap-y-4">
             <div className="space-y-2 min-w-0">
@@ -2832,9 +3088,6 @@ export default function RemotePage() {
                 onClick={() => {
                   setEditingSessionId(null)
                   setRequestName('')
-                  setFirstName('')
-                  setLastName('')
-                  setEmail('')
                   setRaHourPart('')
                   setRaMinutePart('')
                   setRaSecondPart('')
@@ -2919,38 +3172,6 @@ export default function RemotePage() {
               className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
             />
           </label>
-          <div className="sm:col-span-2 grid gap-3 sm:grid-cols-3">
-            <label className="block space-y-1">
-              <span className="text-sm font-medium text-white">First Name</span>
-              <input
-                type="text"
-                value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
-                placeholder="First name"
-                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
-              />
-            </label>
-            <label className="block space-y-1">
-              <span className="text-sm font-medium text-white">Last Name</span>
-              <input
-                type="text"
-                value={lastName}
-                onChange={(e) => setLastName(e.target.value)}
-                placeholder="Last name"
-                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
-              />
-            </label>
-            <label className="block space-y-1">
-              <span className="text-sm font-medium text-white">Email *</span>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="Email"
-                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
-              />
-            </label>
-          </div>
           <div className="sm:col-span-2 space-y-3">
             {sessionType === 'variable_star' ? (
               <div className="space-y-4">
@@ -3371,18 +3592,7 @@ export default function RemotePage() {
               </p>
             </div>
           )}
-          <div className="sm:col-span-2 grid gap-3 sm:grid-cols-2 sm:items-start">
-            <label className="block space-y-1">
-              <span className="text-sm font-medium text-white">Session Password *</span>
-              <input
-                required
-                type="password"
-                value={sessionPassword}
-                onChange={(e) => setSessionPassword(e.target.value)}
-                placeholder="Required for progress and download access"
-                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
-              />
-            </label>
+          <div className="sm:col-span-2 grid gap-3">
             <div className="grid gap-2">
               <span className="text-sm font-medium text-white">Output Type *</span>
               <div className="flex flex-wrap gap-2">
@@ -3447,7 +3657,6 @@ export default function RemotePage() {
               onClick={() => {
                 setRunModalError(null)
                 setRunModalName('')
-                setRunModalPassword('')
                 setShowRunRemoteSessionModal(true)
               }}
               className="inline-flex items-center justify-center rounded-full border border-white/25 bg-[#151616] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#1b1c1c]"
@@ -3461,7 +3670,6 @@ export default function RemotePage() {
                 if (!canSaveRemoteSessionSpec) return
                 setSaveModalError(null)
                 setSaveModalName(requestName.trim())
-                setSaveModalPassword(sessionPassword)
                 setShowSaveRemoteSessionModal(true)
               }}
               className="inline-flex items-center justify-center rounded-full border border-white/25 bg-[#151616] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#1b1c1c] disabled:cursor-not-allowed disabled:opacity-50"
@@ -3470,6 +3678,7 @@ export default function RemotePage() {
             </button>
           </div>
             </form>
+            )}
           </div>
         </section>
         <div className="hidden lg:block h-full min-h-[16rem] w-px bg-black/10 dark:bg-white/10" />
@@ -3583,11 +3792,14 @@ export default function RemotePage() {
           <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-4">Current Sessions</h1>
           <div className="flex flex-col gap-4">
             <p className="text-sm text-gray-600 dark:text-gray-400">
-              This list includes every session that is pending, scheduled, in progress, or completed. Completed sessions
-              are retained for{' '}
-              <span className="font-semibold text-red-600 dark:text-red-400">48 hours</span> after completion, then
-              removed automatically. When your session finishes, you will receive an email—please download your data
-              while it is still available. For the observatory master calibration library (bias, darks, flats),{' '}
+              This list includes every session that is pending, scheduled, in progress, or completed. Single-night
+              sessions are kept for{' '}
+              <span className="font-semibold text-red-600 dark:text-red-400">48 hours</span> after they finish.
+              Project Mode keeps every completed sub-session download available until the{' '}
+              <span className="font-semibold text-red-600 dark:text-red-400">entire project</span> is done; then all
+              project files are removed 48 hours after that. When your session finishes, you will receive an
+              email—please download your data while it is still available. For the observatory master calibration library
+              (bias, darks, flats),{' '}
               <a
                 href={POMFRET_CALIBRATION_LIBRARY_DRIVE_URL}
                 target="_blank"
@@ -3606,6 +3818,12 @@ export default function RemotePage() {
                 const displayStatus = item.status === 'claimed' ? 'in_progress' : item.status
                 const sessionTypeLabel = item.sessionType === 'variable_star' ? 'Variable Star' : 'Deep Sky Object'
                 const projectLabel = item.projectMode ? ' · Project Mode' : ''
+                const projectHasDownloads =
+                  item.projectMode === true &&
+                  item.outputMode !== 'none' &&
+                  (item.nights?.some((n) => n.hasDownload === true) ?? false)
+                const showDownloadButton = item.projectMode ? projectHasDownloads : item.hasDownload === true
+                const actionsEnabled = canInteractWithSession(item)
                 return (
                 <li
                   key={item.id}
@@ -3618,62 +3836,39 @@ export default function RemotePage() {
                     </span>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-3">
-                    {item.hasDownload && item.downloadPath && (
+                    {showDownloadButton && (
                       <button
                         type="button"
-                        onClick={() => {
-                          setAuthModalSessionId(item.id)
-                          setAuthModalAction('download')
-                          setAuthError(null)
-                          setAuthPassword(sessionPasswords[item.id] ?? '')
-                        }}
-                        className="rounded-full border border-white/25 bg-[#151616] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#1b1c1c]"
+                        disabled={!actionsEnabled}
+                        onClick={() => void handleDownloadClick(item)}
+                        className={sessionActionButtonClass(actionsEnabled)}
                       >
                         Download file
                       </button>
                     )}
                     <button
                       type="button"
-                      onClick={() => {
-                        if (item.projectMode) {
-                          setAuthModalSessionId(item.id)
-                          setAuthModalAction('project_progress')
-                          setAuthError(null)
-                          setAuthPassword(sessionPasswords[item.id] ?? '')
-                          return
-                        }
-                        setAuthModalSessionId(item.id)
-                        setAuthModalAction('progress')
-                        setAuthError(null)
-                        setAuthPassword(sessionPasswords[item.id] ?? '')
-                      }}
-                      className="rounded-full border border-white/25 bg-[#151616] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#1b1c1c]"
+                      disabled={!actionsEnabled}
+                      onClick={() => void handleCheckProgressClick(item)}
+                      className={sessionActionButtonClass(actionsEnabled)}
                     >
                       Check progress
                     </button>
                     {(item.status === 'pending' || item.status === 'scheduled') && (
                       <button
                         type="button"
-                        onClick={() => {
-                          setAuthModalSessionId(item.id)
-                          setAuthModalAction('edit')
-                          setAuthError(null)
-                          setAuthPassword(sessionPasswords[item.id] ?? '')
-                        }}
-                        className="rounded-full border border-white/25 bg-[#151616] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#1b1c1c]"
+                        disabled={!actionsEnabled}
+                        onClick={() => handleEditSessionClick(item)}
+                        className={sessionActionButtonClass(actionsEnabled)}
                       >
                         Edit session
                       </button>
                     )}
                     <button
                       type="button"
-                      onClick={() => {
-                        setDeleteError(null)
-                        setDeleteTargetId(item.id)
-                        setDeletePassword('')
-                        setShowDeleteModal(true)
-                      }}
-                      className="rounded-full border border-red-500/50 bg-[#151616] px-3 py-1.5 text-xs font-medium text-red-300 hover:bg-[#1b1c1c] hover:text-red-200"
+                      disabled={!actionsEnabled}
+                      onClick={() => handleDeleteSessionClick(item)}
+                      className={sessionActionButtonClass(actionsEnabled, 'danger')}
                     >
                       Delete session
                     </button>
@@ -3823,65 +4018,139 @@ export default function RemotePage() {
             className="w-full max-w-md rounded-xl bg-[#09090a] border border-gray-700 p-6 space-y-4"
           >
             <h2 id="night-picker-title" className="text-lg font-semibold text-white">
-              Select session
+              {nightPickerPurpose === 'download' ? 'Select session to download' : 'Select session'}
             </h2>
             {(() => {
-              const pickerNights = (
-                queueItems.find((x) => x.id === nightPickerProjectId)?.nights ?? []
-              ).filter(
-                (n) =>
-                  n.status === 'scheduled' ||
-                  n.status === 'in_progress' ||
-                  n.status === 'completed'
-              )
-              if (pickerNights.length === 0) {
+              const projectItem = queueItems.find((x) => x.id === nightPickerProjectId)
+              const projectOwned = projectItem ? sessionOwnedByMe(projectItem) : false
+              const projectFramesTotal = projectItem?.projectFramesTotal ?? 0
+              const projectFramesCaptured = projectItem?.projectFramesCaptured ?? 0
+              const showProjectProgress =
+                nightPickerPurpose === 'progress' &&
+                projectItem?.projectMode === true &&
+                projectFramesTotal > 0
+              const projectProgressPct = showProjectProgress
+                ? Math.min(100, Math.round((projectFramesCaptured / projectFramesTotal) * 100))
+                : 0
+              const pickerNights = (projectItem?.nights ?? []).filter((n) => {
+                if (nightPickerPurpose === 'download') {
+                  return n.status === 'completed' && n.hasDownload === true
+                }
+                return n.status === 'scheduled' || n.status === 'in_progress' || n.status === 'completed'
+              })
+              if (pickerNights.length === 0 && !showProjectProgress) {
                 return (
-                  <p className="text-sm text-gray-400 py-2">No Session Scheduled</p>
+                  <p className="text-sm text-gray-400 py-2">
+                    {nightPickerPurpose === 'download'
+                      ? 'No completed session with a download yet.'
+                      : 'No Session Scheduled'}
+                  </p>
                 )
               }
               return (
+                <>
+                {pickerNights.length === 0 ? (
+                  <p className="text-sm text-gray-400 py-2">No Session Scheduled</p>
+                ) : (
                 <ul className="space-y-2 max-h-64 overflow-y-auto">
                   {pickerNights.map((night) => (
                     <li key={night.id}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const projectId = nightPickerProjectId
-                          const password = projectId ? sessionPasswords[projectId] ?? '' : ''
-                          setNightPickerProjectId(null)
-                          if (!password) {
-                            setAuthModalSessionId(projectId)
-                            setAuthModalAction('project_progress')
-                            setAuthError('Session password required.')
-                            return
-                          }
-                          setSessionPasswords((prev) => ({
-                            ...prev,
-                            [night.id]: password,
-                            ...(projectId ? { [projectId]: password } : {}),
-                          }))
-                          setTerminalSessionId(night.id)
-                        }}
-                        className="w-full rounded-lg border border-gray-600 px-3 py-2 text-left text-sm text-white hover:bg-[#151616]"
-                      >
-                        <span className="font-medium">Session {night.nightIndex}</span>
-                        <span className="text-gray-400"> · {night.nightKey}</span>
-                        <span
-                          className={`ml-2 text-xs font-semibold uppercase ${queueStatusBadgeClass(
-                            night.status === 'in_progress' ? 'in_progress' : night.status
-                          )}`}
+                      {nightPickerPurpose === 'download' ? (
+                        <div className="flex items-center justify-between gap-2 rounded-lg border border-gray-600 px-3 py-2">
+                          <div className="min-w-0 text-sm text-white">
+                            <span className="font-medium">Session {night.nightIndex}</span>
+                            <span className="text-gray-400"> · {night.nightKey}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const projectId = nightPickerProjectId
+                              const password = projectId ? sessionPasswords[projectId] ?? '' : ''
+                              if (!password && !isAdmin && !projectOwned) return
+                              const err = await downloadSessionFile(night.id, password)
+                              if (err) setDeleteError(err)
+                            }}
+                            className="shrink-0 rounded-full border border-white/25 bg-[#151616] px-3 py-1 text-xs font-medium text-white hover:bg-[#1b1c1c]"
+                          >
+                            Download
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const projectId = nightPickerProjectId
+                            const password = projectId ? sessionPasswords[projectId] ?? '' : ''
+                            setNightPickerProjectId(null)
+                            setNightPickerPurpose(null)
+                            if (!password && !isAdmin && !projectOwned) {
+                              setAuthModalSessionId(projectId)
+                              setAuthModalAction('project_progress')
+                              setAuthError('Session password required.')
+                              return
+                            }
+                            if (password) {
+                              setSessionPasswords((prev) => ({
+                                ...prev,
+                                [night.id]: password,
+                                ...(projectId ? { [projectId]: password } : {}),
+                              }))
+                            }
+                            setTerminalSessionId(night.id)
+                          }}
+                          className="w-full rounded-lg border border-gray-600 px-3 py-2 text-left text-sm text-white hover:bg-[#151616]"
                         >
-                          {queueStatusLabel(night.status)}
-                        </span>
-                      </button>
+                          <span className="font-medium">Session {night.nightIndex}</span>
+                          <span className="text-gray-400"> · {night.nightKey}</span>
+                          <span
+                            className={`ml-2 text-xs font-semibold uppercase ${queueStatusBadgeClass(
+                              night.status === 'in_progress' ? 'in_progress' : night.status
+                            )}`}
+                          >
+                            {queueStatusLabel(night.status)}
+                          </span>
+                        </button>
+                      )}
                     </li>
                   ))}
                 </ul>
+                )}
+                {showProjectProgress && (
+                  <>
+                    <h2 className="text-lg font-semibold text-white">Project progress</h2>
+                    <div className="space-y-2">
+                      <div
+                        className="flex h-2.5 w-full overflow-hidden rounded-full"
+                        role="progressbar"
+                        aria-valuenow={projectFramesCaptured}
+                        aria-valuemin={0}
+                        aria-valuemax={projectFramesTotal}
+                        aria-label="Project frames captured"
+                      >
+                        <div
+                          className="h-full shrink-0 bg-emerald-500 transition-[width] duration-300"
+                          style={{ width: `${projectProgressPct}%` }}
+                        />
+                        <div className="h-full min-w-0 flex-1 bg-gray-600" aria-hidden />
+                      </div>
+                      <p className="text-xs text-gray-400">
+                        <span className="text-white font-medium">{projectFramesCaptured}</span>
+                        {' / '}
+                        {projectFramesTotal} frames captured
+                        {projectFramesCaptured >= projectFramesTotal ? ' · project complete' : ''}
+                      </p>
+                    </div>
+                  </>
+                )}
+                </>
               )
             })()}
             <button
               type="button"
-              onClick={() => setNightPickerProjectId(null)}
+              onClick={() => {
+                setNightPickerProjectId(null)
+                setNightPickerPurpose(null)
+              }}
               className="w-full rounded-full border border-gray-600 px-4 py-2 text-sm text-gray-300 hover:text-white"
             >
               Cancel
@@ -3917,6 +4186,24 @@ export default function RemotePage() {
                     return
                   }
                   setNightPickerProjectId(authModalSessionId)
+                  setNightPickerPurpose('progress')
+                  setAuthModalSessionId(null)
+                  setAuthModalAction(null)
+                  setAuthPassword('')
+                  return
+                }
+                if (authModalAction === 'project_download') {
+                  const res = await fetch(
+                    `/api/imaging/queue/${encodeURIComponent(authModalSessionId)}/progress`,
+                    { headers: { 'x-session-password': password } }
+                  )
+                  const data = await res.json().catch(() => ({}))
+                  if (!res.ok || data?.ok !== true) {
+                    setAuthError(typeof data.error === 'string' ? data.error : 'Invalid session password.')
+                    return
+                  }
+                  setNightPickerProjectId(authModalSessionId)
+                  setNightPickerPurpose('download')
                   setAuthModalSessionId(null)
                   setAuthModalAction(null)
                   setAuthPassword('')
@@ -3942,22 +4229,14 @@ export default function RemotePage() {
                   setAuthPassword('')
                   return
                 }
-                const res = await fetch(
-                  `/api/imaging/download?queueId=${encodeURIComponent(authModalSessionId)}&mode=json`,
-                  {
-                    headers: { 'x-session-password': password },
-                  }
-                )
-                const data = await res.json().catch(() => ({}))
-                if (!res.ok || data?.ok !== true || typeof data.signedUrl !== 'string') {
-                  setAuthError(typeof data.error === 'string' ? data.error : 'Download failed.')
+                const err = await downloadSessionFile(authModalSessionId, password)
+                if (err) {
+                  setAuthError(err)
                   return
                 }
                 setAuthModalSessionId(null)
                 setAuthModalAction(null)
                 setAuthPassword('')
-                window.location.assign(data.signedUrl)
-                await refreshQueue()
               } finally {
                 setAuthSubmitting(false)
               }
@@ -3966,11 +4245,13 @@ export default function RemotePage() {
             <h2 className="text-lg font-semibold text-white">
               {authModalAction === 'project_progress'
                 ? 'Check Project Progress'
-                : authModalAction === 'progress'
-                  ? 'Check Session Progress'
-                  : authModalAction === 'edit'
-                    ? 'Edit Session'
-                    : 'Download Session File'}
+                : authModalAction === 'project_download'
+                  ? 'Download Project Session'
+                  : authModalAction === 'progress'
+                    ? 'Check Session Progress'
+                    : authModalAction === 'edit'
+                      ? 'Edit Session'
+                      : 'Download Session File'}
             </h2>
             {authModalAction === 'edit' && (
               <p className="text-sm text-gray-400">
@@ -4021,32 +4302,46 @@ export default function RemotePage() {
               e.preventDefault()
               if (!deleteTargetId) return
               const pwd = deletePassword.trim()
-              if (!pwd) {
+              const deleteTargetItem = queueItems.find((item) => item.id === deleteTargetId)
+              const deleteOwned = deleteTargetItem ? sessionOwnedByMe(deleteTargetItem) : false
+              if (!isAdmin && !deleteOwned && !pwd) {
                 setDeleteError('Password is required.')
                 return
               }
               setDeleteSubmitting(true)
               setDeleteError(null)
               try {
-                await handleDeleteRequest(deleteTargetId, pwd)
+                await handleDeleteRequest(deleteTargetId, isAdmin || deleteOwned ? '' : pwd)
               } finally {
                 setDeleteSubmitting(false)
               }
             }}
           >
             <h2 className="text-lg font-semibold text-white">Delete Session</h2>
-            <p className="text-sm text-gray-400">
-              Enter the admin password or this session&apos;s password to delete.
-            </p>
-            <label className="block space-y-1">
-              <span className="text-sm font-medium text-white">Password</span>
-              <input
-                type="password"
-                value={deletePassword}
-                onChange={(e) => setDeletePassword(e.target.value)}
-                className="w-full rounded-lg border border-gray-600 bg-transparent px-3 py-2 text-sm text-white placeholder:text-gray-500"
-              />
-            </label>
+            {(() => {
+              const deleteTargetItem = deleteTargetId
+                ? queueItems.find((item) => item.id === deleteTargetId)
+                : undefined
+              const deleteOwned = deleteTargetItem ? sessionOwnedByMe(deleteTargetItem) : false
+              if (isAdmin || deleteOwned) {
+                return (
+                  <p className="text-sm text-gray-300">
+                    Delete this session permanently? This cannot be undone.
+                  </p>
+                )
+              }
+              return (
+                <label className="block space-y-1">
+                  <span className="text-sm font-medium text-white">Password</span>
+                  <input
+                    type="password"
+                    value={deletePassword}
+                    onChange={(e) => setDeletePassword(e.target.value)}
+                    className="w-full rounded-lg border border-gray-600 bg-transparent px-3 py-2 text-sm text-white placeholder:text-gray-500"
+                  />
+                </label>
+              )
+            })()}
             {deleteError && <p className="text-sm text-red-400">{deleteError}</p>}
             <div className="flex items-center justify-end gap-3">
               <button
@@ -4078,22 +4373,13 @@ export default function RemotePage() {
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
           <div className="w-full max-w-md rounded-xl bg-[#09090a] border border-gray-700 p-6 space-y-4">
             <h2 className="text-lg font-semibold text-white">Save Session</h2>
-            <p className="text-sm text-gray-400">Confirm the name and password stored with this preset on this device.</p>
+            <p className="text-sm text-gray-400">Save this form as a reusable template on your account.</p>
             <label className="block space-y-1">
               <span className="text-sm font-medium text-white">Session name</span>
               <input
                 type="text"
                 value={saveModalName}
                 onChange={(e) => setSaveModalName(e.target.value)}
-                className="w-full rounded-lg border border-gray-600 bg-transparent px-3 py-2 text-sm text-white placeholder:text-gray-500"
-              />
-            </label>
-            <label className="block space-y-1">
-              <span className="text-sm font-medium text-white">Session password</span>
-              <input
-                type="password"
-                value={saveModalPassword}
-                onChange={(e) => setSaveModalPassword(e.target.value)}
                 className="w-full rounded-lg border border-gray-600 bg-transparent px-3 py-2 text-sm text-white placeholder:text-gray-500"
               />
             </label>
@@ -4112,26 +4398,27 @@ export default function RemotePage() {
               <button
                 type="button"
                 onClick={() => {
-                  const name = saveModalName.trim()
-                  const pwd = saveModalPassword
-                  if (!name) {
-                    setSaveModalError('Session name is required.')
-                    return
-                  }
-                  if (!pwd.trim()) {
-                    setSaveModalError('Session password is required.')
-                    return
-                  }
-                  const form = captureRemoteSavedForm()
-                  form.requestName = name
-                  form.sessionPassword = pwd
-                  upsertRemoteSavedSession({ name, password: pwd, form })
-                  setRequestName(name)
-                  setSessionPassword(pwd)
-                  setShowSaveRemoteSessionModal(false)
-                  setSaveModalError(null)
-                  setSubmitError(null)
-                  setSubmitSuccess(`Saved session "${name}" on this device.`)
+                  void (async () => {
+                    const name = saveModalName.trim()
+                    if (!name) {
+                      setSaveModalError('Session name is required.')
+                      return
+                    }
+                    const form = captureRemoteSavedForm()
+                    form.requestName = name
+                    form.sessionPassword = ''
+                    const result = await saveMemberSavedSession({ name, form })
+                    if (!result.ok) {
+                      setSaveModalError(result.error)
+                      return
+                    }
+                    await refreshCloudSavedSessions()
+                    setRequestName(name)
+                    setShowSaveRemoteSessionModal(false)
+                    setSaveModalError(null)
+                    setSubmitError(null)
+                    setSubmitSuccess(`Saved session "${name}" to your account.`)
+                  })()
                 }}
                 className="rounded-full border border-white/60 bg-[#151616] px-4 py-2 text-sm font-medium text-white hover:bg-[#1b1c1c]"
               >
@@ -4146,22 +4433,29 @@ export default function RemotePage() {
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
           <div className="w-full max-w-md rounded-xl bg-[#09090a] border border-gray-700 p-6 space-y-4">
             <h2 className="text-lg font-semibold text-white">Run A Saved Session</h2>
-            <p className="text-sm text-gray-400">Enter the saved session name and password to load the form.</p>
+            {cloudSavedSessions.length > 0 ? (
+              <label className="block space-y-1">
+                <span className="text-sm font-medium text-white">Saved templates</span>
+                <select
+                  value={runModalName}
+                  onChange={(e) => setRunModalName(e.target.value)}
+                  className="w-full rounded-lg border border-gray-600 bg-transparent px-3 py-2 text-sm text-white"
+                >
+                  <option value="">Select…</option>
+                  {cloudSavedSessions.map((s) => (
+                    <option key={s.id} value={s.name}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <label className="block space-y-1">
               <span className="text-sm font-medium text-white">Session name</span>
               <input
                 type="text"
                 value={runModalName}
                 onChange={(e) => setRunModalName(e.target.value)}
-                className="w-full rounded-lg border border-gray-600 bg-transparent px-3 py-2 text-sm text-white placeholder:text-gray-500"
-              />
-            </label>
-            <label className="block space-y-1">
-              <span className="text-sm font-medium text-white">Session password</span>
-              <input
-                type="password"
-                value={runModalPassword}
-                onChange={(e) => setRunModalPassword(e.target.value)}
                 className="w-full rounded-lg border border-gray-600 bg-transparent px-3 py-2 text-sm text-white placeholder:text-gray-500"
               />
             </label>
@@ -4180,22 +4474,23 @@ export default function RemotePage() {
               <button
                 type="button"
                 onClick={() => {
-                  const name = runModalName.trim()
-                  const pwd = runModalPassword
-                  if (!name || !pwd) {
-                    setRunModalError('Name and password are required.')
-                    return
-                  }
-                  const found = findRemoteSavedSession(name, pwd)
-                  if (!found) {
-                    setRunModalError('No saved session matches that name and password.')
-                    return
-                  }
-                  applyRemoteSavedForm(found.form)
-                  setShowRunRemoteSessionModal(false)
-                  setRunModalError(null)
-                  setSubmitError(null)
-                  setSubmitSuccess(`Loaded saved session "${found.name}".`)
+                  void (async () => {
+                    const name = runModalName.trim()
+                    if (!name) {
+                      setRunModalError('Session name is required.')
+                      return
+                    }
+                    const found = await loadMemberSavedSessionByName(name)
+                    if (!found) {
+                      setRunModalError('No saved session with that name.')
+                      return
+                    }
+                    applyRemoteSavedForm(found.form)
+                    setShowRunRemoteSessionModal(false)
+                    setRunModalError(null)
+                    setSubmitError(null)
+                    setSubmitSuccess(`Loaded saved session "${found.name}".`)
+                  })()
                 }}
                 className="rounded-full border border-white/60 bg-[#151616] px-4 py-2 text-sm font-medium text-white hover:bg-[#1b1c1c]"
               >

@@ -41,6 +41,16 @@ export async function kvSetJson(key: string, value: unknown): Promise<boolean> {
   }
 }
 
+export async function kvDel(key: string): Promise<boolean> {
+  if (!enabled()) return false
+  try {
+    const res = await request(`/del/${encodeURIComponent(key)}`, { method: 'POST' })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
 export function kvEnabled(): boolean {
   return enabled()
 }

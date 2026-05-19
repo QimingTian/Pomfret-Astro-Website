@@ -1,7 +1,7 @@
-import { isImagingAdminPassword } from '@/lib/imaging-admin-auth'
 import { listSessionProgressLinesFromAudit } from '@/lib/imaging-audit-log'
 import { subscribeProgress, type LiveProgressEvent } from '@/lib/imaging-progress-live'
-import { resolveImagingSessionContext, validateSessionPassword } from '@/lib/imaging-session-access'
+import { authorizeImagingSession, resolveImagingSessionContext } from '@/lib/imaging-session-access'
+import type { NextRequest } from 'next/server'
 
 export const runtime = 'nodejs'
 
@@ -15,7 +15,7 @@ function linesFingerprint(lines: Array<{ at: string; text: string }>): string {
   return lines.map((l) => `${l.at}\t${l.text}`).join('\n')
 }
 
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   const id = params.id
   if (!id) {
     return new Response(JSON.stringify({ ok: false, error: 'Missing id' }), { status: 400 })
@@ -23,15 +23,12 @@ export async function GET(request: Request, { params }: { params: { id: string }
 
   const requestUrl = new URL(request.url)
   const providedPassword =
-    request.headers.get('x-session-password') ??
-    request.headers.get('x-admin-password') ??
-    requestUrl.searchParams.get('password')
-  const isAdmin = isImagingAdminPassword(providedPassword)
-  if (!isAdmin) {
-    const auth = await validateSessionPassword(id, providedPassword)
-    if (!auth.ok) {
-      return new Response(JSON.stringify({ ok: false, error: auth.error }), { status: auth.status })
-    }
+    request.headers.get('x-session-password')?.trim() ||
+    requestUrl.searchParams.get('password')?.trim() ||
+    null
+  const auth = await authorizeImagingSession(request, id, providedPassword)
+  if (!auth.ok) {
+    return new Response(JSON.stringify({ ok: false, error: auth.error }), { status: auth.status })
   }
 
   const session = await resolveImagingSessionContext(id)

@@ -5,10 +5,22 @@ import { buildNinaSequenceJson } from '@/lib/build-nina-sequence-json'
 import { hashSessionPassword } from '@/lib/session-password'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 import { getTonightAstronomicalNightWindow, getTonightSchedulingWindow } from '@/lib/sunrise-window'
-import { altitudeAllowedCoverageMs, altitudeCoverageMsAtMinAltitude, firstAltitudeAllowedTimeMs } from '@/lib/target-altitude'
+import {
+  altitudeAllowedCoverageMs,
+  altitudeCoverageMsAtMinAltitude,
+  altitudeSessionCoverageOk,
+  firstAltitudeAllowedTimeMs,
+  requiredAltitudeCoverageMs,
+} from '@/lib/target-altitude'
 
 /** Queue lifecycle: mutually exclusive (no separate scheduleStatus flag). */
-export type ImagingRequestStatus = 'pending' | 'scheduled' | 'in_progress' | 'completed' | 'failed'
+export type ImagingRequestStatus =
+  | 'pending'
+  | 'scheduled'
+  | 'in_progress'
+  | 'completed'
+  | 'failed'
+  | 'rejected'
 
 export interface ImagingRequest {
   id: string
@@ -39,16 +51,28 @@ export interface ImagingRequest {
   sequenceTemplate?: 'dso' | 'variable_star'
   /** Multi-night DSO project; queue row is consumed on first NINA delivery only. */
   projectMode?: boolean
+  /** Member who submitted this session (new sessions). */
+  userId?: string
 }
 
 /** Strip large JSON from API list responses; expose download path instead. */
 export function toPublicImagingRequest(
-  r: ImagingRequest
-): Omit<ImagingRequest, 'ninaSequenceJson' | 'sessionPasswordHash' | 'scheduleStatus'> & { ninaSequencePath?: string } {
+  r: ImagingRequest,
+  options?: { redactContact?: boolean }
+): Omit<ImagingRequest, 'ninaSequenceJson' | 'sessionPasswordHash' | 'scheduleStatus'> & {
+  ninaSequencePath?: string
+} {
   const { ninaSequenceJson, sessionPasswordHash, scheduleStatus: _legacySchedule, ...rest } = r
-  return {
+  const pub = {
     ...rest,
     ninaSequencePath: `/api/imaging/queue/${r.id}/nina-sequence`,
+  }
+  if (!options?.redactContact) return pub
+  return {
+    ...pub,
+    email: undefined,
+    firstName: undefined,
+    lastName: undefined,
   }
 }
 
@@ -252,7 +276,8 @@ export interface CreateImagingInput {
   filter: string | null
   exposureSeconds: number | string
   count: number | string
-  sessionPassword: string
+  sessionPassword?: string
+  userId?: string
   outputMode?: 'raw_zip' | 'stacked_master' | 'none'
   filterPlans?: Array<{ filterName: string; exposureSeconds: number | string; count: number | string }>
   firstName?: string | null
@@ -282,15 +307,14 @@ function canFitInIdealNight(
   const STEP_MS = 5 * 60 * 1000
 
   // Search possible starts under ideal conditions: no weather limits, no queue blockers.
-  // Still enforce target >= 30deg at start and >=80% altitude coverage over session duration.
+  // Still enforce target >= 30deg for the full session duration (100% altitude coverage).
   let cursor = windowStartMs
   while (cursor <= latestStartMs) {
     const startMs = firstAltitudeAllowedTimeMs(raHours, decDeg, cursor, latestStartMs)
     if (startMs == null) return false
     const endMs = startMs + durationMs
     if (endMs > windowEndMs) return false
-    const coveredMs = altitudeAllowedCoverageMs(raHours, decDeg, startMs, endMs)
-    if (coveredMs >= durationMs * 0.8) return true
+    if (altitudeSessionCoverageOk(raHours, decDeg, startMs, endMs)) return true
     cursor = startMs + STEP_MS
   }
   return false
@@ -427,7 +451,7 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
       nauticalDuskUtc.getTime(),
       nauticalDawnUtc.getTime()
     )
-    const requiredAltitudeAllowedMs = estimatedDurationSeconds * 1000 * 0.8
+    const requiredAltitudeAllowedMs = requiredAltitudeCoverageMs(estimatedDurationSeconds * 1000)
     if (nightAltitudeAllowedMs < requiredAltitudeAllowedMs) {
       return {
         error:
@@ -452,14 +476,18 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
     }
   }
 
-  const sessionPassword = typeof input.sessionPassword === 'string' ? input.sessionPassword.trim() : ''
-  if (!sessionPassword) {
-    return { error: 'Session password is required' }
+  const userId = typeof input.userId === 'string' && input.userId.trim() ? input.userId.trim() : undefined
+  if (!userId) {
+    return { error: 'Authentication required to submit imaging requests.' }
   }
+  const sessionPassword = typeof input.sessionPassword === 'string' ? input.sessionPassword.trim() : ''
+  let sessionPasswordHash: string | undefined
   if (sessionPassword.length > 128) {
     return { error: 'Session password must be at most 128 characters' }
   }
-  const sessionPasswordHash = await hashSessionPassword(sessionPassword)
+  if (sessionPassword) {
+    sessionPasswordHash = await hashSessionPassword(sessionPassword)
+  }
 
   let ninaSequenceJson: string
   try {
@@ -508,9 +536,10 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
     lastName,
     email,
     ninaSequenceJson,
-    sessionPasswordHash,
+    ...(sessionPasswordHash ? { sessionPasswordHash } : {}),
     sequenceTemplate,
     ...(projectMode ? { projectMode: true as const } : {}),
+    ...(userId ? { userId } : {}),
   }
 
   mem.push(req)
@@ -617,31 +646,34 @@ export async function updatePendingRequestById(
           )
         })()
       : normalizedFilterPlans.reduce((sum, p) => sum + p.count * p.exposureSeconds, 0) + 15 * 60
-  const { nauticalDuskUtc, nauticalDawnUtc } = getTonightSchedulingWindow(new Date())
-  const nightAltitudeAllowedMs = altitudeAllowedCoverageMs(
-    raHours,
-    decDeg,
-    nauticalDuskUtc.getTime(),
-    nauticalDawnUtc.getTime()
-  )
-  if (nightAltitudeAllowedMs < estimatedDurationSeconds * 1000 * 0.8) {
-    return { error: 'Session is too long for this target altitude profile tonight. Please shorten it.' }
-  }
-  const tonightWindow = getTonightAstronomicalNightWindow(new Date())
-  if (estimatedDurationSeconds > tonightWindow.durationSeconds) {
-    return { error: 'Session is too long to finish in one night. Please shorten it.' }
-  }
-  const idealNightFeasible = canFitInIdealNight(
-    raHours,
-    decDeg,
-    estimatedDurationSeconds * 1000,
-    nauticalDuskUtc.getTime(),
-    nauticalDawnUtc.getTime()
-  )
-  if (!idealNightFeasible) {
-    return {
-      error:
-        'Session has no valid imaging window tonight even under ideal conditions (clear weather and empty schedule). Please shorten it or change target.',
+  const projectMode = current.projectMode === true
+  if (!projectMode) {
+    const { nauticalDuskUtc, nauticalDawnUtc } = getTonightSchedulingWindow(new Date())
+    const nightAltitudeAllowedMs = altitudeAllowedCoverageMs(
+      raHours,
+      decDeg,
+      nauticalDuskUtc.getTime(),
+      nauticalDawnUtc.getTime()
+    )
+    if (nightAltitudeAllowedMs < requiredAltitudeCoverageMs(estimatedDurationSeconds * 1000)) {
+      return { error: 'Session is too long for this target altitude profile tonight. Please shorten it.' }
+    }
+    const tonightWindow = getTonightAstronomicalNightWindow(new Date())
+    if (estimatedDurationSeconds > tonightWindow.durationSeconds) {
+      return { error: 'Session is too long to finish in one night. Please shorten it.' }
+    }
+    const idealNightFeasible = canFitInIdealNight(
+      raHours,
+      decDeg,
+      estimatedDurationSeconds * 1000,
+      nauticalDuskUtc.getTime(),
+      nauticalDawnUtc.getTime()
+    )
+    if (!idealNightFeasible) {
+      return {
+        error:
+          'Session has no valid imaging window tonight even under ideal conditions (clear weather and empty schedule). Please shorten it or change target.',
+      }
     }
   }
 
@@ -651,7 +683,10 @@ export async function updatePendingRequestById(
     if (nextPassword.length > 128) return { error: 'Session password must be at most 128 characters' }
     sessionPasswordHash = await hashSessionPassword(nextPassword)
   }
-  if (!sessionPasswordHash) return { error: 'Session password is required' }
+  const ownedByMember = typeof current.userId === 'string' && current.userId.length > 0
+  if (!sessionPasswordHash && !ownedByMember) {
+    return { error: 'Session password is required' }
+  }
 
   let ninaSequenceJson: string
   try {
@@ -720,7 +755,7 @@ export async function updateStatus(
   }
 
   const current = mem[idx]
-  if (current.status === 'completed' || current.status === 'failed') {
+  if (current.status === 'completed' || current.status === 'failed' || current.status === 'rejected') {
     return { error: 'Request is already finished' }
   }
 
@@ -734,6 +769,50 @@ export async function updateStatus(
   const next: ImagingRequest = {
     ...current,
     status,
+    updatedAt: nowIso(),
+  }
+  mem[idx] = next
+  await persist()
+  return next
+}
+
+/** Admin Session Control: force terminal status from any non-terminal queue row. */
+export async function adminForceQueueStatus(
+  id: string,
+  status: 'completed' | 'failed'
+): Promise<ImagingRequest | { error: string }> {
+  await ensureLoadedFromDisk()
+  const mem = getMemory()
+  const idx = mem.findIndex((r) => r.id === id)
+  if (idx === -1) return { error: 'Not found' }
+  const current = mem[idx]
+  if (current.status === 'completed' || current.status === 'failed' || current.status === 'rejected') {
+    return { error: 'Request is already finished' }
+  }
+  const next: ImagingRequest = { ...current, status, updatedAt: nowIso() }
+  mem[idx] = next
+  await persist()
+  return next
+}
+
+/** Keep rejected submits in queue for member session history (not offered to NINA). */
+export async function markQueueRejected(
+  id: string,
+  reasons: string[]
+): Promise<ImagingRequest | { error: string }> {
+  await ensureLoadedFromDisk()
+  const mem = getMemory()
+  const idx = mem.findIndex((r) => r.id === id)
+  if (idx === -1) return { error: 'Not found' }
+  const current = mem[idx]
+  if (current.status === 'completed' || current.status === 'failed' || current.status === 'rejected') {
+    return { error: 'Request is already finished' }
+  }
+  const next: ImagingRequest = {
+    ...current,
+    status: 'rejected',
+    plannedStartIso: null,
+    scheduleReasons: reasons,
     updatedAt: nowIso(),
   }
   mem[idx] = next

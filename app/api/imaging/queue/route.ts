@@ -1,13 +1,17 @@
 import { NextRequest } from 'next/server'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
+import { requireUser } from '@/lib/member-auth'
 import {
   imagingCorsOptions,
+  imagingQueueReadable,
+  imagingUnauthorized,
   withImagingCors,
 } from '@/lib/imaging-queue-auth'
 import {
   createRequest,
   deleteRequestById,
   getRequestById,
+  markQueueRejected,
   listAll,
   listPending,
   patchRequestScheduleInsight,
@@ -72,22 +76,31 @@ export function OPTIONS() {
 
 /**
  * GET — NINA / observatory poller: pending requests only (default).
- * ?scope=all — full queue (newest first), same auth.
+ * ?scope=all — full queue (member or IMAGING_QUEUE_SECRET only).
  */
 export async function GET(request: NextRequest) {
+  if (!(await imagingQueueReadable(request))) {
+    return imagingUnauthorized()
+  }
+
   const scope = request.nextUrl.searchParams.get('scope')
   if (scope === 'all') {
     const requests = (await listAll())
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-      .map(toPublicImagingRequest)
+      .map((r) => toPublicImagingRequest(r, { redactContact: true }))
     return withImagingCors({ ok: true as const, scope: 'all' as const, requests })
   }
 
-  const requests = (await listPending()).map(toPublicImagingRequest)
+  const requests = (await listPending()).map((r) => toPublicImagingRequest(r, { redactContact: true }))
   return withImagingCors({ ok: true as const, scope: 'pending' as const, requests })
 }
 
 export async function POST(request: NextRequest) {
+  const auth = await requireUser(request)
+  if (!auth.ok) {
+    return withImagingCors(auth.body, auth.status)
+  }
+
   let body: unknown
   try {
     body = await request.json()
@@ -152,15 +165,16 @@ export async function POST(request: NextRequest) {
           ? 'none'
           : 'raw_zip',
     filterPlans: parsedFilterPlans,
-    firstName: typeof b.firstName === 'string' ? b.firstName : b.firstName == null ? null : String(b.firstName),
-    lastName: typeof b.lastName === 'string' ? b.lastName : b.lastName == null ? null : String(b.lastName),
-    email: typeof b.email === 'string' ? b.email : b.email == null ? null : String(b.email),
+    firstName: auth.user.firstName.trim() || null,
+    lastName: auth.user.lastName.trim() || null,
+    email: auth.user.email,
     sequenceTemplate: b.sessionType === 'variable_star' ? 'variable_star' : 'dso',
     estimatedDurationSeconds:
       typeof b.estimatedDurationSeconds === 'number' && Number.isFinite(b.estimatedDurationSeconds)
         ? b.estimatedDurationSeconds
         : undefined,
     projectMode: b.projectMode === true,
+    userId: auth.user.id,
   }
 
   const whenClosedBehavior =
@@ -192,7 +206,7 @@ export async function POST(request: NextRequest) {
     return withImagingCors({ ok: false as const, error: result.error }, 400)
   }
 
-  if (result.projectMode && result.raHours != null && result.decDeg != null && result.sessionPasswordHash) {
+  if (result.projectMode && result.raHours != null && result.decDeg != null) {
     await createImagingProject({
       id: result.id,
       target: result.target,
@@ -204,7 +218,8 @@ export async function POST(request: NextRequest) {
       firstName: result.firstName,
       lastName: result.lastName,
       email: result.email,
-      sessionPasswordHash: result.sessionPasswordHash,
+      ...(result.sessionPasswordHash ? { sessionPasswordHash: result.sessionPasswordHash } : {}),
+      ...(result.userId ? { userId: result.userId } : {}),
     })
   }
 
@@ -283,7 +298,7 @@ export async function POST(request: NextRequest) {
     whenClosedBehavior !== 'queue_until_ready' &&
     !unscheduledByWeather
   ) {
-    await deleteRequestById(result.id)
+    await markQueueRejected(result.id, insight.reasons)
     const reasonLine = insight.reasons.length > 0 ? insight.reasons.join(' ') : 'No schedulable slot tonight.'
     void appendAuditLog({
       kind: 'queue.rejected',

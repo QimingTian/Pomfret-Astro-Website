@@ -29,6 +29,7 @@ export type SessionBoardEntry = {
   failedAt?: string
   downloadedAt?: string
   sessionPasswordHash?: string
+  userId?: string
   /** Frozen Tonight's Schedule bar for this strip night (survives refresh / other devices). */
   scheduleStripNightKey?: string | null
   scheduleBarStartMs?: number | null
@@ -239,6 +240,7 @@ export async function boardUpsertInProgress(input: {
   filterPlans?: Array<{ filterName: string; exposureSeconds: number; count: number }>
   estimatedDurationSeconds?: number
   sessionPasswordHash?: string
+  userId?: string
   projectMode?: boolean
 }): Promise<void> {
   const ts = new Date().toISOString()
@@ -264,6 +266,7 @@ export async function boardUpsertInProgress(input: {
     completedAt: undefined,
     downloadedAt: undefined,
     sessionPasswordHash: input.sessionPasswordHash,
+    ...(input.userId ? { userId: input.userId } : {}),
     ...(input.projectMode ? { projectMode: true as const } : {}),
   }
   await writeEntries([...without, entry])
@@ -366,6 +369,7 @@ export async function boardPurgeCompletedOlderThan(maxAgeMs: number): Promise<st
   const now = Date.now()
   const removedIds: string[] = []
   const filtered = prev.filter((e) => {
+    if (e.projectMode === true) return true
     if (e.status !== 'completed' && e.status !== 'failed') return true
     const basis = e.status === 'failed' ? (e.failedAt ?? e.updatedAt) : (e.completedAt ?? e.updatedAt)
     const at = Date.parse(basis)

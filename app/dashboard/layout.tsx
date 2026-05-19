@@ -1,24 +1,45 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
+import { MemberProvider, useMember } from '@/hooks/use-member'
+
+function accountNavLabel(member: ReturnType<typeof useMember>): string {
+  if (member.status !== 'authenticated') return 'Log In'
+  const user = member.user
+  return user.username?.trim() || user.email.split('@')[0] || user.email
+}
 
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
+  return (
+    <MemberProvider>
+      <DashboardChrome>{children}</DashboardChrome>
+    </MemberProvider>
+  )
+}
+
+function DashboardChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const isWelcomePage = pathname === '/dashboard'
   const [menuOpen, setMenuOpen] = useState(false)
+  const member = useMember()
+
+  useEffect(() => {
+    void member.refresh()
+  }, [pathname, member.refresh])
 
   const navItems = [
     { href: '/dashboard/weather', label: 'Weather' },
     { href: '/dashboard/atlas', label: 'Atlas' },
     { href: '/dashboard/remote', label: 'Remote' },
     { href: '/dashboard/gallery', label: 'Gallery' },
-    { href: '/dashboard/admin', label: 'Admin' },
+    { href: '/dashboard/contact', label: 'Team' },
+    { href: '/dashboard/account', label: accountNavLabel(member) },
   ]
 
   return (
@@ -60,7 +81,6 @@ export default function DashboardLayout({
                 )
               })}
             </nav>
-
           </div>
         </div>
 
@@ -89,10 +109,15 @@ export default function DashboardLayout({
         )}
       </header>
 
-      <main className={isWelcomePage ? 'min-h-[calc(100vh-5rem)]' : 'mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-10 py-8'}>
+      <main
+        className={
+          isWelcomePage
+            ? 'min-h-[calc(100vh-5rem)]'
+            : 'mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-10 py-8'
+        }
+      >
         {children}
       </main>
     </div>
   )
 }
-

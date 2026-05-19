@@ -6,11 +6,13 @@ export default function sitemap(): MetadataRoute.Sitemap {
   const routes = [
     '/',
     '/login',
+    '/signup',
     '/dashboard',
+    '/dashboard/account',
+    '/dashboard/contact',
     '/dashboard/gallery',
     '/dashboard/weather',
     '/dashboard/remote',
-    '/dashboard/admin',
   ]
 
   const now = new Date()

@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
-import { isImagingAdminPassword } from '@/lib/imaging-admin-auth'
+import { requireImagingAdmin } from '@/lib/imaging-admin-auth'
 import {
   addAdminClosedWindow,
   listAdminClosedWindows,
@@ -23,9 +23,9 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const password = request.headers.get('x-admin-password')
-  if (!isImagingAdminPassword(password)) {
-    return withImagingCors({ ok: false as const, error: 'Unauthorized' }, 401)
+  const admin = await requireImagingAdmin(request)
+  if (!admin.ok) {
+    return withImagingCors({ ok: false as const, error: admin.error }, admin.status)
   }
   let body: unknown
   try {
@@ -126,9 +126,9 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const password = request.headers.get('x-admin-password')
-  if (!isImagingAdminPassword(password)) {
-    return withImagingCors({ ok: false as const, error: 'Unauthorized' }, 401)
+  const admin = await requireImagingAdmin(request)
+  if (!admin.ok) {
+    return withImagingCors({ ok: false as const, error: admin.error }, admin.status)
   }
   const requestUrl = new URL(request.url)
   const id = requestUrl.searchParams.get('id') ?? ''

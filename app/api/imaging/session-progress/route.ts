@@ -4,15 +4,33 @@ import { sendCompletionEmail } from '@/lib/imaging-completion-email'
 import { publishProgress } from '@/lib/imaging-progress-live'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import { parseProjectNightSubId } from '@/lib/imaging-project-ids'
+import { logEndNightDue } from '@/lib/imaging-end-night-audit'
 import { reconcilePendingScheduleStatus } from '@/lib/imaging-queue-reconcile'
+import {
+  hasRemainingTonightImagingWork,
+  nightKeyFromDusk,
+} from '@/lib/imaging-tonight-complete'
 import {
   getProjectByNightSubId,
   markNightCompleted,
 } from '@/lib/imaging-project-store'
-import { boardMarkCompleted, getBoardEntry, getSoleInProgressBoardId } from '@/lib/imaging-session-board'
-import { isSessionCompletedSignal, progressLineText, readQueueIdFromDetail } from '@/lib/session-progress-signal'
+import { boardMarkCompleted, getBoardEntry } from '@/lib/imaging-session-board'
+import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
+import { resolveSessionProgressQueueId } from '@/lib/imaging-session-progress-queue'
+import { isSessionCompletedSignal, progressLineText } from '@/lib/session-progress-signal'
 
 export const runtime = 'nodejs'
+
+async function markEndNightDueIfTonightComplete(): Promise<void> {
+  const schedulingWindow = getTonightSchedulingWindow(new Date())
+  const nightKey = nightKeyFromDusk(schedulingWindow.nauticalDuskUtc)
+  const remaining = await hasRemainingTonightImagingWork(
+    nightKey,
+    schedulingWindow.nauticalDuskUtc.getTime(),
+    schedulingWindow.nauticalDawnUtc.getTime()
+  )
+  if (!remaining) await logEndNightDue(nightKey, 'tonight imaging complete (NINA session end signal)')
+}
 
 /** When set, requests must authenticate (see `authorized`). When unset, endpoint is open (use only if you accept that risk). */
 function authPassword(): string | undefined {
@@ -40,8 +58,13 @@ function authorized(request: NextRequest): boolean {
   const expectedPass = authPassword()
   if (!expectedPass) return true
 
+  const expectedUser = expectedBasicUser()
   const basic = parseBasicCredentials(request.headers.get('authorization'))
-  if (basic && basic.user === expectedBasicUser() && basic.pass === expectedPass) return true
+  if (basic && basic.pass === expectedPass) {
+    // NINA Ground Station sends HttpAuthUsername (e.g. pomfretastro). When
+    // NINA_SESSION_PROGRESS_BASIC_USER is unset, accept any username with the right password.
+    if (!expectedUser || basic.user === expectedUser) return true
+  }
 
   const auth = request.headers.get('authorization')
   if (auth === `Bearer ${expectedPass}`) return true
@@ -79,6 +102,16 @@ export function OPTIONS() {
  */
 export async function POST(request: NextRequest) {
   if (!authorized(request)) {
+    const basic = parseBasicCredentials(request.headers.get('authorization'))
+    void appendAuditLog({
+      kind: 'session.progress',
+      message: 'Rejected unauthorized session-progress POST (check NINA HTTP auth vs Vercel env).',
+      detail: {
+        hasAuthorization: Boolean(request.headers.get('authorization')),
+        basicUser: basic?.user ?? null,
+        expectedUserSet: expectedBasicUser().length > 0,
+      },
+    })
     return withImagingCors({ ok: false as const, error: 'Unauthorized' }, 401)
   }
 
@@ -89,10 +122,7 @@ export async function POST(request: NextRequest) {
       ? (body as Record<string, unknown>)
       : { payload: body }
 
-  let queueId = readQueueIdFromDetail(detail)
-  if (!queueId) {
-    queueId = await getSoleInProgressBoardId()
-  }
+  const queueId = await resolveSessionProgressQueueId(detail)
 
   const auditDetail = queueId ? { ...detail, queueId } : detail
   const msg =
@@ -159,6 +189,7 @@ export async function POST(request: NextRequest) {
             publishProgress(match.project.id, { type: 'status', queueStatus: 'completed' })
             void reconcilePendingScheduleStatus()
           }
+          void markEndNightDueIfTonightComplete()
         }
       }
       return withImagingCors({ ok: true as const })
@@ -194,6 +225,7 @@ export async function POST(request: NextRequest) {
           })
         })
         publishProgress(queueId, { type: 'status', queueStatus: 'completed' })
+        void markEndNightDueIfTonightComplete()
       }
     }
   }

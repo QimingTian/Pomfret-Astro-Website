@@ -3,8 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { publishPreview } from '@/lib/imaging-preview-live'
 import { publishProgress } from '@/lib/imaging-progress-live'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
-import { isImagingAdminPassword } from '@/lib/imaging-admin-auth'
-import { validateSessionPassword } from '@/lib/imaging-session-access'
+import { authorizeImagingSession } from '@/lib/imaging-session-access'
 import { imagingCorsOptions, imagingQueueAuthorized, withImagingCors } from '@/lib/imaging-queue-auth'
 import { getPreviewImage, upsertPreviewImage } from '@/lib/imaging-preview-store'
 import { totalExposureFramesForQueueId } from '@/lib/imaging-total-frames'
@@ -23,14 +22,10 @@ export async function GET(request: NextRequest) {
     return withImagingCors({ ok: false as const, error: 'Missing queueId' }, 400)
   }
 
-  const providedPassword =
-    request.headers.get('x-session-password') ?? request.headers.get('x-admin-password') ?? ''
-  const isAdmin = isImagingAdminPassword(providedPassword)
-  if (!isAdmin) {
-    const auth = await validateSessionPassword(queueId, providedPassword)
-    if (!auth.ok) {
-      return withImagingCors({ ok: false as const, error: auth.error }, auth.status)
-    }
+  const providedPassword = request.headers.get('x-session-password')?.trim() || null
+  const auth = await authorizeImagingSession(request, queueId, providedPassword)
+  if (!auth.ok) {
+    return withImagingCors({ ok: false as const, error: auth.error }, auth.status)
   }
 
   const latest = await getPreviewImage(queueId)

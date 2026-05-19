@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 
 import { appendAuditLog } from '@/lib/imaging-audit-log'
+import { purgeExpiredProjectAssets } from '@/lib/imaging-project-retention'
 import { boardPurgeCompletedOlderThan } from '@/lib/imaging-session-board'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import { removePreviewImage } from '@/lib/imaging-preview-store'
@@ -26,8 +27,8 @@ export async function GET(request: NextRequest) {
   if (!cronAuthorized(request)) {
     return withImagingCors({ ok: false as const, error: 'Unauthorized' }, 401)
   }
-  const purgedQueueIds = await boardPurgeCompletedOlderThan(RETENTION_MS)
-  for (const queueId of purgedQueueIds) {
+  const purgedBoardIds = await boardPurgeCompletedOlderThan(RETENTION_MS)
+  for (const queueId of purgedBoardIds) {
     await deleteR2ObjectForQueueId(queueId)
     await removePreviewImage(queueId)
     void appendAuditLog({
@@ -36,5 +37,18 @@ export async function GET(request: NextRequest) {
       detail: { id: queueId, source: 'cron_retention_48h' },
     })
   }
-  return withImagingCors({ ok: true as const, purged: purgedQueueIds.length, ids: purgedQueueIds })
+  const purgedProjectIds = await purgeExpiredProjectAssets(RETENTION_MS)
+  for (const queueId of purgedProjectIds) {
+    void appendAuditLog({
+      kind: 'queue.deleted',
+      message: `Project assets ${queueId} deleted by cron retention after project completion.`,
+      detail: { id: queueId, source: 'cron_retention_48h_project' },
+    })
+  }
+  const purgedIds = Array.from(new Set([...purgedBoardIds, ...purgedProjectIds]))
+  return withImagingCors({
+    ok: true as const,
+    purged: purgedIds.length,
+    ids: purgedIds,
+  })
 }

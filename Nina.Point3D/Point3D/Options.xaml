@@ -1,0 +1,34 @@
+﻿<ResourceDictionary
+    x:Class="NINA.Point3d.Options"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!--  This data template will be displayed in N.I.N.A. on the options->plugin tab with the datacontext of the TestPlugin instance  -->
+    <!--  In order for this datatemplate to be picked correctly, the key has to follow the naming convention of <IPlugin.Name>_Options -->
+    <!--  Furthermore the Resource Dictionary has to be exported via code behind export attributes  -->
+    <DataTemplate x:Key="Point3D_Options">
+        <StackPanel Orientation="Vertical">
+            <Label Content="Model display options" Margin="0,5,0,0"/>
+            <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
+                <Label Content="OTA Style"/>
+                <ComboBox Margin="5,0,0,0" ItemsSource="{Binding OTAStyles}" DisplayMemberPath="Key" SelectedValuePath="Value" SelectedValue="{Binding OTAStyle}"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
+                <Label Content="Model Color"/>
+                <ComboBox Margin="5,0,0,0" ItemsSource="{Binding ModelColors}" DisplayMemberPath="Key" SelectedValuePath="Value" SelectedValue="{Binding ModelColor}"/>
+            </StackPanel>
+            <Label Margin="0,5,0,0" Content="Below are offsets for the model in degrees, ony change them if the model does not match how your telescope is pointing.  Typically they should be changed in multiples of 90 and can be positive or negative."/>
+            <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
+                <Label Content="X Offset (Dec)"/>
+                <TextBox MinWidth="50" Margin="5,0,0,0" Text="{Binding XOffset}"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
+                <Label Content="Y Offset (RA)"/>
+                <TextBox MinWidth="50" Margin="5,0,0,0" Text="{Binding YOffset}"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
+                <Label Content="Z Offset"/>
+                <TextBox MinWidth="50" Margin="5,0,0,0" Text="{Binding ZOffset}"/>
+            </StackPanel>
+        </StackPanel>
+    </DataTemplate>
+</ResourceDictionary>

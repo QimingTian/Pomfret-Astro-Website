@@ -1,0 +1,43 @@
+{
+    "Name": "Point3D",
+    "Identifier": "200ce2d2-6992-44fe-bf83-f8c2e01c7244",
+    "Version": {
+        "Major": "0",
+        "Minor": "2",
+        "Patch": "3",
+        "Build": "0"
+    },
+    "Author": "Drew McDermott",
+    "Homepage": "https://github.com/FlyingKiwis/Nina.Point3D",
+    "Repository": "https://github.com/FlyingKiwis/Nina.Point3D",
+    "License": "GPL-3.0",
+    "LicenseURL": "https://www.gnu.org/licenses/gpl-3.0.en.html",
+    "ChangelogURL": "https://github.com/FlyingKiwis/Nina.Point3D/blob/master/CHANGELOG.md",
+    "Tags": [
+        "Point3D",
+        "Telescope",
+        "Model",
+        "Pointing",
+        "Simulation",
+        "Simulated"
+    ],
+    "MinimumApplicationVersion": {
+        "Major": "3",
+        "Minor": "0",
+        "Patch": "0",
+        "Build": "1085"
+    },
+    "Descriptions": {
+        "ShortDescription": "Displays a model of how the telescope is pointing",
+        "LongDescription": "# Point3D\r\n\r\n## Issues / Requests\r\n\r\nPlease submit issues or requests here: [New Github Issue](https://github.com/FlyingKiwis/Nina.Point3D/issues/new/choose)\r\n\r\n## About\r\n\r\nThis plugin adds a dockable window in the imaging view that shows a simulated model of your telescope.\r\n\r\n## Legal\r\n\r\n- This plugin is distributed under the GPL v3 license.\r\n    - [License](https://github.com/FlyingKiwis/Nina.Point3D/blob/master/LICENSE)\r\n- It is primarily a port of Green Swamp Server's Point3D © 2021 Rob Morgan released under GPL v3\r\n    - [Website](https://greenswamp.org/)\r\n    - [License](https://github.com/rmorgan001/GS.Point3d/blob/master/LICENSE)\r\n- Models and images redistributed with permission from Rob Morgan\r\n\r\n## Contact\r\n\r\nI'm in the [NINA discord](https://discord.gg/rWRbVbw) server as Kiwi🥝",
+        "FeaturedImageURL": "",
+        "ScreenshotURL": "",
+        "AltScreenshotURL": ""
+    },
+    "Installer": {
+        "URL": "https://github.com/FlyingKiwis/Nina.Point3D/releases/download/v0.2.3/Point3D.0.2.3.0.zip",
+        "Type": "ARCHIVE",
+        "Checksum": "44D4364CBBE9479FF55271369770A23BB9843628C41E89C83ECCD6428420C5D7",
+        "ChecksumType": "SHA256"
+    }
+}

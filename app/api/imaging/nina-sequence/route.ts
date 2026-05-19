@@ -6,10 +6,13 @@ import { buildNinaSequenceJson } from '@/lib/build-nina-sequence-json'
 import {
   getActiveOnBoardProject,
   getDeliverableNight,
+  getProjectAwaitingSubSessionDelivery,
   getProjectById,
+  listProjects,
   markNightInProgress,
   markProjectOnBoard,
-  projectHasOpenSessionsForNightKey,
+  patchProject,
+  remainingFramesTotal,
   type ImagingProject,
   type ProjectNight,
 } from '@/lib/imaging-project-store'
@@ -27,12 +30,16 @@ import {
   touchObservatoryPoll,
 } from '@/lib/observatory-status-store'
 import { isAltitudeAllowed } from '@/lib/target-altitude'
+import {
+  hasRemainingTonightImagingWork,
+  nightKeyFromDusk,
+} from '@/lib/imaging-tonight-complete'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
+import { logEndNightDelivered, logEndNightDue } from '@/lib/imaging-end-night-audit'
 import {
   isEndNightDue,
   markEndNightAfterSessionsSent,
   markEndNightDawnSent,
-  markEndNightDue,
   wasEndNightAfterSessionsSent,
   wasEndNightDawnSent,
 } from '@/lib/end-night-state'
@@ -70,11 +77,40 @@ function sequenceJsonFor(r: ImagingRequest): string | null {
   return null
 }
 
-function nightKeyFromWindowStart(d: Date): string {
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
+/** When the on-board project target is too low, try the next in-progress project whose target is up. */
+async function deliverNextEligibleInProgressProjectNight(
+  status: Awaited<ReturnType<typeof getObservatoryStatus>>,
+  skipProjectId: string
+): Promise<NextResponse | null> {
+  const projects = (await listProjects())
+    .filter((p) => p.status === 'in_progress' && p.id !== skipProjectId && remainingFramesTotal(p) > 0)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  for (const project of projects) {
+    const night = getDeliverableNight(project)
+    if (!night?.ninaSequenceJson) continue
+    const altCheck = isAltitudeAllowed(project.raHours, project.decDeg)
+    if (!altCheck.ok) continue
+    if (!isObservatoryReady(status)) {
+      return NextResponse.json(
+        { error: 'Observatory is closed' },
+        { status: 409, headers: imagingCorsHeadersResolved() }
+      )
+    }
+    const onBoard = await getActiveOnBoardProject()
+    if (onBoard && onBoard.id !== project.id) {
+      const nights = onBoard.nights.map((n) =>
+        n.status === 'in_progress' ? { ...n, status: 'scheduled' as const } : n
+      )
+      await patchProject(onBoard.id, { onBoard: false, nights })
+    }
+    await markProjectOnBoard(project.id)
+    return deliverProjectNightJson(
+      project,
+      night,
+      `NINA project night delivered: ${project.target} night ${night.nightIndex} (${night.id}).`
+    )
+  }
+  return null
 }
 
 async function deliverProjectNightJson(
@@ -82,6 +118,9 @@ async function deliverProjectNightJson(
   night: ProjectNight,
   auditMessage: string
 ): Promise<NextResponse> {
+  if (!project.onBoard) {
+    await markProjectOnBoard(project.id)
+  }
   await markNightInProgress(project.id, night.id)
   const board = await getBoardEntry(project.id)
   if (!board) {
@@ -101,6 +140,7 @@ async function deliverProjectNightJson(
       filterPlans: project.filterPlansTotal,
       estimatedDurationSeconds: project.estimatedDurationSeconds,
       sessionPasswordHash: project.sessionPasswordHash,
+      userId: project.userId,
       projectMode: true,
     })
   }
@@ -156,9 +196,10 @@ export async function GET() {
   const nauticalDawnMs = schedulingWindow.nauticalDawnUtc.getTime()
   const deadlineMs = nauticalDawnMs
   const nightStartMs = schedulingWindow.nauticalDuskUtc.getTime()
-  const nightKey = nightKeyFromWindowStart(schedulingWindow.nauticalDuskUtc)
+  const nightKey = nightKeyFromDusk(schedulingWindow.nauticalDuskUtc)
 
   const activeOnBoard = await getActiveOnBoardProject()
+  const projectForSubDelivery = await getProjectAwaitingSubSessionDelivery()
 
   const scheduledTonight = pending
     .filter(
@@ -173,11 +214,17 @@ export async function GET() {
   let blockingError: string | null = null
 
   for (const candidate of scheduledTonight) {
-    if (activeOnBoard && !candidate.projectMode) {
+    if (activeOnBoard) {
       const projectAlt = isAltitudeAllowed(activeOnBoard.raHours, activeOnBoard.decDeg)
       if (projectAlt.ok) {
-        blockingError = `Multi-night project target is above 30° (${activeOnBoard.target}); other sessions run when it is below 30°.`
-        continue
+        if (!candidate.projectMode) {
+          blockingError = `Multi-night project target is above 30° (${activeOnBoard.target}); other sessions run when it is below 30°.`
+          continue
+        }
+        if (candidate.projectMode && candidate.id !== activeOnBoard.id) {
+          blockingError = `Multi-night project "${activeOnBoard.target}" is above 30°; the next project runs when it is below 30°.`
+          continue
+        }
       }
     }
     const hasRaDec =
@@ -198,7 +245,45 @@ export async function GET() {
   }
 
   if (!selected) {
-    if (scheduledTonight.length > 0) {
+    const remainingTonight = await hasRemainingTonightImagingWork(
+      nightKey,
+      nightStartMs,
+      deadlineMs,
+      activeOnBoard ?? projectForSubDelivery
+    )
+
+    // Night 2+ delivers via project sub-session ids after the queue row was consumed on night 1.
+    // Try that before blocking behind other scheduled queue rows (which only apply below 30°).
+    if (remainingTonight && projectForSubDelivery) {
+      const night = getDeliverableNight(projectForSubDelivery)
+      if (night?.ninaSequenceJson) {
+        if (!isObservatoryReady(status)) {
+          return NextResponse.json(
+            { error: 'Observatory is closed' },
+            { status: 409, headers: imagingCorsHeadersResolved() }
+          )
+        }
+        const altCheck = isAltitudeAllowed(
+          projectForSubDelivery.raHours,
+          projectForSubDelivery.decDeg
+        )
+        if (!altCheck.ok) {
+          const successor = await deliverNextEligibleInProgressProjectNight(
+            status,
+            projectForSubDelivery.id
+          )
+          if (successor) return successor
+        } else {
+          return deliverProjectNightJson(
+            projectForSubDelivery,
+            night,
+            `NINA project night delivered: ${projectForSubDelivery.target} night ${night.nightIndex} (${night.id}).`
+          )
+        }
+      }
+    }
+
+    if (scheduledTonight.length > 0 && remainingTonight) {
       return NextResponse.json(
         {
           error:
@@ -209,37 +294,11 @@ export async function GET() {
       )
     }
 
-    if (activeOnBoard) {
-      const night = getDeliverableNight(activeOnBoard)
-      if (night?.ninaSequenceJson) {
-        if (!isObservatoryReady(status)) {
-          return NextResponse.json(
-            { error: 'Observatory is closed' },
-            { status: 409, headers: imagingCorsHeadersResolved() }
-          )
-        }
-        const altCheck = isAltitudeAllowed(activeOnBoard.raHours, activeOnBoard.decDeg)
-        if (!altCheck.ok) {
-          return NextResponse.json(
-            {
-              error: `Target altitude ${altCheck.altitudeDeg.toFixed(2)}° is below ${altCheck.minAltitudeDeg}° (${activeOnBoard.target}).`,
-            },
-            { status: 409, headers: imagingCorsHeadersResolved() }
-          )
-        }
-        return deliverProjectNightJson(
-          activeOnBoard,
-          night,
-          `NINA project night delivered: ${activeOnBoard.target} night ${night.nightIndex} (${night.id}).`
-        )
-      }
-    }
-
-    if (activeOnBoard && projectHasOpenSessionsForNightKey(activeOnBoard, nightKey)) {
+    if (remainingTonight) {
       return NextResponse.json(
         {
           error:
-            'Multi-night project still has sessions scheduled for tonight; end night runs after the last session completes.',
+            'Imaging still scheduled for tonight; end night runs after the last session completes.',
         },
         { status: 409, headers: imagingCorsHeadersResolved() }
       )
@@ -247,8 +306,13 @@ export async function GET() {
 
     const board = await listBoardEntries()
     const hasTonightActivity = board.some((b) => {
-      const createdMs = Date.parse(b.createdAt)
-      return Number.isFinite(createdMs) && createdMs >= nightStartMs && createdMs < deadlineMs
+      const markers = [b.downloadedAt, b.updatedAt, b.completedAt, b.createdAt].filter(
+        (m): m is string => typeof m === 'string' && m.length > 0
+      )
+      return markers.some((m) => {
+        const ms = Date.parse(m)
+        return Number.isFinite(ms) && ms >= nightStartMs && ms < deadlineMs
+      })
     })
     const endNightDue = await isEndNightDue(nightKey)
     const afterSessionsEligible = endNightDue || hasTonightActivity
@@ -257,15 +321,7 @@ export async function GET() {
       const queueId = `end-night-${nightKey}`
       const payload = endNightSequenceJson(queueId)
       await markEndNightAfterSessionsSent(nightKey)
-      void appendAuditLog({
-        kind: 'nina.delivered',
-        message: `End-night shutdown sequence delivered (${queueId}).`,
-        detail: {
-          id: queueId,
-          type: 'end_night',
-          trigger: 'after_sessions',
-        },
-      })
+      void logEndNightDelivered({ nightKey, queueId, trigger: 'after_sessions' })
       return new NextResponse(payload, {
         status: 200,
         headers: {
@@ -280,15 +336,7 @@ export async function GET() {
       const queueId = `end-night-${nightKey}-dawn`
       const payload = endNightSequenceJson(queueId)
       await markEndNightDawnSent(nightKey)
-      void appendAuditLog({
-        kind: 'nina.delivered',
-        message: `End-night shutdown sequence delivered at nautical dawn (${queueId}).`,
-        detail: {
-          id: queueId,
-          type: 'end_night',
-          trigger: 'nautical_dawn',
-        },
-      })
+      void logEndNightDelivered({ nightKey, queueId, trigger: 'nautical_dawn' })
       return new NextResponse(payload, {
         status: 200,
         headers: {
@@ -337,7 +385,7 @@ export async function GET() {
       Number.isFinite(Date.parse(r.plannedStartIso))
   )
   if (stillScheduled.length === 0) {
-    await markEndNightDue(nightKey)
+    void logEndNightDue(nightKey, 'last scheduled queue row consumed')
   }
 
   let sequenceJson: string | null = null
@@ -383,6 +431,7 @@ export async function GET() {
     filterPlans: consumed.filterPlans,
     estimatedDurationSeconds: consumed.estimatedDurationSeconds,
     sessionPasswordHash: consumed.sessionPasswordHash,
+    userId: consumed.userId,
     ...(consumed.projectMode ? { projectMode: true as const } : {}),
   })
 

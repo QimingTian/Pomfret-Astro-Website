@@ -1,4 +1,6 @@
+import type { NextRequest } from 'next/server'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
+import { getCurrentUser } from '@/lib/member-auth'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
 import {
   effectiveProjectStatus,
@@ -7,10 +9,14 @@ import {
   type ImagingProject,
   type ProjectNight,
 } from '@/lib/imaging-project-store'
+import { projectFrameCounts } from '@/lib/imaging-total-frames'
 import { boardEnsureScheduleBarForTerminal, boardPurgeCompletedOlderThan, listBoardEntries } from '@/lib/imaging-session-board'
 import { listAll, toPublicImagingRequest, type CreateImagingInput } from '@/lib/imaging-queue-store'
+import { purgeExpiredProjectAssets } from '@/lib/imaging-project-retention'
 import { reconcilePendingScheduleStatus } from '@/lib/imaging-queue-reconcile'
 import { deleteR2ObjectForQueueId, hasR2ObjectForQueueId } from '@/lib/r2-session-download'
+
+const RETENTION_MS = 48 * 60 * 60 * 1000
 import { hasPreviewImage, removePreviewImage } from '@/lib/imaging-preview-store'
 
 export const runtime = 'nodejs'
@@ -23,18 +29,36 @@ export function OPTIONS() {
  * Queue rows (e.g. pending) + board rows (in_progress / completed after NINA download).
  * NINA still uses GET /api/imaging/queue (pending) and GET /api/imaging/nina-sequence (consume).
  */
-export async function GET() {
+function redactContactFields<T extends { email?: string | null; firstName?: string | null; lastName?: string | null }>(
+  row: T,
+  includeContact: boolean
+): T {
+  if (includeContact) return row
+  return { ...row, email: null, firstName: null, lastName: null }
+}
+
+export async function GET(request: NextRequest) {
+  const viewer = await getCurrentUser(request)
+  const includeContact = viewer != null
+
   await reconcilePendingScheduleStatus()
 
-  // Remove completed sessions from the board after 48h, then delete assets.
-  const purgedQueueIds = await boardPurgeCompletedOlderThan(48 * 60 * 60 * 1000)
-  for (const queueId of purgedQueueIds) {
+  const purgedBoardIds = await boardPurgeCompletedOlderThan(RETENTION_MS)
+  for (const queueId of purgedBoardIds) {
     await deleteR2ObjectForQueueId(queueId)
     await removePreviewImage(queueId)
     void appendAuditLog({
       kind: 'queue.deleted',
       message: `Session ${queueId} deleted by 48h retention trigger (current-sessions refresh).`,
       detail: { id: queueId, source: 'retention_48h_current_sessions' },
+    })
+  }
+  const purgedProjectIds = await purgeExpiredProjectAssets(RETENTION_MS)
+  for (const queueId of purgedProjectIds) {
+    void appendAuditLog({
+      kind: 'queue.deleted',
+      message: `Project assets ${queueId} deleted by 48h retention after project completion.`,
+      detail: { id: queueId, source: 'retention_48h_project_complete' },
     })
   }
 
@@ -81,6 +105,9 @@ export async function GET() {
     previewPath?: string
     sessionType?: 'dso' | 'variable_star'
     projectMode?: boolean
+    userId?: string | null
+    projectFramesTotal?: number
+    projectFramesCaptured?: number
     nights?: Array<{
       id: string
       nightIndex: number
@@ -94,7 +121,31 @@ export async function GET() {
       failedAt?: string | null
       estimatedDurationSeconds?: number
       filterPlans?: Array<{ filterName: string; exposureSeconds: number; count: number }>
+      hasDownload?: boolean
+      downloadPath?: string
     }>
+  }
+
+  type ProjectNightRow = NonNullable<Row['nights']>[number]
+
+  async function enrichProjectNights(
+    nights: ProjectNightRow[] | undefined,
+    outputMode: Row['outputMode']
+  ): Promise<ProjectNightRow[] | undefined> {
+    if (!nights) return nights
+    if (outputMode === 'none') return nights
+    return Promise.all(
+      nights.map(async (n) => {
+        if (n.status !== 'completed') return n
+        const hasDownload = await hasR2ObjectForQueueId(n.id)
+        if (!hasDownload) return n
+        return {
+          ...n,
+          hasDownload: true,
+          downloadPath: `/api/imaging/download?queueId=${encodeURIComponent(n.id)}`,
+        }
+      })
+    )
   }
 
   const sessions: Row[] = []
@@ -105,6 +156,7 @@ export async function GET() {
   function projectRow(p: ImagingProject, queueStatus?: string): Row {
     const boardEntry = boardAfterBackfill.find((b) => b.id === p.id)
     const status = effectiveProjectStatus(p)
+    const { total: projectFramesTotal, captured: projectFramesCaptured } = projectFrameCounts(p)
     return {
       id: p.id,
       target: p.target,
@@ -125,6 +177,9 @@ export async function GET() {
       plannedStartIso:
         p.nights.find((n) => n.status === 'scheduled' || n.status === 'in_progress')?.plannedStartIso ?? null,
       projectMode: true,
+      userId: p.userId ?? null,
+      projectFramesTotal,
+      projectFramesCaptured,
       nights: p.nights.map((n: ProjectNight) => ({
         id: n.id,
         nightIndex: n.nightIndex,
@@ -180,6 +235,7 @@ export async function GET() {
       scheduleBarStartMs: null,
       scheduleBarEndMs: null,
       ...(p.projectMode ? { projectMode: true } : {}),
+      userId: p.userId ?? null,
     })
   }
 
@@ -223,6 +279,7 @@ export async function GET() {
           typeof b.scheduleBarEndMs === 'number' && Number.isFinite(b.scheduleBarEndMs)
             ? b.scheduleBarEndMs
             : null,
+        userId: b.userId ?? null,
       })
     }
   }
@@ -231,6 +288,21 @@ export async function GET() {
 
   const enriched = await Promise.all(
     sessions.map(async (s) => {
+      if (s.projectMode) {
+        const nights = await enrichProjectNights(s.nights, s.outputMode)
+        const hasDownload =
+          s.outputMode !== 'none' && (nights?.some((n) => n.hasDownload === true) ?? false)
+        const hasPreview = await hasPreviewImage(s.id)
+        return {
+          ...s,
+          nights,
+          ...(hasDownload ? { hasDownload: true as const } : {}),
+          ...(hasPreview ? { hasPreview: true, previewPath: `/api/imaging/preview?queueId=${encodeURIComponent(s.id)}` } : {}),
+        }
+      }
+      if (s.outputMode === 'none') {
+        return s
+      }
       const hasDownload = await hasR2ObjectForQueueId(s.id)
       const hasPreview = await hasPreviewImage(s.id)
       return {
@@ -241,5 +313,7 @@ export async function GET() {
     })
   )
 
-  return withImagingCors({ ok: true as const, sessions: enriched })
+  const sessionsOut = enriched.map((s) => redactContactFields(s, includeContact))
+
+  return withImagingCors({ ok: true as const, sessions: sessionsOut })
 }

@@ -1,6 +1,10 @@
 import { subtractOccupiedFromFree } from '@/lib/imaging-queue-free-intervals'
 import type { ProjectSubSessionOccupancy } from '@/lib/imaging-project-store'
-import { altitudeAllowedCoverageMs, firstAltitudeAllowedTimeMs, isAltitudeAllowed } from '@/lib/target-altitude'
+import {
+  altitudeSessionCoverageOk,
+  firstAltitudeAllowedTimeMs,
+  isAltitudeAllowed,
+} from '@/lib/target-altitude'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import { weatherPermittedCoverageMs, weatherCoverageOk, type TimeInterval } from '@/lib/tonight-weather-gate'
 
@@ -145,7 +149,7 @@ function buildUnscheduledReasons(input: {
     reasons.push('Target does not rise above 30° in any remaining free interval.')
   }
   if (input.failedByAltitudeCoverage > 0) {
-    reasons.push('Target altitude coverage is below 80% for required duration in remaining free intervals.')
+    reasons.push('Target altitude coverage is below 100% for required duration in remaining free intervals.')
   }
   if (input.failedByIntervalLength > 0 && input.freeIntervals.length > 0) {
     reasons.push('Every remaining free interval is shorter than session duration before nautical dawn.')
@@ -173,7 +177,7 @@ function buildUnscheduledReasons(input: {
   return reasons
 }
 
-function estimateDurationSeconds(
+export function estimateDurationSeconds(
   req: Pick<
     SchedulePendingRow,
     'exposureSeconds' | 'count' | 'filterPlans' | 'estimatedDurationSeconds'
@@ -333,10 +337,7 @@ export function computeScheduleInsight(
       const weatherCoveredMs = weatherPermittedCoverageMs(weatherPermittedIntervals, startMs, endMs)
       const weatherCoveragePct = durationMs > 0 ? (weatherCoveredMs / durationMs) * 100 : 0
       if (!weatherCoverageOk(weatherPermittedIntervals, startMs, endMs, 0.8)) return null
-      if (hasRaDec) {
-        const coveredMs = altitudeAllowedCoverageMs(req.raHours!, req.decDeg!, startMs, endMs)
-        if (coveredMs < durationMs * 0.8) return null
-      }
+      if (hasRaDec && !altitudeSessionCoverageOk(req.raHours!, req.decDeg!, startMs, endMs)) return null
       return { startMs, endMs, riseAtMs, weatherCoveragePct, baselineStartMs }
     }
 
@@ -389,9 +390,8 @@ export function computeScheduleInsight(
           failedByWeatherCoverage += 1
           continue
         }
-        if (hasRaDec) {
-          const coveredMs = altitudeAllowedCoverageMs(req.raHours!, req.decDeg!, startMs, endMs)
-          if (coveredMs < durationMs * 0.8) failedByAltitudeCoverage += 1
+        if (hasRaDec && !altitudeSessionCoverageOk(req.raHours!, req.decDeg!, startMs, endMs)) {
+          failedByAltitudeCoverage += 1
         }
       }
     }

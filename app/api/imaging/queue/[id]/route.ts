@@ -1,11 +1,12 @@
 import { NextRequest } from 'next/server'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
-import { isImagingAdminPassword } from '@/lib/imaging-admin-auth'
+import { getAdminFromRequest } from '@/lib/imaging-admin-auth'
+import { authorizeImagingSession } from '@/lib/imaging-session-access'
+import { getCurrentUser } from '@/lib/member-auth'
 import {
   imagingCorsOptions,
   withImagingCors,
 } from '@/lib/imaging-queue-auth'
-import { validateSessionPassword } from '@/lib/imaging-session-access'
 import { boardRemove, getBoardEntry } from '@/lib/imaging-session-board'
 import { removePreviewImage } from '@/lib/imaging-preview-store'
 import {
@@ -17,7 +18,10 @@ import {
   type CreateImagingInput,
   type ImagingRequestStatus,
 } from '@/lib/imaging-queue-store'
-import { deleteProjectById } from '@/lib/imaging-project-store'
+import { applyPendingProjectQueueEdit, deleteProjectById } from '@/lib/imaging-project-store'
+import { planAndScheduleProjectTonight } from '@/lib/imaging-project-planner'
+import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
+import { getTonightWeatherPermittedIntervals } from '@/lib/tonight-weather-gate'
 import { deleteR2ObjectForQueueId } from '@/lib/r2-session-download'
 
 export const runtime = 'nodejs'
@@ -71,20 +75,10 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
   const id = params.id
   if (!id) return withImagingCors({ ok: false as const, error: 'Missing id' }, 400)
-  const credential = (
-    request.headers.get('x-edit-credential') ??
-    request.headers.get('x-admin-password') ??
-    ''
-  ).trim()
-  if (!credential) {
-    return withImagingCors({ ok: false as const, error: 'Session/Admin password required' }, 401)
-  }
-  const isAdmin = isImagingAdminPassword(credential)
-  if (!isAdmin) {
-    const auth = await validateSessionPassword(id, credential)
-    if (!auth.ok) {
-      return withImagingCors({ ok: false as const, error: auth.error }, auth.status)
-    }
+  const credential = request.headers.get('x-edit-credential')?.trim() || null
+  const auth = await authorizeImagingSession(request, id, credential)
+  if (!auth.ok) {
+    return withImagingCors({ ok: false as const, error: auth.error }, auth.status)
   }
 
   let body: unknown
@@ -97,6 +91,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     return withImagingCors({ ok: false as const, error: 'Expected JSON object' }, 400)
   }
   const b = body as Record<string, unknown>
+  const user = await getCurrentUser(request)
   const parsedFilterPlans = Array.isArray(b.filterPlans)
     ? b.filterPlans
         .map((x) => {
@@ -135,9 +130,27 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
           ? 'none'
           : 'raw_zip',
     filterPlans: parsedFilterPlans,
-    firstName: typeof b.firstName === 'string' ? b.firstName : b.firstName == null ? null : String(b.firstName),
-    lastName: typeof b.lastName === 'string' ? b.lastName : b.lastName == null ? null : String(b.lastName),
-    email: typeof b.email === 'string' ? b.email : b.email == null ? null : String(b.email),
+    firstName: user
+      ? user.firstName.trim() || null
+      : typeof b.firstName === 'string'
+        ? b.firstName
+        : b.firstName == null
+          ? null
+          : String(b.firstName),
+    lastName: user
+      ? user.lastName.trim() || null
+      : typeof b.lastName === 'string'
+        ? b.lastName
+        : b.lastName == null
+          ? null
+          : String(b.lastName),
+    email: user
+      ? user.email
+      : typeof b.email === 'string'
+        ? b.email
+        : b.email == null
+          ? null
+          : String(b.email),
     sequenceTemplate: b.sessionType === 'variable_star' ? 'variable_star' : 'dso',
     estimatedDurationSeconds:
       typeof b.estimatedDurationSeconds === 'number' && Number.isFinite(b.estimatedDurationSeconds)
@@ -149,6 +162,41 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
   if ('error' in updated) {
     const status = typeof updated.status === 'number' ? updated.status : updated.error === 'Not found' ? 404 : 400
     return withImagingCors({ ok: false as const, error: updated.error }, status)
+  }
+
+  if (updated.projectMode && updated.filterPlans?.length) {
+    const projectSync = await applyPendingProjectQueueEdit(id, {
+      target: updated.target,
+      raHours: updated.raHours!,
+      decDeg: updated.decDeg!,
+      outputMode: updated.outputMode ?? 'raw_zip',
+      filterPlans: updated.filterPlans,
+      estimatedDurationSeconds: updated.estimatedDurationSeconds ?? 0,
+      firstName: updated.firstName ?? null,
+      lastName: updated.lastName ?? null,
+      email: updated.email ?? null,
+      ...(updated.sessionPasswordHash ? { sessionPasswordHash: updated.sessionPasswordHash } : {}),
+    })
+    if ('error' in projectSync) {
+      return withImagingCors({ ok: false as const, error: projectSync.error }, 400)
+    }
+    const weatherIntervals = await getTonightWeatherPermittedIntervals()
+    if (weatherIntervals.status === 'ok') {
+      const now = new Date()
+      const window = getTonightSchedulingWindow(now)
+      const nowMs = now.getTime()
+      await planAndScheduleProjectTonight(
+        id,
+        [
+          {
+            startMs: Math.max(nowMs, window.nauticalDuskUtc.getTime()),
+            endMs: window.nauticalDawnUtc.getTime(),
+          },
+        ],
+        weatherIntervals.permittedIntervals,
+        now
+      )
+    }
   }
 
   void appendAuditLog({
@@ -171,22 +219,12 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
     return withImagingCors({ ok: false as const, error: 'Not found' }, 404)
   }
 
-  const credential = (
-    request.headers.get('x-delete-credential') ??
-    request.headers.get('x-admin-password') ??
-    ''
-  ).trim()
-  if (!credential) {
-    return withImagingCors({ ok: false as const, error: 'Password required' }, 401)
+  const credential = request.headers.get('x-delete-credential')?.trim() || null
+  const auth = await authorizeImagingSession(request, id, credential)
+  if (!auth.ok) {
+    return withImagingCors({ ok: false as const, error: auth.error }, auth.status)
   }
-
-  const isAdmin = isImagingAdminPassword(credential)
-  if (!isAdmin) {
-    const auth = await validateSessionPassword(id, credential)
-    if (!auth.ok) {
-      return withImagingCors({ ok: false as const, error: auth.error }, auth.status)
-    }
-  }
+  const adminUser = await getAdminFromRequest(request)
 
   await deleteRequestById(id)
   await boardRemove(id)
@@ -196,11 +234,11 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
 
   void appendAuditLog({
     kind: 'queue.deleted',
-    message: `${isAdmin ? 'Admin manual delete' : 'User manual delete'} for imaging session ${id}.`,
+    message: `${adminUser ? 'Admin manual delete' : 'User manual delete'} for imaging session ${id}.`,
     detail: {
       id,
-      via: isAdmin ? 'admin_password' : 'session_password',
-      source: isAdmin ? 'admin_manual' : 'user_manual',
+      via: adminUser ? 'admin_account' : 'session_owner',
+      source: adminUser ? 'admin_manual' : 'user_manual',
       ...(projectRecordRemoved ? { projectRecordRemoved: true } : {}),
     },
   })

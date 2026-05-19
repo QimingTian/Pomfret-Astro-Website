@@ -5,6 +5,7 @@ import {
   compactOrphanProjects,
   compactStaleProjectNights,
   getBlockingInProgressProject,
+  getDeliverableNight,
   getNextPendingProject,
   getProjectById,
   hasInProgressSessionTonight,
@@ -21,11 +22,13 @@ import {
   type ImagingProject,
   type ProjectNight,
 } from '@/lib/imaging-project-store'
+import { projectAltitudeHoldIntervals } from '@/lib/imaging-project-altitude-hold'
 import { patchRequestScheduleInsight } from '@/lib/imaging-queue-store'
 import { subtractOccupiedFromFree } from '@/lib/imaging-queue-free-intervals'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import {
   altitudeAllowedCoverageMs,
+  altitudeSessionCoverageOk,
   currentAltitudeDeg,
   firstAltitudeAllowedTimeMs,
 } from '@/lib/target-altitude'
@@ -64,11 +67,26 @@ function formatScheduleEtRange(startMs: number, endMs: number): string {
   return `${formatScheduleEt(startMs)} – ${formatScheduleEt(endMs)} ET`
 }
 
+function formatWeatherPermittedSpansForRun(
+  startMs: number,
+  endMs: number,
+  weatherPermittedIntervals: TimeInterval[]
+): string {
+  const spans: string[] = []
+  for (const iv of weatherPermittedIntervals) {
+    const overlapStart = Math.max(startMs, iv.startMs)
+    const overlapEnd = Math.min(endMs, iv.endMs)
+    if (overlapEnd > overlapStart) {
+      spans.push(formatScheduleEtRange(overlapStart, overlapEnd))
+    }
+  }
+  return spans.length > 0 ? spans.join('; ') : 'none'
+}
+
 function buildProjectSubSessionScheduleReasons(input: {
   project: ImagingProject
-  weatherWindow: TimeInterval
   cursorMs: number
-  sliceEndMs: number
+  planningEndMs: number
   placedStart: number
   placedEnd: number
   finalPlans: FilterPlanRow[]
@@ -80,9 +98,8 @@ function buildProjectSubSessionScheduleReasons(input: {
 }): string[] {
   const {
     project,
-    weatherWindow,
     cursorMs,
-    sliceEndMs,
+    planningEndMs,
     placedStart,
     placedEnd,
     finalPlans,
@@ -99,7 +116,7 @@ function buildProjectSubSessionScheduleReasons(input: {
   const durationMs = placedEnd - placedStart
 
   reasons.push(
-    `Clear weather window for this spell: ${formatScheduleEtRange(weatherWindow.startMs, weatherWindow.endMs)}.`
+    `Weather-permitted segments overlapping this run: ${formatWeatherPermittedSpansForRun(placedStart, placedEnd, weatherPermittedIntervals)}.`
   )
 
   const frameParts = finalPlans.map((p) => `${p.filterName} ${p.count}×${p.exposureSeconds}s`)
@@ -110,8 +127,8 @@ function buildProjectSubSessionScheduleReasons(input: {
   const riseAt = firstAltitudeAllowedTimeMs(
     project.raHours,
     project.decDeg,
-    Math.max(cursorMs, weatherWindow.startMs),
-    sliceEndMs
+    cursorMs,
+    planningEndMs
   )
   if (riseAt != null && riseAt > placedStart + 60_000) {
     reasons.push(
@@ -126,16 +143,16 @@ function buildProjectSubSessionScheduleReasons(input: {
   const earliestMs = Math.max(cursorMs, createdMs, nowMs, windowStartMs)
   if (placedStart > earliestMs + 5 * 60_000) {
     reasons.push(
-      `Not placed at ${formatScheduleEt(earliestMs)} ET: waiting for target altitude, weather-permitted coverage, or a long enough gap in this clear spell.`
+      `Not placed at ${formatScheduleEt(earliestMs)} ET: waiting for target altitude, ≥80% weather-permitted coverage, or a long enough free interval.`
     )
   }
 
   const virtualProject: ImagingProject = { ...project, remainingByFilter: workingRemainingBefore }
-  const maxPack = planTonightFilterFrames(virtualProject, cursorMs, sliceEndMs, workingRemainingBefore)
+  const maxPack = planTonightFilterFrames(virtualProject, cursorMs, planningEndMs, workingRemainingBefore)
   const maxFrames = maxPack.filterPlansTonight.reduce((s, p) => s + p.count, 0)
   if (frameTotal < maxFrames) {
     reasons.push(
-      'Fewer frames than the clear spell could fit: placement requires ≥80% weather-permitted and target-altitude coverage for the full run.'
+      'Fewer frames than the free window could fit: placement requires ≥80% weather-permitted and 100% target-altitude (≥30°) coverage for the full run (may span multiple clear spells).'
     )
   }
 
@@ -144,8 +161,8 @@ function buildProjectSubSessionScheduleReasons(input: {
     `End at ${formatScheduleEt(placedEnd)} ET: ${(exposureMs / 3600000).toFixed(2)} h exposure + 15 min session overhead (${(durationMs / 3600000).toFixed(2)} h block).`
   )
 
-  if (placedEnd >= sliceEndMs - 2 * 60_000) {
-    reasons.push('End aligned with the end of this continuous clear-weather spell.')
+  if (placedEnd >= planningEndMs - 2 * 60_000) {
+    reasons.push('End aligned with the end of the available free scheduling window.')
   }
   if (placedEnd >= deadlineMs - 2 * 60_000) {
     reasons.push('End limited by nautical-dawn scheduling deadline.')
@@ -157,7 +174,7 @@ function buildProjectSubSessionScheduleReasons(input: {
       : 0
   const altPct = durationMs > 0 ? (altitudeAllowedCoverageMs(project.raHours, project.decDeg, placedStart, placedEnd) / durationMs) * 100 : 0
   reasons.push(
-    `Coverage checks: weather-permitted ${weatherPct.toFixed(0)}%, target ≥30° ${altPct.toFixed(0)}% (each ≥80% required).`
+    `Coverage checks: weather-permitted ${weatherPct.toFixed(0)}% (≥80% required), target ≥30° ${altPct.toFixed(0)}% (100% required).`
   )
 
   return reasons
@@ -339,20 +356,19 @@ function findPlacementStart(
       const endMs = startMs + durationMs
       if (endMs > interval.endMs || endMs > deadlineMs) continue
       if (!weatherCoverageOk(weatherPermittedIntervals, startMs, endMs, 0.8)) continue
-      const altCovered = altitudeAllowedCoverageMs(project.raHours, project.decDeg, startMs, endMs)
-      if (altCovered < durationMs * 0.8) continue
+      if (!altitudeSessionCoverageOk(project.raHours, project.decDeg, startMs, endMs)) continue
       return startMs
     }
   }
   return null
 }
 
-/** Place one sub-session inside a weather slice; shrink frame count if altitude/weather 80% rule blocks full pack. */
-function placeSubSessionInWeatherSlice(
+/** Place one sub-session in free time; may span multiple clear spells when ≥80% weather coverage holds. */
+function placeSubSessionInFreeWindow(
   virtualProject: ImagingProject,
   usableFree: TimeInterval[],
   cursorMs: number,
-  sliceEndMs: number,
+  planningEndMs: number,
   workingRemaining: FilterRemainingRow[],
   weatherPermittedIntervals: TimeInterval[],
   nowMs: number,
@@ -362,7 +378,7 @@ function placeSubSessionInWeatherSlice(
   let { filterPlansTonight: draftPlans } = planTonightFilterFrames(
     virtualProject,
     cursorMs,
-    sliceEndMs,
+    planningEndMs,
     workingRemaining
   )
   if (draftPlans.length === 0) return null
@@ -388,7 +404,7 @@ function placeSubSessionInWeatherSlice(
     const { filterPlansTonight: finalPlans } = planTonightFilterFrames(
       virtualProject,
       startMs,
-      Math.min(startMs + durationMs, sliceEndMs, deadlineMs),
+      Math.min(startMs + durationMs, planningEndMs, deadlineMs),
       workingRemaining
     )
     if (finalPlans.length === 0) {
@@ -418,7 +434,25 @@ function placeSubSessionInWeatherSlice(
   return null
 }
 
-/** One sub-session plan per viable weather window tonight (global session indices). */
+function hasSchedulableFreeTonight(
+  freeIntervals: Array<{ startMs: number; endMs: number }>,
+  weatherPermittedIntervals: TimeInterval[],
+  windowStartMs: number,
+  deadlineMs: number,
+  minWindowMs: number
+): boolean {
+  for (const free of freeIntervals) {
+    const startMs = Math.max(free.startMs, windowStartMs)
+    const endMs = Math.min(free.endMs, deadlineMs)
+    if (endMs - startMs < minWindowMs) continue
+    if (weatherPermittedCoverageMs(weatherPermittedIntervals, startMs, endMs) >= minWindowMs) {
+      return true
+    }
+  }
+  return false
+}
+
+/** One sub-session plan per schedulable free interval tonight (global session indices). */
 export function planTonightSubSessions(
   project: ImagingProject,
   freeIntervals: Array<{ startMs: number; endMs: number }>,
@@ -434,81 +468,85 @@ export function planTonightSubSessions(
   const strip = getTonightScheduleStrip(now)
   const minWindowMs = minExposureMs(project) + SESSION_OVERHEAD_MS
 
-  const windows = buildTonightWeatherWindows(
-    freeIntervals,
-    weatherPermittedIntervals,
-    windowStartMs,
-    deadlineMs,
-    minWindowMs
-  )
-  if (windows.length === 0) return []
+  if (!hasSchedulableFreeTonight(freeIntervals, weatherPermittedIntervals, windowStartMs, deadlineMs, minWindowMs)) {
+    return []
+  }
 
   let workingRemaining = project.remainingByFilter.map((r) => ({ ...r }))
   let sessionIndex = nextProjectSessionIndex(project)
   const plans: ProjectTonightPlan[] = []
-  let workingFree = freeIntervals
+  let workingFree = [...freeIntervals].sort((a, b) => a.startMs - b.startMs)
+  let globalCursorMs = Math.max(nowMs, windowStartMs)
 
-  for (const weatherWindow of windows) {
-    let cursorMs = weatherWindow.startMs
+  while (true) {
+    const framesLeft = workingRemaining.reduce((s, r) => s + r.countRemaining, 0)
+    if (framesLeft <= 0) break
 
-    while (true) {
-      const framesLeft = workingRemaining.reduce((s, r) => s + r.countRemaining, 0)
-      if (framesLeft <= 0) break
+    let best: {
+      finalPlans: FilterPlanRow[]
+      placedStart: number
+      actualDurationMs: number
+      cursorMs: number
+      planningEndMs: number
+    } | null = null
 
-      const sliceEndMs = weatherWindow.endMs
-      if (sliceEndMs - cursorMs < minWindowMs) break
-
-      const usableFree = freeSlicesInWindow(workingFree, cursorMs, sliceEndMs, minWindowMs)
-      if (usableFree.length === 0) break
+    for (const free of workingFree) {
+      const cursorMs = Math.max(free.startMs, globalCursorMs)
+      const planningEndMs = Math.min(free.endMs, deadlineMs)
+      if (planningEndMs - cursorMs < minWindowMs) continue
 
       const virtualProject: ImagingProject = { ...project, remainingByFilter: workingRemaining }
-      const placed = placeSubSessionInWeatherSlice(
+      const placed = placeSubSessionInFreeWindow(
         virtualProject,
-        usableFree,
+        [{ startMs: cursorMs, endMs: free.endMs }],
         cursorMs,
-        sliceEndMs,
+        planningEndMs,
         workingRemaining,
         weatherPermittedIntervals,
         nowMs,
         windowStartMs,
         deadlineMs
       )
-      if (!placed) break
-
-      const { finalPlans, placedStart, actualDurationMs } = placed
-      const placedEnd = placedStart + actualDurationMs
-      const remainingBefore = workingRemaining.map((r) => ({ ...r }))
-
-      plans.push({
-        nightKey: strip.nightKey,
-        nightIndex: sessionIndex++,
-        filterPlansTonight: finalPlans,
-        plannedStartIso: new Date(placedStart).toISOString(),
-        plannedEndIso: new Date(placedEnd).toISOString(),
-        durationSeconds: tonightDurationSecondsFromPlans(finalPlans),
-        scheduleReasons: buildProjectSubSessionScheduleReasons({
-          project,
-          weatherWindow,
-          cursorMs,
-          sliceEndMs,
-          placedStart,
-          placedEnd,
-          finalPlans,
-          workingRemainingBefore: remainingBefore,
-          weatherPermittedIntervals,
-          nowMs,
-          windowStartMs,
-          deadlineMs,
-        }),
-      })
-
-      workingRemaining = subtractRemaining(workingRemaining, finalPlans)
-      workingFree = subtractOccupiedFromFree(workingFree, {
-        startMs: placedStart,
-        endMs: placedEnd,
-      })
-      cursorMs = Math.max(cursorMs, placedEnd)
+      if (!placed) continue
+      if (!best || placed.placedStart < best.placedStart) {
+        best = { ...placed, cursorMs, planningEndMs }
+      }
     }
+
+    if (!best) break
+
+    const { finalPlans, placedStart, actualDurationMs, cursorMs, planningEndMs } = best
+    const placedEnd = placedStart + actualDurationMs
+    const remainingBefore = workingRemaining.map((r) => ({ ...r }))
+
+    plans.push({
+      nightKey: strip.nightKey,
+      nightIndex: sessionIndex++,
+      filterPlansTonight: finalPlans,
+      plannedStartIso: new Date(placedStart).toISOString(),
+      plannedEndIso: new Date(placedEnd).toISOString(),
+      durationSeconds: tonightDurationSecondsFromPlans(finalPlans),
+      scheduleReasons: buildProjectSubSessionScheduleReasons({
+        project,
+        cursorMs,
+        planningEndMs,
+        placedStart,
+        placedEnd,
+        finalPlans,
+        workingRemainingBefore: remainingBefore,
+        weatherPermittedIntervals,
+        nowMs,
+        windowStartMs,
+        deadlineMs,
+      }),
+    })
+
+    workingRemaining = subtractRemaining(workingRemaining, finalPlans)
+    workingFree = subtractOccupiedFromFree(workingFree, {
+      startMs: placedStart,
+      endMs: placedEnd,
+    })
+    globalCursorMs = Math.max(globalCursorMs, placedEnd)
   }
 
   return plans
@@ -528,6 +566,8 @@ export function computeProjectTonightPlan(
 function shouldRefreshTonightSubs(project: ImagingProject, nightKey: string): boolean {
   const tonight = project.nights.filter((n) => n.nightKey === nightKey)
   if (tonight.length === 0) return true
+  // Do not reshuffle later `scheduled` subs while one is imaging — avoids Session 2 sliding on the strip.
+  if (hasInProgressSessionTonight(project, nightKey)) return false
   // Re-plan or clear `scheduled` subs when weather changes. in_progress/completed are kept by replaceScheduledSubsForNightKey.
   if (
     tonight.some(
@@ -536,7 +576,6 @@ function shouldRefreshTonightSubs(project: ImagingProject, nightKey: string): bo
   ) {
     return true
   }
-  if (hasInProgressSessionTonight(project, nightKey)) return false
   if (
     tonight.every((n) => n.status === 'completed' || n.status === 'failed') &&
     remainingFramesTotal(project) > 0
@@ -546,14 +585,17 @@ function shouldRefreshTonightSubs(project: ImagingProject, nightKey: string): bo
   return false
 }
 
-function subtractInProgressSubsTonight(
+function subtractProjectSubsTonight(
   project: ImagingProject,
   freeIntervals: Array<{ startMs: number; endMs: number }>,
-  nightKey: string
+  nightKey: string,
+  statuses: Array<'scheduled' | 'in_progress'>
 ): Array<{ startMs: number; endMs: number }> {
   let free = freeIntervals
   for (const n of project.nights) {
-    if (n.nightKey !== nightKey || n.status !== 'in_progress') continue
+    if (n.nightKey !== nightKey) continue
+    if (n.status !== 'scheduled' && n.status !== 'in_progress') continue
+    if (!statuses.includes(n.status)) continue
     if (!n.plannedStartIso) continue
     const startMs = Date.parse(n.plannedStartIso)
     if (!Number.isFinite(startMs)) continue
@@ -562,6 +604,28 @@ function subtractInProgressSubsTonight(
     free = subtractOccupiedFromFree(free, { startMs, endMs })
   }
   return free
+}
+
+function subtractInProgressSubsTonight(
+  project: ImagingProject,
+  freeIntervals: Array<{ startMs: number; endMs: number }>,
+  nightKey: string
+): Array<{ startMs: number; endMs: number }> {
+  return subtractProjectSubsTonight(project, freeIntervals, nightKey, ['in_progress'])
+}
+
+/** Free time for the next pending project while another project is in progress (≥30° windows reserved for active target). */
+export function plannerFreeIntervalsBehindInProgressProject(
+  active: ImagingProject,
+  freeIntervals: Array<{ startMs: number; endMs: number }>,
+  nightKey: string,
+  now = new Date()
+): Array<{ startMs: number; endMs: number }> {
+  let free = freeIntervals
+  for (const hold of projectAltitudeHoldIntervals(active, now)) {
+    free = subtractOccupiedFromFree(free, hold)
+  }
+  return subtractProjectSubsTonight(active, free, nightKey, ['scheduled', 'in_progress'])
 }
 
 function hasScheduledSubsTonight(project: ImagingProject, nightKey: string): boolean {
@@ -579,6 +643,9 @@ async function applyTonightPlansOrClearScheduled(
   }
   const project = await getProjectById(projectId)
   if (!project || !hasScheduledSubsTonight(project, nightKey)) return
+  // Keep deliverable scheduled subs when replan is briefly empty (stuck in_progress, API flicker).
+  if (hasInProgressSessionTonight(project, nightKey)) return
+  if (getDeliverableNight(project)) return
   await replaceScheduledSubsForNightKey(projectId, nightKey, [])
 }
 
@@ -601,14 +668,7 @@ export function explainWhyNoPlansTonight(
   const windowStartMs = window.nauticalDuskUtc.getTime()
   const deadlineMs = window.nauticalDawnUtc.getTime()
   const minWindowMs = minExposureMs(project) + SESSION_OVERHEAD_MS
-  const windows = buildTonightWeatherWindows(
-    freeIntervals,
-    weatherPermittedIntervals,
-    windowStartMs,
-    deadlineMs,
-    minWindowMs
-  )
-  if (windows.length === 0) {
+  if (!hasSchedulableFreeTonight(freeIntervals, weatherPermittedIntervals, windowStartMs, deadlineMs, minWindowMs)) {
     return [
       'No weather-permitted window overlaps nautical dusk–dawn tonight (after queue free time).',
     ]
@@ -616,43 +676,43 @@ export function explainWhyNoPlansTonight(
 
   const reasons: string[] = []
   let workingRemaining = project.remainingByFilter.map((r) => ({ ...r }))
+  let globalCursorMs = Math.max(nowMs, windowStartMs)
+  const sortedFree = [...freeIntervals].sort((a, b) => a.startMs - b.startMs)
 
-  for (let i = 0; i < windows.length; i++) {
-    const weatherWindow = windows[i]!
-    const label = `Window ${i + 1} (${new Date(weatherWindow.startMs).toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' })}–${new Date(weatherWindow.endMs).toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' })} ET)`
+  for (let i = 0; i < sortedFree.length; i++) {
+    const free = sortedFree[i]!
+    const cursorMs = Math.max(free.startMs, globalCursorMs)
+    const planningEndMs = Math.min(free.endMs, deadlineMs)
+    const label = `Free interval ${i + 1} (${new Date(cursorMs).toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' })}–${new Date(planningEndMs).toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' })} ET)`
     const framesLeft = workingRemaining.reduce((s, r) => s + r.countRemaining, 0)
     if (framesLeft <= 0) break
+    if (planningEndMs - cursorMs < minWindowMs) continue
 
     const virtualProject: ImagingProject = { ...project, remainingByFilter: workingRemaining }
     const { filterPlansTonight: draftPlans } = planTonightFilterFrames(
       virtualProject,
-      weatherWindow.startMs,
-      weatherWindow.endMs,
+      cursorMs,
+      planningEndMs,
       workingRemaining
     )
     if (draftPlans.length === 0) {
-      reasons.push(`${label}: window too short for one exposure plus session overhead.`)
+      reasons.push(`${label}: interval too short for one exposure plus session overhead.`)
       continue
     }
 
     const durationMs = tonightDurationSecondsFromPlans(draftPlans) * 1000
-    const riseAt = firstAltitudeAllowedTimeMs(
-      project.raHours,
-      project.decDeg,
-      weatherWindow.startMs,
-      weatherWindow.endMs
-    )
+    const riseAt = firstAltitudeAllowedTimeMs(project.raHours, project.decDeg, cursorMs, planningEndMs)
     if (riseAt == null) {
-      const altAtStart = currentAltitudeDeg(project.raHours, project.decDeg, new Date(weatherWindow.startMs))
+      const altAtStart = currentAltitudeDeg(project.raHours, project.decDeg, new Date(cursorMs))
       reasons.push(
-        `${label}: target stays below 30° altitude (about ${altAtStart.toFixed(0)}° at window start).`
+        `${label}: target stays below 30° altitude (about ${altAtStart.toFixed(0)}° at interval start).`
       )
       continue
     }
 
     const startMs = findPlacementStart(
       virtualProject,
-      [weatherWindow],
+      [{ startMs: cursorMs, endMs: free.endMs }],
       durationMs,
       weatherPermittedIntervals,
       nowMs,
@@ -660,16 +720,17 @@ export function explainWhyNoPlansTonight(
       deadlineMs
     )
     if (startMs == null) {
-      const windowH = ((weatherWindow.endMs - weatherWindow.startMs) / 3600000).toFixed(1)
+      const windowH = ((planningEndMs - cursorMs) / 3600000).toFixed(1)
       const needH = (durationMs / 3600000).toFixed(1)
       const frames = draftPlans.reduce((s, p) => s + p.count, 0)
       reasons.push(
-        `${label}: cannot place ${frames} frame(s) (~${needH} h with overhead) in ${windowH} h (weather/altitude 80% rule).`
+        `${label}: cannot place ${frames} frame(s) (~${needH} h with overhead) in ${windowH} h free (weather ≥80%, altitude 100%; may span multiple clear spells).`
       )
       continue
     }
 
     workingRemaining = subtractRemaining(workingRemaining, draftPlans)
+    globalCursorMs = Math.max(globalCursorMs, startMs + durationMs)
   }
 
   if (reasons.length === 0) {
@@ -705,14 +766,13 @@ export function computeProjectScheduleInsight(
   }
 }
 
-function subSessionScheduleFingerprint(input: {
-  plannedStartIso: string
-  filterPlansTonight: FilterPlanRow[]
-}): string {
-  return JSON.stringify({
-    plannedStartIso: input.plannedStartIso,
-    filterPlansTonight: input.filterPlansTonight,
-  })
+function filterPlansFingerprint(filterPlansTonight: FilterPlanRow[]): string {
+  return JSON.stringify(filterPlansTonight)
+}
+
+/** Frame plan only — planned start may move with reconcile without rewriting NINA JSON. */
+function subSessionScheduleFingerprint(input: { filterPlansTonight: FilterPlanRow[] }): string {
+  return filterPlansFingerprint(input.filterPlansTonight)
 }
 
 function logProjectSubSessionScheduled(
@@ -755,6 +815,12 @@ function plansToScheduledNights(
     const reuse = existingScheduled[i]
     const nightIndex = reuse?.nightIndex ?? plan.nightIndex
     const nightId = reuse?.id ?? projectNightSubId(project.id, nightIndex)
+    const sameFrames =
+      reuse != null &&
+      filterPlansFingerprint(reuse.filterPlansTonight) === filterPlansFingerprint(plan.filterPlansTonight)
+    const reuseStartMs = reuse?.plannedStartIso ? Date.parse(reuse.plannedStartIso) : NaN
+    const plannedStartIso =
+      sameFrames && Number.isFinite(reuseStartMs) ? reuse.plannedStartIso! : plan.plannedStartIso
     return {
       id: nightId,
       nightKey: plan.nightKey,
@@ -762,9 +828,24 @@ function plansToScheduledNights(
       status: 'scheduled' as const,
       filterPlansTonight: plan.filterPlansTonight,
       ninaSequenceJson: buildNightNinaJson(project, nightId, plan.filterPlansTonight),
-      plannedStartIso: plan.plannedStartIso,
+      plannedStartIso,
     }
   })
+}
+
+export function subtractProjectTonightPlansFromFree(
+  freeIntervals: Array<{ startMs: number; endMs: number }>,
+  plans: ProjectTonightPlan[]
+): Array<{ startMs: number; endMs: number }> {
+  let free = freeIntervals
+  for (const plan of plans) {
+    const startMs = Date.parse(plan.plannedStartIso)
+    if (!Number.isFinite(startMs)) continue
+    const endMs = startMs + plan.durationSeconds * 1000
+    if (endMs <= startMs) continue
+    free = subtractOccupiedFromFree(free, { startMs, endMs })
+  }
+  return free
 }
 
 /** Persist all tonight sub-session plans; promote project to in_progress when any are written. */
@@ -773,21 +854,13 @@ export async function applyProjectTonightPlans(
   plans: ProjectTonightPlan[]
 ): Promise<void> {
   if (plans.length === 0) return
-  const blocker = await getBlockingInProgressProject(projectId)
-  if (blocker) return
   const project = await getProjectById(projectId)
   if (!project) return
   const nightKey = plans[0]!.nightKey
   const prevScheduled = new Map(
     project.nights
       .filter((n) => n.nightKey === nightKey && n.status === 'scheduled')
-      .map((n) => [
-        n.id,
-        subSessionScheduleFingerprint({
-          plannedStartIso: n.plannedStartIso ?? '',
-          filterPlansTonight: n.filterPlansTonight,
-        }),
-      ])
+      .map((n) => [n.id, subSessionScheduleFingerprint({ filterPlansTonight: n.filterPlansTonight })])
   )
   const subs = plansToScheduledNights(project, plans)
   await replaceScheduledSubsForNightKey(projectId, nightKey, subs)
@@ -795,12 +868,9 @@ export async function applyProjectTonightPlans(
     const plan = plans[i]!
     const sub = subs[i]
     if (!sub) continue
-    const nextFp = subSessionScheduleFingerprint({
-      plannedStartIso: plan.plannedStartIso,
-      filterPlansTonight: plan.filterPlansTonight,
-    })
+    const nextFp = subSessionScheduleFingerprint({ filterPlansTonight: plan.filterPlansTonight })
     if (prevScheduled.get(sub.id) === nextFp) continue
-    logProjectSubSessionScheduled(project, plan, sub.id)
+    logProjectSubSessionScheduled(project, { ...plan, nightIndex: sub.nightIndex }, sub.id)
   }
   const refreshed = await getProjectById(projectId)
   if (refreshed && (refreshed.status === 'pending' || refreshed.status === 'scheduled')) {
@@ -865,22 +935,7 @@ export async function planAndScheduleProjectTonight(
   return insight
 }
 
-async function markProjectQueueWaiting(
-  project: ImagingProject,
-  nightKey: string,
-  reasons: string[]
-): Promise<void> {
-  await patchRequestScheduleInsight(project.id, {
-    status: 'unscheduled',
-    plannedStartIso: null,
-    reasons,
-  })
-  if (shouldRefreshTonightSubs(project, nightKey)) {
-    await replaceScheduledSubsForNightKey(project.id, nightKey, [])
-  }
-}
-
-async function reconcileOneProjectTonight(
+export async function reconcileOneProjectTonight(
   project: ImagingProject,
   projectFree: Array<{ startMs: number; endMs: number }>,
   weatherPermittedIntervals: TimeInterval[],
@@ -913,16 +968,16 @@ async function reconcileOneProjectTonight(
   return plans
 }
 
-export async function reconcileProjectSchedules(
+/** Refresh tonight sub-sessions for the one in-progress project (full night; not altitude-gapped). */
+export async function reconcileActiveInProgressProjectTonight(
   freeIntervals: Array<{ startMs: number; endMs: number }>,
   weatherPermittedIntervals: TimeInterval[],
   now = new Date()
-): Promise<void> {
+): Promise<ImagingProject | undefined> {
   await compactStaleProjectNights()
   await compactOrphanProjects()
   let projects = await listProjects()
-  const strip = getTonightScheduleStrip(now)
-  const nightKey = strip.nightKey
+  const nightKey = getTonightScheduleStrip(now).nightKey
 
   const inProgressRows = projects
     .filter((p) => p.status === 'in_progress')
@@ -933,48 +988,22 @@ export async function reconcileProjectSchedules(
     }
     projects = await listProjects()
   }
+
   const onBoard = projects.find((p) => p.status === 'in_progress' && p.onBoard)
+  const blocker = onBoard ?? (await getBlockingInProgressProject())
+  const active = onBoard ?? blocker
+  if (!active || remainingFramesTotal(active) <= 0) return undefined
 
-  if (onBoard) {
-    if (remainingFramesTotal(onBoard) > 0) {
-      const plannerFree = subtractInProgressSubsTonight(onBoard, freeIntervals, nightKey)
-      const plans = planTonightSubSessions(onBoard, plannerFree, weatherPermittedIntervals, now)
-      if (shouldRefreshTonightSubs(onBoard, nightKey)) {
-        await applyTonightPlansOrClearScheduled(onBoard.id, nightKey, plans)
-      }
-    }
-    for (const project of projects) {
-      if (project.id === onBoard.id) continue
-      if (project.status !== 'pending') continue
-      await markProjectQueueWaiting(project, nightKey, [projectSchedulingBlockedReason(onBoard)])
-    }
-    return
-  }
+  const activeFree = subtractInProgressSubsTonight(active, freeIntervals, nightKey)
+  await reconcileOneProjectTonight(active, activeFree, weatherPermittedIntervals, nightKey, now)
+  return active
+}
 
-  const blocker = await getBlockingInProgressProject()
-  if (blocker) {
-    if (remainingFramesTotal(blocker) > 0) {
-      await reconcileOneProjectTonight(blocker, freeIntervals, weatherPermittedIntervals, nightKey, now)
-    }
-    for (const project of projects) {
-      if (project.id === blocker.id) continue
-      if (project.status !== 'pending') continue
-      await markProjectQueueWaiting(project, nightKey, [projectSchedulingBlockedReason(blocker)])
-    }
-    return
-  }
-
-  const nextPending = getNextPendingProject(projects)
-  if (nextPending) {
-    await reconcileOneProjectTonight(nextPending, freeIntervals, weatherPermittedIntervals, nightKey, now)
-  }
-
-  for (const project of projects) {
-    if (project.status !== 'pending') continue
-    if (nextPending && project.id === nextPending.id) continue
-    const reason = nextPending
-      ? projectQueueBlockedReason(nextPending)
-      : 'Waiting for an earlier multi-night project in the queue to complete.'
-    await markProjectQueueWaiting(project, nightKey, [reason])
-  }
+/** Reconcile in-progress project own subs only; queue FIFO runs in reconcilePendingScheduleStatus. */
+export async function reconcileProjectSchedules(
+  freeIntervals: Array<{ startMs: number; endMs: number }>,
+  weatherPermittedIntervals: TimeInterval[],
+  now = new Date()
+): Promise<void> {
+  await reconcileActiveInProgressProjectTonight(freeIntervals, weatherPermittedIntervals, now)
 }

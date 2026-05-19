@@ -3,9 +3,6 @@ export type RemoteSessionTypeV1 = 'dso' | 'variable_star'
 export type RemoteSavedSessionFormV1 = {
   sessionType: RemoteSessionTypeV1
   requestName: string
-  firstName: string
-  lastName: string
-  email: string
   raHourPart: string
   raMinutePart: string
   raSecondPart: string
@@ -22,62 +19,63 @@ export type RemoteSavedSessionFormV1 = {
   catalogQuery: string
 }
 
-export type RemoteSavedSessionEntryV1 = {
+export type MemberSavedSessionApiEntry = {
+  id: string
   name: string
-  password: string
   savedAt: string
+  updatedAt: string
   form: RemoteSavedSessionFormV1
 }
 
-const STORAGE_KEY = 'pomfret-remote-saved-sessions-v1'
-const MAX_SESSIONS = 40
+/** Query param on /dashboard/remote to load a cloud-saved session by id. */
+export const SAVED_SESSION_ID_QUERY = 'savedSessionId'
 
-function readRaw(): RemoteSavedSessionEntryV1[] {
-  if (typeof window === 'undefined') return []
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) return []
-    const parsed = JSON.parse(raw) as unknown
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter(
-      (x): x is RemoteSavedSessionEntryV1 =>
-        x != null &&
-        typeof x === 'object' &&
-        typeof (x as RemoteSavedSessionEntryV1).name === 'string' &&
-        typeof (x as RemoteSavedSessionEntryV1).password === 'string' &&
-        typeof (x as RemoteSavedSessionEntryV1).savedAt === 'string' &&
-        (x as RemoteSavedSessionEntryV1).form != null &&
-        typeof (x as RemoteSavedSessionEntryV1).form === 'object'
-    )
-  } catch {
-    return []
-  }
+export function buildRemoteRunSavedSessionUrl(sessionId: string): string {
+  return `/dashboard/remote?${SAVED_SESSION_ID_QUERY}=${encodeURIComponent(sessionId)}`
 }
 
-export function upsertRemoteSavedSession(entry: {
+export async function fetchMemberSavedSessions(): Promise<MemberSavedSessionApiEntry[]> {
+  const res = await fetch('/api/member/saved-sessions', { credentials: 'include', cache: 'no-store' })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok || data?.ok !== true || !Array.isArray(data.sessions)) return []
+  return data.sessions as MemberSavedSessionApiEntry[]
+}
+
+export async function saveMemberSavedSession(input: {
   name: string
-  password: string
   form: RemoteSavedSessionFormV1
-}): void {
-  if (typeof window === 'undefined') return
-  const nameKey = entry.name.trim().toLowerCase()
-  if (!nameKey) return
-  const next: RemoteSavedSessionEntryV1 = {
-    name: entry.name.trim(),
-    password: entry.password,
-    savedAt: new Date().toISOString(),
-    form: entry.form,
+}): Promise<{ ok: true; session: MemberSavedSessionApiEntry } | { ok: false; error: string }> {
+  const res = await fetch('/api/member/saved-sessions', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok || data?.ok !== true) {
+    return { ok: false, error: typeof data.error === 'string' ? data.error : 'Save failed' }
   }
-  const prev = readRaw().filter((e) => e.name.trim().toLowerCase() !== nameKey)
-  prev.unshift(next)
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(prev.slice(0, MAX_SESSIONS)))
+  return { ok: true, session: data.session as MemberSavedSessionApiEntry }
 }
 
-export function findRemoteSavedSession(name: string, password: string): RemoteSavedSessionEntryV1 | null {
+export async function loadMemberSavedSessionByName(
+  name: string
+): Promise<MemberSavedSessionApiEntry | null> {
+  const sessions = await fetchMemberSavedSessions()
   const key = name.trim().toLowerCase()
-  if (!key) return null
-  for (const e of readRaw()) {
-    if (e.name.trim().toLowerCase() === key && e.password === password) return e
-  }
-  return null
+  return sessions.find((s) => s.name.toLowerCase() === key) ?? null
+}
+
+export async function loadMemberSavedSessionById(
+  id: string
+): Promise<MemberSavedSessionApiEntry | null> {
+  const trimmed = id.trim()
+  if (!trimmed) return null
+  const res = await fetch(`/api/member/saved-sessions?id=${encodeURIComponent(trimmed)}`, {
+    credentials: 'include',
+    cache: 'no-store',
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok || data?.ok !== true || !data.session) return null
+  return data.session as MemberSavedSessionApiEntry
 }

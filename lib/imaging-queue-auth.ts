@@ -1,12 +1,13 @@
 import { headers } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
+import { getCurrentUser } from '@/lib/member-auth'
 
 /** Fallback for tools without an `Origin` header (e.g. NINA HTTP client). */
 export const imagingCorsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
   'Access-Control-Allow-Headers':
-    'Authorization, Content-Type, x-nina-session-progress-secret, x-nina-mount-telemetry-secret, x-imaging-r2-secret, x-delete-credential, x-admin-password, x-session-password',
+    'Authorization, Content-Type, x-nina-session-progress-secret, x-nina-mount-telemetry-secret, x-imaging-r2-secret, x-delete-credential, x-session-password',
 }
 
 const CORS_ALLOW_METHODS = imagingCorsHeaders['Access-Control-Allow-Methods']
@@ -76,4 +77,10 @@ export function imagingQueueAuthorized(request: NextRequest): boolean {
 
 export function imagingUnauthorized() {
   return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: imagingCorsHeadersResolved() })
+}
+
+/** Member cookie or observatory Bearer secret (when IMAGING_QUEUE_SECRET is set). */
+export async function imagingQueueReadable(request: NextRequest): Promise<boolean> {
+  if (imagingQueueAuthorized(request)) return true
+  return (await getCurrentUser(request)) != null
 }

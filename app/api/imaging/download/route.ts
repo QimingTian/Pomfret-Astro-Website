@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-import { isImagingAdminPassword } from '@/lib/imaging-admin-auth'
-import { validateSessionPassword } from '@/lib/imaging-session-access'
+import { authorizeImagingSession } from '@/lib/imaging-session-access'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import { boardMarkDownloaded } from '@/lib/imaging-session-board'
 import { buildSignedDownloadUrl } from '@/lib/r2-session-download'
@@ -21,13 +20,10 @@ export async function GET(request: NextRequest) {
     return withImagingCors({ ok: false as const, error: 'Missing queueId' }, 400)
   }
 
-  const providedPassword = request.headers.get('x-session-password')
-  const isAdmin = isImagingAdminPassword(providedPassword)
-  if (!isAdmin) {
-    const auth = await validateSessionPassword(queueId, providedPassword)
-    if (!auth.ok) {
-      return withImagingCors({ ok: false as const, error: auth.error }, auth.status)
-    }
+  const providedPassword = request.headers.get('x-session-password')?.trim() || null
+  const auth = await authorizeImagingSession(request, queueId, providedPassword)
+  if (!auth.ok) {
+    return withImagingCors({ ok: false as const, error: auth.error }, auth.status)
   }
 
   const signed = await buildSignedDownloadUrl(queueId, file || undefined)

@@ -1,15 +1,19 @@
 import {
   getBlockingInProgressProject,
+  projectHasOpenSessionsForNightKey,
   remainingFramesTotal,
   type ImagingProject,
 } from '@/lib/imaging-project-store'
+import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import { intervalsWhereAltitudeAtOrAbove } from '@/lib/target-altitude'
 
 /** In-progress multi-night project whose target-altitude window others must not use. */
 export async function getActiveProjectForAltitudeHold(now = new Date()): Promise<ImagingProject | undefined> {
-  const active = await getBlockingInProgressProject()
+  const stripNightKey = getTonightScheduleStrip(now).nightKey
+  const active = await getBlockingInProgressProject(undefined, stripNightKey)
   if (!active || remainingFramesTotal(active) <= 0) return undefined
+  if (!projectHasOpenSessionsForNightKey(active, stripNightKey)) return undefined
   return active
 }
 

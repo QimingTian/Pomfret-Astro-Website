@@ -2,6 +2,10 @@ import { mkdir, readFile, rename, writeFile } from 'fs/promises'
 import path from 'path'
 
 import { buildNinaSequenceJson } from '@/lib/build-nina-sequence-json'
+import {
+  DSO_SESSION_OVERHEAD_SEC,
+  VARIABLE_STAR_SESSION_OVERHEAD_SEC,
+} from '@/lib/imaging-session-overhead'
 import { hashSessionPassword } from '@/lib/session-password'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 import { getTonightAstronomicalNightWindow, getTonightSchedulingWindow } from '@/lib/sunrise-window'
@@ -35,7 +39,7 @@ export interface ImagingRequest {
   count: number
   outputMode?: 'raw_zip' | 'stacked_master' | 'none'
   filterPlans?: Array<{ filterName: string; exposureSeconds: number; count: number }>
-  /** Estimated session duration in seconds: sum(filter count * exposure) + 15min overhead. */
+  /** Estimated session duration in seconds: sum(filter count * exposure) + DSO overhead. */
   estimatedDurationSeconds?: number
   notes: string | null
   firstName?: string | null
@@ -82,7 +86,7 @@ const MAX_FILTER = 64
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const STACKED_MASTER_REQUIRED_EXPOSURE_SECONDS = 600
 const VARIABLE_STAR_ESTIMATE_ALTITUDE_DEG = 40
-export const VARIABLE_STAR_SESSION_OVERHEAD_SEC = 15 * 60
+export { DSO_SESSION_OVERHEAD_SEC, VARIABLE_STAR_SESSION_OVERHEAD_SEC } from '@/lib/imaging-session-overhead'
 
 function variableStarDurationFromClientEstimate(inputEst: unknown): { ok: true; seconds: number } | { ok: false } {
   if (typeof inputEst !== 'number' || !Number.isFinite(inputEst)) return { ok: false }
@@ -441,7 +445,7 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
             )
           )
         })()
-      : normalizedFilterPlans.reduce((sum, p) => sum + p.count * p.exposureSeconds, 0) + 15 * 60
+      : normalizedFilterPlans.reduce((sum, p) => sum + p.count * p.exposureSeconds, 0) + DSO_SESSION_OVERHEAD_SEC
 
   if (!projectMode) {
     const { nauticalDuskUtc, nauticalDawnUtc } = getTonightSchedulingWindow(new Date())
@@ -645,7 +649,7 @@ export async function updatePendingRequestById(
             )
           )
         })()
-      : normalizedFilterPlans.reduce((sum, p) => sum + p.count * p.exposureSeconds, 0) + 15 * 60
+      : normalizedFilterPlans.reduce((sum, p) => sum + p.count * p.exposureSeconds, 0) + DSO_SESSION_OVERHEAD_SEC
   const projectMode = current.projectMode === true
   if (!projectMode) {
     const { nauticalDuskUtc, nauticalDawnUtc } = getTonightSchedulingWindow(new Date())

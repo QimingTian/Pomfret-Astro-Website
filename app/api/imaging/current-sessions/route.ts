@@ -4,6 +4,7 @@ import { getCurrentUser } from '@/lib/member-auth'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
 import {
   effectiveProjectStatus,
+  expireMissedScheduledProjectNights,
   listProjects,
   tonightDurationSecondsFromPlans,
   type ImagingProject,
@@ -42,6 +43,7 @@ export async function GET(request: NextRequest) {
   const includeContact = viewer != null
 
   await reconcilePendingScheduleStatus()
+  await expireMissedScheduledProjectNights()
 
   const purgedBoardIds = await boardPurgeCompletedOlderThan(RETENTION_MS)
   for (const queueId of purgedBoardIds) {

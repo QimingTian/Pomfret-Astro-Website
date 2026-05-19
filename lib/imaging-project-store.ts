@@ -1,5 +1,6 @@
 import { buildNinaSequenceJson } from '@/lib/build-nina-sequence-json'
 import { projectNightSubId } from '@/lib/imaging-project-ids'
+import { DSO_SESSION_OVERHEAD_SEC } from '@/lib/imaging-session-overhead'
 import { getRequestById } from '@/lib/imaging-queue-store'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 import type { ScheduleBarPlacement } from '@/lib/imaging-schedule-bar'
@@ -104,12 +105,40 @@ async function writeProjects(projects: ImagingProject[]): Promise<void> {
 
 /** Remove duplicate strip-night rows left by older reconcile bugs. */
 export async function compactStaleProjectNights(): Promise<void> {
+  await expireMissedScheduledProjectNights()
   const all = await readProjects()
   let changed = false
   const next = all.map((p) => {
     const deduped = dedupeProjectNights(p.nights)
     if (deduped.length < p.nights.length) changed = true
     return { ...p, nights: deduped }
+  })
+  if (changed) await writeProjects(next)
+}
+
+/** Mark `scheduled` sub-sessions whose planned window has passed without starting. */
+export async function expireMissedScheduledProjectNights(now = new Date()): Promise<void> {
+  const nowMs = now.getTime()
+  const all = await readProjects()
+  let changed = false
+  const next = all.map((project) => {
+    let nightsChanged = false
+    const nights = project.nights.map((n) => {
+      if (n.status !== 'scheduled' || !n.plannedStartIso) return n
+      const startMs = Date.parse(n.plannedStartIso)
+      if (!Number.isFinite(startMs)) return n
+      const durationMs = tonightDurationSecondsFromPlans(n.filterPlansTonight) * 1000
+      const endMs = startMs + durationMs
+      if (endMs > nowMs) return n
+      nightsChanged = true
+      changed = true
+      return {
+        ...n,
+        status: 'failed' as const,
+        failedAt: new Date(endMs).toISOString(),
+      }
+    })
+    return nightsChanged ? { ...project, nights, updatedAt: new Date().toISOString() } : project
   })
   if (changed) await writeProjects(next)
 }
@@ -181,9 +210,13 @@ export async function deleteProjectById(id: string): Promise<boolean> {
   return true
 }
 
-/** The one multi-night project allowed to plan sub-sessions; blocks all others until it completes or fails. */
+/**
+ * In-progress project that blocks others tonight. When `stripNightKey` is set, a project whose
+ * remaining work is only on a later calendar strip night (e.g. Session 2 tomorrow) does not block.
+ */
 export async function getBlockingInProgressProject(
-  exceptProjectId?: string
+  exceptProjectId?: string,
+  stripNightKey?: string
 ): Promise<ImagingProject | undefined> {
   const all = await readProjects()
   const candidates = all
@@ -204,6 +237,10 @@ export async function getBlockingInProgressProject(
 
     if (remainingFramesTotal(project) <= 0) {
       await patchProject(project.id, { status: 'completed' })
+      continue
+    }
+
+    if (stripNightKey && !projectHasOpenSessionsForNightKey(project, stripNightKey)) {
       continue
     }
 
@@ -238,15 +275,17 @@ export async function getActiveOnBoardProject(): Promise<ImagingProject | undefi
  * In-progress project with a sub-session NINA can receive (on-board or not).
  * Night 2+ delivers via sub-session ids after the queue row was consumed on night 1.
  */
-export async function getProjectAwaitingSubSessionDelivery(): Promise<ImagingProject | undefined> {
+export async function getProjectAwaitingSubSessionDelivery(
+  stripNightKey?: string
+): Promise<ImagingProject | undefined> {
   const onBoard = await getActiveOnBoardProject()
-  if (onBoard && getDeliverableNight(onBoard)) return onBoard
+  if (onBoard && getDeliverableNight(onBoard, stripNightKey)) return onBoard
 
   const candidates = (await readProjects())
     .filter((p) => p.status === 'in_progress' && remainingFramesTotal(p) > 0)
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
 
-  return candidates.find((p) => getDeliverableNight(p) != null)
+  return candidates.find((p) => getDeliverableNight(p, stripNightKey) != null)
 }
 
 /** True while this strip night still has a project night to shoot (not completed). */
@@ -257,8 +296,11 @@ export function projectHasOpenSessionsForNightKey(project: ImagingProject, night
   )
 }
 
-export async function hasBlockingInProgressProject(exceptProjectId?: string): Promise<boolean> {
-  const active = await getBlockingInProgressProject(exceptProjectId)
+export async function hasBlockingInProgressProject(
+  exceptProjectId?: string,
+  stripNightKey?: string
+): Promise<boolean> {
+  const active = await getBlockingInProgressProject(exceptProjectId, stripNightKey)
   return active != null
 }
 
@@ -654,11 +696,17 @@ export async function setNightScheduleBar(
   if (changed) await writeProjects(next)
 }
 
-export function getDeliverableNight(project: ImagingProject): ProjectNight | undefined {
-  const inProgress = project.nights.find((n) => n.status === 'in_progress')
+export function getDeliverableNight(
+  project: ImagingProject,
+  stripNightKey?: string
+): ProjectNight | undefined {
+  const matchesStrip = (n: ProjectNight) => !stripNightKey || n.nightKey === stripNightKey
+
+  const inProgress = project.nights.find((n) => n.status === 'in_progress' && matchesStrip(n))
   if (inProgress?.ninaSequenceJson) return inProgress
+
   const scheduled = project.nights
-    .filter((n) => n.status === 'scheduled' && n.ninaSequenceJson)
+    .filter((n) => n.status === 'scheduled' && n.ninaSequenceJson && matchesStrip(n))
     .sort((a, b) => {
       const ta = Date.parse(a.plannedStartIso ?? '')
       const tb = Date.parse(b.plannedStartIso ?? '')
@@ -670,7 +718,7 @@ export function getDeliverableNight(project: ImagingProject): ProjectNight | und
 
 export function tonightDurationSecondsFromPlans(plans: FilterPlanRow[]): number {
   if (plans.length === 0) return 0
-  return plans.reduce((sum, p) => sum + p.count * p.exposureSeconds, 0) + 15 * 60
+  return plans.reduce((sum, p) => sum + p.count * p.exposureSeconds, 0) + DSO_SESSION_OVERHEAD_SEC
 }
 
 /** Tonight sub-session windows used to block other queue rows (not full multi-night estimate). */

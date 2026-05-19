@@ -187,8 +187,8 @@ export async function POST(request: NextRequest) {
               })
             })
             publishProgress(match.project.id, { type: 'status', queueStatus: 'completed' })
-            void reconcilePendingScheduleStatus()
           }
+          void reconcilePendingScheduleStatus()
           void markEndNightDueIfTonightComplete()
         }
       }

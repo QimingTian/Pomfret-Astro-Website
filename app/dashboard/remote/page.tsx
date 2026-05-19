@@ -30,6 +30,7 @@ import {
   type MemberSavedSessionApiEntry,
   type RemoteSavedSessionFormV1,
 } from '@/lib/remote-saved-session'
+import { DSO_SESSION_OVERHEAD_SEC } from '@/lib/imaging-session-overhead'
 import { parseProjectNightSubId } from '@/lib/imaging-project-ids'
 
 const jsonHeaders: HeadersInit = { 'Content-Type': 'application/json' }
@@ -336,15 +337,16 @@ function mergeWithFrozenPastHours(previous: string[], incoming: string[], now: D
 function estimateDurationSecondsFromPlans(
   plans: Array<{ filterName: string; exposureSeconds: number; count: number }> | undefined
 ): number {
-  if (!Array.isArray(plans) || plans.length === 0) return 15 * 60
+  if (!Array.isArray(plans) || plans.length === 0) return DSO_SESSION_OVERHEAD_SEC
   const imagingSeconds = plans.reduce((sum, p) => sum + p.count * p.exposureSeconds, 0)
-  return Math.max(imagingSeconds + 15 * 60, 15 * 60)
+  return Math.max(imagingSeconds + DSO_SESSION_OVERHEAD_SEC, DSO_SESSION_OVERHEAD_SEC)
 }
 
 type TerminalSessionLike = {
   id: string
   status: string
   createdAt: string
+  nightKey?: string
   plannedStartIso?: string | null
   failedAt?: string | null
   scheduleStripNightKey?: string | null
@@ -438,10 +440,12 @@ function fallbackPlacementForTerminalSession(
 /** Completed rows only belong on the current 4pm→8am strip if their time range overlaps that window. */
 function completedSessionOverlapsTonightStripWindow(
   item: TerminalSessionLike,
+  tonightNightKey: string,
   windowStartMs: number,
   windowEndMs: number,
   locked: Record<string, { startMs: number; endMs: number }>,
 ): boolean {
+  if (item.nightKey && item.nightKey !== tonightNightKey) return false
   const durationMs = sessionDurationMsFromItem(item)
   const lock = locked[item.id]
   if (
@@ -799,6 +803,7 @@ export default function RemotePage() {
   /** Dedupe preview refetches: same server `updatedAt` can repeat across uploads; include payload slice so new frames still count. */
   const terminalPreviewLastFingerprintRef = useRef<string | null>(null)
   const terminalEndRef = useRef<HTMLDivElement>(null)
+  const terminalOpenedSessionRef = useRef<string | null>(null)
   const [authModalSessionId, setAuthModalSessionId] = useState<string | null>(null)
   const [authModalAction, setAuthModalAction] = useState<
     'progress' | 'project_progress' | 'project_download' | 'download' | 'edit' | null
@@ -1550,15 +1555,17 @@ export default function RemotePage() {
   }, [sessionType])
 
   const scheduleStripItems = useMemo(() => {
-    type StripItem = (typeof queueItems)[number]
+    type StripItem = (typeof queueItems)[number] & { nightKey?: string }
     const expanded: StripItem[] = []
     for (const item of queueItems) {
       if (item.projectMode && item.nights && item.nights.length > 0) {
         for (const night of item.nights) {
+          if (night.nightKey !== tonightNightKey) continue
           if (night.status === 'planned' && !night.plannedStartIso) continue
           expanded.push({
             ...item,
             id: night.id,
+            nightKey: night.nightKey,
             target: `${item.target} — Session ${night.nightIndex}`,
             status:
               night.status === 'in_progress'
@@ -1584,7 +1591,7 @@ export default function RemotePage() {
       }
     }
     return expanded
-  }, [queueItems])
+  }, [queueItems, tonightNightKey])
 
   const dsoEstimatedDurationPreviewSeconds = useMemo(() => {
     if (sessionType !== 'dso') return null
@@ -1874,7 +1881,13 @@ export default function RemotePage() {
         if (item.status !== 'in_progress' && item.status !== 'completed' && item.status !== 'failed') continue
         if (
           (item.status === 'completed' || item.status === 'failed') &&
-          !completedSessionOverlapsTonightStripWindow(item, windowStartMs, windowEndMs, effectiveLocks)
+          !completedSessionOverlapsTonightStripWindow(
+            item,
+            tonightNightKey,
+            windowStartMs,
+            windowEndMs,
+            effectiveLocks
+          )
         ) {
           continue
         }
@@ -1997,6 +2010,8 @@ export default function RemotePage() {
       minStartMs: number
     ): { startMs: number; endMs: number } | null => {
       const createdMs = Number.isFinite(Date.parse(item.createdAt)) ? Date.parse(item.createdAt) : windowStartMs
+      const plannedMs = item.plannedStartIso ? Date.parse(item.plannedStartIso) : Number.NaN
+      const anchorMs = Number.isFinite(plannedMs) ? plannedMs : createdMs
       const estimatedSeconds =
         typeof item.estimatedDurationSeconds === 'number' && Number.isFinite(item.estimatedDurationSeconds)
           ? item.estimatedDurationSeconds
@@ -2005,7 +2020,7 @@ export default function RemotePage() {
 
       for (const interval of freeIntervals) {
         if (interval.endMs <= interval.startMs) continue
-        let startMs = Math.max(interval.startMs, createdMs, nauticalDuskMs, minStartMs)
+        let startMs = Math.max(interval.startMs, anchorMs, nauticalDuskMs, minStartMs)
 
         // Anchor to altitude rise when available (time indicator, not only boolean gate).
         if (
@@ -2050,9 +2065,19 @@ export default function RemotePage() {
       .filter((item) => item.status === 'in_progress' || item.status === 'completed' || item.status === 'failed')
       .filter((item) => {
         if (item.status === 'in_progress') return true
-        return completedSessionOverlapsTonightStripWindow(item, windowStartMs, windowEndMs, effectiveLocks)
+        return completedSessionOverlapsTonightStripWindow(
+          item,
+          tonightNightKey,
+          windowStartMs,
+          windowEndMs,
+          effectiveLocks
+        )
       })
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .sort((a, b) => {
+        const aMs = a.plannedStartIso ? Date.parse(a.plannedStartIso) : Date.parse(a.createdAt)
+        const bMs = b.plannedStartIso ? Date.parse(b.plannedStartIso) : Date.parse(b.createdAt)
+        return (Number.isFinite(aMs) ? aMs : 0) - (Number.isFinite(bMs) ? bMs : 0)
+      })
 
     for (const item of lockable) {
       let placed = effectiveLocks[item.id]
@@ -2162,7 +2187,7 @@ export default function RemotePage() {
         const item = scheduleStripItems.find((x) => x.id === id)
         if (
           (item?.status === 'completed' || item?.status === 'failed') &&
-          !completedSessionOverlapsTonightStripWindow(item, windowStartMs, windowEndMs, prev)
+          !completedSessionOverlapsTonightStripWindow(item, tonightNightKey, windowStartMs, windowEndMs, prev)
         ) {
           changed = true
           continue
@@ -2281,15 +2306,19 @@ export default function RemotePage() {
     [sessionPasswords]
   )
 
+  const refreshQueueRef = useRef(refreshQueue)
+  refreshQueueRef.current = refreshQueue
+
   const loadTerminalProgress = useCallback(
-    async (id: string, passwordOverride?: string) => {
+    async (id: string, passwordOverride?: string, options?: { showLoading?: boolean }) => {
       const password = passwordOverride ?? resolveSessionPassword(id)
       if (!password && !isAdmin && !canAccessSessionId(id)) {
         setTerminalError('Session password required.')
         setTerminalLoading(false)
         return
       }
-      setTerminalLoading(true)
+      const showLoading = options?.showLoading !== false
+      if (showLoading) setTerminalLoading(true)
       setTerminalError(null)
       try {
         const res = await fetch(`/api/imaging/queue/${encodeURIComponent(id)}/progress`, {
@@ -2304,13 +2333,16 @@ export default function RemotePage() {
         setTerminalLines(Array.isArray(data.lines) ? (data.lines as SessionProgressLine[]) : [])
         const qs = typeof data.queueStatus === 'string' ? data.queueStatus : null
         setTerminalQueueStatus(qs)
-        if (qs === 'completed') await refreshQueue()
+        if (qs === 'completed') void refreshQueueRef.current()
       } finally {
-        setTerminalLoading(false)
+        if (showLoading) setTerminalLoading(false)
       }
     },
-    [refreshQueue, resolveSessionPassword, isAdmin, canAccessSessionId]
+    [resolveSessionPassword, isAdmin, canAccessSessionId]
   )
+
+  const loadTerminalProgressRef = useRef(loadTerminalProgress)
+  loadTerminalProgressRef.current = loadTerminalProgress
 
   const downloadSessionFile = useCallback(
     async (queueId: string, password: string): Promise<string | null> => {
@@ -2380,27 +2412,44 @@ export default function RemotePage() {
     [resolveSessionPassword, isAdmin, canAccessSessionId]
   )
 
+  const loadTerminalPreviewRef = useRef(loadTerminalPreview)
+  loadTerminalPreviewRef.current = loadTerminalPreview
+
+  const resolveSessionPasswordRef = useRef(resolveSessionPassword)
+  resolveSessionPasswordRef.current = resolveSessionPassword
+
+  const canAccessSessionIdRef = useRef(canAccessSessionId)
+  canAccessSessionIdRef.current = canAccessSessionId
+
   useEffect(() => {
-    if (!terminalSessionId) return
-    setTerminalLines([])
-    setTerminalQueueStatus(null)
-    setTerminalError(null)
-    setTerminalPreviewUrl(null)
-    setTerminalPreviewError(null)
-    setTerminalPreviewUpdatedAt(null)
-    terminalPreviewLastFingerprintRef.current = null
-    const password = resolveSessionPassword(terminalSessionId)
-    void loadTerminalProgress(terminalSessionId, password)
-    void loadTerminalPreview(terminalSessionId, password)
-  }, [terminalSessionId, loadTerminalPreview, loadTerminalProgress, resolveSessionPassword])
+    if (!terminalSessionId) {
+      terminalOpenedSessionRef.current = null
+      return
+    }
+    const isNewSession = terminalOpenedSessionRef.current !== terminalSessionId
+    terminalOpenedSessionRef.current = terminalSessionId
+    if (isNewSession) {
+      setTerminalLines([])
+      setTerminalQueueStatus(null)
+      setTerminalError(null)
+      setTerminalPreviewUrl(null)
+      setTerminalPreviewError(null)
+      setTerminalPreviewUpdatedAt(null)
+      terminalPreviewLastFingerprintRef.current = null
+    }
+    const password = resolveSessionPasswordRef.current(terminalSessionId)
+    void loadTerminalProgressRef.current(terminalSessionId, password, { showLoading: isNewSession })
+    if (isNewSession) void loadTerminalPreviewRef.current(terminalSessionId, password)
+  }, [terminalSessionId])
 
   useEffect(() => {
     if (!terminalSessionId) return
-    const password = resolveSessionPassword(terminalSessionId)
-    if (!password && !isAdmin && !canAccessSessionId(terminalSessionId)) return
+    const sessionId = terminalSessionId
+    const password = resolveSessionPasswordRef.current(sessionId)
+    if (!password && !isAdmin && !canAccessSessionIdRef.current(sessionId)) return
 
     const params = password ? new URLSearchParams({ password }) : new URLSearchParams()
-    const streamUrl = `/api/imaging/queue/${encodeURIComponent(terminalSessionId)}/preview-stream?${params.toString()}`
+    const streamUrl = `/api/imaging/queue/${encodeURIComponent(sessionId)}/preview-stream?${params.toString()}`
     const source = new EventSource(streamUrl)
 
     source.onmessage = (evt) => {
@@ -2413,7 +2462,7 @@ export default function RemotePage() {
       if (!payload || typeof payload !== 'object' || !('type' in payload)) return
       if (payload.type === 'ping') return
       if (payload.type === 'snapshot' || payload.type === 'updated') {
-        void loadTerminalPreview(terminalSessionId, password)
+        void loadTerminalPreviewRef.current(sessionId, password)
       }
     }
 
@@ -2422,15 +2471,16 @@ export default function RemotePage() {
     return () => {
       source.close()
     }
-  }, [terminalSessionId, loadTerminalPreview, resolveSessionPassword, isAdmin, canAccessSessionId])
+  }, [terminalSessionId, isAdmin])
 
   useEffect(() => {
     if (!terminalSessionId) return
-    const password = resolveSessionPassword(terminalSessionId)
-    if (!password && !isAdmin && !canAccessSessionId(terminalSessionId)) return
+    const sessionId = terminalSessionId
+    const password = resolveSessionPasswordRef.current(sessionId)
+    if (!password && !isAdmin && !canAccessSessionIdRef.current(sessionId)) return
 
     const params = password ? new URLSearchParams({ password }) : new URLSearchParams()
-    const streamUrl = `/api/imaging/queue/${encodeURIComponent(terminalSessionId)}/progress-stream?${params.toString()}`
+    const streamUrl = `/api/imaging/queue/${encodeURIComponent(sessionId)}/progress-stream?${params.toString()}`
     const source = new EventSource(streamUrl)
 
     source.onopen = () => {
@@ -2453,7 +2503,7 @@ export default function RemotePage() {
       }
       if (payload.type === 'status') {
         setTerminalQueueStatus(payload.queueStatus)
-        if (payload.queueStatus === 'completed') void refreshQueue()
+        if (payload.queueStatus === 'completed') void refreshQueueRef.current()
         return
       }
       if (payload.type === 'line') {
@@ -2469,7 +2519,7 @@ export default function RemotePage() {
     return () => {
       source.close()
     }
-  }, [terminalSessionId, refreshQueue, resolveSessionPassword, isAdmin, canAccessSessionId])
+  }, [terminalSessionId, isAdmin])
 
   useEffect(() => {
     terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -4035,6 +4085,10 @@ export default function RemotePage() {
               const pickerNights = (projectItem?.nights ?? []).filter((n) => {
                 if (nightPickerPurpose === 'download') {
                   return n.status === 'completed' && n.hasDownload === true
+                }
+                if (n.status === 'failed') return true
+                if (n.nightKey !== tonightNightKey) {
+                  return n.status === 'completed' || n.status === 'in_progress'
                 }
                 return n.status === 'scheduled' || n.status === 'in_progress' || n.status === 'completed'
               })

@@ -1,7 +1,13 @@
 import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { sendSessionFailedEmail } from '@/lib/imaging-completion-email'
 import { publishProgress } from '@/lib/imaging-progress-live'
-import { boardFailAllInProgress, type FailedBoardSnapshot } from '@/lib/imaging-session-board'
+import { getInProgressProjectNightSubId } from '@/lib/imaging-session-progress-queue'
+import {
+  boardFailAllInProgress,
+  listBoardEntries,
+  type FailedBoardSnapshot,
+  type SessionBoardEntry,
+} from '@/lib/imaging-session-board'
 import type { ObservatoryStatus } from '@/lib/observatory-status-store'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 
@@ -73,12 +79,36 @@ async function notifySessionFailed(snapshot: FailedBoardSnapshot, reason: string
   })
 }
 
+/**
+ * Multi-night projects stay `in_progress` on the board between sub-nights. Do not treat them as
+ * aborted when no sub-night is actively imaging (e.g. after NINA Session Completed for tonight).
+ */
+export function shouldFailProjectModeBoardEntry(
+  entry: Pick<SessionBoardEntry, 'projectMode'>,
+  activeNightSubId: string | null
+): boolean {
+  if (entry.projectMode !== true) return true
+  return activeNightSubId != null
+}
+
+/** Board project ids with no `in_progress` sub-night — parked between nights, not actively imaging. */
+export async function inactiveProjectBoardSkipIds(): Promise<Set<string>> {
+  const skip = new Set<string>()
+  for (const entry of await listBoardEntries()) {
+    if (entry.status !== 'in_progress' || entry.projectMode !== true) continue
+    const activeNight = await getInProgressProjectNightSubId(entry.id)
+    if (!shouldFailProjectModeBoardEntry(entry, activeNight)) skip.add(entry.id)
+  }
+  return skip
+}
+
 /** Mark every board `in_progress` row failed and push the red terminal line. */
 export async function failInProgressBoardSessions(
   exceptId: string | undefined,
   reason: string
 ): Promise<string[]> {
-  const failed = await boardFailAllInProgress(exceptId)
+  const skipIds = await inactiveProjectBoardSkipIds()
+  const failed = await boardFailAllInProgress(exceptId, skipIds)
   for (const snapshot of failed) {
     await notifySessionFailed(snapshot, reason)
   }

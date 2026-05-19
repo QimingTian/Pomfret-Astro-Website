@@ -10,6 +10,8 @@ import {
   collectTonightProjectSubSessionOccupancy,
   getProjectById,
   listProjects,
+  projectHasOpenSessionsForNightKey,
+  replaceScheduledSubsForNightKey,
   type ImagingProject,
 } from '@/lib/imaging-project-store'
 import {
@@ -60,6 +62,15 @@ export async function reconcilePendingScheduleStatus(): Promise<void> {
 
   if (pending.length === 0) return
 
+  async function clearTonightScheduledProjectSubs(): Promise<void> {
+    const projects = await listProjects()
+    await Promise.all(
+      projects
+        .filter((p) => p.nights.some((n) => n.nightKey === nightKey && n.status === 'scheduled'))
+        .map((p) => replaceScheduledSubsForNightKey(p.id, nightKey, []))
+    )
+  }
+
   if (weatherIntervals.status !== 'ok') {
     for (const r of pending) {
       nextById.set(r.id, {
@@ -68,6 +79,7 @@ export async function reconcilePendingScheduleStatus(): Promise<void> {
         reasons: [weatherIntervals.reason ?? 'Unable to evaluate tonight weather.'],
       })
     }
+    await clearTonightScheduledProjectSubs()
   } else if (weatherIntervals.globalHardBlocked === true) {
     for (const r of pending) {
       nextById.set(r.id, {
@@ -76,13 +88,15 @@ export async function reconcilePendingScheduleStatus(): Promise<void> {
         reasons: [weatherIntervals.globalHardBlockReason ?? 'Tonight blocked by global weather trigger.'],
       })
     }
+    await clearTonightScheduledProjectSubs()
   } else {
     const permitted = weatherIntervals.permittedIntervals as TimeInterval[]
     const reservedIntervals = activeProject ? projectAltitudeHoldIntervals(activeProject, now) : []
 
-    let fifoFree = activeProject
-      ? plannerFreeIntervalsBehindInProgressProject(activeProject, fullNightFree, nightKey, now)
-      : fullNightFree
+    let fifoFree = fullNightFree
+    if (activeProject && projectHasOpenSessionsForNightKey(activeProject, nightKey)) {
+      fifoFree = plannerFreeIntervalsBehindInProgressProject(activeProject, fullNightFree, nightKey, now)
+    }
 
     let projectSubSessions = collectTonightProjectSubSessionOccupancy(
       await listProjects(),

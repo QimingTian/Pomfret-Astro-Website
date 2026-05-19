@@ -80,13 +80,14 @@ function sequenceJsonFor(r: ImagingRequest): string | null {
 /** When the on-board project target is too low, try the next in-progress project whose target is up. */
 async function deliverNextEligibleInProgressProjectNight(
   status: Awaited<ReturnType<typeof getObservatoryStatus>>,
-  skipProjectId: string
+  skipProjectId: string,
+  stripNightKey: string
 ): Promise<NextResponse | null> {
   const projects = (await listProjects())
     .filter((p) => p.status === 'in_progress' && p.id !== skipProjectId && remainingFramesTotal(p) > 0)
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
   for (const project of projects) {
-    const night = getDeliverableNight(project)
+    const night = getDeliverableNight(project, stripNightKey)
     if (!night?.ninaSequenceJson) continue
     const altCheck = isAltitudeAllowed(project.raHours, project.decDeg)
     if (!altCheck.ok) continue
@@ -199,7 +200,7 @@ export async function GET() {
   const nightKey = nightKeyFromDusk(schedulingWindow.nauticalDuskUtc)
 
   const activeOnBoard = await getActiveOnBoardProject()
-  const projectForSubDelivery = await getProjectAwaitingSubSessionDelivery()
+  const projectForSubDelivery = await getProjectAwaitingSubSessionDelivery(nightKey)
 
   const scheduledTonight = pending
     .filter(
@@ -255,7 +256,7 @@ export async function GET() {
     // Night 2+ delivers via project sub-session ids after the queue row was consumed on night 1.
     // Try that before blocking behind other scheduled queue rows (which only apply below 30°).
     if (remainingTonight && projectForSubDelivery) {
-      const night = getDeliverableNight(projectForSubDelivery)
+      const night = getDeliverableNight(projectForSubDelivery, nightKey)
       if (night?.ninaSequenceJson) {
         if (!isObservatoryReady(status)) {
           return NextResponse.json(
@@ -270,7 +271,8 @@ export async function GET() {
         if (!altCheck.ok) {
           const successor = await deliverNextEligibleInProgressProjectNight(
             status,
-            projectForSubDelivery.id
+            projectForSubDelivery.id,
+            nightKey
           )
           if (successor) return successor
         } else {
@@ -280,6 +282,9 @@ export async function GET() {
             `NINA project night delivered: ${projectForSubDelivery.target} night ${night.nightIndex} (${night.id}).`
           )
         }
+      } else if (activeOnBoard && activeOnBoard.id === projectForSubDelivery.id) {
+        const successor = await deliverNextEligibleInProgressProjectNight(status, activeOnBoard.id, nightKey)
+        if (successor) return successor
       }
     }
 
@@ -393,7 +398,7 @@ export async function GET() {
 
   if (consumed.projectMode) {
     const project = await getProjectById(consumed.id)
-    const night = project ? getDeliverableNight(project) : undefined
+    const night = project ? getDeliverableNight(project, nightKey) : undefined
     if (!night?.ninaSequenceJson) {
       return NextResponse.json(
         { error: 'Project night sequence not available for download' },

@@ -1,3 +1,4 @@
+import { DSO_SESSION_OVERHEAD_SEC } from '@/lib/imaging-session-overhead'
 import { subtractOccupiedFromFree } from '@/lib/imaging-queue-free-intervals'
 import type { ProjectSubSessionOccupancy } from '@/lib/imaging-project-store'
 import {
@@ -188,8 +189,9 @@ export function estimateDurationSeconds(
   }
   const fromPlans =
     Array.isArray(req.filterPlans) && req.filterPlans.length > 0
-      ? req.filterPlans.reduce((sum, p) => sum + Number(p.count) * Number(p.exposureSeconds), 0) + 15 * 60
-      : Number(req.exposureSeconds) * Number(req.count) + 15 * 60
+      ? req.filterPlans.reduce((sum, p) => sum + Number(p.count) * Number(p.exposureSeconds), 0) +
+          DSO_SESSION_OVERHEAD_SEC
+      : Number(req.exposureSeconds) * Number(req.count) + DSO_SESSION_OVERHEAD_SEC
   return Math.max(60, Math.round(fromPlans))
 }
 

@@ -1,3 +1,4 @@
+import { DSO_SESSION_OVERHEAD_SEC } from '@/lib/imaging-session-overhead'
 import type { SessionBoardEntry } from '@/lib/imaging-session-board'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 
@@ -18,12 +19,14 @@ export function estimateSessionDurationMs(entry: {
   }
   if (Array.isArray(entry.filterPlans) && entry.filterPlans.length > 0) {
     const imagingSeconds = entry.filterPlans.reduce((sum, p) => sum + p.count * p.exposureSeconds, 0)
-    return Math.max(imagingSeconds + 15 * 60, 15 * 60) * 1000
+    return Math.max(imagingSeconds + DSO_SESSION_OVERHEAD_SEC, DSO_SESSION_OVERHEAD_SEC) * 1000
   }
   const exp = typeof entry.exposureSeconds === 'number' ? entry.exposureSeconds : 0
   const count = typeof entry.count === 'number' ? entry.count : 0
-  if (exp > 0 && count > 0) return Math.max(exp * count + 15 * 60, 15 * 60) * 1000
-  return 15 * 60 * 1000
+  if (exp > 0 && count > 0) {
+    return Math.max(exp * count + DSO_SESSION_OVERHEAD_SEC, DSO_SESSION_OVERHEAD_SEC) * 1000
+  }
+  return DSO_SESSION_OVERHEAD_SEC * 1000
 }
 
 /** Server-side fallback when no bar was saved before terminal transition. */

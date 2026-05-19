@@ -23,6 +23,7 @@ import {
   type ProjectNight,
 } from '@/lib/imaging-project-store'
 import { projectAltitudeHoldIntervals } from '@/lib/imaging-project-altitude-hold'
+import { DSO_SESSION_OVERHEAD_SEC } from '@/lib/imaging-session-overhead'
 import { patchRequestScheduleInsight } from '@/lib/imaging-queue-store'
 import { subtractOccupiedFromFree } from '@/lib/imaging-queue-free-intervals'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
@@ -49,7 +50,7 @@ export type ProjectTonightPlan = {
   scheduleReasons: string[]
 }
 
-const SESSION_OVERHEAD_MS = 15 * 60 * 1000
+const SESSION_OVERHEAD_MS = DSO_SESSION_OVERHEAD_SEC * 1000
 const PLACEMENT_STEP_MS = 5 * 60 * 1000
 const SCHEDULE_LOG_TZ = 'America/New_York'
 
@@ -158,7 +159,7 @@ function buildProjectSubSessionScheduleReasons(input: {
 
   const exposureMs = finalPlans.reduce((s, p) => s + p.count * p.exposureSeconds, 0) * 1000
   reasons.push(
-    `End at ${formatScheduleEt(placedEnd)} ET: ${(exposureMs / 3600000).toFixed(2)} h exposure + 15 min session overhead (${(durationMs / 3600000).toFixed(2)} h block).`
+    `End at ${formatScheduleEt(placedEnd)} ET: ${(exposureMs / 3600000).toFixed(2)} h exposure + ${DSO_SESSION_OVERHEAD_SEC / 60} min session overhead (${(durationMs / 3600000).toFixed(2)} h block).`
   )
 
   if (placedEnd >= planningEndMs - 2 * 60_000) {
@@ -645,7 +646,7 @@ async function applyTonightPlansOrClearScheduled(
   if (!project || !hasScheduledSubsTonight(project, nightKey)) return
   // Keep deliverable scheduled subs when replan is briefly empty (stuck in_progress, API flicker).
   if (hasInProgressSessionTonight(project, nightKey)) return
-  if (getDeliverableNight(project)) return
+  if (getDeliverableNight(project, nightKey)) return
   await replaceScheduledSubsForNightKey(projectId, nightKey, [])
 }
 
@@ -901,7 +902,8 @@ export async function planAndScheduleProjectTonight(
       reasons: ['Project record not found.'],
     }
   }
-  const blocker = await getBlockingInProgressProject(projectId)
+  const strip = getTonightScheduleStrip(now)
+  const blocker = await getBlockingInProgressProject(projectId, strip.nightKey)
   if (blocker) {
     return {
       status: 'unscheduled',
@@ -925,7 +927,6 @@ export async function planAndScheduleProjectTonight(
   )
   if (insight.status !== 'scheduled') return insight
 
-  const strip = getTonightScheduleStrip(now)
   const plans = planTonightSubSessions(project, freeIntervals, weatherPermittedIntervals, now)
   if (plans.length === 0) return insight
 
@@ -944,6 +945,7 @@ export async function reconcileOneProjectTonight(
 ): Promise<ProjectTonightPlan[]> {
   const plannerFree = subtractInProgressSubsTonight(project, projectFree, nightKey)
   const plans = planTonightSubSessions(project, plannerFree, weatherPermittedIntervals, now)
+  const existingDeliverable = getDeliverableNight(project, nightKey)
   const insight =
     plans.length > 0
       ? {
@@ -953,11 +955,19 @@ export async function reconcileOneProjectTonight(
             `Multi-night project: ${plans.length} session(s) tonight (${plans.reduce((s, p) => s + p.filterPlansTonight.reduce((t, f) => t + f.count, 0), 0)} frame(s)).`,
           ],
         }
-      : {
-          status: 'unscheduled' as const,
-          plannedStartIso: null,
-          reasons: ['Project could not be scheduled for tonight; will retry on a later night.'],
-        }
+      : existingDeliverable
+        ? {
+            status: 'scheduled' as const,
+            plannedStartIso: existingDeliverable.plannedStartIso ?? null,
+            reasons: [
+              'Keeping existing tonight sub-session on the schedule (NINA may still deliver when the observatory is ready).',
+            ],
+          }
+        : {
+            status: 'unscheduled' as const,
+            plannedStartIso: null,
+            reasons: explainWhyNoPlansTonight(project, plannerFree, weatherPermittedIntervals, now),
+          }
 
   await patchRequestScheduleInsight(project.id, insight)
 

@@ -304,8 +304,11 @@ export type FailedBoardSnapshot = {
   failedAt: string
 }
 
-/** Fail every `in_progress` board row (optional except id). Returns snapshots for notifications. */
-export async function boardFailAllInProgress(exceptId?: string): Promise<FailedBoardSnapshot[]> {
+/** Fail every `in_progress` board row (optional except id, optional skip set). Returns snapshots for notifications. */
+export async function boardFailAllInProgress(
+  exceptId?: string,
+  skipIds?: ReadonlySet<string>
+): Promise<FailedBoardSnapshot[]> {
   const prev = await readEntries()
   const ts = new Date().toISOString()
   const failed: FailedBoardSnapshot[] = []
@@ -313,6 +316,7 @@ export async function boardFailAllInProgress(exceptId?: string): Promise<FailedB
   const next = prev.map((e) => {
     if (e.status !== 'in_progress') return e
     if (exceptId && e.id === exceptId) return e
+    if (skipIds?.has(e.id)) return e
     failed.push({
       id: e.id,
       target: e.target,

@@ -247,7 +247,7 @@ Timeline uses **America/New_York**, roughly **4:00 PM → 8:00 AM** across the i
 | Colored blocks | Scheduled sessions (yours or others’) |
 | **Target — Session N** | Project Mode sub-session bars |
 
-Grey or empty regions = scheduler will not place new work there. Block **position and height** = planned start and duration (exposure × frames + ~15 min overhead).
+Grey or empty regions = scheduler will not place new work there. Block **position and height** = planned start and duration (exposure × frames + ~25 min overhead).
 
 The strip **updates** when you refresh Current sessions or when background reconcile runs.
 

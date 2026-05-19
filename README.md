@@ -1,6 +1,6 @@
 # Pomfret Astro — Complete Platform Guide
 
-> 💡 **Single Source of Truth** for the Pomfret Olmsted Observatory remote-imaging system.
+> **Single Source of Truth** for the Pomfret Olmsted Observatory remote-imaging system.
 
 **Live site:** [https://www.pomfretastro.org](https://www.pomfretastro.org)
 
@@ -54,7 +54,7 @@ The platform is **not** a multi-telescope SaaS. It is a **single observatory** (
 
 ---
 
-## 🟢 PART I: Member Quick Start (新会员快速上手)
+## PART I: Member Quick Start
 
 ### 1. Quick Start & Workflow
 
@@ -288,7 +288,7 @@ NINA `nina-sequence` and agent uploads work without Bearer tokens (current produ
 
 ---
 
-## 🟡 PART II: Observatory Operator Runbook (值班操作员手册)
+## PART II: Observatory Operator Runbook
 
 ### 5. Night-of Operations Checklist
 
@@ -406,7 +406,7 @@ Read-only activity feed: submissions, deliveries, status changes, retention dele
 
 ---
 
-## 🔵 PART III: Scheduling Core Logic (核心调度引擎业务逻辑)
+## PART III: Scheduling Core Logic
 
 ### 8. Autonomous Scheduler Rules
 
@@ -533,7 +533,7 @@ Sequence template: `Variable Star Sequence.json`.
 
 ---
 
-## ⚙️ PART IV: Hardware Automation & Agent (硬件联动与自动化)
+## PART IV: Hardware Automation & Agent
 
 ### 11. NINA Agent Architecture
 
@@ -596,7 +596,7 @@ Bundled into Vercel deploy via `next.config.js` `outputFileTracingIncludes`.
 
 ---
 
-## 🛠️ PART V: Developer Reference & Architecture (开发者参考)
+## PART V: Developer Reference & Architecture
 
 ### 13. System Architecture
 
@@ -859,7 +859,7 @@ npm run deploy    # vercel --prod --yes
 
 ---
 
-## 📄 APPENDIX (附录)
+## APPENDIX
 
 ### Complete HTTP API Reference
 

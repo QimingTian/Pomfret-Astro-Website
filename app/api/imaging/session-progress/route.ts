@@ -124,7 +124,13 @@ export async function POST(request: NextRequest) {
 
   const queueId = await resolveSessionProgressQueueId(detail)
 
-  const auditDetail = queueId ? { ...detail, queueId } : detail
+  const auditDetail = queueId
+    ? {
+        ...detail,
+        queueId,
+        ...(parseProjectNightSubId(queueId) ? { subSessionId: queueId } : {}),
+      }
+    : detail
   const msg =
     typeof detail.message === 'string'
       ? detail.message

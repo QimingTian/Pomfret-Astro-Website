@@ -2479,6 +2479,11 @@ export default function RemotePage() {
     const password = resolveSessionPasswordRef.current(sessionId)
     if (!password && !isAdmin && !canAccessSessionIdRef.current(sessionId)) return
 
+    const pollProgress = () => {
+      void loadTerminalProgressRef.current(sessionId, password, { showLoading: false })
+    }
+    const pollId = window.setInterval(pollProgress, 3000)
+
     const params = password ? new URLSearchParams({ password }) : new URLSearchParams()
     const streamUrl = `/api/imaging/queue/${encodeURIComponent(sessionId)}/progress-stream?${params.toString()}`
     const source = new EventSource(streamUrl)
@@ -2517,6 +2522,7 @@ export default function RemotePage() {
     source.onerror = () => {}
 
     return () => {
+      window.clearInterval(pollId)
       source.close()
     }
   }, [terminalSessionId, isAdmin])

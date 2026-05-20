@@ -1,5 +1,5 @@
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
-import { progressLineText, readQueueIdFromDetail } from '@/lib/session-progress-signal'
+import { auditRoutedQueueId, progressLineText, stringish } from '@/lib/session-progress-signal'
 
 const KEY = 'imaging-audit-log'
 const MAX_ENTRIES = 400
@@ -103,11 +103,23 @@ function isSessionProgressMailNotificationEntry(e: AuditLogEntry): boolean {
   )
 }
 
-/** Same KV-backed store as Admin activity log; filtered by `queueId` in entry detail. */
+function detailMatchesQueueAliases(d: Record<string, unknown>, aliases: Set<string>): boolean {
+  const routed = auditRoutedQueueId(d)
+  if (routed && aliases.has(routed)) return true
+  const subSessionId = stringish(d.subSessionId)
+  if (subSessionId && aliases.has(subSessionId)) return true
+  const nightId = stringish(d.nightId)
+  if (nightId && aliases.has(nightId)) return true
+  return false
+}
+
+/** Same KV-backed store as Admin activity log; filtered by routed queue / sub-session id in detail. */
 export async function listSessionProgressLinesFromAudit(
   queueId: string,
+  options?: { includeQueueIds?: string[] },
   limit = 400
 ): Promise<SessionProgressLine[]> {
+  const aliases = new Set([queueId, ...(options?.includeQueueIds ?? [])])
   const entries = await listAuditLog(Math.min(Math.max(1, limit), MAX_ENTRIES))
   const matched = entries.filter((e) => {
     if (e.kind !== 'session.progress') return false
@@ -116,7 +128,7 @@ export async function listSessionProgressLinesFromAudit(
       e.detail && typeof e.detail === 'object' && !Array.isArray(e.detail)
         ? (e.detail as Record<string, unknown>)
         : {}
-    return readQueueIdFromDetail(d) === queueId
+    return detailMatchesQueueAliases(d, aliases)
   })
   matched.sort((a, b) => a.at.localeCompare(b.at))
   return matched.map((e) => {

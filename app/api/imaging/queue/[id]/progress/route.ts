@@ -1,4 +1,6 @@
 import { listSessionProgressLinesFromAudit } from '@/lib/imaging-audit-log'
+import { parseProjectNightSubId } from '@/lib/imaging-project-ids'
+import { getProjectByNightSubId } from '@/lib/imaging-project-store'
 import { authorizeImagingSession, resolveImagingSessionContext } from '@/lib/imaging-session-access'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import type { NextRequest } from 'next/server'
@@ -27,7 +29,18 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     return withImagingCors({ ok: false as const, error: 'Not found' }, 404)
   }
 
-  const lines = await listSessionProgressLinesFromAudit(id)
+  const progressAliases: string[] = []
+  const nightSub = parseProjectNightSubId(id)
+  if (nightSub) {
+    const match = await getProjectByNightSubId(id)
+    if (match?.night.status === 'in_progress') {
+      progressAliases.push(nightSub.projectId)
+    }
+  }
+  const lines = await listSessionProgressLinesFromAudit(
+    id,
+    progressAliases.length > 0 ? { includeQueueIds: progressAliases } : undefined
+  )
   const queueStatus = session.queueStatus
 
   return withImagingCors({

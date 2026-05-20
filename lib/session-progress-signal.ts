@@ -51,7 +51,7 @@ export function progressLineText(detail: Record<string, unknown>): string {
   }
 }
 
-function stringish(v: unknown): string | null {
+export function stringish(v: unknown): string | null {
   if (typeof v === 'string' && v.trim().length > 0) return v.trim()
   if (typeof v === 'number' && Number.isFinite(v)) return String(v)
   return null
@@ -74,6 +74,16 @@ function nestedPomfretQueueId(detail: Record<string, unknown>): string | null {
  * Resolves session id for routing POST lines to the per-session buffer.
  * Accepts common NINA / manual field names and `PomfretAstro.QueueId` (same as sequence JSON).
  */
+/**
+ * Queue id used for audit routing. Prefer lowercase `queueId` set by session-progress
+ * over NINA's `QueueId` / PomfretAstro when both are present.
+ */
+export function auditRoutedQueueId(detail: Record<string, unknown>): string | null {
+  const server = stringish(detail.queueId)
+  if (server) return server
+  return readQueueIdFromDetail(detail)
+}
+
 export function readQueueIdFromDetail(detail: Record<string, unknown>): string | null {
   const direct =
     stringish(detail.queueId) ??

@@ -1,7 +1,5 @@
 import { listSessionProgressLinesFromAudit } from '@/lib/imaging-audit-log'
 import { subscribeProgress, type LiveProgressEvent } from '@/lib/imaging-progress-live'
-import { parseProjectNightSubId } from '@/lib/imaging-project-ids'
-import { getProjectByNightSubId } from '@/lib/imaging-project-store'
 import { authorizeImagingSession, resolveImagingSessionContext } from '@/lib/imaging-session-access'
 import type { NextRequest } from 'next/server'
 
@@ -38,24 +36,13 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     return new Response(JSON.stringify({ ok: false, error: 'Not found' }), { status: 404 })
   }
 
-  const progressAliases: string[] = []
-  const nightSub = parseProjectNightSubId(id)
-  if (nightSub) {
-    const match = await getProjectByNightSubId(id)
-    if (match?.night.status === 'in_progress') {
-      progressAliases.push(nightSub.projectId)
-    }
-  }
-  const auditOpts = progressAliases.length > 0 ? { includeQueueIds: progressAliases } : undefined
-  const watchIds = [id, ...progressAliases]
-
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const encoder = new TextEncoder()
       const enqueue = (payload: unknown) => controller.enqueue(encoder.encode(sseData(payload)))
 
       let queueStatus = session.queueStatus
-      let lines = await listSessionProgressLinesFromAudit(id, auditOpts)
+      let lines = await listSessionProgressLinesFromAudit(id)
       let fingerprint = linesFingerprint(lines)
       enqueue({ type: 'snapshot', queueStatus, lines })
 
@@ -72,11 +59,11 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
         }
       }
 
-      const unsubscribes = watchIds.map((watchId) => subscribeProgress(watchId, onLiveEvent))
+      const unsubscribe = subscribeProgress(id, onLiveEvent)
 
       const pollAudit = setInterval(async () => {
         try {
-          const fresh = await listSessionProgressLinesFromAudit(id, auditOpts)
+          const fresh = await listSessionProgressLinesFromAudit(id)
           const nextFp = linesFingerprint(fresh)
           if (nextFp === fingerprint) return
           fingerprint = nextFp
@@ -96,7 +83,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       request.signal.addEventListener('abort', () => {
         clearInterval(keepAlive)
         clearInterval(pollAudit)
-        for (const off of unsubscribes) off()
+        unsubscribe()
         controller.close()
       })
     },

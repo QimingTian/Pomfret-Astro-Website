@@ -9,7 +9,6 @@ import {
   getBoardEntry,
   listBoardEntries,
   type FailedBoardSnapshot,
-  type SessionBoardEntry,
 } from '@/lib/imaging-session-board'
 import type { ObservatoryStatus } from '@/lib/observatory-status-store'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
@@ -99,24 +98,13 @@ async function notifySessionFailed(snapshot: FailedBoardSnapshot, reason: string
 }
 
 /**
- * Multi-night projects stay `in_progress` on the board between sub-sessions. Do not treat them as
- * aborted when no sub-session is actively imaging (e.g. after NINA Session Completed).
+ * Project board rows are not imaging sessions — only sub-sessions are. Never auto-fail the board
+ * on observatory status flicker (busy→ready between subs is normal).
  */
-export function shouldFailProjectModeBoardEntry(
-  entry: Pick<SessionBoardEntry, 'projectMode'>,
-  activeNightSubId: string | null
-): boolean {
-  if (entry.projectMode !== true) return true
-  return activeNightSubId != null
-}
-
-/** Board project ids with no `in_progress` sub-session — parked between runs, not actively imaging. */
 export async function inactiveProjectBoardSkipIds(): Promise<Set<string>> {
   const skip = new Set<string>()
   for (const entry of await listBoardEntries()) {
-    if (entry.status !== 'in_progress' || entry.projectMode !== true) continue
-    const activeNight = await getInProgressProjectNightSubId(entry.id)
-    if (!shouldFailProjectModeBoardEntry(entry, activeNight)) skip.add(entry.id)
+    if (entry.projectMode === true) skip.add(entry.id)
   }
   return skip
 }

@@ -113,13 +113,12 @@ function detailMatchesQueueAliases(d: Record<string, unknown>, aliases: Set<stri
   return false
 }
 
-/** Same KV-backed store as Admin activity log; filtered by routed queue / sub-session id in detail. */
+/** Same KV-backed store as Admin activity log; filtered by routed sub-session / queue id in detail. */
 export async function listSessionProgressLinesFromAudit(
   queueId: string,
-  options?: { includeQueueIds?: string[] },
   limit = 400
 ): Promise<SessionProgressLine[]> {
-  const aliases = new Set([queueId, ...(options?.includeQueueIds ?? [])])
+  const aliases = new Set([queueId])
   const entries = await listAuditLog(Math.min(Math.max(1, limit), MAX_ENTRIES))
   const matched = entries.filter((e) => {
     if (e.kind !== 'session.progress') return false

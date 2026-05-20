@@ -32,14 +32,11 @@ export function AdminActivityLogPanel({ entries, loading, error }: Props) {
   return (
     <>
       {error ? <p className="mb-2 text-sm text-red-400">{error}</p> : null}
-      <div className="admin-activity-log-scroll max-h-[28rem] min-h-[12rem] overflow-y-auto rounded-lg border border-gray-800 bg-[#08090a]">
-        <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-white border-b border-gray-800">
-          Activity log
-        </div>
+      <div className="admin-activity-log-scroll max-h-[28rem] min-h-[12rem] overflow-y-auto font-mono text-xs leading-relaxed">
         {entries.length === 0 && !loading ? (
-          <p className="p-3 text-sm text-gray-500">No log entries yet.</p>
+          <p className="text-sm text-gray-500">No log entries yet.</p>
         ) : (
-          <div className="min-h-0 flex-1 overflow-auto p-3 font-mono text-xs leading-relaxed">
+          <>
             {entries.map((row) => {
               const failed = auditLogLineFailed(row)
               const headline = auditLogHeadline(row)
@@ -62,10 +59,9 @@ export function AdminActivityLogPanel({ entries, loading, error }: Props) {
                 </button>
               )
             })}
-          </div>
+          </>
         )}
       </div>
-      <p className="mt-2 text-xs text-gray-500">Click a line for full detail (reasons, ids, timestamps).</p>
 
       {selected ? (
         <div

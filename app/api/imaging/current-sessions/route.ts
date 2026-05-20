@@ -4,6 +4,7 @@ import { getCurrentUser } from '@/lib/member-auth'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
 import {
   effectiveProjectStatus,
+  compactStaleProjectBoardRows,
   expireMissedScheduledProjectNights,
   listProjects,
   tonightDurationSecondsFromPlans,
@@ -44,6 +45,14 @@ export async function GET(request: NextRequest) {
 
   await reconcilePendingScheduleStatus()
   await expireMissedScheduledProjectNights()
+  const prunedBoardIds = await compactStaleProjectBoardRows()
+  for (const id of prunedBoardIds) {
+    void appendAuditLog({
+      kind: 'queue.deleted',
+      message: `Removed stale project board row ${id} (project record missing).`,
+      detail: { id, source: 'compact_stale_project_board' },
+    })
+  }
 
   const purgedBoardIds = await boardPurgeCompletedOlderThan(RETENTION_MS)
   for (const queueId of purgedBoardIds) {
@@ -282,6 +291,9 @@ export async function GET(request: NextRequest) {
             ? b.scheduleBarEndMs
             : null,
         userId: b.userId ?? null,
+        ...(b.projectMode === true
+          ? { projectMode: true as const, nights: [] as Row['nights'] }
+          : {}),
       })
     }
   }

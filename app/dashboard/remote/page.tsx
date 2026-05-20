@@ -389,6 +389,11 @@ function sessionDurationMsFromItem(item: {
 
 /** Placement for in_progress / completed when the weather-aware packer cannot run or fails.
  *  Prefer an existing lock, then planned start, then created time, then "now" for in_progress. */
+/** Earliest time a session block may appear on the strip (after 4pm anchor, not before nautical dusk). */
+function imagingWindowStartMs(windowStartMs: number, nauticalDuskMs: number): number {
+  return Math.max(windowStartMs, nauticalDuskMs)
+}
+
 function fallbackPlacementForTerminalSession(
   item: TerminalSessionLike,
   locked: Record<string, { startMs: number; endMs: number }>,
@@ -1861,6 +1866,8 @@ export default function RemotePage() {
   const sessionSchedulePlan = useMemo(() => {
     const windowStartMs = tonightSchedule.start.getTime()
     const windowEndMs = tonightSchedule.end.getTime()
+    const nauticalDuskMs = tonightSchedule.nauticalDusk.getTime()
+    const imagingStartMs = imagingWindowStartMs(windowStartMs, nauticalDuskMs)
     const schedulingDeadlineMs = Math.min(windowEndMs, tonightSchedule.astronomicalDawn.getTime())
 
     const effectiveLocks: Record<string, { startMs: number; endMs: number }> = { ...lockedSessionSchedule }
@@ -1893,9 +1900,15 @@ export default function RemotePage() {
         }
         const placed =
           serverScheduleBarForNight(item, tonightNightKey) ??
-          fallbackPlacementForTerminalSession(item, effectiveLocks, windowStartMs, schedulingDeadlineMs, nowMs)
+          fallbackPlacementForTerminalSession(
+            item,
+            effectiveLocks,
+            imagingStartMs,
+            schedulingDeadlineMs,
+            nowMs
+          )
         if (!placed) continue
-        const startMs = Math.max(placed.startMs, windowStartMs)
+        const startMs = Math.max(placed.startMs, imagingStartMs)
         let endMs = Math.min(placed.endMs, schedulingDeadlineMs)
         if (item.status === 'failed' && item.failedAt && !serverScheduleBarForNight(item, tonightNightKey)) {
           const failMs = Date.parse(item.failedAt)
@@ -1909,29 +1922,10 @@ export default function RemotePage() {
           newlyLocked[item.id] = { startMs, endMs }
         }
       }
-      // Still show server-scheduled pending sessions (plannedStartIso) so the strip matches queue state
-      // even when the UI is in "weather not permitted" mode — previously only in_progress/completed appeared.
-      for (const item of scheduleStripItems) {
-        if (item.status !== 'scheduled') continue
-        const startMsRaw = item.plannedStartIso ? Date.parse(item.plannedStartIso) : Number.NaN
-        if (!Number.isFinite(startMsRaw)) continue
-        const estimatedSeconds =
-          typeof item.estimatedDurationSeconds === 'number' && Number.isFinite(item.estimatedDurationSeconds)
-            ? item.estimatedDurationSeconds
-            : estimateDurationSecondsFromPlans(item.filterPlans)
-        const durationMs = Math.max(estimatedSeconds, 60) * 1000
-        const startMs = Math.max(startMsRaw, windowStartMs)
-        const endMs = Math.min(startMs + durationMs, schedulingDeadlineMs)
-        if (endMs <= startMs) continue
-        const topPct = ((startMs - windowStartMs) / (windowEndMs - windowStartMs)) * 100
-        const heightPct = ((endMs - startMs) / (windowEndMs - windowStartMs)) * 100
-        blocks.push({ id: item.id, startMs, endMs, topPct, heightPct, label: item.target })
-      }
       blocks.sort((a, b) => a.startMs - b.startMs)
       return { blocks, newlyLocked }
     }
 
-    const nauticalDuskMs = tonightSchedule.nauticalDusk.getTime()
     const readyHourKeySet = new Set(readyWeatherHourKeys)
     const readyHourStartsMs = tonightSchedule.hours
       .filter((h) => readyWeatherHourKeys.includes(h.hourKey))
@@ -1940,7 +1934,7 @@ export default function RemotePage() {
 
     const blocks: Array<{ id: string; startMs: number; endMs: number; topPct: number; heightPct: number; label: string }> = []
     type Interval = { startMs: number; endMs: number }
-    let freeIntervals: Interval[] = [{ startMs: Math.max(windowStartMs, nauticalDuskMs), endMs: schedulingDeadlineMs }]
+    let freeIntervals: Interval[] = [{ startMs: imagingStartMs, endMs: schedulingDeadlineMs }]
     const adminClosedIntervals = adminClosedWindows
       .map((w) => {
         const startMs = Date.parse(w.startIso)
@@ -2082,7 +2076,7 @@ export default function RemotePage() {
     for (const item of lockable) {
       let placed = effectiveLocks[item.id]
       if (!placed) {
-        const computed = placeInFreeIntervals(item, Math.max(windowStartMs, nauticalDuskMs))
+        const computed = placeInFreeIntervals(item, imagingStartMs)
         if (computed) {
           placed = computed
           newlyLocked[item.id] = placed
@@ -2090,7 +2084,7 @@ export default function RemotePage() {
           const fb = fallbackPlacementForTerminalSession(
             item,
             effectiveLocks,
-            windowStartMs,
+            imagingStartMs,
             schedulingDeadlineMs,
             Date.now(),
           )
@@ -2100,7 +2094,7 @@ export default function RemotePage() {
         }
       }
 
-      let startMs = Math.max(placed.startMs, windowStartMs)
+      let startMs = Math.max(placed.startMs, imagingStartMs)
       let endMs = Math.min(placed.endMs, schedulingDeadlineMs)
       if (item.status === 'failed' && item.failedAt && !serverScheduleBarForNight(item, tonightNightKey)) {
         const failMs = Date.parse(item.failedAt)
@@ -2120,12 +2114,13 @@ export default function RemotePage() {
       .map((item) => {
         const startMsRaw = item.plannedStartIso ? Date.parse(item.plannedStartIso) : Number.NaN
         if (!Number.isFinite(startMsRaw)) return null
+        if (startMsRaw < imagingStartMs - 60_000) return null
         const estimatedSeconds =
           typeof item.estimatedDurationSeconds === 'number' && Number.isFinite(item.estimatedDurationSeconds)
             ? item.estimatedDurationSeconds
             : estimateDurationSecondsFromPlans(item.filterPlans)
         const durationMs = Math.max(estimatedSeconds, 60) * 1000
-        const startMs = Math.max(startMsRaw, windowStartMs)
+        const startMs = Math.max(startMsRaw, imagingStartMs)
         const endMs = Math.min(startMs + durationMs, schedulingDeadlineMs)
         if (endMs <= startMs) return null
         return { item, startMs, endMs }
@@ -2713,7 +2708,8 @@ export default function RemotePage() {
   const handleCheckProgressClick = useCallback(
     async (item: (typeof queueItems)[number]) => {
       if (!canInteractWithSession(item)) return
-      if (item.projectMode) {
+      const isProjectSession = item.projectMode === true || (item.nights?.length ?? 0) > 0
+      if (isProjectSession) {
         if (isAdmin || sessionOwnedByMe(item)) {
           await openProjectPickerAfterAccess(item.id, 'progress')
           return
@@ -2747,7 +2743,8 @@ export default function RemotePage() {
   const handleDownloadClick = useCallback(
     async (item: (typeof queueItems)[number]) => {
       if (!canInteractWithSession(item)) return
-      if (item.projectMode) {
+      const isProjectSession = item.projectMode === true || (item.nights?.length ?? 0) > 0
+      if (isProjectSession) {
         if (isAdmin || sessionOwnedByMe(item)) {
           await openProjectPickerAfterAccess(item.id, 'download')
           return
@@ -4092,11 +4089,12 @@ export default function RemotePage() {
                 if (nightPickerPurpose === 'download') {
                   return n.status === 'completed' && n.hasDownload === true
                 }
-                if (n.status === 'failed') return true
-                if (n.nightKey !== tonightNightKey) {
-                  return n.status === 'completed' || n.status === 'in_progress'
-                }
-                return n.status === 'scheduled' || n.status === 'in_progress' || n.status === 'completed'
+                return (
+                  n.status === 'scheduled' ||
+                  n.status === 'in_progress' ||
+                  n.status === 'completed' ||
+                  n.status === 'failed'
+                )
               })
               if (pickerNights.length === 0 && !showProjectProgress) {
                 return (

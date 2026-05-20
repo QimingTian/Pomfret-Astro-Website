@@ -1,5 +1,5 @@
 import { parseProjectNightSubId } from '@/lib/imaging-project-ids'
-import { getProjectById } from '@/lib/imaging-project-store'
+import { getProjectById, listProjects } from '@/lib/imaging-project-store'
 import { getBoardEntry, getSoleInProgressBoardId } from '@/lib/imaging-session-board'
 import { readQueueIdFromDetail } from '@/lib/session-progress-signal'
 
@@ -7,8 +7,22 @@ import { readQueueIdFromDetail } from '@/lib/session-progress-signal'
 export async function getInProgressProjectNightSubId(projectId: string): Promise<string | null> {
   const project = await getProjectById(projectId)
   if (!project) return null
-  const active = project.nights.filter((n) => n.status === 'in_progress')
-  if (active.length === 1) return active[0].id
+  return soleInProgressNightSubId(project.nights.filter((n) => n.status === 'in_progress').map((n) => n.id))
+}
+
+/** Exactly one `in_progress` sub-session across all projects (current observatory run). */
+export async function getSoleInProgressProjectNightSubId(): Promise<string | null> {
+  const active: string[] = []
+  for (const project of await listProjects()) {
+    for (const night of project.nights) {
+      if (night.status === 'in_progress') active.push(night.id)
+    }
+  }
+  return soleInProgressNightSubId(active)
+}
+
+function soleInProgressNightSubId(ids: string[]): string | null {
+  if (ids.length === 1) return ids[0]!
   return null
 }
 
@@ -42,5 +56,7 @@ export async function resolveSessionProgressQueueId(
     }
     return fromBody
   }
-  return getActiveSessionProgressId()
+  const active = await getActiveSessionProgressId()
+  if (active) return active
+  return getSoleInProgressProjectNightSubId()
 }

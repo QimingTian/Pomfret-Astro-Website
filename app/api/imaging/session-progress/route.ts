@@ -102,7 +102,6 @@ export function OPTIONS() {
  * Body: JSON or text/plain (stored under `detail.text` when not JSON).
  */
 export async function POST(request: NextRequest) {
-  await expireMissedScheduledProjectNights()
   if (!authorized(request)) {
     const basic = parseBasicCredentials(request.headers.get('authorization'))
     void appendAuditLog({
@@ -123,6 +122,12 @@ export async function POST(request: NextRequest) {
     body && typeof body === 'object' && !Array.isArray(body)
       ? (body as Record<string, unknown>)
       : { payload: body }
+
+  const completionSignal = isSessionCompletedSignal(detail)
+  // Resolve before expire: overdue-window cleanup can flip `in_progress` → `failed` and break routing.
+  if (!completionSignal) {
+    await expireMissedScheduledProjectNights()
+  }
 
   const queueId = await resolveSessionProgressQueueId(detail)
 
@@ -156,7 +161,7 @@ export async function POST(request: NextRequest) {
     })
   }
 
-  if (queueId && isSessionCompletedSignal(detail)) {
+  if (queueId && completionSignal) {
     const nightSub = parseProjectNightSubId(queueId)
     if (nightSub) {
       const match = await getProjectByNightSubId(queueId)
@@ -227,6 +232,8 @@ export async function POST(request: NextRequest) {
       }
     }
   }
+
+  await expireMissedScheduledProjectNights()
 
   return withImagingCors({ ok: true as const })
 }

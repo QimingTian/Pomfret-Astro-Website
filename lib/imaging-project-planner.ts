@@ -647,7 +647,10 @@ async function applyTonightPlansOrClearScheduled(
   // Keep deliverable scheduled subs when replan is briefly empty (stuck in_progress, API flicker).
   if (hasInProgressSessionTonight(project, nightKey)) return
   if (getDeliverableNight(project, nightKey)) return
-  await replaceScheduledSubsForNightKey(projectId, nightKey, [])
+  await replaceScheduledSubsForNightKey(projectId, nightKey, [], {
+    clearReason:
+      'Tonight sub-session cleared: no schedulable plan (weather, target altitude, or free window).',
+  })
 }
 
 export type ProjectScheduleInsight = {
@@ -864,7 +867,9 @@ export async function applyProjectTonightPlans(
       .map((n) => [n.id, subSessionScheduleFingerprint({ filterPlansTonight: n.filterPlansTonight })])
   )
   const subs = plansToScheduledNights(project, plans)
-  await replaceScheduledSubsForNightKey(projectId, nightKey, subs)
+  await replaceScheduledSubsForNightKey(projectId, nightKey, subs, {
+    clearReason: 'Replaced by updated tonight sub-session plan.',
+  })
   for (let i = 0; i < plans.length; i++) {
     const plan = plans[i]!
     const sub = subs[i]

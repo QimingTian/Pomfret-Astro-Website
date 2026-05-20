@@ -1,6 +1,8 @@
+import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { buildNinaSequenceJson } from '@/lib/build-nina-sequence-json'
 import { projectNightSubId } from '@/lib/imaging-project-ids'
 import { DSO_SESSION_OVERHEAD_SEC } from '@/lib/imaging-session-overhead'
+import { boardRemove, getBoardEntry, listBoardEntries } from '@/lib/imaging-session-board'
 import { getRequestById } from '@/lib/imaging-queue-store'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 import type { ScheduleBarPlacement } from '@/lib/imaging-schedule-bar'
@@ -208,7 +210,9 @@ export async function getProjectByNightSubId(
 /** Project still tied to an operator-visible session (queue row or on-board after NINA consume). */
 export async function isProjectVisibleToOperators(project: ImagingProject): Promise<boolean> {
   if (project.onBoard) return true
-  return (await getRequestById(project.id)) != null
+  if (await getRequestById(project.id)) return true
+  const board = await getBoardEntry(project.id)
+  return board?.projectMode === true
 }
 
 export async function getActiveInProgressProject(): Promise<ImagingProject | undefined> {
@@ -235,8 +239,26 @@ export async function compactOrphanProjects(): Promise<string[]> {
     }
     removedIds.push(project.id)
   }
-  if (removedIds.length > 0) await writeProjects(kept)
+  if (removedIds.length > 0) {
+    await writeProjects(kept)
+    for (const id of removedIds) {
+      await boardRemove(id)
+    }
+  }
   return removedIds
+}
+
+/** Board row left after project KV was removed (e.g. stale visibility cleanup). */
+export async function compactStaleProjectBoardRows(): Promise<string[]> {
+  const projectIds = new Set((await readProjects()).map((p) => p.id))
+  const removed: string[] = []
+  for (const entry of await listBoardEntries()) {
+    if (entry.projectMode === true && !projectIds.has(entry.id)) {
+      await boardRemove(entry.id)
+      removed.push(entry.id)
+    }
+  }
+  return removed
 }
 
 export async function deleteProjectById(id: string): Promise<boolean> {
@@ -268,7 +290,6 @@ export async function getBlockingInProgressProject(
     if (exceptProjectId && project.id === exceptProjectId) continue
 
     if (!(await isProjectVisibleToOperators(project))) {
-      await deleteProjectById(project.id)
       continue
     }
 
@@ -431,7 +452,10 @@ export async function applyPendingProjectQueueEdit(
     exposureSeconds: p.exposureSeconds,
     countRemaining: p.count,
   }))
-  const nights = project.nights.filter((n) => n.status === 'completed')
+  // Keep terminal sub-sessions so Check Progress / history survive filter-plan edits.
+  const nights = project.nights.filter(
+    (n) => n.status === 'completed' || n.status === 'failed' || n.status === 'in_progress'
+  )
 
   const next: ImagingProject = {
     ...project,
@@ -607,23 +631,47 @@ export async function upsertPlannedNight(
   return patchProject(projectId, { nights })
 }
 
-/** Replace all `scheduled` sub-sessions for a calendar night (keeps in_progress / completed). */
+/** Replace all `scheduled` sub-sessions for a calendar night (keeps in_progress / completed / failed). */
 export async function replaceScheduledSubsForNightKey(
   projectId: string,
   nightKey: string,
-  subs: ProjectNight[]
+  subs: ProjectNight[],
+  options?: { clearReason?: string }
 ): Promise<ImagingProject | undefined> {
   const project = await getProjectById(projectId)
   if (!project) return undefined
-  const kept = dedupeProjectNights(project.nights).filter(
-    (n) => n.nightKey !== nightKey || n.status !== 'scheduled'
-  )
+  const deduped = dedupeProjectNights(project.nights)
+  const removed = deduped.filter((n) => n.nightKey === nightKey && n.status === 'scheduled')
+  const kept = deduped.filter((n) => n.nightKey !== nightKey || n.status !== 'scheduled')
   const merged: ProjectNight[] = [
     ...kept,
     ...subs.map((s) => ({ ...s, nightKey, status: 'scheduled' as const })),
   ]
   const nights = dedupeProjectNights(merged).sort((a, b) => a.nightIndex - b.nightIndex)
-  return patchProject(projectId, { nights })
+  const updated = await patchProject(projectId, { nights })
+  if (updated && removed.length > 0) {
+    const reason =
+      options?.clearReason ??
+      (subs.length > 0
+        ? 'Replaced by updated tonight sub-session plan.'
+        : 'Tonight sub-session removed from schedule.')
+    for (const night of removed) {
+      void appendAuditLog({
+        kind: 'project.sub_session_unscheduled',
+        message: `Project sub-session unscheduled: ${project.target} Session ${night.nightIndex} (${night.id}).`,
+        detail: {
+          projectId,
+          nightSubId: night.id,
+          nightIndex: night.nightIndex,
+          nightKey,
+          target: project.target,
+          previousPlannedStartIso: night.plannedStartIso ?? null,
+          reason,
+        },
+      })
+    }
+  }
+  return updated
 }
 
 export async function markProjectOnBoard(projectId: string): Promise<void> {

@@ -62,12 +62,12 @@ export async function reconcilePendingScheduleStatus(): Promise<void> {
 
   if (pending.length === 0) return
 
-  async function clearTonightScheduledProjectSubs(): Promise<void> {
+  async function clearTonightScheduledProjectSubs(clearReason: string): Promise<void> {
     const projects = await listProjects()
     await Promise.all(
       projects
         .filter((p) => p.nights.some((n) => n.nightKey === nightKey && n.status === 'scheduled'))
-        .map((p) => replaceScheduledSubsForNightKey(p.id, nightKey, []))
+        .map((p) => replaceScheduledSubsForNightKey(p.id, nightKey, [], { clearReason }))
     )
   }
 
@@ -79,7 +79,9 @@ export async function reconcilePendingScheduleStatus(): Promise<void> {
         reasons: [weatherIntervals.reason ?? 'Unable to evaluate tonight weather.'],
       })
     }
-    await clearTonightScheduledProjectSubs()
+    await clearTonightScheduledProjectSubs(
+      weatherIntervals.reason ?? 'Unable to evaluate tonight weather.'
+    )
   } else if (weatherIntervals.globalHardBlocked === true) {
     for (const r of pending) {
       nextById.set(r.id, {
@@ -88,7 +90,9 @@ export async function reconcilePendingScheduleStatus(): Promise<void> {
         reasons: [weatherIntervals.globalHardBlockReason ?? 'Tonight blocked by global weather trigger.'],
       })
     }
-    await clearTonightScheduledProjectSubs()
+    await clearTonightScheduledProjectSubs(
+      weatherIntervals.globalHardBlockReason ?? 'Tonight blocked by global weather trigger.'
+    )
   } else {
     const permitted = weatherIntervals.permittedIntervals as TimeInterval[]
     const reservedIntervals = activeProject ? projectAltitudeHoldIntervals(activeProject, now) : []

@@ -5,6 +5,7 @@ import { accountTwoColGridObservatoryLog } from '@/app/dashboard/account/account
 import { AccountTwoColRow } from '@/app/dashboard/account/account-two-col-row'
 import { DashboardPanel } from '@/app/dashboard/account/dashboard-panel'
 import { AccountMemberGrid } from '@/app/dashboard/account/account-member-grid'
+import { AdminActivityLogPanel } from '@/app/dashboard/admin/admin-activity-log-panel'
 import { AllMembersSection } from '@/app/dashboard/admin/all-members-section'
 import { statusOptions, useAdminTools } from '@/app/dashboard/admin/use-admin-tools'
 
@@ -85,31 +86,11 @@ export function AdminDashboardGrid() {
               </button>
             }
           >
-            {t.logError && <p className="mb-2 text-sm text-red-400">{t.logError}</p>}
-            <div className="admin-activity-log-scroll max-h-[28rem] overflow-y-auto font-mono text-xs leading-relaxed text-gray-100">
-              {t.logEntries.length === 0 && !t.logLoading ? (
-                <p className="text-gray-500">No log entries yet.</p>
-              ) : (
-                <ul className="space-y-3">
-                  {t.logEntries.map((row) => {
-                    const detailText =
-                      row.detail && Object.keys(row.detail).length > 0
-                        ? JSON.stringify(row.detail, null, 2)
-                        : null
-                    return (
-                      <li key={row.id} className="border-b border-gray-800/80 pb-2 last:border-0 last:pb-0">
-                        <p className="whitespace-pre-wrap break-words text-gray-100">
-                          {`${row.at.replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC')} | ${row.kind} | ${row.message}`}
-                        </p>
-                        {detailText ? (
-                          <p className="mt-1 whitespace-pre-wrap break-words text-gray-400">{`detail | ${detailText}`}</p>
-                        ) : null}
-                      </li>
-                    )
-                  })}
-                </ul>
-              )}
-            </div>
+            <AdminActivityLogPanel
+              entries={t.logEntries}
+              loading={t.logLoading}
+              error={t.logError}
+            />
           </DashboardPanel>
         }
       />

@@ -1,9 +1,12 @@
 import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { sendSessionFailedEmail } from '@/lib/imaging-completion-email'
 import { publishProgress } from '@/lib/imaging-progress-live'
+import { markNightFailed } from '@/lib/imaging-project-store'
+import { notifyProjectNightFailedEmail } from '@/lib/imaging-project-night-email'
 import { getInProgressProjectNightSubId } from '@/lib/imaging-session-progress-queue'
 import {
   boardFailAllInProgress,
+  getBoardEntry,
   listBoardEntries,
   type FailedBoardSnapshot,
   type SessionBoardEntry,
@@ -51,37 +54,53 @@ async function recordSessionFailure(queueId: string, reason: string): Promise<vo
 }
 
 async function notifySessionFailed(snapshot: FailedBoardSnapshot, reason: string): Promise<void> {
-  await recordSessionFailure(snapshot.id, reason)
+  const board = await getBoardEntry(snapshot.id)
+  let queueId = snapshot.id
+  if (board?.projectMode) {
+    const nightId = await getInProgressProjectNightSubId(snapshot.id)
+    if (nightId) {
+      await markNightFailed(snapshot.id, nightId)
+      queueId = nightId
+    }
+  }
+
+  await recordSessionFailure(queueId, reason)
   void appendAuditLog({
     kind: 'queue.status',
-    message: `Session ${snapshot.id} marked failed (${reason}).`,
-    detail: { id: snapshot.id, reason },
+    message: `Session ${queueId} marked failed (${reason}).`,
+    detail: { id: queueId, boardId: snapshot.id, reason },
   })
-  void sendSessionFailedEmail({
-    queueId: snapshot.id,
+
+  const mailCtx = {
+    queueId,
     target: snapshot.target,
     email: snapshot.email,
     firstName: snapshot.firstName,
-    failedAtIso: snapshot.failedAt,
-  }).then((result) => {
+  }
+  if (board?.projectMode && queueId !== snapshot.id) {
+    notifyProjectNightFailedEmail(mailCtx, snapshot.failedAt)
+    return
+  }
+
+  void sendSessionFailedEmail({ ...mailCtx, failedAtIso: snapshot.failedAt }).then((result) => {
     if (!result.sent) {
       return appendAuditLog({
         kind: 'session.progress',
-        message: `Failure email skipped/failed for ${snapshot.id}: ${result.reason ?? 'unknown reason'}`,
-        detail: { queueId: snapshot.id, reason: result.reason ?? null },
+        message: `Failure email skipped/failed for ${queueId}: ${result.reason ?? 'unknown reason'}`,
+        detail: { queueId, reason: result.reason ?? null },
       })
     }
     return appendAuditLog({
       kind: 'session.progress',
-      message: `Failure email sent for ${snapshot.id}.`,
-      detail: { queueId: snapshot.id, email: snapshot.email ?? null },
+      message: `Failure email sent for ${queueId}.`,
+      detail: { queueId, email: snapshot.email ?? null },
     })
   })
 }
 
 /**
- * Multi-night projects stay `in_progress` on the board between sub-nights. Do not treat them as
- * aborted when no sub-night is actively imaging (e.g. after NINA Session Completed for tonight).
+ * Multi-night projects stay `in_progress` on the board between sub-sessions. Do not treat them as
+ * aborted when no sub-session is actively imaging (e.g. after NINA Session Completed).
  */
 export function shouldFailProjectModeBoardEntry(
   entry: Pick<SessionBoardEntry, 'projectMode'>,
@@ -91,7 +110,7 @@ export function shouldFailProjectModeBoardEntry(
   return activeNightSubId != null
 }
 
-/** Board project ids with no `in_progress` sub-night — parked between nights, not actively imaging. */
+/** Board project ids with no `in_progress` sub-session — parked between runs, not actively imaging. */
 export async function inactiveProjectBoardSkipIds(): Promise<Set<string>> {
   const skip = new Set<string>()
   for (const entry of await listBoardEntries()) {

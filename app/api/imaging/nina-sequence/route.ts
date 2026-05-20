@@ -78,8 +78,8 @@ function sequenceJsonFor(r: ImagingRequest): string | null {
   return null
 }
 
-/** Night 2+: queue row was consumed on night 1 — deliver sub-session ids without re-selecting the queue row. */
-function shouldDeliverProjectNightDirect(
+/** After the queue row is consumed, deliver sub-sessions by sub-session id (same path for every session index). */
+function shouldDeliverProjectSubSessionDirect(
   project: ImagingProject,
   pending: ImagingRequest[]
 ): boolean {
@@ -87,8 +87,8 @@ function shouldDeliverProjectNightDirect(
   return !pending.some((r) => r.id === project.id)
 }
 
-/** Try delivering a scheduled/in-progress project sub-session for tonight (on-board projects first). */
-async function tryDeliverProjectNightTonight(
+/** Try delivering the next schedulable project sub-session for tonight (on-board projects first). */
+async function tryDeliverProjectSubSessionTonight(
   status: ObservatoryStatus,
   nightKey: string,
   project: ImagingProject,
@@ -97,7 +97,7 @@ async function tryDeliverProjectNightTonight(
   const night = getDeliverableNight(project, nightKey)
   if (!night?.ninaSequenceJson) {
     if (activeOnBoard && activeOnBoard.id === project.id) {
-      return deliverNextEligibleInProgressProjectNight(status, activeOnBoard.id, nightKey)
+      return deliverNextEligibleInProgressProjectSubSession(status, activeOnBoard.id, nightKey)
     }
     return null
   }
@@ -110,7 +110,7 @@ async function tryDeliverProjectNightTonight(
   const altCheck = isAltitudeAllowed(project.raHours, project.decDeg)
   if (!altCheck.ok) {
     if (activeOnBoard?.id === project.id) {
-      const successor = await deliverNextEligibleInProgressProjectNight(status, project.id, nightKey)
+      const successor = await deliverNextEligibleInProgressProjectSubSession(status, project.id, nightKey)
       if (successor) return successor
     }
     return NextResponse.json(
@@ -120,15 +120,15 @@ async function tryDeliverProjectNightTonight(
       { status: 409, headers: imagingCorsHeadersResolved() }
     )
   }
-  return deliverProjectNightJson(
+  return deliverProjectSubSessionJson(
     project,
     night,
-    `NINA project night delivered: ${project.target} night ${night.nightIndex} (${night.id}).`
+    `NINA project sub-session delivered: ${project.target} Session ${night.nightIndex} (${night.id}).`
   )
 }
 
 /** When the on-board project target is too low, try the next in-progress project whose target is up. */
-async function deliverNextEligibleInProgressProjectNight(
+async function deliverNextEligibleInProgressProjectSubSession(
   status: Awaited<ReturnType<typeof getObservatoryStatus>>,
   skipProjectId: string,
   stripNightKey: string
@@ -155,16 +155,16 @@ async function deliverNextEligibleInProgressProjectNight(
       await patchProject(onBoard.id, { onBoard: false, nights })
     }
     await markProjectOnBoard(project.id)
-    return deliverProjectNightJson(
+    return deliverProjectSubSessionJson(
       project,
       night,
-      `NINA project night delivered: ${project.target} night ${night.nightIndex} (${night.id}).`
+      `NINA project sub-session delivered: ${project.target} Session ${night.nightIndex} (${night.id}).`
     )
   }
   return null
 }
 
-async function deliverProjectNightJson(
+async function deliverProjectSubSessionJson(
   project: ImagingProject,
   night: ProjectNight,
   auditMessage: string
@@ -222,7 +222,7 @@ async function deliverProjectNightJson(
   void appendAuditLog({
     kind: 'nina.delivered',
     message: auditMessage,
-    detail: { projectId: project.id, nightId: night.id, nightIndex: night.nightIndex },
+    detail: { projectId: project.id, subSessionId: night.id, sessionIndex: night.nightIndex },
   })
   return new NextResponse(night.ninaSequenceJson!, {
     status: 200,
@@ -279,8 +279,8 @@ export async function GET() {
   const projectForSubDelivery = await getProjectAwaitingSubSessionDelivery(nightKey)
 
   const directProject = projectForSubDelivery ?? activeOnBoard
-  if (directProject && shouldDeliverProjectNightDirect(directProject, pending)) {
-    const delivered = await tryDeliverProjectNightTonight(
+  if (directProject && shouldDeliverProjectSubSessionDirect(directProject, pending)) {
+    const delivered = await tryDeliverProjectSubSessionTonight(
       status,
       nightKey,
       directProject,
@@ -340,8 +340,8 @@ export async function GET() {
       activeOnBoard ?? projectForSubDelivery
     )
 
-    if (projectForSubDelivery && shouldDeliverProjectNightDirect(projectForSubDelivery, pending)) {
-      const delivered = await tryDeliverProjectNightTonight(
+    if (projectForSubDelivery && shouldDeliverProjectSubSessionDirect(projectForSubDelivery, pending)) {
+      const delivered = await tryDeliverProjectSubSessionTonight(
         status,
         nightKey,
         projectForSubDelivery,
@@ -354,7 +354,7 @@ export async function GET() {
       if (activeOnBoard) {
         const onBoardNight = getDeliverableNight(activeOnBoard, nightKey)
         if (onBoardNight?.ninaSequenceJson) {
-          const delivered = await tryDeliverProjectNightTonight(
+          const delivered = await tryDeliverProjectSubSessionTonight(
             status,
             nightKey,
             activeOnBoard,
@@ -450,8 +450,8 @@ export async function GET() {
   if (!consumed) {
     if (selected.projectMode) {
       const project = await getProjectById(selected.id)
-      if (project && shouldDeliverProjectNightDirect(project, pending)) {
-        const delivered = await tryDeliverProjectNightTonight(
+      if (project && shouldDeliverProjectSubSessionDirect(project, pending)) {
+        const delivered = await tryDeliverProjectSubSessionTonight(
           status,
           nightKey,
           project,
@@ -479,26 +479,23 @@ export async function GET() {
     void logEndNightDue(nightKey, 'last scheduled queue row consumed')
   }
 
-  let sequenceJson: string | null = null
-  let progressQueueId = consumed.id
-
   if (consumed.projectMode) {
     const project = await getProjectById(consumed.id)
     const night = project ? getDeliverableNight(project, nightKey) : undefined
     if (!night?.ninaSequenceJson) {
       return NextResponse.json(
-        { error: 'Project night sequence not available for download' },
+        { error: 'Project sub-session sequence not available for download' },
         { status: 404, headers: imagingCorsHeadersResolved() }
       )
     }
-    sequenceJson = night.ninaSequenceJson
-    progressQueueId = night.id
-    await markProjectOnBoard(consumed.id)
-    await markNightInProgress(consumed.id, night.id)
-  } else {
-    sequenceJson = sequenceJsonFor(consumed)
+    return deliverProjectSubSessionJson(
+      project!,
+      night,
+      `NINA project sub-session delivered: ${project!.target} Session ${night.nightIndex} (${night.id}).`
+    )
   }
 
+  const sequenceJson = sequenceJsonFor(consumed)
   if (!sequenceJson) {
     return NextResponse.json(
       { error: 'NINA sequence not available for latest session' },
@@ -523,12 +520,11 @@ export async function GET() {
     estimatedDurationSeconds: consumed.estimatedDurationSeconds,
     sessionPasswordHash: consumed.sessionPasswordHash,
     userId: consumed.userId,
-    ...(consumed.projectMode ? { projectMode: true as const } : {}),
   })
 
   const startedAtIso = new Date().toISOString()
   void sendSessionStartedEmail({
-    queueId: progressQueueId,
+    queueId: consumed.id,
     target: consumed.target,
     email: consumed.email,
     firstName: consumed.firstName,
@@ -538,28 +534,25 @@ export async function GET() {
       return appendAuditLog({
         kind: 'session.progress',
         message: `Start email skipped/failed for ${consumed.id}: ${result.reason ?? 'unknown reason'}`,
-        detail: { queueId: progressQueueId, reason: result.reason ?? null },
+        detail: { queueId: consumed.id, reason: result.reason ?? null },
       })
     }
     return appendAuditLog({
       kind: 'session.progress',
-      message: `Start email sent for ${progressQueueId}.`,
-      detail: { queueId: progressQueueId, email: consumed.email ?? null },
+      message: `Start email sent for ${consumed.id}.`,
+      detail: { queueId: consumed.id, email: consumed.email ?? null },
     })
   })
 
   void appendAuditLog({
     kind: 'nina.delivered',
-    message: consumed.projectMode
-      ? `NINA project first night delivered: ${consumed.target} (${progressQueueId}).`
-      : `NINA sequence delivered (scheduled queue, planned-start order) and removed from queue: ${consumed.target} (${consumed.id}).`,
+    message: `NINA sequence delivered (scheduled queue, planned-start order) and removed from queue: ${consumed.target} (${consumed.id}).`,
     detail: {
       id: consumed.id,
-      nightId: consumed.projectMode ? progressQueueId : undefined,
       target: consumed.target,
       exposureSeconds: consumed.exposureSeconds,
       count: consumed.count,
-      projectMode: consumed.projectMode ?? false,
+      projectMode: false,
     },
   })
 

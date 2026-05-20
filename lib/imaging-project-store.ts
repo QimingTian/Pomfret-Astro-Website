@@ -265,7 +265,7 @@ export function getNextPendingProject(projects: ImagingProject[]): ImagingProjec
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0]
 }
 
-/** Project that has started imaging (first night delivered to NINA). */
+/** Project that has started imaging (at least one sub-session delivered to NINA). */
 export async function getActiveOnBoardProject(): Promise<ImagingProject | undefined> {
   const all = await readProjects()
   return all.find((p) => p.status === 'in_progress' && p.onBoard === true)
@@ -273,7 +273,7 @@ export async function getActiveOnBoardProject(): Promise<ImagingProject | undefi
 
 /**
  * In-progress project with a sub-session NINA can receive (on-board or not).
- * Night 2+ delivers via sub-session ids after the queue row was consumed on night 1.
+ * After the queue row is consumed, further sub-sessions deliver by sub-session id (same as any index).
  */
 export async function getProjectAwaitingSubSessionDelivery(
   stripNightKey?: string

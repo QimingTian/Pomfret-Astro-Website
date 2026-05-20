@@ -1,4 +1,4 @@
-/** Night sub-id for progress/audit routing: `{projectId}::night-{index}` (1-based index). */
+/** Project sub-session id for progress/audit: `{projectId}::night-{index}` (1-based session index; legacy segment name). */
 export function projectNightSubId(projectId: string, nightIndex: number): string {
   return `${projectId}::night-${nightIndex}`
 }

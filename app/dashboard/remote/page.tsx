@@ -3217,7 +3217,7 @@ export default function RemotePage() {
               placeholder={
                 sessionType === 'variable_star'
                   ? 'e.g. AW UMa Session 1'
-                  : 'e.g. M31 LRGB Night 1'
+                  : 'e.g. M31 LRGB Session 1'
               }
               className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
             />

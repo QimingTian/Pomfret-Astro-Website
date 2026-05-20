@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { sendCompletionEmail } from '@/lib/imaging-completion-email'
+import { notifyProjectNightCompletionEmail } from '@/lib/imaging-project-night-email'
 import { publishProgress } from '@/lib/imaging-progress-live'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import { parseProjectNightSubId } from '@/lib/imaging-project-ids'
@@ -154,37 +155,27 @@ export async function POST(request: NextRequest) {
       if (match && match.night.status === 'in_progress') {
         const result = await markNightCompleted(match.project.id, queueId)
         if (result) {
+          const completedAtIso = new Date().toISOString()
           publishProgress(queueId, { type: 'status', queueStatus: 'completed' })
           void appendAuditLog({
             kind: 'queue.status',
-            message: `Project night ${queueId} completed (end signal from NINA).`,
+            message: `Project sub-session ${queueId} completed (end signal from NINA).`,
             detail: { id: queueId, projectId: match.project.id, target: match.project.target },
           })
+          notifyProjectNightCompletionEmail(
+            {
+              queueId,
+              target: match.project.target,
+              email: match.project.email,
+              firstName: match.project.firstName,
+            },
+            completedAtIso
+          )
           if (result.projectCompleted) {
             const board = await getBoardEntry(match.project.id)
             if (board?.status === 'in_progress') {
               await boardMarkCompleted(match.project.id)
             }
-            void sendCompletionEmail({
-              queueId: match.project.id,
-              target: match.project.target,
-              email: match.project.email,
-              firstName: match.project.firstName,
-              completedAtIso: new Date().toISOString(),
-            }).then((emailResult) => {
-              if (!emailResult.sent) {
-                return appendAuditLog({
-                  kind: 'session.progress',
-                  message: `Completion email skipped/failed for ${match.project.id}: ${emailResult.reason ?? 'unknown reason'}`,
-                  detail: { queueId: match.project.id, reason: emailResult.reason ?? null },
-                })
-              }
-              return appendAuditLog({
-                kind: 'session.progress',
-                message: `Completion email sent for project ${match.project.id}.`,
-                detail: { queueId: match.project.id, email: match.project.email ?? null },
-              })
-            })
             publishProgress(match.project.id, { type: 'status', queueStatus: 'completed' })
           }
           void reconcilePendingScheduleStatus()

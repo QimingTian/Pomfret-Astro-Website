@@ -1,5 +1,9 @@
 import { appendAuditLog } from '@/lib/imaging-audit-log'
-import { sendCompletionEmail, sendSessionFailedEmail } from '@/lib/imaging-completion-email'
+import { sendSessionFailedEmail } from '@/lib/imaging-completion-email'
+import {
+  notifyProjectNightCompletionEmail,
+  notifyProjectNightFailedEmail,
+} from '@/lib/imaging-project-night-email'
 import { publishProgress } from '@/lib/imaging-progress-live'
 import { parseProjectNightSubId } from '@/lib/imaging-project-ids'
 import {
@@ -145,18 +149,20 @@ export async function adminMarkSessionComplete(sessionId: string): Promise<{ ok:
       message: `Admin marked project sub-session ${sessionId} completed.`,
       detail: { sessionId, projectId: match.project.id, nightIndex: match.night.nightIndex },
     })
+    notifyProjectNightCompletionEmail(
+      {
+        queueId: sessionId,
+        target: match.project.target,
+        email: match.project.email,
+        firstName: match.project.firstName,
+      },
+      new Date().toISOString()
+    )
     if (result.projectCompleted) {
       const board = await getBoardEntry(match.project.id)
       if (board?.status === 'in_progress') {
         await boardMarkCompleted(match.project.id)
       }
-      void sendCompletionEmail({
-        queueId: match.project.id,
-        target: match.project.target,
-        email: match.project.email,
-        firstName: match.project.firstName,
-        completedAtIso: new Date().toISOString(),
-      })
       publishProgress(match.project.id, { type: 'status', queueStatus: 'completed' })
     }
     void reconcilePendingScheduleStatus()
@@ -203,13 +209,15 @@ export async function adminMarkSessionFailed(sessionId: string): Promise<{ ok: t
       message: `Admin marked project sub-session ${sessionId} failed.`,
       detail: { sessionId, projectId: match.project.id, nightIndex: match.night.nightIndex },
     })
-    void sendSessionFailedEmail({
-      queueId: sessionId,
-      target: match.project.target,
-      email: match.project.email,
-      firstName: match.project.firstName,
-      failedAtIso: new Date().toISOString(),
-    })
+    notifyProjectNightFailedEmail(
+      {
+        queueId: sessionId,
+        target: match.project.target,
+        email: match.project.email,
+        firstName: match.project.firstName,
+      },
+      new Date().toISOString()
+    )
     void reconcilePendingScheduleStatus()
     return { ok: true }
   }

@@ -400,7 +400,7 @@ Read-only activity feed: submissions, deliveries, status changes, retention dele
 | No emails | Resend not configured | `RESEND_API_KEY`, `IMAGING_MAIL_FROM` |
 | Download missing | R2 mapping / retention | `session-files` POST from agent; 48h purge |
 | Lost all users after deploy | KV not configured | `KV_REST_API_URL`, `KV_REST_API_TOKEN` on Vercel |
-| Project night 2 not delivering | Queue consumed; sub not scheduled | Reconcile; project planner logs; in_progress lock |
+| Project sub-session not delivering | Queue consumed; sub not scheduled | Reconcile; project planner logs; in_progress lock |
 | M101 starts at 2 AM after Markarian | Weather spell boundary (if < 80% cross-spell) | Audit `scheduleReasons`; permitted hour gaps |
 | End night only at dawn, not after last session | `remainingTonight` still true (stale scheduled sub / queue) | Audit `end_night`; project subs; reconcile |
 
@@ -501,8 +501,8 @@ One **project** = one queue entry + `imaging-projects` state in KV. Many **sub-s
 
 #### NINA delivery
 
-- **Night 1:** normal queue consume → delivers project night JSON.
-- **Night 2+:** queue row already consumed; `GET /api/imaging/nina-sequence` delivers the next **scheduled project sub** by project night id.
+- **First sub-session:** queue row is consumed once, then JSON is delivered (same finalize path as later sessions).
+- **Later sub-sessions:** queue row already consumed; `GET /api/imaging/nina-sequence` delivers the next **scheduled** sub-session by sub-session id (`{projectId}::night-{n}`).
 
 #### End of night
 
@@ -512,8 +512,9 @@ After the **last** scheduled/active work for the calendar night, the observatory
 
 | Event | Email |
 |-------|-------|
-| Each sub-session **starts** | Session started |
-| **Entire project** all frames done | One completion email (not per sub) |
+| Each sub-session **starts** | Session started (`Session ID` = sub-session id) |
+| Each sub-session **completes** | Session completed |
+| Each sub-session **fails** | Session failed |
 
 #### Audit reasons
 

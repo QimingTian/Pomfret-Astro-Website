@@ -97,7 +97,7 @@ export function AccountInfoSection({
           <InfoRow label="Email" value={user.email} />
           <InfoRow label="First name" value={user.firstName} />
           <InfoRow label="Last name" value={user.lastName} />
-          <InfoRow label="Level" value={memberLevelLabel(user.role)} />
+          <InfoRow label="Role" value={memberLevelLabel(user.role)} />
         </div>
         <div className="flex shrink-0 flex-wrap gap-2 sm:gap-3">
           <button type="button" onClick={openPasswordModal} className={actionButtonClass}>

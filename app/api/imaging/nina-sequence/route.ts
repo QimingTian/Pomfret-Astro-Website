@@ -13,11 +13,13 @@ import {
   markProjectOnBoard,
   patchProject,
   remainingFramesTotal,
+  tonightDurationSecondsFromPlans,
   type ImagingProject,
   type ProjectNight,
 } from '@/lib/imaging-project-store'
+import { publishProgress } from '@/lib/imaging-progress-live'
 import { failInProgressBoardSessions } from '@/lib/imaging-session-failure'
-import { boardUpsertInProgress, getBoardEntry, listBoardEntries } from '@/lib/imaging-session-board'
+import { boardUpsertInProgress, listBoardEntries } from '@/lib/imaging-session-board'
 import {
   consumeRequestById,
   listPending,
@@ -171,28 +173,52 @@ async function deliverProjectNightJson(
     await markProjectOnBoard(project.id)
   }
   await markNightInProgress(project.id, night.id)
-  const board = await getBoardEntry(project.id)
-  if (!board) {
-    await boardUpsertInProgress({
-      id: project.id,
-      target: project.target,
-      createdAt: project.createdAt,
-      firstName: project.firstName ?? null,
-      lastName: project.lastName ?? null,
-      email: project.email ?? null,
-      raHours: project.raHours,
-      decDeg: project.decDeg,
-      filter: project.filterPlansTotal[0]?.filterName ?? null,
-      exposureSeconds: project.filterPlansTotal[0]?.exposureSeconds,
-      count: night.filterPlansTonight[0]?.count ?? 0,
-      outputMode: project.outputMode,
-      filterPlans: project.filterPlansTotal,
-      estimatedDurationSeconds: project.estimatedDurationSeconds,
-      sessionPasswordHash: project.sessionPasswordHash,
-      userId: project.userId,
-      projectMode: true,
+
+  const startedAtIso = new Date().toISOString()
+  await boardUpsertInProgress({
+    id: project.id,
+    target: project.target,
+    createdAt: project.createdAt,
+    firstName: project.firstName ?? null,
+    lastName: project.lastName ?? null,
+    email: project.email ?? null,
+    raHours: project.raHours,
+    decDeg: project.decDeg,
+    filter: night.filterPlansTonight[0]?.filterName ?? project.filterPlansTotal[0]?.filterName ?? null,
+    exposureSeconds:
+      night.filterPlansTonight[0]?.exposureSeconds ?? project.filterPlansTotal[0]?.exposureSeconds,
+    count: night.filterPlansTonight[0]?.count ?? 0,
+    outputMode: project.outputMode,
+    filterPlans: project.filterPlansTotal,
+    estimatedDurationSeconds: tonightDurationSecondsFromPlans(night.filterPlansTonight),
+    sessionPasswordHash: project.sessionPasswordHash,
+    userId: project.userId,
+    projectMode: true,
+  })
+
+  void sendSessionStartedEmail({
+    queueId: night.id,
+    target: project.target,
+    email: project.email,
+    firstName: project.firstName,
+    startedAtIso,
+  }).then((result) => {
+    if (!result.sent) {
+      return appendAuditLog({
+        kind: 'session.progress',
+        message: `Start email skipped/failed for ${night.id}: ${result.reason ?? 'unknown reason'}`,
+        detail: { queueId: night.id, projectId: project.id, reason: result.reason ?? null },
+      })
+    }
+    return appendAuditLog({
+      kind: 'session.progress',
+      message: `Start email sent for ${night.id}.`,
+      detail: { queueId: night.id, projectId: project.id, email: project.email ?? null },
     })
-  }
+  })
+
+  publishProgress(night.id, { type: 'status', queueStatus: 'in_progress' })
+
   void appendAuditLog({
     kind: 'nina.delivered',
     message: auditMessage,

@@ -31,10 +31,8 @@ import {
   touchObservatoryPoll,
 } from '@/lib/observatory-status-store'
 import { isAltitudeAllowed } from '@/lib/target-altitude'
-import {
-  hasRemainingTonightImagingWork,
-  nightKeyFromDusk,
-} from '@/lib/imaging-tonight-complete'
+import { hasRemainingTonightImagingWork } from '@/lib/imaging-tonight-complete'
+import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import { logEndNightDelivered, logEndNightDue } from '@/lib/imaging-end-night-audit'
 import {
@@ -244,10 +242,12 @@ export async function GET() {
   const now = new Date()
   const nowMs = now.getTime()
   const schedulingWindow = getTonightSchedulingWindow(now)
+  const strip = getTonightScheduleStrip(now)
   const nauticalDawnMs = schedulingWindow.nauticalDawnUtc.getTime()
   const deadlineMs = nauticalDawnMs
   const nightStartMs = schedulingWindow.nauticalDuskUtc.getTime()
-  const nightKey = nightKeyFromDusk(schedulingWindow.nauticalDuskUtc)
+  /** Match project planner + Remote strip (4pm-local day), not UTC calendar day of nautical dusk. */
+  const nightKey = strip.nightKey
 
   const activeOnBoard = await getActiveOnBoardProject()
   const projectForSubDelivery = await getProjectAwaitingSubSessionDelivery(nightKey)
@@ -325,6 +325,18 @@ export async function GET() {
     }
 
     if (scheduledTonight.length > 0 && remainingTonight) {
+      if (activeOnBoard) {
+        const onBoardNight = getDeliverableNight(activeOnBoard, nightKey)
+        if (onBoardNight?.ninaSequenceJson) {
+          const delivered = await tryDeliverProjectNightTonight(
+            status,
+            nightKey,
+            activeOnBoard,
+            activeOnBoard
+          )
+          if (delivered) return delivered
+        }
+      }
       return NextResponse.json(
         {
           error:

@@ -6,10 +6,8 @@ import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import { parseProjectNightSubId } from '@/lib/imaging-project-ids'
 import { logEndNightDue } from '@/lib/imaging-end-night-audit'
 import { reconcilePendingScheduleStatus } from '@/lib/imaging-queue-reconcile'
-import {
-  hasRemainingTonightImagingWork,
-  nightKeyFromDusk,
-} from '@/lib/imaging-tonight-complete'
+import { hasRemainingTonightImagingWork } from '@/lib/imaging-tonight-complete'
+import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import {
   getProjectByNightSubId,
   markNightCompleted,
@@ -22,8 +20,9 @@ import { isSessionCompletedSignal, progressLineText } from '@/lib/session-progre
 export const runtime = 'nodejs'
 
 async function markEndNightDueIfTonightComplete(): Promise<void> {
-  const schedulingWindow = getTonightSchedulingWindow(new Date())
-  const nightKey = nightKeyFromDusk(schedulingWindow.nauticalDuskUtc)
+  const now = new Date()
+  const schedulingWindow = getTonightSchedulingWindow(now)
+  const nightKey = getTonightScheduleStrip(now).nightKey
   const remaining = await hasRemainingTonightImagingWork(
     nightKey,
     schedulingWindow.nauticalDuskUtc.getTime(),

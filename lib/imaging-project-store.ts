@@ -116,7 +116,23 @@ export async function compactStaleProjectNights(): Promise<void> {
   if (changed) await writeProjects(next)
 }
 
-/** Mark `scheduled` sub-sessions whose planned window has passed without starting. */
+/** Planned window end for a sub-session (planned start + duration, or frozen schedule bar end). */
+export function projectSubSessionWindowEndMs(night: ProjectNight): number | null {
+  if (night.plannedStartIso) {
+    const startMs = Date.parse(night.plannedStartIso)
+    if (Number.isFinite(startMs)) {
+      return startMs + tonightDurationSecondsFromPlans(night.filterPlansTonight) * 1000
+    }
+  }
+  if (typeof night.scheduleBarEndMs === 'number' && Number.isFinite(night.scheduleBarEndMs)) {
+    return night.scheduleBarEndMs
+  }
+  return null
+}
+
+/**
+ * Mark `scheduled` / stuck `in_progress` sub-sessions failed once their imaging window has ended.
+ */
 export async function expireMissedScheduledProjectNights(now = new Date()): Promise<void> {
   const nowMs = now.getTime()
   const all = await readProjects()
@@ -124,12 +140,9 @@ export async function expireMissedScheduledProjectNights(now = new Date()): Prom
   const next = all.map((project) => {
     let nightsChanged = false
     const nights = project.nights.map((n) => {
-      if (n.status !== 'scheduled' || !n.plannedStartIso) return n
-      const startMs = Date.parse(n.plannedStartIso)
-      if (!Number.isFinite(startMs)) return n
-      const durationMs = tonightDurationSecondsFromPlans(n.filterPlansTonight) * 1000
-      const endMs = startMs + durationMs
-      if (endMs > nowMs) return n
+      if (n.status !== 'scheduled' && n.status !== 'in_progress') return n
+      const endMs = projectSubSessionWindowEndMs(n)
+      if (endMs == null || endMs > nowMs) return n
       nightsChanged = true
       changed = true
       return {
@@ -141,6 +154,22 @@ export async function expireMissedScheduledProjectNights(now = new Date()): Prom
     return nightsChanged ? { ...project, nights, updatedAt: new Date().toISOString() } : project
   })
   if (changed) await writeProjects(next)
+}
+
+/** Drop on-board hold when tonight has no schedulable / active sub-session left. */
+export async function releaseOnBoardProjectIfNothingDeliverable(
+  projectId: string,
+  stripNightKey: string
+): Promise<void> {
+  const project = await getProjectById(projectId)
+  if (!project?.onBoard) return
+  if (getDeliverableNight(project, stripNightKey)) return
+  await patchProject(projectId, { onBoard: false })
+}
+
+/** True while this project still has a deliverable sub tonight and holds the altitude slot. */
+export function projectHoldsQueueTonight(project: ImagingProject, stripNightKey: string): boolean {
+  return getDeliverableNight(project, stripNightKey) != null
 }
 
 export async function listProjects(): Promise<ImagingProject[]> {

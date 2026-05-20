@@ -5,13 +5,17 @@ import { imagingCorsHeadersResolved, imagingCorsOptions } from '@/lib/imaging-qu
 import { buildNinaSequenceJson } from '@/lib/build-nina-sequence-json'
 import {
   getActiveOnBoardProject,
+  expireMissedScheduledProjectNights,
   getDeliverableNight,
   getProjectAwaitingSubSessionDelivery,
   getProjectById,
+  getProjectByNightSubId,
   listProjects,
   markNightInProgress,
   markProjectOnBoard,
   patchProject,
+  projectHoldsQueueTonight,
+  releaseOnBoardProjectIfNothingDeliverable,
   remainingFramesTotal,
   tonightDurationSecondsFromPlans,
   type ImagingProject,
@@ -169,62 +173,76 @@ async function deliverProjectSubSessionJson(
   night: ProjectNight,
   auditMessage: string
 ): Promise<NextResponse> {
-  if (!project.onBoard) {
-    await markProjectOnBoard(project.id)
+  const match = await getProjectByNightSubId(night.id)
+  const projectRef = match?.project ?? project
+  const nightRef = match?.night ?? night
+  const isFirstDelivery = nightRef.status !== 'in_progress'
+
+  if (!projectRef.onBoard) {
+    await markProjectOnBoard(projectRef.id)
   }
-  await markNightInProgress(project.id, night.id)
+  if (isFirstDelivery) {
+    await markNightInProgress(projectRef.id, nightRef.id)
 
-  const startedAtIso = new Date().toISOString()
-  await boardUpsertInProgress({
-    id: project.id,
-    target: project.target,
-    createdAt: project.createdAt,
-    firstName: project.firstName ?? null,
-    lastName: project.lastName ?? null,
-    email: project.email ?? null,
-    raHours: project.raHours,
-    decDeg: project.decDeg,
-    filter: night.filterPlansTonight[0]?.filterName ?? project.filterPlansTotal[0]?.filterName ?? null,
-    exposureSeconds:
-      night.filterPlansTonight[0]?.exposureSeconds ?? project.filterPlansTotal[0]?.exposureSeconds,
-    count: night.filterPlansTonight[0]?.count ?? 0,
-    outputMode: project.outputMode,
-    filterPlans: project.filterPlansTotal,
-    estimatedDurationSeconds: tonightDurationSecondsFromPlans(night.filterPlansTonight),
-    sessionPasswordHash: project.sessionPasswordHash,
-    userId: project.userId,
-    projectMode: true,
-  })
+    const startedAtIso = new Date().toISOString()
+    await boardUpsertInProgress({
+      id: projectRef.id,
+      target: projectRef.target,
+      createdAt: projectRef.createdAt,
+      firstName: projectRef.firstName ?? null,
+      lastName: projectRef.lastName ?? null,
+      email: projectRef.email ?? null,
+      raHours: projectRef.raHours,
+      decDeg: projectRef.decDeg,
+      filter: nightRef.filterPlansTonight[0]?.filterName ?? projectRef.filterPlansTotal[0]?.filterName ?? null,
+      exposureSeconds:
+        nightRef.filterPlansTonight[0]?.exposureSeconds ??
+        projectRef.filterPlansTotal[0]?.exposureSeconds,
+      count: nightRef.filterPlansTonight[0]?.count ?? 0,
+      outputMode: projectRef.outputMode,
+      filterPlans: projectRef.filterPlansTotal,
+      estimatedDurationSeconds: tonightDurationSecondsFromPlans(nightRef.filterPlansTonight),
+      sessionPasswordHash: projectRef.sessionPasswordHash,
+      userId: projectRef.userId,
+      projectMode: true,
+    })
 
-  void sendSessionStartedEmail({
-    queueId: night.id,
-    target: project.target,
-    email: project.email,
-    firstName: project.firstName,
-    startedAtIso,
-  }).then((result) => {
-    if (!result.sent) {
+    void sendSessionStartedEmail({
+      queueId: nightRef.id,
+      target: projectRef.target,
+      email: projectRef.email,
+      firstName: projectRef.firstName,
+      startedAtIso,
+    }).then((result) => {
+      if (!result.sent) {
+        return appendAuditLog({
+          kind: 'session.progress',
+          message: `Start email skipped/failed for ${nightRef.id}: ${result.reason ?? 'unknown reason'}`,
+          detail: { queueId: nightRef.id, projectId: projectRef.id, reason: result.reason ?? null },
+        })
+      }
       return appendAuditLog({
         kind: 'session.progress',
-        message: `Start email skipped/failed for ${night.id}: ${result.reason ?? 'unknown reason'}`,
-        detail: { queueId: night.id, projectId: project.id, reason: result.reason ?? null },
+        message: `Start email sent for ${nightRef.id}.`,
+        detail: { queueId: nightRef.id, projectId: projectRef.id, email: projectRef.email ?? null },
       })
-    }
-    return appendAuditLog({
-      kind: 'session.progress',
-      message: `Start email sent for ${night.id}.`,
-      detail: { queueId: night.id, projectId: project.id, email: project.email ?? null },
     })
-  })
 
-  publishProgress(night.id, { type: 'status', queueStatus: 'in_progress' })
+    publishProgress(nightRef.id, { type: 'status', queueStatus: 'in_progress' })
 
-  void appendAuditLog({
-    kind: 'nina.delivered',
-    message: auditMessage,
-    detail: { projectId: project.id, subSessionId: night.id, sessionIndex: night.nightIndex },
-  })
-  return new NextResponse(night.ninaSequenceJson!, {
+    void appendAuditLog({
+      kind: 'nina.delivered',
+      message: auditMessage,
+      detail: {
+        projectId: projectRef.id,
+        subSessionId: nightRef.id,
+        sessionIndex: nightRef.nightIndex,
+        firstDelivery: true,
+      },
+    })
+  }
+
+  return new NextResponse(nightRef.ninaSequenceJson!, {
     status: 200,
     headers: {
       ...imagingCorsHeadersResolved(),
@@ -255,6 +273,8 @@ function endNightSequenceJson(queueId: string): string {
  */
 export async function GET() {
   await touchObservatoryPoll()
+  const now = new Date()
+  await expireMissedScheduledProjectNights(now)
   const adminWindowNow = await getAdminClosedWindowAt(Date.now())
   if (adminWindowNow) {
     const msg =
@@ -265,7 +285,6 @@ export async function GET() {
   }
   const status = await getObservatoryStatus()
   const pending = await listPending()
-  const now = new Date()
   const nowMs = now.getTime()
   const schedulingWindow = getTonightSchedulingWindow(now)
   const strip = getTonightScheduleStrip(now)
@@ -276,15 +295,19 @@ export async function GET() {
   const nightKey = strip.nightKey
 
   const activeOnBoard = await getActiveOnBoardProject()
-  const projectForSubDelivery = await getProjectAwaitingSubSessionDelivery(nightKey)
+  if (activeOnBoard) {
+    await releaseOnBoardProjectIfNothingDeliverable(activeOnBoard.id, nightKey)
+  }
+  const activeOnBoardAfterRelease = await getActiveOnBoardProject()
+  const projectForSubDeliveryFresh = await getProjectAwaitingSubSessionDelivery(nightKey)
 
-  const directProject = projectForSubDelivery ?? activeOnBoard
+  const directProject = projectForSubDeliveryFresh ?? activeOnBoardAfterRelease
   if (directProject && shouldDeliverProjectSubSessionDirect(directProject, pending)) {
     const delivered = await tryDeliverProjectSubSessionTonight(
       status,
       nightKey,
       directProject,
-      activeOnBoard
+      activeOnBoardAfterRelease
     )
     if (delivered) return delivered
   }
@@ -302,15 +325,18 @@ export async function GET() {
   let blockingError: string | null = null
 
   for (const candidate of scheduledTonight) {
-    if (activeOnBoard) {
-      const projectAlt = isAltitudeAllowed(activeOnBoard.raHours, activeOnBoard.decDeg)
+    if (activeOnBoardAfterRelease && projectHoldsQueueTonight(activeOnBoardAfterRelease, nightKey)) {
+      const projectAlt = isAltitudeAllowed(
+        activeOnBoardAfterRelease.raHours,
+        activeOnBoardAfterRelease.decDeg
+      )
       if (projectAlt.ok) {
         if (!candidate.projectMode) {
-          blockingError = `Multi-night project target is above 30° (${activeOnBoard.target}); other sessions run when it is below 30°.`
+          blockingError = `Multi-night project target is above 30° (${activeOnBoardAfterRelease.target}); other sessions run when it is below 30°.`
           continue
         }
-        if (candidate.projectMode && candidate.id !== activeOnBoard.id) {
-          blockingError = `Multi-night project "${activeOnBoard.target}" is above 30°; the next project runs when it is below 30°.`
+        if (candidate.projectMode && candidate.id !== activeOnBoardAfterRelease.id) {
+          blockingError = `Multi-night project "${activeOnBoardAfterRelease.target}" is above 30°; the next project runs when it is below 30°.`
           continue
         }
       }
@@ -337,28 +363,28 @@ export async function GET() {
       nightKey,
       nightStartMs,
       deadlineMs,
-      activeOnBoard ?? projectForSubDelivery
+      activeOnBoardAfterRelease ?? projectForSubDeliveryFresh
     )
 
-    if (projectForSubDelivery && shouldDeliverProjectSubSessionDirect(projectForSubDelivery, pending)) {
+    if (projectForSubDeliveryFresh && shouldDeliverProjectSubSessionDirect(projectForSubDeliveryFresh, pending)) {
       const delivered = await tryDeliverProjectSubSessionTonight(
         status,
         nightKey,
-        projectForSubDelivery,
-        activeOnBoard
+        projectForSubDeliveryFresh,
+        activeOnBoardAfterRelease
       )
       if (delivered) return delivered
     }
 
     if (scheduledTonight.length > 0 && remainingTonight) {
-      if (activeOnBoard) {
-        const onBoardNight = getDeliverableNight(activeOnBoard, nightKey)
+      if (activeOnBoardAfterRelease) {
+        const onBoardNight = getDeliverableNight(activeOnBoardAfterRelease, nightKey)
         if (onBoardNight?.ninaSequenceJson) {
           const delivered = await tryDeliverProjectSubSessionTonight(
             status,
             nightKey,
-            activeOnBoard,
-            activeOnBoard
+            activeOnBoardAfterRelease,
+            activeOnBoardAfterRelease
           )
           if (delivered) return delivered
         }
@@ -455,7 +481,7 @@ export async function GET() {
           status,
           nightKey,
           project,
-          activeOnBoard
+          activeOnBoardAfterRelease
         )
         if (delivered) return delivered
       }

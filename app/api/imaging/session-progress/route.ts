@@ -10,6 +10,7 @@ import { reconcilePendingScheduleStatus } from '@/lib/imaging-queue-reconcile'
 import { hasRemainingTonightImagingWork } from '@/lib/imaging-tonight-complete'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import {
+  expireMissedScheduledProjectNights,
   getProjectByNightSubId,
   markNightCompleted,
 } from '@/lib/imaging-project-store'
@@ -101,6 +102,7 @@ export function OPTIONS() {
  * Body: JSON or text/plain (stored under `detail.text` when not JSON).
  */
 export async function POST(request: NextRequest) {
+  await expireMissedScheduledProjectNights()
   if (!authorized(request)) {
     const basic = parseBasicCredentials(request.headers.get('authorization'))
     void appendAuditLog({

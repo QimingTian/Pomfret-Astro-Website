@@ -1,7 +1,7 @@
 import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { sendSessionFailedEmail } from '@/lib/imaging-completion-email'
 import { publishProgress } from '@/lib/imaging-progress-live'
-import { markNightFailed } from '@/lib/imaging-project-store'
+import { listProjects, markNightFailed } from '@/lib/imaging-project-store'
 import { notifyProjectNightFailedEmail } from '@/lib/imaging-project-night-email'
 import { getInProgressProjectNightSubId } from '@/lib/imaging-session-progress-queue'
 import {
@@ -97,16 +97,41 @@ async function notifySessionFailed(snapshot: FailedBoardSnapshot, reason: string
   })
 }
 
-/**
- * Project board rows are not imaging sessions — only sub-sessions are. Never auto-fail the board
- * on observatory status flicker (busy→ready between subs is normal).
- */
+/** Project board rows are containers; busy→ready fails the active sub-session, not the board row. */
 export async function inactiveProjectBoardSkipIds(): Promise<Set<string>> {
   const skip = new Set<string>()
   for (const entry of await listBoardEntries()) {
     if (entry.projectMode === true) skip.add(entry.id)
   }
   return skip
+}
+
+/** Same rule as normal board `in_progress` on busy→ready, applied per project sub-session id. */
+export async function failInProgressProjectSubSessions(reason: string): Promise<string[]> {
+  const failed: string[] = []
+  for (const project of await listProjects()) {
+    for (const night of project.nights) {
+      if (night.status !== 'in_progress') continue
+      await markNightFailed(project.id, night.id)
+      await recordSessionFailure(night.id, reason)
+      failed.push(night.id)
+      void appendAuditLog({
+        kind: 'queue.status',
+        message: `Project sub-session ${night.id} marked failed (${reason}).`,
+        detail: { sessionId: night.id, projectId: project.id, reason },
+      })
+      notifyProjectNightFailedEmail(
+        {
+          queueId: night.id,
+          target: project.target,
+          email: project.email,
+          firstName: project.firstName,
+        },
+        new Date().toISOString()
+      )
+    }
+  }
+  return failed
 }
 
 /** Mark every board `in_progress` row failed and push the red terminal line. */
@@ -129,6 +154,7 @@ export async function failInProgressBoardSessions(
 export async function onObservatoryFinalStatusChanged(final: ObservatoryStatus): Promise<void> {
   const previous = await readLastFinalStatus()
   if (previous === 'busy_in_use' && final === 'ready') {
+    await failInProgressProjectSubSessions('observatory_busy_to_ready')
     await failInProgressBoardSessions(undefined, 'observatory_busy_to_ready')
   }
   await writeLastFinalStatus(final)

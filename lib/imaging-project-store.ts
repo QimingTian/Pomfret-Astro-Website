@@ -26,6 +26,8 @@ export type ProjectNight = {
   plannedStartIso?: string | null
   completedAt?: string
   failedAt?: string
+  /** Set when NINA has pulled this sub-session JSON (same role as queue consume for normal sessions). */
+  ninaDeliveredAt?: string
   scheduleStripNightKey?: string | null
   scheduleBarStartMs?: number | null
   scheduleBarEndMs?: number | null
@@ -156,19 +158,25 @@ export async function expireMissedScheduledProjectNights(now = new Date()): Prom
   if (changed) await writeProjects(next)
 }
 
-/** Drop on-board hold when tonight has no schedulable / active sub-session left. */
+/** Drop on-board hold when tonight has no active or still-scheduled sub-session left. */
 export async function releaseOnBoardProjectIfNothingDeliverable(
   projectId: string,
   stripNightKey: string
 ): Promise<void> {
   const project = await getProjectById(projectId)
   if (!project?.onBoard) return
-  if (getDeliverableNight(project, stripNightKey)) return
+  const matchesStrip = (n: ProjectNight) => !stripNightKey || n.nightKey === stripNightKey
+  const stillTonight = project.nights.some(
+    (n) => matchesStrip(n) && (n.status === 'in_progress' || n.status === 'scheduled')
+  )
+  if (stillTonight) return
   await patchProject(projectId, { onBoard: false })
 }
 
-/** True while this project still has a deliverable sub tonight and holds the altitude slot. */
+/** True while this project is imaging or still has an undelivered sub tonight (altitude hold). */
 export function projectHoldsQueueTonight(project: ImagingProject, stripNightKey: string): boolean {
+  const matchesStrip = (n: ProjectNight) => !stripNightKey || n.nightKey === stripNightKey
+  if (project.nights.some((n) => matchesStrip(n) && n.status === 'in_progress')) return true
   return getDeliverableNight(project, stripNightKey) != null
 }
 
@@ -625,9 +633,10 @@ export async function markProjectOnBoard(projectId: string): Promise<void> {
 export async function markNightInProgress(projectId: string, nightSubId: string): Promise<void> {
   const project = await getProjectById(projectId)
   if (!project) return
+  const deliveredAt = new Date().toISOString()
   const nights = project.nights.map((n) =>
     n.id === nightSubId
-      ? { ...n, status: 'in_progress' as const }
+      ? { ...n, status: 'in_progress' as const, ninaDeliveredAt: n.ninaDeliveredAt ?? deliveredAt }
       : n.status === 'in_progress'
         ? { ...n, status: 'scheduled' as const }
         : n
@@ -731,9 +740,7 @@ export function getDeliverableNight(
 ): ProjectNight | undefined {
   const matchesStrip = (n: ProjectNight) => !stripNightKey || n.nightKey === stripNightKey
 
-  const inProgress = project.nights.find((n) => n.status === 'in_progress' && matchesStrip(n))
-  if (inProgress?.ninaSequenceJson) return inProgress
-
+  // Like normal queue consume: once delivered (`in_progress`), do not offer JSON again from this endpoint.
   const scheduled = project.nights
     .filter((n) => n.status === 'scheduled' && n.ninaSequenceJson && matchesStrip(n))
     .sort((a, b) => {

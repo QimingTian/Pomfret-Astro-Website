@@ -501,8 +501,9 @@ One **project** = one queue entry + `imaging-projects` state in KV. Many **sub-s
 
 #### NINA delivery
 
-- **First sub-session:** queue row is consumed once, then JSON is delivered (same finalize path as later sessions).
-- **Later sub-sessions:** queue row already consumed; `GET /api/imaging/nina-sequence` delivers the next **scheduled** sub-session by sub-session id (`{projectId}::night-{n}`).
+- **Queue row:** consumed once on the project’s first sub-session (same as before).
+- **Each sub-session JSON:** delivered **once** (`scheduled` → `in_progress`, then `GET` returns 409 for that sub — same idea as normal consume). Agent re-polls get 409, not another start email.
+- **Progress / preview:** use sub-session id `{projectId}::night-{n}` in `PomfretAstro.QueueId` (not the parent project id).
 
 #### End of night
 

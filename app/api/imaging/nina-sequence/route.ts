@@ -23,7 +23,7 @@ import {
 } from '@/lib/imaging-project-store'
 import { publishProgress } from '@/lib/imaging-progress-live'
 import { failInProgressBoardSessions } from '@/lib/imaging-session-failure'
-import { boardUpsertInProgress, listBoardEntries } from '@/lib/imaging-session-board'
+import { boardMarkDownloaded, boardUpsertInProgress, listBoardEntries } from '@/lib/imaging-session-board'
 import {
   consumeRequestById,
   listPending,
@@ -176,16 +176,20 @@ async function deliverProjectSubSessionJson(
   const match = await getProjectByNightSubId(night.id)
   const projectRef = match?.project ?? project
   const nightRef = match?.night ?? night
-  const isFirstDelivery = nightRef.status !== 'in_progress'
+  if (nightRef.status !== 'scheduled') {
+    return NextResponse.json(
+      { error: 'Project sub-session sequence already delivered; not available for re-download.' },
+      { status: 409, headers: imagingCorsHeadersResolved() }
+    )
+  }
 
   if (!projectRef.onBoard) {
     await markProjectOnBoard(projectRef.id)
   }
-  if (isFirstDelivery) {
-    await markNightInProgress(projectRef.id, nightRef.id)
+  await markNightInProgress(projectRef.id, nightRef.id)
 
-    const startedAtIso = new Date().toISOString()
-    await boardUpsertInProgress({
+  const startedAtIso = new Date().toISOString()
+  await boardUpsertInProgress({
       id: projectRef.id,
       target: projectRef.target,
       createdAt: projectRef.createdAt,
@@ -204,43 +208,42 @@ async function deliverProjectSubSessionJson(
       estimatedDurationSeconds: tonightDurationSecondsFromPlans(nightRef.filterPlansTonight),
       sessionPasswordHash: projectRef.sessionPasswordHash,
       userId: projectRef.userId,
-      projectMode: true,
-    })
+    projectMode: true,
+  })
+  await boardMarkDownloaded(projectRef.id)
 
-    void sendSessionStartedEmail({
-      queueId: nightRef.id,
-      target: projectRef.target,
-      email: projectRef.email,
-      firstName: projectRef.firstName,
-      startedAtIso,
-    }).then((result) => {
-      if (!result.sent) {
-        return appendAuditLog({
-          kind: 'session.progress',
-          message: `Start email skipped/failed for ${nightRef.id}: ${result.reason ?? 'unknown reason'}`,
-          detail: { queueId: nightRef.id, projectId: projectRef.id, reason: result.reason ?? null },
-        })
-      }
+  void sendSessionStartedEmail({
+    queueId: nightRef.id,
+    target: projectRef.target,
+    email: projectRef.email,
+    firstName: projectRef.firstName,
+    startedAtIso,
+  }).then((result) => {
+    if (!result.sent) {
       return appendAuditLog({
         kind: 'session.progress',
-        message: `Start email sent for ${nightRef.id}.`,
-        detail: { queueId: nightRef.id, projectId: projectRef.id, email: projectRef.email ?? null },
+        message: `Start email skipped/failed for ${nightRef.id}: ${result.reason ?? 'unknown reason'}`,
+        detail: { queueId: nightRef.id, projectId: projectRef.id, reason: result.reason ?? null },
       })
+    }
+    return appendAuditLog({
+      kind: 'session.progress',
+      message: `Start email sent for ${nightRef.id}.`,
+      detail: { queueId: nightRef.id, projectId: projectRef.id, email: projectRef.email ?? null },
     })
+  })
 
-    publishProgress(nightRef.id, { type: 'status', queueStatus: 'in_progress' })
+  publishProgress(nightRef.id, { type: 'status', queueStatus: 'in_progress' })
 
-    void appendAuditLog({
-      kind: 'nina.delivered',
-      message: auditMessage,
-      detail: {
-        projectId: projectRef.id,
-        subSessionId: nightRef.id,
-        sessionIndex: nightRef.nightIndex,
-        firstDelivery: true,
-      },
-    })
-  }
+  void appendAuditLog({
+    kind: 'nina.delivered',
+    message: auditMessage,
+    detail: {
+      projectId: projectRef.id,
+      subSessionId: nightRef.id,
+      sessionIndex: nightRef.nightIndex,
+    },
+  })
 
   return new NextResponse(nightRef.ninaSequenceJson!, {
     status: 200,

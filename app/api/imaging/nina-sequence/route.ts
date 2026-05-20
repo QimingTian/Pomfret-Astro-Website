@@ -24,6 +24,7 @@ import {
   VARIABLE_STAR_SESSION_OVERHEAD_SEC,
   type ImagingRequest,
 } from '@/lib/imaging-queue-store'
+import type { ObservatoryStatus } from '@/lib/observatory-status-store'
 import {
   getObservatoryStatus,
   isObservatoryReady,
@@ -75,6 +76,55 @@ function sequenceJsonFor(r: ImagingRequest): string | null {
     })
   }
   return null
+}
+
+/** Night 2+: queue row was consumed on night 1 — deliver sub-session ids without re-selecting the queue row. */
+function shouldDeliverProjectNightDirect(
+  project: ImagingProject,
+  pending: ImagingRequest[]
+): boolean {
+  if (project.onBoard) return true
+  return !pending.some((r) => r.id === project.id)
+}
+
+/** Try delivering a scheduled/in-progress project sub-session for tonight (on-board projects first). */
+async function tryDeliverProjectNightTonight(
+  status: ObservatoryStatus,
+  nightKey: string,
+  project: ImagingProject,
+  activeOnBoard: ImagingProject | undefined
+): Promise<NextResponse | null> {
+  const night = getDeliverableNight(project, nightKey)
+  if (!night?.ninaSequenceJson) {
+    if (activeOnBoard && activeOnBoard.id === project.id) {
+      return deliverNextEligibleInProgressProjectNight(status, activeOnBoard.id, nightKey)
+    }
+    return null
+  }
+  if (!isObservatoryReady(status)) {
+    return NextResponse.json(
+      { error: 'Observatory is closed' },
+      { status: 409, headers: imagingCorsHeadersResolved() }
+    )
+  }
+  const altCheck = isAltitudeAllowed(project.raHours, project.decDeg)
+  if (!altCheck.ok) {
+    if (activeOnBoard?.id === project.id) {
+      const successor = await deliverNextEligibleInProgressProjectNight(status, project.id, nightKey)
+      if (successor) return successor
+    }
+    return NextResponse.json(
+      {
+        error: `Target altitude ${altCheck.altitudeDeg.toFixed(2)}° is below ${altCheck.minAltitudeDeg}° (${project.target}).`,
+      },
+      { status: 409, headers: imagingCorsHeadersResolved() }
+    )
+  }
+  return deliverProjectNightJson(
+    project,
+    night,
+    `NINA project night delivered: ${project.target} night ${night.nightIndex} (${night.id}).`
+  )
 }
 
 /** When the on-board project target is too low, try the next in-progress project whose target is up. */
@@ -202,6 +252,17 @@ export async function GET() {
   const activeOnBoard = await getActiveOnBoardProject()
   const projectForSubDelivery = await getProjectAwaitingSubSessionDelivery(nightKey)
 
+  const directProject = projectForSubDelivery ?? activeOnBoard
+  if (directProject && shouldDeliverProjectNightDirect(directProject, pending)) {
+    const delivered = await tryDeliverProjectNightTonight(
+      status,
+      nightKey,
+      directProject,
+      activeOnBoard
+    )
+    if (delivered) return delivered
+  }
+
   const scheduledTonight = pending
     .filter(
       (r) =>
@@ -253,39 +314,14 @@ export async function GET() {
       activeOnBoard ?? projectForSubDelivery
     )
 
-    // Night 2+ delivers via project sub-session ids after the queue row was consumed on night 1.
-    // Try that before blocking behind other scheduled queue rows (which only apply below 30°).
-    if (remainingTonight && projectForSubDelivery) {
-      const night = getDeliverableNight(projectForSubDelivery, nightKey)
-      if (night?.ninaSequenceJson) {
-        if (!isObservatoryReady(status)) {
-          return NextResponse.json(
-            { error: 'Observatory is closed' },
-            { status: 409, headers: imagingCorsHeadersResolved() }
-          )
-        }
-        const altCheck = isAltitudeAllowed(
-          projectForSubDelivery.raHours,
-          projectForSubDelivery.decDeg
-        )
-        if (!altCheck.ok) {
-          const successor = await deliverNextEligibleInProgressProjectNight(
-            status,
-            projectForSubDelivery.id,
-            nightKey
-          )
-          if (successor) return successor
-        } else {
-          return deliverProjectNightJson(
-            projectForSubDelivery,
-            night,
-            `NINA project night delivered: ${projectForSubDelivery.target} night ${night.nightIndex} (${night.id}).`
-          )
-        }
-      } else if (activeOnBoard && activeOnBoard.id === projectForSubDelivery.id) {
-        const successor = await deliverNextEligibleInProgressProjectNight(status, activeOnBoard.id, nightKey)
-        if (successor) return successor
-      }
+    if (projectForSubDelivery && shouldDeliverProjectNightDirect(projectForSubDelivery, pending)) {
+      const delivered = await tryDeliverProjectNightTonight(
+        status,
+        nightKey,
+        projectForSubDelivery,
+        activeOnBoard
+      )
+      if (delivered) return delivered
     }
 
     if (scheduledTonight.length > 0 && remainingTonight) {
@@ -374,6 +410,18 @@ export async function GET() {
 
   const consumed = await consumeRequestById(selected.id)
   if (!consumed) {
+    if (selected.projectMode) {
+      const project = await getProjectById(selected.id)
+      if (project && shouldDeliverProjectNightDirect(project, pending)) {
+        const delivered = await tryDeliverProjectNightTonight(
+          status,
+          nightKey,
+          project,
+          activeOnBoard
+        )
+        if (delivered) return delivered
+      }
+    }
     return NextResponse.json(
       {
         error:

@@ -908,7 +908,14 @@ def run_loop() -> None:
                     sleep_between_polls()
                     continue
                 if ex.code == 409:
-                    log("Sequence not ready yet (HTTP 409, server-side gate not met).")
+                    detail = ""
+                    try:
+                        body = ex.read().decode("utf-8", errors="replace").strip()
+                        if body:
+                            detail = f" — {body[:500]}"
+                    except Exception:
+                        pass
+                    log(f"Sequence not ready yet (HTTP 409, server-side gate not met){detail}.")
                     sleep_between_polls()
                     continue
                 raise

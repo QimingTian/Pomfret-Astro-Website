@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react'
 const GALLERY_IMAGES: Array<{ file: string; description: string }> = [
   { file: 'photo1.png', description: 'M31 | 14.08h | LRGB' },
   { file: 'photo2.png', description: 'IC1805 | 35h | SHO' },
+  { file: 'photo3.png', description: 'Markarians Chain | 14.16h RGB + 11h Ha | HaRGB' },
 ]
 
 export default function GalleryPage() {
@@ -37,7 +38,7 @@ export default function GalleryPage() {
       <div className="flex-1 pb-8 min-h-0">
         <div className="mt-6">
           {images.length > 0 ? (
-            <div className="grid gap-0 sm:grid-cols-2">
+            <div className="grid gap-0 sm:grid-cols-3">
               {images.map((img, index) => (
                 <div key={img.src} className="relative overflow-visible">
                   <button

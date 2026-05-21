@@ -1,6 +1,7 @@
 import { listProjects } from '@/lib/imaging-project-store'
 import { listBoardEntries } from '@/lib/imaging-session-board'
 import { listAll, type ImagingRequest } from '@/lib/imaging-queue-store'
+import { syncMemberSessionHistoryArchive } from '@/lib/member-session-history-archive'
 import { normalizeMemberEmail } from '@/lib/member-store'
 
 export type MemberSessionHistoryRow = {
@@ -26,12 +27,26 @@ function belongsToMember(row: Ownable, userId: string, userEmail: string): boole
   return false
 }
 
-function displayStatusForQueue(r: ImagingRequest): string {
+export function displayStatusForQueue(r: ImagingRequest): string {
   if (r.status === 'rejected') return 'rejected'
   if (r.status === 'pending' && r.scheduleReasons && r.scheduleReasons.length > 0) {
     return 'unscheduled'
   }
   return r.status
+}
+
+export function memberSessionHistoryRowFromQueue(r: ImagingRequest): MemberSessionHistoryRow {
+  return {
+    id: r.id,
+    kind: r.projectMode ? 'project' : 'queue',
+    target: r.target,
+    status: r.status,
+    displayStatus: displayStatusForQueue(r),
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+    projectMode: r.projectMode ?? false,
+    ...(r.scheduleReasons?.length ? { scheduleReasons: r.scheduleReasons } : {}),
+  }
 }
 
 export async function listMemberSessionHistory(
@@ -99,5 +114,6 @@ export async function listMemberSessionHistory(
     }
   }
 
-  return Array.from(byId.values()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  const live = Array.from(byId.values()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  return syncMemberSessionHistoryArchive(userId, live)
 }

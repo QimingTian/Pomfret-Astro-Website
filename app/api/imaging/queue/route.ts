@@ -1,5 +1,7 @@
 import { NextRequest } from 'next/server'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
+import { memberSessionHistoryRowFromQueue } from '@/lib/member-session-history'
+import { recordMemberSessionHistory } from '@/lib/member-session-history-archive'
 import { requireUser } from '@/lib/member-auth'
 import {
   imagingCorsOptions,
@@ -299,6 +301,10 @@ export async function POST(request: NextRequest) {
     !unscheduledByWeather
   ) {
     await markQueueRejected(result.id, insight.reasons)
+    const rejectedRow = await getRequestById(result.id)
+    if (rejectedRow?.userId) {
+      void recordMemberSessionHistory(rejectedRow.userId, memberSessionHistoryRowFromQueue(rejectedRow))
+    }
     const reasonLine = insight.reasons.length > 0 ? insight.reasons.join(' ') : 'No schedulable slot tonight.'
     void appendAuditLog({
       kind: 'queue.rejected',
@@ -363,5 +369,9 @@ export async function POST(request: NextRequest) {
   })
 
   const persisted = await getRequestById(result.id)
-  return withImagingCors({ ok: true as const, request: toPublicImagingRequest(persisted ?? result) }, 201)
+  const finalRow = persisted ?? result
+  if (finalRow.userId) {
+    void recordMemberSessionHistory(finalRow.userId, memberSessionHistoryRowFromQueue(finalRow))
+  }
+  return withImagingCors({ ok: true as const, request: toPublicImagingRequest(finalRow) }, 201)
 }

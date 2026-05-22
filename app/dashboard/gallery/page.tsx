@@ -2,8 +2,6 @@
 
 import { useEffect, useState } from 'react'
 
-// Add image filenames here (place files in /public/gallery/)
-// Example: put your photos in website/public/gallery and name them to match below.
 const GALLERY_IMAGES: Array<{ file: string; description: string }> = [
   { file: 'photo1.png', description: 'M31 | 14.08h | LRGB' },
   { file: 'photo2.png', description: 'IC1805 | 35h | SHO' },

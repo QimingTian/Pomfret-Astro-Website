@@ -7,9 +7,11 @@ import {
   gallerySubmissionR2Enabled,
   getGallerySubmissionObjectBuffer,
   GALLERY_SUBMISSION_MAX_BYTES,
+  GALLERY_SUBMISSION_SERVER_UPLOAD_MAX_BYTES,
   headGallerySubmissionObject,
-  normalizeGallerySubmissionContentType,
+  inferGallerySubmissionContentType,
   pendingSubmissionStorageKey,
+  putGallerySubmissionObject,
 } from '@/lib/gallery-submission-r2'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 import type { MemberUser } from '@/lib/member-store'
@@ -96,7 +98,13 @@ export async function createGallerySubmission(input: {
   contentType: string
   fileSize: number
 }): Promise<
-  | { ok: true; submission: GallerySubmission; uploadUrl: string }
+  | {
+      ok: true
+      submission: GallerySubmission
+      uploadMethod: 'server' | 'presigned'
+      contentType: string
+      uploadUrl?: string
+    }
   | { ok: false; error: string }
 > {
   const description = input.description.trim()
@@ -104,7 +112,7 @@ export async function createGallerySubmission(input: {
   if (description.length > 500) return { ok: false, error: 'Description is too long.' }
 
   const fileName = input.fileName.trim() || 'submission.png'
-  const contentType = normalizeGallerySubmissionContentType(input.contentType)
+  const contentType = inferGallerySubmissionContentType(input.contentType, fileName)
   if (!contentType) return { ok: false, error: 'Unsupported image type. Use PNG, JPEG, or WebP.' }
 
   if (!Number.isFinite(input.fileSize) || input.fileSize < 1) {
@@ -117,11 +125,16 @@ export async function createGallerySubmission(input: {
     return { ok: false, error: 'File is too large (max 50 MB).' }
   }
 
+  const useServerUpload = input.fileSize <= GALLERY_SUBMISSION_SERVER_UPLOAD_MAX_BYTES
   const id = crypto.randomUUID()
   const ext = extensionForContentType(contentType)
   const storageKey = pendingSubmissionStorageKey(id, ext)
-  const uploadUrl = await createGallerySubmissionPresignedPut(storageKey, contentType, input.fileSize)
-  if (!uploadUrl) return { ok: false, error: 'Could not prepare upload.' }
+  let uploadUrl: string | undefined
+  if (!useServerUpload) {
+    const presigned = await createGallerySubmissionPresignedPut(storageKey, contentType, input.fileSize)
+    if (!presigned) return { ok: false, error: 'Could not prepare upload.' }
+    uploadUrl = presigned
+  }
 
   const submission: GallerySubmission = {
     id,
@@ -138,7 +151,36 @@ export async function createGallerySubmission(input: {
 
   const prev = await readSubmissions()
   await writeSubmissions([submission, ...prev])
-  return { ok: true, submission, uploadUrl }
+  return {
+    ok: true,
+    submission,
+    uploadMethod: useServerUpload ? 'server' : 'presigned',
+    contentType,
+    uploadUrl,
+  }
+}
+
+export async function uploadGallerySubmissionBytes(
+  submissionId: string,
+  userId: string,
+  body: Buffer
+): Promise<{ ok: true; submission: GallerySubmission } | { ok: false; error: string }> {
+  const prev = await readSubmissions()
+  const idx = prev.findIndex((s) => s.id === submissionId)
+  if (idx === -1) return { ok: false, error: 'Submission not found.' }
+  const current = prev[idx]
+  if (current.userId !== userId) return { ok: false, error: 'Not allowed.' }
+  if (current.status !== 'pending') return { ok: false, error: 'Submission is not pending.' }
+  if (current.uploadComplete) return { ok: true, submission: current }
+  if (body.length < 1) return { ok: false, error: 'Empty upload.' }
+  if (body.length > GALLERY_SUBMISSION_SERVER_UPLOAD_MAX_BYTES) {
+    return { ok: false, error: 'File is too large for direct upload (max 4 MB). Export a smaller JPG.' }
+  }
+
+  const stored = await putGallerySubmissionObject(current.storageKey, current.contentType ?? 'image/png', body)
+  if (!stored) return { ok: false, error: 'Could not store upload.' }
+
+  return completeGallerySubmissionUpload(submissionId, userId)
 }
 
 export async function completeGallerySubmissionUpload(

@@ -38,6 +38,8 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     ok: true as const,
     submissionId: result.submission.id,
+    uploadMethod: result.uploadMethod,
+    contentType: result.contentType,
     uploadUrl: result.uploadUrl,
   })
 }

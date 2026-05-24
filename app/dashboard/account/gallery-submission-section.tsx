@@ -41,28 +41,59 @@ export function GallerySubmissionSection({ className = '' }: { className?: strin
         }),
       })
       const createData = await createRes.json().catch(() => ({}))
-      if (!createRes.ok || createData?.ok !== true || typeof createData.uploadUrl !== 'string') {
+      if (!createRes.ok || createData?.ok !== true || typeof createData.submissionId !== 'string') {
         throw new Error(typeof createData.error === 'string' ? createData.error : 'Could not start upload.')
       }
 
-      const putRes = await fetch(createData.uploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': file.type },
-        body: file,
-      })
-      if (!putRes.ok) {
-        throw new Error('Image upload failed. Check your connection and try again.')
-      }
+      const uploadContentType =
+        typeof createData.contentType === 'string' && createData.contentType
+          ? createData.contentType
+          : file.type
 
-      const completeRes = await fetch(
-        `/api/member/gallery-submissions/${encodeURIComponent(createData.submissionId)}/complete`,
-        { method: 'POST', credentials: 'include' }
-      )
-      const completeData = await completeRes.json().catch(() => ({}))
-      if (!completeRes.ok || completeData?.ok !== true) {
-        throw new Error(
-          typeof completeData.error === 'string' ? completeData.error : 'Could not finalize upload.'
+      if (createData.uploadMethod === 'server') {
+        const uploadRes = await fetch(
+          `/api/member/gallery-submissions/${encodeURIComponent(createData.submissionId)}/upload`,
+          {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': uploadContentType || 'application/octet-stream' },
+            body: file,
+          }
         )
+        const uploadData = await uploadRes.json().catch(() => ({}))
+        if (!uploadRes.ok || uploadData?.ok !== true) {
+          throw new Error(typeof uploadData.error === 'string' ? uploadData.error : 'Image upload failed.')
+        }
+      } else {
+        if (typeof createData.uploadUrl !== 'string') {
+           throw new Error('Could not prepare upload.')
+        }
+        let putRes: Response
+        try {
+          putRes = await fetch(createData.uploadUrl, {
+            method: 'PUT',
+            headers: { 'Content-Type': uploadContentType },
+            body: file,
+          })
+        } catch {
+          throw new Error(
+            'Image upload blocked by the browser. Try a file under 4 MB, or ask an admin to configure R2 CORS.'
+          )
+        }
+        if (!putRes.ok) {
+          throw new Error('Image upload failed. Try a smaller JPG or PNG under 4 MB.')
+        }
+
+        const completeRes = await fetch(
+          `/api/member/gallery-submissions/${encodeURIComponent(createData.submissionId)}/complete`,
+          { method: 'POST', credentials: 'include' }
+        )
+        const completeData = await completeRes.json().catch(() => ({}))
+        if (!completeRes.ok || completeData?.ok !== true) {
+          throw new Error(
+            typeof completeData.error === 'string' ? completeData.error : 'Could not finalize upload.'
+          )
+        }
       }
 
       setDescription('')
@@ -70,7 +101,8 @@ export function GallerySubmissionSection({ className = '' }: { className?: strin
       if (fileInputRef.current) fileInputRef.current.value = ''
       setSuccess('Submitted. An admin will review your work.')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed.')
+      const message = err instanceof Error ? err.message : 'Upload failed.'
+      setError(message === 'Load failed' ? 'Image upload failed. Try a file under 4 MB.' : message)
     } finally {
       setBusy(false)
     }

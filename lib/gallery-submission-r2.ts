@@ -3,6 +3,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  PutBucketCorsCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3'
@@ -10,8 +11,15 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
 const DEFAULT_SIGN_TTL_SEC = 600
 export const GALLERY_SUBMISSION_MAX_BYTES = 50 * 1024 * 1024
+/** Vercel serverless request body limit is ~4.5 MB; keep a safe margin for server-side uploads. */
+export const GALLERY_SUBMISSION_SERVER_UPLOAD_MAX_BYTES = 4 * 1024 * 1024
 
 const ALLOWED_CONTENT_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
+const GALLERY_SUBMISSION_CORS_ORIGINS = [
+  'https://www.pomfretastro.org',
+  'https://pomfretastro.org',
+  'http://localhost:3000',
+]
 
 export function gallerySubmissionR2Enabled(): boolean {
   return Boolean(
@@ -46,7 +54,18 @@ function createR2Client(): S3Client {
 
 export function normalizeGallerySubmissionContentType(raw: string): string | null {
   const t = raw.trim().toLowerCase()
+  if (t === 'image/jpg') return 'image/jpeg'
   if (ALLOWED_CONTENT_TYPES.has(t)) return t
+  return null
+}
+
+export function inferGallerySubmissionContentType(contentType: string, fileName: string): string | null {
+  const normalized = normalizeGallerySubmissionContentType(contentType)
+  if (normalized) return normalized
+  const ext = fileName.split('.').pop()?.trim().toLowerCase() ?? ''
+  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg'
+  if (ext === 'png') return 'image/png'
+  if (ext === 'webp') return 'image/webp'
   return null
 }
 
@@ -75,6 +94,56 @@ export async function createGallerySubmissionPresignedPut(
     ContentLength: fileSize,
   })
   return getSignedUrl(client, command, { expiresIn: signTtlSec() })
+}
+
+export async function putGallerySubmissionObject(
+  storageKey: string,
+  contentType: string,
+  body: Buffer
+): Promise<boolean> {
+  if (!gallerySubmissionR2Enabled()) return false
+  if (body.length < 1 || body.length > GALLERY_SUBMISSION_MAX_BYTES) return false
+  try {
+    const client = createR2Client()
+    await client.send(
+      new PutObjectCommand({
+        Bucket: r2Bucket(),
+        Key: storageKey,
+        ContentType: contentType,
+        Body: body,
+        ContentLength: body.length,
+      })
+    )
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function configureGallerySubmissionR2Cors(): Promise<boolean> {
+  if (!gallerySubmissionR2Enabled()) return false
+  try {
+    const client = createR2Client()
+    await client.send(
+      new PutBucketCorsCommand({
+        Bucket: r2Bucket(),
+        CORSConfiguration: {
+          CORSRules: [
+            {
+              AllowedOrigins: GALLERY_SUBMISSION_CORS_ORIGINS,
+              AllowedMethods: ['PUT', 'GET', 'HEAD'],
+              AllowedHeaders: ['*'],
+              ExposeHeaders: ['ETag'],
+              MaxAgeSeconds: 3600,
+            },
+          ],
+        },
+      })
+    )
+    return true
+  } catch {
+    return false
+  }
 }
 
 export async function headGallerySubmissionObject(

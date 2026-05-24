@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { DashboardPanel } from '@/app/dashboard/account/dashboard-panel'
 
 export function GallerySubmissionSection({ className = '' }: { className?: string }) {
@@ -10,6 +10,17 @@ export function GallerySubmissionSection({ className = '' }: { className?: strin
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!file) {
+      setPreviewUrl(null)
+      return
+    }
+    const url = URL.createObjectURL(file)
+    setPreviewUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [file])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -56,6 +67,7 @@ export function GallerySubmissionSection({ className = '' }: { className?: strin
 
       setDescription('')
       setFile(null)
+      if (fileInputRef.current) fileInputRef.current.value = ''
       setSuccess('Submitted. An admin will review your work.')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed.')
@@ -84,17 +96,23 @@ export function GallerySubmissionSection({ className = '' }: { className?: strin
           >
             Choose file
           </button>
-          {file ? <p className="mt-2 text-xs text-gray-500">{file.name}</p> : null}
+          {previewUrl ? (
+            <img
+              src={previewUrl}
+              alt=""
+              className="mt-2 max-h-48 w-auto max-w-full rounded-lg border border-white/10 object-contain"
+            />
+          ) : null}
         </div>
         <div>
-          <label className="mb-1 block text-xs text-gray-400">Description</label>
           <input
             type="text"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             disabled={busy}
             maxLength={500}
-            className="w-full rounded-lg border border-gray-600 bg-transparent px-3 py-2 text-sm text-white"
+            placeholder="Description"
+            className="w-full rounded-lg border border-gray-600 bg-transparent px-3 py-2 text-sm text-white placeholder:text-gray-500"
           />
         </div>
         {error ? <p className="text-sm text-red-400">{error}</p> : null}

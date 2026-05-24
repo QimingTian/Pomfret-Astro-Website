@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { DashboardPanel } from '@/app/dashboard/account/dashboard-panel'
 
 export function GallerySubmissionSection({ className = '' }: { className?: string }) {
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [description, setDescription] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [busy, setBusy] = useState(false)
@@ -65,20 +66,25 @@ export function GallerySubmissionSection({ className = '' }: { className?: strin
 
   return (
     <DashboardPanel title="Submit Gallery Work" className={className}>
-      <p className="mb-3 text-sm text-gray-400">
-        Upload your image and caption for gallery review. Approved work is added to the public gallery manually.
-      </p>
       <form className="boxed-fields space-y-3 max-w-xl" onSubmit={(e) => void handleSubmit(e)}>
         <div>
-          <label className="mb-1 block text-xs text-gray-400">Image (PNG, JPEG, or WebP, max 50 MB)</label>
           <input
+            ref={fileInputRef}
             type="file"
             accept="image/png,image/jpeg,image/webp"
             disabled={busy}
+            className="sr-only"
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            className="w-full text-sm text-gray-200 file:mr-2 file:rounded-full file:border file:border-gray-600 file:bg-[#151616] file:px-3 file:py-1 file:text-xs file:text-white"
           />
-          {file ? <p className="mt-1 text-xs text-gray-500">{file.name}</p> : null}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => fileInputRef.current?.click()}
+            className="rounded-full border border-white/25 bg-[#151616] px-4 py-2 text-sm font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-50"
+          >
+            Choose file
+          </button>
+          {file ? <p className="mt-2 text-xs text-gray-500">{file.name}</p> : null}
         </div>
         <div>
           <label className="mb-1 block text-xs text-gray-400">Description</label>
@@ -88,7 +94,6 @@ export function GallerySubmissionSection({ className = '' }: { className?: strin
             onChange={(e) => setDescription(e.target.value)}
             disabled={busy}
             maxLength={500}
-            placeholder="Target | exposure | processing"
             className="w-full rounded-lg border border-gray-600 bg-transparent px-3 py-2 text-sm text-white"
           />
         </div>

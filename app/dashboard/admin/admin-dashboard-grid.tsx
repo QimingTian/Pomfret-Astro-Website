@@ -6,6 +6,7 @@ import { AccountTwoColRow } from '@/app/dashboard/account/account-two-col-row'
 import { DashboardPanel } from '@/app/dashboard/account/dashboard-panel'
 import { AccountMemberGrid } from '@/app/dashboard/account/account-member-grid'
 import { AdminActivityLogPanel } from '@/app/dashboard/admin/admin-activity-log-panel'
+import { GalleryRequestsSection } from '@/app/dashboard/admin/gallery-requests-section'
 import { AllMembersSection } from '@/app/dashboard/admin/all-members-section'
 import { statusOptions, useAdminTools } from '@/app/dashboard/admin/use-admin-tools'
 
@@ -231,6 +232,10 @@ export function AdminDashboardGrid() {
           </DashboardPanel>
         }
       />
+
+      <AccountFullBleedRule />
+
+      <GalleryRequestsSection />
 
       <AccountFullBleedRule />
 

@@ -1,6 +1,7 @@
 'use client'
 
 import { AccountFullBleedRule } from '@/app/dashboard/account/account-full-bleed-rule'
+import { GallerySubmissionSection } from '@/app/dashboard/account/gallery-submission-section'
 import { AccountMemberGrid } from '@/app/dashboard/account/account-member-grid'
 import { AccountPageHeader } from '@/app/dashboard/account/account-page-header'
 import { AccountInfoSection } from '@/app/dashboard/account/account-info-section'
@@ -18,6 +19,8 @@ export function MemberAccountDashboard({ user }: { user: PublicMemberUser }) {
       <AccountMemberGrid />
 
       <AccountFullBleedRule />
+
+      <GallerySubmissionSection />
     </div>
   )
 }

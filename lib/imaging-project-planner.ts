@@ -815,9 +815,22 @@ function plansToScheduledNights(
       if (Number.isFinite(ta) && Number.isFinite(tb)) return ta - tb
       return a.nightIndex - b.nightIndex
     })
+
+  const nonScheduledMaxIndex = Math.max(
+    0,
+    ...project.nights
+      .filter((n) => n.nightKey !== nightKey || n.status !== 'scheduled')
+      .map((n) => n.nightIndex)
+  )
+  const reusedMaxIndex = Math.max(
+    0,
+    ...existingScheduled.slice(0, plans.length).map((n) => n.nightIndex)
+  )
+  let nextFreshIndex = Math.max(nonScheduledMaxIndex, reusedMaxIndex) + 1
+
   return plans.map((plan, i) => {
     const reuse = existingScheduled[i]
-    const nightIndex = reuse?.nightIndex ?? plan.nightIndex
+    const nightIndex = reuse?.nightIndex ?? nextFreshIndex++
     const nightId = reuse?.id ?? projectNightSubId(project.id, nightIndex)
     const sameFrames =
       reuse != null &&
@@ -867,17 +880,35 @@ export async function applyProjectTonightPlans(
       .map((n) => [n.id, subSessionScheduleFingerprint({ filterPlansTonight: n.filterPlansTonight })])
   )
   const subs = plansToScheduledNights(project, plans)
-  await replaceScheduledSubsForNightKey(projectId, nightKey, subs, {
-    clearReason: 'Replaced by updated tonight sub-session plan.',
-  })
-  for (let i = 0; i < plans.length; i++) {
-    const plan = plans[i]!
-    const sub = subs[i]
-    if (!sub) continue
-    const nextFp = subSessionScheduleFingerprint({ filterPlansTonight: plan.filterPlansTonight })
-    if (prevScheduled.get(sub.id) === nextFp) continue
-    logProjectSubSessionScheduled(project, { ...plan, nightIndex: sub.nightIndex }, sub.id)
+
+  const existingSorted = project.nights
+    .filter((n) => n.nightKey === nightKey && n.status === 'scheduled')
+    .sort((a, b) => a.nightIndex - b.nightIndex)
+  const unchanged =
+    subs.length === existingSorted.length &&
+    subs.every((s, i) => {
+      const e = existingSorted[i]!
+      return (
+        s.id === e.id &&
+        s.plannedStartIso === e.plannedStartIso &&
+        filterPlansFingerprint(s.filterPlansTonight) === filterPlansFingerprint(e.filterPlansTonight)
+      )
+    })
+
+  if (!unchanged) {
+    await replaceScheduledSubsForNightKey(projectId, nightKey, subs, {
+      clearReason: 'Replaced by updated tonight sub-session plan.',
+    })
+    for (let i = 0; i < plans.length; i++) {
+      const plan = plans[i]!
+      const sub = subs[i]
+      if (!sub) continue
+      const nextFp = subSessionScheduleFingerprint({ filterPlansTonight: plan.filterPlansTonight })
+      if (prevScheduled.get(sub.id) === nextFp) continue
+      logProjectSubSessionScheduled(project, { ...plan, nightIndex: sub.nightIndex }, sub.id)
+    }
   }
+
   const refreshed = await getProjectById(projectId)
   if (refreshed && (refreshed.status === 'pending' || refreshed.status === 'scheduled')) {
     await patchProject(projectId, { status: 'in_progress' })

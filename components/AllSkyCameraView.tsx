@@ -97,7 +97,8 @@ export default function AllSkyCameraView() {
   const streamURL = controller?.apiClient?.getStreamURL()
   const weather = useAppStore((s) => s.weather)
 
-  const [now, setNow] = useState(() => new Date())
+  // Start `now` as null so SSR and first client paint match; populate after mount.
+  const [now, setNow] = useState<Date | null>(null)
   const [lastFrameAt, setLastFrameAt] = useState<Date | null>(null)
   const [obsStatus, setObsStatus] = useState<ObservatoryApiStatus | null>(null)
 
@@ -107,6 +108,7 @@ export default function AllSkyCameraView() {
   const humidityPct = weather.humidityPercent ?? null
 
   useEffect(() => {
+    setNow(new Date())
     const id = window.setInterval(() => setNow(new Date()), 1000)
     return () => window.clearInterval(id)
   }, [])
@@ -197,7 +199,7 @@ export default function AllSkyCameraView() {
       >
         <p className="break-words">
           <span className={overlayTitleClass}>Current Time: </span>
-          <span className={overlayValueClass(false)}>{formatOverlayDateTime(now)}</span>
+          <span className={overlayValueClass(false)}>{now ? formatOverlayDateTime(now) : '—'}</span>
         </p>
         <p className="break-words">
           <span className={overlayTitleClass}>ASC View Last Updated: </span>

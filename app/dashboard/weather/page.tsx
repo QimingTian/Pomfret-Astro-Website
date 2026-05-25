@@ -96,24 +96,17 @@ function findMoonRiseSet(now: Date): { moonrise: Date | null; moonset: Date | nu
 
 /** NASA SVS Dial-A-Moon image URL for a given UTC instant. Real lunar photo with
  *  correct phase and libration, rendered hourly for each year by NASA's Scientific
- *  Visualization Studio. */
-const SVS_YEAR_IDS: Record<number, number> = {
-  2024: 5187,
-  2025: 5415,
-  2026: 5587,
-  2027: 5587, // placeholder; falls back to 2026 frames if 2027 not yet published
-}
-
+ *  Visualization Studio. We proxy through our own /api/moon-svs route so the user's
+ *  browser only contacts our origin (NASA's CDN can be slow or blocked on some
+ *  networks). The proxy caches aggressively on Vercel edge. */
 function nasaMoonImageUrl(when: Date): string {
+  const supported = new Set([2024, 2025, 2026])
   const utcYear = when.getUTCFullYear()
-  const year = SVS_YEAR_IDS[utcYear] ? utcYear : 2026
-  const visId = SVS_YEAR_IDS[year]!
-  const dir = `a${String(Math.floor(visId / 100) * 100).padStart(6, '0')}/a${String(visId).padStart(6, '0')}`
+  const year = supported.has(utcYear) ? utcYear : 2026
   const yearStartMs = Date.UTC(year, 0, 1, 0, 0, 0)
   const hourOfYear = Math.floor((when.getTime() - yearStartMs) / 3600000)
   const frame = Math.max(1, Math.min(8760, hourOfYear + 1))
-  const frameStr = String(frame).padStart(4, '0')
-  return `https://svs.gsfc.nasa.gov/vis/a000000/${dir}/frames/730x730_1x1_30p/moon.${frameStr}.jpg`
+  return `/api/moon-svs?year=${year}&frame=${frame}`
 }
 
 /* ------------------------------------------------------------------ */

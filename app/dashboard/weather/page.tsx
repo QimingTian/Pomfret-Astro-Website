@@ -197,18 +197,14 @@ function MoonSection() {
   return (
     <div>
       <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-4">Moon</h1>
-      <div
-        className="flex flex-col items-center rounded-lg border border-white/10 p-5 gap-3 justify-center"
-        style={{ aspectRatio: '4 / 3' }}
-      >
-        <div className="relative" style={{ width: 'min(60%, 220px)', aspectRatio: '1 / 1' }}>
+      <div className="flex flex-col items-center gap-3 justify-center">
+        <div className="relative w-full" style={{ maxWidth: '280px', aspectRatio: '1 / 1' }}>
           {imageUrl ? (
             /* eslint-disable-next-line @next/next/no-img-element */
             <img
               src={imageUrl}
               alt={`Moon at ${fmtSelected}`}
-              className="absolute inset-0 h-full w-full rounded-full object-cover"
-              style={{ filter: 'drop-shadow(0 0 16px rgba(180,180,200,0.18))' }}
+              className="absolute inset-0 h-full w-full object-contain"
             />
           ) : (
             <div className="absolute inset-0 rounded-full bg-white/5" />
@@ -396,8 +392,9 @@ export default function WeatherPage() {
         </div>
       )}
 
-      <div className="mt-8 border-t border-black/10 dark:border-white/10 pt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="mt-8 border-t border-black/10 dark:border-white/10 pt-8 grid grid-cols-1 md:grid-cols-[1fr_1px_1fr] gap-6">
         <NOAAGoesCloudMap />
+        <div className="hidden md:block bg-white/15" />
         <MoonSection />
       </div>
 

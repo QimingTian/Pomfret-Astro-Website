@@ -77,14 +77,42 @@ export function AdminDashboardGrid() {
           <DashboardPanel
             title="Log"
             action={
-              <button
-                type="button"
-                onClick={() => void t.loadLog()}
-                disabled={t.logLoading}
-                className="rounded-full border border-white/25 bg-[#151616] px-3 py-1 text-xs font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-50"
-              >
-                {t.logLoading ? '…' : 'Refresh'}
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (t.logEntries.length === 0) return
+                    const escape = (v: string) => `"${v.replace(/"/g, '""')}"`
+                    const header = 'Time (UTC),Kind,Message,Detail'
+                    const rows = t.logEntries.map((r) =>
+                      [
+                        escape(r.at),
+                        escape(r.kind),
+                        escape(r.message),
+                        escape(r.detail ? JSON.stringify(r.detail) : ''),
+                      ].join(',')
+                    )
+                    const blob = new Blob([header + '\n' + rows.join('\n')], { type: 'text/csv' })
+                    const a = document.createElement('a')
+                    a.href = URL.createObjectURL(blob)
+                    a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`
+                    a.click()
+                    URL.revokeObjectURL(a.href)
+                  }}
+                  disabled={t.logEntries.length === 0}
+                  className="rounded-full border border-white/25 bg-[#151616] px-3 py-1 text-xs font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-50"
+                >
+                  Export
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void t.loadLog()}
+                  disabled={t.logLoading}
+                  className="rounded-full border border-white/25 bg-[#151616] px-3 py-1 text-xs font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-50"
+                >
+                  {t.logLoading ? '…' : 'Refresh'}
+                </button>
+              </div>
             }
           >
             <AdminActivityLogPanel

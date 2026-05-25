@@ -12,9 +12,12 @@ type ParsedResolvedObject = {
 
 function degreesToRaParts(raDeg: number) {
   const totalSeconds = (raDeg / 15) * 3600
-  const hour = Math.floor(totalSeconds / 3600)
-  const minute = Math.floor((totalSeconds - hour * 3600) / 60)
-  const second = Number((totalSeconds - hour * 3600 - minute * 60).toFixed(2))
+  let hour = Math.floor(totalSeconds / 3600)
+  let minute = Math.floor((totalSeconds - hour * 3600) / 60)
+  let second = Number((totalSeconds - hour * 3600 - minute * 60).toFixed(2))
+  if (second >= 60) { second -= 60; minute += 1 }
+  if (minute >= 60) { minute -= 60; hour += 1 }
+  if (hour >= 24) hour -= 24
   return { hour, minute, second }
 }
 
@@ -22,9 +25,11 @@ function degreesToDecParts(decDeg: number) {
   const sign: '+' | '-' = decDeg >= 0 ? '+' : '-'
   const abs = Math.abs(decDeg)
   const totalSeconds = abs * 3600
-  const degree = Math.floor(totalSeconds / 3600)
-  const minute = Math.floor((totalSeconds - degree * 3600) / 60)
-  const second = Number((totalSeconds - degree * 3600 - minute * 60).toFixed(2))
+  let degree = Math.floor(totalSeconds / 3600)
+  let minute = Math.floor((totalSeconds - degree * 3600) / 60)
+  let second = Number((totalSeconds - degree * 3600 - minute * 60).toFixed(2))
+  if (second >= 60) { second -= 60; minute += 1 }
+  if (minute >= 60) { minute -= 60; degree += 1 }
   return { sign, degree, minute, second }
 }
 

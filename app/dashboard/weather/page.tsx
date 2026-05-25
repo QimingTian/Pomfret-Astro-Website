@@ -225,16 +225,7 @@ function MoonSection() {
             <p className="text-xs text-gray-500">Loading…</p>
           )}
         </div>
-        <div className="w-full px-1 flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setOffsetHours(0)}
-            disabled={nowMs == null}
-            className="shrink-0 text-xs text-gray-400 hover:text-white underline decoration-dotted underline-offset-2 disabled:opacity-50"
-            aria-label="Reset to now"
-          >
-            Now
-          </button>
+        <div className="w-full max-w-[240px] mt-1 flex items-center gap-2">
           <input
             type="range"
             min={-168}
@@ -246,6 +237,15 @@ function MoonSection() {
             className="flex-1 accent-white/80"
             aria-label="Scrub moon date and time"
           />
+          <button
+            type="button"
+            onClick={() => setOffsetHours(0)}
+            disabled={nowMs == null}
+            className="shrink-0 rounded-full border border-white/25 bg-[#151616] px-2.5 py-0.5 text-[11px] font-medium text-gray-300 hover:text-white hover:bg-[#1b1c1c] disabled:opacity-50"
+            aria-label="Reset to now"
+          >
+            Now
+          </button>
         </div>
         <div className="w-full grid grid-cols-3 gap-2 text-center text-xs text-gray-400">
           <div>

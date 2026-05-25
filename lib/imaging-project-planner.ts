@@ -828,7 +828,7 @@ function plansToScheduledNights(
   )
   let nextFreshIndex = Math.max(nonScheduledMaxIndex, reusedMaxIndex) + 1
 
-  return plans.map((plan, i) => {
+  const subs = plans.map((plan, i) => {
     const reuse = existingScheduled[i]
     const nightIndex = reuse?.nightIndex ?? nextFreshIndex++
     const nightId = reuse?.id ?? projectNightSubId(project.id, nightIndex)
@@ -848,6 +848,19 @@ function plansToScheduledNights(
       plannedStartIso,
     }
   })
+
+  // Fix any nightIndex gaps left by previous bugs (e.g. [1, 3] → [1, 2])
+  subs.sort((a, b) => a.nightIndex - b.nightIndex)
+  for (let i = 1; i < subs.length; i++) {
+    const expected = subs[i - 1]!.nightIndex + 1
+    if (subs[i]!.nightIndex > expected) {
+      subs[i]!.nightIndex = expected
+      subs[i]!.id = projectNightSubId(project.id, expected)
+      subs[i]!.ninaSequenceJson = buildNightNinaJson(project, subs[i]!.id, subs[i]!.filterPlansTonight)
+    }
+  }
+
+  return subs
 }
 
 export function subtractProjectTonightPlansFromFree(

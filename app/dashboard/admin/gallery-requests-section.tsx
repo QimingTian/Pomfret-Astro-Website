@@ -106,10 +106,6 @@ export function GalleryRequestsSection({ className = '' }: { className?: string 
       }
       className={className}
     >
-      <p className="mb-3 text-sm text-gray-400">
-        Download submissions, add images to <code className="text-gray-300">public/gallery</code>, update{' '}
-        <code className="text-gray-300">GALLERY_IMAGES</code>, then deploy.
-      </p>
       {error ? <p className="mb-2 text-sm text-red-400">{error}</p> : null}
       {submissions.length === 0 && !loading ? (
         <p className="text-sm text-gray-500">No pending gallery submissions.</p>

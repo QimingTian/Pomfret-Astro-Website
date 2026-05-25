@@ -123,13 +123,16 @@ function nasaMoonImageUrl(when: Date): string {
 function NOAAGoesCloudMap() {
   const store = useAppStore()
   const imageURL = 'https://cdn.star.nesdis.noaa.gov/GOES19/ABI/CONUS/GEOCOLOR/GOES19-CONUS-GEOCOLOR-625x375.gif'
-  const [refreshKey, setRefreshKey] = useState(Date.now())
+  // Start at 0 so SSR and first client paint produce identical markup. After mount we
+  // bump to a real timestamp to bust cache.
+  const [refreshKey, setRefreshKey] = useState(0)
 
   const handleImageLoad = () => {
     store.addLog({ module: 'noaa-goes', level: 'info', message: 'NOAA GOES satellite image loaded successfully' })
   }
 
   useEffect(() => {
+    setRefreshKey(Date.now())
     const interval = setInterval(() => {
       store.addLog({ module: 'noaa-goes', level: 'info', message: 'Auto-refreshing NOAA GOES satellite image' })
       setRefreshKey(Date.now())

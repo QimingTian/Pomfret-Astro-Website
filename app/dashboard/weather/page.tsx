@@ -94,62 +94,26 @@ function findMoonRiseSet(now: Date): { moonrise: Date | null; moonset: Date | nu
   return { moonrise, moonset }
 }
 
-/** Realistic SVG moon disc with radial gradient, crater texture, and soft terminator. */
-function MoonPhaseSvg({ fraction, size = 120 }: { fraction: number; size?: number }) {
-  const r = size / 2
-  const uid = `moon-${size}`
-  const waxing = fraction <= 0.5
-  const t = waxing ? fraction * 2 : (fraction - 0.5) * 2
+/** NASA SVS Dial-A-Moon image URL for a given UTC instant. Real lunar photo with
+ *  correct phase and libration, rendered hourly for each year by NASA's Scientific
+ *  Visualization Studio. */
+const SVS_YEAR_IDS: Record<number, number> = {
+  2024: 5187,
+  2025: 5415,
+  2026: 5587,
+  2027: 5587, // placeholder; falls back to 2026 frames if 2027 not yet published
+}
 
-  const sweep = waxing ? r * Math.cos(t * Math.PI) : -r * Math.cos(t * Math.PI)
-  const litOnRight = waxing
-  const darkD = `M 0,${-r} A ${r},${r} 0 0,${litOnRight ? '0' : '1'} 0,${r} A ${Math.abs(sweep)},${r} 0 0,${sweep >= 0 ? '1' : '0'} 0,${-r} Z`
-
-  const craters: Array<{ cx: number; cy: number; r: number; o: number }> = [
-    { cx: -0.18, cy: -0.25, r: 0.12, o: 0.13 },
-    { cx: 0.22, cy: -0.10, r: 0.09, o: 0.10 },
-    { cx: -0.05, cy: 0.30, r: 0.14, o: 0.11 },
-    { cx: 0.30, cy: 0.22, r: 0.07, o: 0.12 },
-    { cx: -0.32, cy: 0.05, r: 0.08, o: 0.09 },
-    { cx: 0.10, cy: -0.38, r: 0.06, o: 0.10 },
-    { cx: -0.12, cy: 0.08, r: 0.10, o: 0.08 },
-    { cx: 0.35, cy: -0.30, r: 0.05, o: 0.11 },
-    { cx: -0.28, cy: -0.35, r: 0.06, o: 0.07 },
-    { cx: 0.02, cy: 0.15, r: 0.08, o: 0.09 },
-    { cx: -0.38, cy: 0.28, r: 0.05, o: 0.08 },
-    { cx: 0.18, cy: 0.38, r: 0.06, o: 0.10 },
-  ]
-
-  return (
-    <svg width={size} height={size} viewBox={`${-r - 1} ${-r - 1} ${size + 2} ${size + 2}`}>
-      <defs>
-        <radialGradient id={`${uid}-surf`} cx="0.42" cy="0.38" r="0.58">
-          <stop offset="0%" stopColor="#e8e4d4" />
-          <stop offset="55%" stopColor="#c9c4b0" />
-          <stop offset="100%" stopColor="#8a8474" />
-        </radialGradient>
-        <radialGradient id={`${uid}-glow`} cx="0.5" cy="0.5" r="0.52">
-          <stop offset="85%" stopColor="transparent" />
-          <stop offset="100%" stopColor="rgba(200,195,175,0.18)" />
-        </radialGradient>
-        <filter id={`${uid}-blur`}>
-          <feGaussianBlur stdDeviation={r * 0.045} />
-        </filter>
-        <clipPath id={`${uid}-clip`}>
-          <circle r={r} />
-        </clipPath>
-      </defs>
-      <circle r={r} fill={`url(#${uid}-surf)`} />
-      <g clipPath={`url(#${uid}-clip)`}>
-        {craters.map((c, i) => (
-          <circle key={i} cx={c.cx * r * 2} cy={c.cy * r * 2} r={c.r * r} fill={`rgba(90,85,70,${c.o})`} />
-        ))}
-      </g>
-      <circle r={r} fill={`url(#${uid}-glow)`} />
-      <path d={darkD} fill="rgba(10,10,20,0.92)" filter={`url(#${uid}-blur)`} clipPath={`url(#${uid}-clip)`} />
-      <circle r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={0.6} />
-    </svg>
-  )
+function nasaMoonImageUrl(when: Date): string {
+  const utcYear = when.getUTCFullYear()
+  const year = SVS_YEAR_IDS[utcYear] ? utcYear : 2026
+  const visId = SVS_YEAR_IDS[year]!
+  const dir = `a${String(Math.floor(visId / 100) * 100).padStart(6, '0')}/a${String(visId).padStart(6, '0')}`
+  const yearStartMs = Date.UTC(year, 0, 1, 0, 0, 0)
+  const hourOfYear = Math.floor((when.getTime() - yearStartMs) / 3600000)
+  const frame = Math.max(1, Math.min(8760, hourOfYear + 1))
+  const frameStr = String(frame).padStart(4, '0')
+  return `https://svs.gsfc.nasa.gov/vis/a000000/${dir}/frames/730x730_1x1_30p/moon.${frameStr}.jpg`
 }
 
 /* ------------------------------------------------------------------ */
@@ -187,7 +151,6 @@ function NOAAGoesCloudMap() {
           onLoad={handleImageLoad}
         />
       </div>
-      <p className="text-xs text-gray-500 mt-2">NOAA GOES-East</p>
     </div>
   )
 }
@@ -197,31 +160,65 @@ function NOAAGoesCloudMap() {
 /* ------------------------------------------------------------------ */
 
 function MoonSection() {
-  const now = useMemo(() => new Date(), [])
+  const nowMs = useMemo(() => Date.now(), [])
+  // Slider offset in hours, 0 = now. Range -168h (-7d) to +168h (+7d).
+  const [offsetHours, setOffsetHours] = useState(0)
 
-  const { phase, altitude, riseSet } = useMemo(() => {
-    const phase = moonPhaseInfo(now)
-    const altitude = moonAltDeg(now)
-    const riseSet = findMoonRiseSet(now)
-    return { phase, altitude, riseSet }
-  }, [now])
+  const selectedDate = useMemo(() => new Date(nowMs + offsetHours * 3600_000), [nowMs, offsetHours])
+  const imageUrl = useMemo(() => nasaMoonImageUrl(selectedDate), [selectedDate])
+
+  const phase = useMemo(() => moonPhaseInfo(selectedDate), [selectedDate])
+  const altitude = useMemo(() => moonAltDeg(selectedDate), [selectedDate])
+  const riseSet = useMemo(() => findMoonRiseSet(selectedDate), [selectedDate])
 
   const fmtTime = (d: Date | null) => {
     if (!d) return '—'
     return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
   }
+  const fmtSelected = selectedDate.toLocaleString([], {
+    weekday: 'short', month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit',
+  })
 
   return (
     <div>
       <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-4">Moon</h1>
-      <div className="flex flex-col items-center rounded-lg border border-white/10 p-6 gap-5 justify-center" style={{ aspectRatio: '4 / 3' }}>
-        <MoonPhaseSvg fraction={phase.fraction} size={120} />
-        <div className="text-center space-y-1">
-          <p className="text-sm font-medium text-white">{phase.name}</p>
-          <p className="text-2xl font-semibold text-white">{(phase.illumination * 100).toFixed(0)}%</p>
-          <p className="text-xs text-gray-400">illuminated</p>
+      <div className="flex flex-col items-center rounded-lg border border-white/10 p-5 gap-3 justify-center" style={{ aspectRatio: '4 / 3' }}>
+        <div className="relative" style={{ width: 'min(60%, 220px)', aspectRatio: '1 / 1' }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={imageUrl}
+            alt={`Moon at ${fmtSelected}`}
+            className="absolute inset-0 h-full w-full rounded-full object-cover"
+            style={{ filter: 'drop-shadow(0 0 16px rgba(180,180,200,0.18))' }}
+            loading="lazy"
+          />
         </div>
-        <div className="w-full grid grid-cols-3 gap-2 text-center text-xs text-gray-400 mt-auto">
+        <div className="text-center -mt-1">
+          <p className="text-base font-semibold text-white">{phase.name}</p>
+          <p className="text-xs text-gray-400">{fmtSelected} · {(phase.illumination * 100).toFixed(0)}% illuminated</p>
+        </div>
+        <div className="w-full px-1 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setOffsetHours(0)}
+            className="shrink-0 text-xs text-gray-400 hover:text-white underline decoration-dotted underline-offset-2"
+            aria-label="Reset to now"
+          >
+            Now
+          </button>
+          <input
+            type="range"
+            min={-168}
+            max={168}
+            step={1}
+            value={offsetHours}
+            onChange={(e) => setOffsetHours(Number(e.target.value))}
+            className="flex-1 accent-white/80"
+            aria-label="Scrub moon date and time"
+          />
+        </div>
+        <div className="w-full grid grid-cols-3 gap-2 text-center text-xs text-gray-400">
           <div>
             <p className="text-white font-medium">{altitude >= 0 ? `${altitude.toFixed(1)}°` : 'Below'}</p>
             <p>Altitude</p>

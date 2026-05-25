@@ -160,49 +160,82 @@ function NOAAGoesCloudMap() {
 /* ------------------------------------------------------------------ */
 
 function MoonSection() {
-  const nowMs = useMemo(() => Date.now(), [])
-  // Slider offset in hours, 0 = now. Range -168h (-7d) to +168h (+7d).
+  // All Date.now()-derived values must wait until after mount to avoid SSR
+  // hydration mismatches (server renders at build time, client renders at view time).
+  const [nowMs, setNowMs] = useState<number | null>(null)
   const [offsetHours, setOffsetHours] = useState(0)
 
-  const selectedDate = useMemo(() => new Date(nowMs + offsetHours * 3600_000), [nowMs, offsetHours])
-  const imageUrl = useMemo(() => nasaMoonImageUrl(selectedDate), [selectedDate])
+  useEffect(() => {
+    setNowMs(Date.now())
+  }, [])
 
-  const phase = useMemo(() => moonPhaseInfo(selectedDate), [selectedDate])
-  const altitude = useMemo(() => moonAltDeg(selectedDate), [selectedDate])
-  const riseSet = useMemo(() => findMoonRiseSet(selectedDate), [selectedDate])
+  const selectedDate = useMemo(
+    () => (nowMs == null ? null : new Date(nowMs + offsetHours * 3600_000)),
+    [nowMs, offsetHours]
+  )
+  const imageUrl = useMemo(
+    () => (selectedDate ? nasaMoonImageUrl(selectedDate) : null),
+    [selectedDate]
+  )
+  const phase = useMemo(() => (selectedDate ? moonPhaseInfo(selectedDate) : null), [selectedDate])
+  const altitude = useMemo(() => (selectedDate ? moonAltDeg(selectedDate) : null), [selectedDate])
+  const riseSet = useMemo(
+    () => (selectedDate ? findMoonRiseSet(selectedDate) : null),
+    [selectedDate]
+  )
 
   const fmtTime = (d: Date | null) => {
     if (!d) return '—'
     return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
   }
-  const fmtSelected = selectedDate.toLocaleString([], {
-    weekday: 'short', month: 'short', day: 'numeric',
-    hour: 'numeric', minute: '2-digit',
-  })
+  const fmtSelected = selectedDate
+    ? selectedDate.toLocaleString([], {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      })
+    : ''
 
   return (
     <div>
       <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-4">Moon</h1>
-      <div className="flex flex-col items-center rounded-lg border border-white/10 p-5 gap-3 justify-center" style={{ aspectRatio: '4 / 3' }}>
+      <div
+        className="flex flex-col items-center rounded-lg border border-white/10 p-5 gap-3 justify-center"
+        style={{ aspectRatio: '4 / 3' }}
+      >
         <div className="relative" style={{ width: 'min(60%, 220px)', aspectRatio: '1 / 1' }}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={imageUrl}
-            alt={`Moon at ${fmtSelected}`}
-            className="absolute inset-0 h-full w-full rounded-full object-cover"
-            style={{ filter: 'drop-shadow(0 0 16px rgba(180,180,200,0.18))' }}
-            loading="lazy"
-          />
+          {imageUrl ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={imageUrl}
+              alt={`Moon at ${fmtSelected}`}
+              className="absolute inset-0 h-full w-full rounded-full object-cover"
+              style={{ filter: 'drop-shadow(0 0 16px rgba(180,180,200,0.18))' }}
+            />
+          ) : (
+            <div className="absolute inset-0 rounded-full bg-white/5" />
+          )}
         </div>
-        <div className="text-center -mt-1">
-          <p className="text-base font-semibold text-white">{phase.name}</p>
-          <p className="text-xs text-gray-400">{fmtSelected} · {(phase.illumination * 100).toFixed(0)}% illuminated</p>
+        <div className="text-center -mt-1 min-h-[2.5rem]">
+          {phase && selectedDate ? (
+            <>
+              <p className="text-base font-semibold text-white">{phase.name}</p>
+              <p className="text-xs text-gray-400">
+                {fmtSelected} · {(phase.illumination * 100).toFixed(0)}% illuminated
+              </p>
+            </>
+          ) : (
+            <p className="text-xs text-gray-500">Loading…</p>
+          )}
         </div>
         <div className="w-full px-1 flex items-center gap-3">
           <button
             type="button"
             onClick={() => setOffsetHours(0)}
-            className="shrink-0 text-xs text-gray-400 hover:text-white underline decoration-dotted underline-offset-2"
+            disabled={nowMs == null}
+            className="shrink-0 text-xs text-gray-400 hover:text-white underline decoration-dotted underline-offset-2 disabled:opacity-50"
             aria-label="Reset to now"
           >
             Now
@@ -214,21 +247,24 @@ function MoonSection() {
             step={1}
             value={offsetHours}
             onChange={(e) => setOffsetHours(Number(e.target.value))}
+            disabled={nowMs == null}
             className="flex-1 accent-white/80"
             aria-label="Scrub moon date and time"
           />
         </div>
         <div className="w-full grid grid-cols-3 gap-2 text-center text-xs text-gray-400">
           <div>
-            <p className="text-white font-medium">{altitude >= 0 ? `${altitude.toFixed(1)}°` : 'Below'}</p>
+            <p className="text-white font-medium">
+              {altitude == null ? '—' : altitude >= 0 ? `${altitude.toFixed(1)}°` : 'Below'}
+            </p>
             <p>Altitude</p>
           </div>
           <div>
-            <p className="text-white font-medium">{fmtTime(riseSet.moonrise)}</p>
+            <p className="text-white font-medium">{fmtTime(riseSet?.moonrise ?? null)}</p>
             <p>Moonrise</p>
           </div>
           <div>
-            <p className="text-white font-medium">{fmtTime(riseSet.moonset)}</p>
+            <p className="text-white font-medium">{fmtTime(riseSet?.moonset ?? null)}</p>
             <p>Moonset</p>
           </div>
         </div>

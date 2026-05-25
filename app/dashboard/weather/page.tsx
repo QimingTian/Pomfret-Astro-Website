@@ -176,14 +176,14 @@ function NOAAGoesCloudMap() {
 
   return (
     <div>
-      <h2 className="text-2xl font-semibold text-white mb-4">Cloud Map</h2>
+      <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-4">Cloud Map</h1>
       <div className="relative w-full rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-800" style={{ aspectRatio: '4 / 3' }}>
         <img
           src={`/api/noaa-goes?url=${encodeURIComponent(imageURL)}&t=${refreshKey}`}
           alt="NOAA GOES-East Satellite Cloud Map Animation"
           key={refreshKey}
-          className="absolute top-0 h-full"
-          style={{ width: '200%', right: '0' }}
+          className="absolute"
+          style={{ width: '200%', height: '200%', top: '0', right: '0', objectFit: 'cover' }}
           onLoad={handleImageLoad}
         />
       </div>
@@ -213,8 +213,8 @@ function MoonSection() {
 
   return (
     <div>
-      <h2 className="text-2xl font-semibold text-white mb-4">Moon</h2>
-      <div className="flex h-full flex-col items-center rounded-lg border border-white/10 p-6 gap-5 justify-center">
+      <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-4">Moon</h1>
+      <div className="flex flex-col items-center rounded-lg border border-white/10 p-6 gap-5 justify-center" style={{ aspectRatio: '4 / 3' }}>
         <MoonPhaseSvg fraction={phase.fraction} size={120} />
         <div className="text-center space-y-1">
           <p className="text-sm font-medium text-white">{phase.name}</p>

@@ -198,7 +198,10 @@ function MoonSection() {
     <div>
       <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-4">Moon</h1>
       <div className="flex flex-col items-center gap-3 justify-center">
-        <div className="relative w-full" style={{ maxWidth: '280px', aspectRatio: '1 / 1' }}>
+        <div
+          className="relative w-full isolate"
+          style={{ maxWidth: '280px', aspectRatio: '1 / 1', backgroundColor: 'rgb(var(--background-rgb))' }}
+        >
           {imageUrl ? (
             /* eslint-disable-next-line @next/next/no-img-element */
             <img

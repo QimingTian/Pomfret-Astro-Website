@@ -182,8 +182,8 @@ function NOAAGoesCloudMap() {
           src={`/api/noaa-goes?url=${encodeURIComponent(imageURL)}&t=${refreshKey}`}
           alt="NOAA GOES-East Satellite Cloud Map Animation"
           key={refreshKey}
-          className="absolute"
-          style={{ width: '200%', height: '200%', top: '0', right: '0', objectFit: 'cover' }}
+          className="absolute inset-0 h-full w-full object-cover"
+          style={{ transform: 'scale(2)', transformOrigin: '100% 0%' }}
           onLoad={handleImageLoad}
         />
       </div>

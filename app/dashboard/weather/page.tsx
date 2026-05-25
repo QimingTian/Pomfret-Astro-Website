@@ -204,7 +204,7 @@ function MoonSection() {
             <img
               src={imageUrl}
               alt={`Moon at ${fmtSelected}`}
-              className="absolute inset-0 h-full w-full object-contain"
+              className="absolute inset-0 h-full w-full object-contain mix-blend-lighten"
             />
           ) : (
             <div className="absolute inset-0 rounded-full bg-white/5" />
@@ -394,7 +394,7 @@ export default function WeatherPage() {
 
       <div className="mt-8 border-t border-black/10 dark:border-white/10 pt-8 grid grid-cols-1 md:grid-cols-[1fr_1px_1fr] gap-6">
         <NOAAGoesCloudMap />
-        <div className="hidden md:block bg-white/15" />
+        <div className="hidden md:block bg-white/15 -my-8" />
         <MoonSection />
       </div>
 

@@ -170,7 +170,7 @@ function NOAAGoesCloudMap() {
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-4">Cloud Map</h1>
+      <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-6">Cloud Map</h1>
       <div className="relative w-full rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-800" style={{ aspectRatio: '4 / 3' }}>
         <img
           src={`/api/noaa-goes?url=${encodeURIComponent(imageURL)}&t=${refreshKey}`}
@@ -230,7 +230,7 @@ function MoonSection() {
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-4">Moon</h1>
+      <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-6">Moon</h1>
       <div className="flex flex-col items-center gap-3 justify-center">
         <div
           className="relative w-full isolate"

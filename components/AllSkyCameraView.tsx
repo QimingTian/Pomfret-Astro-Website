@@ -245,7 +245,7 @@ export default function AllSkyCameraView() {
 
   return (
     <div className="flex h-full flex-col">
-      <h1 className="mb-3 text-xl font-semibold text-apple-dark dark:text-white sm:mb-4 sm:text-2xl">
+      <h1 className="mb-6 text-2xl font-semibold text-apple-dark dark:text-white">
         All Sky Camera
       </h1>
       <div className="min-h-0 flex-1 pb-4 sm:pb-8">

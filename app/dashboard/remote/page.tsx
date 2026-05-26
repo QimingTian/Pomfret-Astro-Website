@@ -640,6 +640,7 @@ export default function RemotePage() {
       exposureSeconds?: number
       count?: number
       outputMode?: 'raw_zip' | 'stacked_master' | 'none'
+      cameraCoolingTempC?: -10 | 0
       estimatedDurationSeconds?: number
       filterPlans?: Array<{ filterName: string; exposureSeconds: number; count: number }>
       plannedStartIso?: string | null
@@ -694,6 +695,27 @@ export default function RemotePage() {
   const [decSecondPart, setDecSecondPart] = useState('')
   const [sessionPassword, setSessionPassword] = useState('')
   const [outputMode, setOutputMode] = useState<'raw_zip' | 'stacked_master' | 'none'>('raw_zip')
+  const [cameraCoolingTempC, setCameraCoolingTempC] = useState<-10 | 0>(-10)
+  const [ambientTempC, setAmbientTempC] = useState<number | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const fetchTemp = async () => {
+      try {
+        const res = await fetch(
+          'https://api.open-meteo.com/v1/forecast?latitude=41.9159&longitude=-71.9626&current=temperature_2m&timezone=UTC'
+        )
+        const data = await res.json()
+        if (!cancelled && typeof data?.current?.temperature_2m === 'number') {
+          setAmbientTempC(data.current.temperature_2m)
+          if (data.current.temperature_2m > 20) setCameraCoolingTempC(0)
+        }
+      } catch { /* ignore */ }
+    }
+    fetchTemp()
+    const iv = setInterval(fetchTemp, 10 * 60_000)
+    return () => { cancelled = true; clearInterval(iv) }
+  }, [])
 
   const loggedInContact = useMemo(() => {
     if (member.status !== 'authenticated') return null
@@ -1249,6 +1271,10 @@ export default function RemotePage() {
               }
               return undefined
             })(),
+            cameraCoolingTempC:
+              (x as Record<string, unknown>).cameraCoolingTempC === -10 || (x as Record<string, unknown>).cameraCoolingTempC === 0
+                ? ((x as Record<string, unknown>).cameraCoolingTempC as -10 | 0)
+                : undefined,
             sessionType,
             estimatedDurationSeconds:
               typeof x.estimatedDurationSeconds === 'number' && Number.isFinite(x.estimatedDurationSeconds)
@@ -1677,6 +1703,7 @@ export default function RemotePage() {
       decSecondPart,
       sessionPassword,
       outputMode,
+      cameraCoolingTempC,
       filterPlans: filterPlans.map((p) => ({ ...p })),
       variableStarBlockHours,
       variableStarListSelection,
@@ -1695,6 +1722,7 @@ export default function RemotePage() {
     decSecondPart,
     sessionPassword,
     outputMode,
+    cameraCoolingTempC,
     filterPlans,
     variableStarBlockHours,
     variableStarListSelection,
@@ -1717,6 +1745,9 @@ export default function RemotePage() {
       setDecSecondPart(form.decSecondPart)
       setSessionPassword(form.sessionPassword)
       setOutputMode(form.outputMode)
+      if (form.cameraCoolingTempC === 0 || form.cameraCoolingTempC === -10) {
+        setCameraCoolingTempC(form.cameraCoolingTempC)
+      }
       setFilterPlans(
         form.filterPlans.length > 0
           ? form.filterPlans.map((p) => ({ ...p }))
@@ -2629,6 +2660,7 @@ export default function RemotePage() {
         whenClosedBehavior,
         ...(isLoggedIn && !sessionPassword.trim() ? {} : { sessionPassword }),
         outputMode,
+        cameraCoolingTempC,
         estimatedDurationSeconds,
         sessionType,
         ...(sessionType === 'dso' && projectMode ? { projectMode: true } : {}),
@@ -2878,6 +2910,9 @@ export default function RemotePage() {
       setVariableStarBlockHours(1)
     }
     setOutputMode(item.outputMode ?? 'raw_zip')
+    if (item.cameraCoolingTempC === 0 || item.cameraCoolingTempC === -10) {
+      setCameraCoolingTempC(item.cameraCoolingTempC)
+    }
     if (Array.isArray(item.filterPlans) && item.filterPlans.length > 0) {
       setFilterPlans(
         item.filterPlans.map((p) => ({
@@ -3539,16 +3574,6 @@ export default function RemotePage() {
                   )
                 })}
               </div>
-              <p className="text-xs text-gray-500">
-                Estimated duration:{' '}
-                {!variableStarDurationPick.coordsOk ||
-                variableStarDurationPick.starHalfSteps < 1 ||
-                !variableStarDurationUserSelected
-                  ? '--'
-                  : formatDurationShort(
-                      (variableStarBlockHours + VARIABLE_STAR_SESSION_OVERHEAD_HOURS) * 3600
-                    )}
-              </p>
             </div>
           )}
           {sessionType === 'dso' && (
@@ -3637,15 +3662,9 @@ export default function RemotePage() {
                   </div>
                 </div>
               )}
-              <p className="text-xs text-gray-500">
-                Estimated duration:{' '}
-                {dsoEstimatedDurationPreviewSeconds == null
-                  ? '--'
-                  : formatDurationShort(dsoEstimatedDurationPreviewSeconds)}
-              </p>
             </div>
           )}
-          <div className="sm:col-span-2 grid gap-3">
+          <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="grid gap-2">
               <span className="text-sm font-medium text-white">Output Type *</span>
               <div className="flex flex-wrap gap-2">
@@ -3683,6 +3702,36 @@ export default function RemotePage() {
                   }`}
                 >
                   None
+                </button>
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <span className="text-sm font-medium text-white">Camera Temperature</span>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={ambientTempC !== null && ambientTempC > 20}
+                  onClick={() => setCameraCoolingTempC(-10)}
+                  className={`rounded-full border px-3 py-2 text-sm font-medium ${
+                    ambientTempC !== null && ambientTempC > 20
+                      ? 'border-gray-700 bg-[#151616] text-gray-600 cursor-not-allowed'
+                      : cameraCoolingTempC === -10
+                        ? 'border-white/60 bg-[#151616] text-white'
+                        : 'border-gray-300 dark:border-gray-600 bg-[#151616] text-gray-300 hover:text-white'
+                  }`}
+                >
+                  −10°C
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCameraCoolingTempC(0)}
+                  className={`rounded-full border px-3 py-2 text-sm font-medium ${
+                    cameraCoolingTempC === 0
+                      ? 'border-white/60 bg-[#151616] text-white'
+                      : 'border-gray-300 dark:border-gray-600 bg-[#151616] text-gray-300 hover:text-white'
+                  }`}
+                >
+                  0°C
                 </button>
               </div>
             </div>
@@ -3730,6 +3779,20 @@ export default function RemotePage() {
               Save Session
             </button>
           </div>
+          <p className="sm:col-span-2 text-xs text-gray-500">
+            Estimated duration:{' '}
+            {sessionType === 'variable_star'
+              ? !variableStarDurationPick?.coordsOk ||
+                (variableStarDurationPick?.starHalfSteps ?? 0) < 1 ||
+                !variableStarDurationUserSelected
+                ? '--'
+                : formatDurationShort(
+                    (variableStarBlockHours + VARIABLE_STAR_SESSION_OVERHEAD_HOURS) * 3600
+                  )
+              : dsoEstimatedDurationPreviewSeconds == null
+                ? '--'
+                : formatDurationShort(dsoEstimatedDurationPreviewSeconds)}
+          </p>
             </form>
             )}
           </div>

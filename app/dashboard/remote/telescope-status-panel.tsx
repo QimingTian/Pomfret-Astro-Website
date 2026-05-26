@@ -178,7 +178,11 @@ export function TelescopeStatusPanel() {
     const load = async () => {
       try {
         const res = await fetch(`/api/imaging/mount-pointing?_=${Date.now()}`, { cache: 'no-store' })
-        const data = (await res.json().catch(() => null)) as { ok?: boolean; sample?: MountSample | null } | null
+        const data = (await res.json().catch(() => null)) as {
+          ok?: boolean
+          sample?: MountSample | null
+          serverNowUtc?: string
+        } | null
         if (!mounted || !data?.ok || !data.sample) {
           setConnected(false)
           setTrackingEnabled(null)
@@ -189,7 +193,9 @@ export function TelescopeStatusPanel() {
         }
         const sample = data.sample
         const receivedAtMs = sample.receivedAtUtc ? Date.parse(sample.receivedAtUtc) : NaN
-        const stale = !Number.isFinite(receivedAtMs) || Date.now() - receivedAtMs > TELEMETRY_STALE_MS
+        const serverNowMs = data.serverNowUtc ? Date.parse(data.serverNowUtc) : NaN
+        const nowMs = Number.isFinite(serverNowMs) ? serverNowMs : Date.now()
+        const stale = !Number.isFinite(receivedAtMs) || nowMs - receivedAtMs > TELEMETRY_STALE_MS
         const isConnected = !stale && sample.connected === true
         setConnected(isConnected)
         setTrackingEnabled(isConnected ? (typeof sample.trackingEnabled === 'boolean' ? sample.trackingEnabled : null) : null)

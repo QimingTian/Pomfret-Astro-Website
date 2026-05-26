@@ -38,6 +38,7 @@ export interface ImagingRequest {
   exposureSeconds: number
   count: number
   outputMode?: 'raw_zip' | 'stacked_master' | 'none'
+  cameraCoolingTempC?: number
   filterPlans?: Array<{ filterName: string; exposureSeconds: number; count: number }>
   /** Estimated session duration in seconds: sum(filter count * exposure) + DSO overhead. */
   estimatedDurationSeconds?: number
@@ -283,6 +284,7 @@ export interface CreateImagingInput {
   sessionPassword?: string
   userId?: string
   outputMode?: 'raw_zip' | 'stacked_master' | 'none'
+  cameraCoolingTempC?: number
   filterPlans?: Array<{ filterName: string; exposureSeconds: number | string; count: number | string }>
   firstName?: string | null
   lastName?: string | null
@@ -503,6 +505,7 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
       exposureCount: normalizedFilterPlans[0].count,
       pomfretQueueId: id,
       outputMode,
+      cameraCoolingTempC: input.cameraCoolingTempC,
       templateKind: sequenceTemplate,
       targetName: target,
       filterPlans: normalizedFilterPlans.map((p) => ({
@@ -533,6 +536,7 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
     exposureSeconds: normalizedFilterPlans[0].exposureSeconds,
     count: normalizedFilterPlans[0].count,
     outputMode,
+    cameraCoolingTempC: input.cameraCoolingTempC,
     filterPlans: normalizedFilterPlans,
     estimatedDurationSeconds,
     notes,
@@ -702,6 +706,7 @@ export async function updatePendingRequestById(
       exposureCount: normalizedFilterPlans[0].count,
       pomfretQueueId: id,
       outputMode,
+      cameraCoolingTempC: input.cameraCoolingTempC,
       templateKind: sequenceTemplate,
       targetName: target,
       filterPlans: normalizedFilterPlans.map((p) => ({

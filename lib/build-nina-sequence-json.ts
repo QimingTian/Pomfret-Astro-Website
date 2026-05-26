@@ -25,6 +25,7 @@ export interface NinaSequenceParams {
   templateKind?: 'dso' | 'variable_star'
   targetName?: string
   variableStarObservingSeconds?: number
+  cameraCoolingTempC?: number
 }
 
 function roundSeconds(x: number): number {
@@ -545,9 +546,33 @@ export function buildNinaSequenceJson(params: NinaSequenceParams): string {
     }
   }
 
+  if (params.cameraCoolingTempC != null) {
+    applyCameraCoolingTemp(root, params.cameraCoolingTempC)
+  }
+
   applyNinaHttpAuthCredentials(root)
 
   return JSON.stringify(root, null, 2)
+}
+
+function applyCameraCoolingTemp(node: unknown, tempC: number): void {
+  const walk = (value: unknown): void => {
+    if (!value || typeof value !== 'object') return
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item)
+      return
+    }
+    const rec = value as Record<string, unknown>
+    if (
+      typeof rec['$type'] === 'string' &&
+      rec['$type'].includes('CoolCamera') &&
+      'Temperature' in rec
+    ) {
+      rec['Temperature'] = tempC + 0.0
+    }
+    for (const child of Object.values(rec)) walk(child)
+  }
+  walk(node)
 }
 
 /** Replace template HttpAuth* fields with server env (avoids hardcoded passwords in JSON exports). */

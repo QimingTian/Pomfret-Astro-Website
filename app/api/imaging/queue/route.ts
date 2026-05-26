@@ -166,6 +166,8 @@ export async function POST(request: NextRequest) {
         : b.outputMode === 'none'
           ? 'none'
           : 'raw_zip',
+    cameraCoolingTempC:
+      b.cameraCoolingTempC === -10 || b.cameraCoolingTempC === 0 ? b.cameraCoolingTempC : -10,
     filterPlans: parsedFilterPlans,
     firstName: auth.user.firstName.trim() || null,
     lastName: auth.user.lastName.trim() || null,

@@ -12,6 +12,7 @@ export type RemoteSavedSessionFormV1 = {
   decSecondPart: string
   sessionPassword: string
   outputMode: 'raw_zip' | 'stacked_master' | 'none'
+  cameraCoolingTempC?: -10 | 0
   filterPlans: Array<{ filterName: string; count: string; exposureSeconds: string }>
   variableStarBlockHours: number
   variableStarListSelection: string

@@ -105,8 +105,9 @@ export async function GET(request: NextRequest) {
 
   const stationId = request.nextUrl.searchParams.get('stationId') ?? undefined
   const sample = getMountPointingSample(stationId)
+  const serverNowUtc = new Date().toISOString()
   if (!sample) {
-    return withImagingCors({ ok: true as const, sample: null }, 200, NO_STORE_HEADERS)
+    return withImagingCors({ ok: true as const, sample: null, serverNowUtc }, 200, NO_STORE_HEADERS)
   }
-  return withImagingCors({ ok: true as const, sample }, 200, NO_STORE_HEADERS)
+  return withImagingCors({ ok: true as const, sample, serverNowUtc }, 200, NO_STORE_HEADERS)
 }

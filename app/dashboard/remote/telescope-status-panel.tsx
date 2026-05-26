@@ -27,7 +27,9 @@ const POMFRET_SITE = {
 const POLAR_ALIGNMENT_X_DEG = 40
 const WEBSITE_Y_OFFSET_DEG = -90
 const WORLD_COMPASS_ROTATION_DEG = 0
-const TELEMETRY_STALE_MS = 10_000
+const TELEMETRY_STALE_MS = 15_000
+const POLL_CONNECTED_MS = 5_000
+const POLL_DISCONNECTED_MS = 2_000
 const DISCONNECTED_POINTING = {
   // North celestial pole for Pomfret: due North at local latitude altitude.
   altDeg: POMFRET_SITE.latitudeDeg,
@@ -175,7 +177,15 @@ export function TelescopeStatusPanel() {
 
   useEffect(() => {
     let mounted = true
-    const load = async () => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+
+    const schedule = (delayMs: number) => {
+      if (!mounted) return
+      timer = setTimeout(poll, delayMs)
+    }
+
+    const poll = async () => {
+      let nowConnected = false
       try {
         const res = await fetch(`/api/imaging/mount-pointing?_=${Date.now()}`, { cache: 'no-store' })
         const data = (await res.json().catch(() => null)) as {
@@ -183,12 +193,13 @@ export function TelescopeStatusPanel() {
           sample?: MountSample | null
           serverNowUtc?: string
         } | null
-        if (!mounted || !data?.ok || !data.sample) {
+        if (!mounted) return
+        if (!data?.ok || !data.sample) {
           setConnected(false)
           setTrackingEnabled(null)
           opticalTargetRef.current = { alt: DISCONNECTED_POINTING.altDeg, az: DISCONNECTED_POINTING.azDeg }
-          // Disconnected parking pose: upright north-facing branch (flipped side).
           pierRollRef.current = Math.PI
+          schedule(POLL_DISCONNECTED_MS)
           return
         }
         const sample = data.sample
@@ -196,24 +207,20 @@ export function TelescopeStatusPanel() {
         const serverNowMs = data.serverNowUtc ? Date.parse(data.serverNowUtc) : NaN
         const nowMs = Number.isFinite(serverNowMs) ? serverNowMs : Date.now()
         const stale = !Number.isFinite(receivedAtMs) || nowMs - receivedAtMs > TELEMETRY_STALE_MS
-        const isConnected = !stale && sample.connected === true
-        setConnected(isConnected)
-        setTrackingEnabled(isConnected ? (typeof sample.trackingEnabled === 'boolean' ? sample.trackingEnabled : null) : null)
+        nowConnected = !stale && sample.connected === true
+        setConnected(nowConnected)
+        setTrackingEnabled(nowConnected ? (typeof sample.trackingEnabled === 'boolean' ? sample.trackingEnabled : null) : null)
         const alt = finiteOrNull(sample.altitudeDeg)
         const az = finiteOrNull(sample.azimuthDeg)
-        if (isConnected && alt != null && az != null) {
+        if (nowConnected && alt != null && az != null) {
           opticalTargetRef.current = { alt: clampAltitude(alt), az: normalize360(az) }
           const sop = (sample.sideOfPier ?? '').toLowerCase()
-          // SideOfPier affects which side of the mount the OTA sits on,
-          // while keeping optical-axis direction unchanged.
           pierRollRef.current = sop === 'piereast' ? 0 : Math.PI
         } else {
           opticalTargetRef.current = { alt: DISCONNECTED_POINTING.altDeg, az: DISCONNECTED_POINTING.azDeg }
-          // Disconnected parking pose: upright north-facing branch (flipped side).
           pierRollRef.current = Math.PI
         }
 
-        // Keep mount body in a stable polar-aligned pose.
         targetEulerRef.current = {
           x: POLAR_ALIGNMENT_X_DEG,
           y: WEBSITE_Y_OFFSET_DEG,
@@ -224,17 +231,16 @@ export function TelescopeStatusPanel() {
           setConnected(false)
           setTrackingEnabled(null)
           opticalTargetRef.current = { alt: DISCONNECTED_POINTING.altDeg, az: DISCONNECTED_POINTING.azDeg }
-          // Disconnected parking pose: upright north-facing branch (flipped side).
           pierRollRef.current = Math.PI
         }
       }
+      schedule(nowConnected ? POLL_CONNECTED_MS : POLL_DISCONNECTED_MS)
     }
 
-    void load()
-    const id = window.setInterval(load, 1500)
+    poll()
     return () => {
       mounted = false
-      window.clearInterval(id)
+      if (timer) clearTimeout(timer)
     }
   }, [])
 

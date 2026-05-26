@@ -210,6 +210,7 @@ export async function getProjectByNightSubId(
 /** Project still tied to an operator-visible session (queue row or on-board after NINA consume). */
 export async function isProjectVisibleToOperators(project: ImagingProject): Promise<boolean> {
   if (project.onBoard) return true
+  if (project.status === 'in_progress' && remainingFramesTotal(project) > 0) return true
   if (await getRequestById(project.id)) return true
   const board = await getBoardEntry(project.id)
   return board?.projectMode === true

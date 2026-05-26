@@ -47,7 +47,7 @@ export async function reconcilePendingScheduleStatus(): Promise<void> {
   const strip = getTonightScheduleStrip(now)
   const nightKey = strip.nightKey
 
-  if (weatherIntervals.status === 'ok') {
+  if (weatherIntervals.status === 'ok' && weatherIntervals.globalHardBlocked !== true) {
     activeProject = await reconcileActiveInProgressProjectTonight(
       fullNightFree,
       weatherIntervals.permittedIntervals,

@@ -1,16 +1,14 @@
-# Pomfret Astro — Complete Platform Guide
+# Pomfret Astro — System Guide
 
-> **Single Source of Truth** for the Pomfret Olmsted Observatory remote-imaging system.
+> **Single Source of Truth** for the Pomfret Olmsted Observatory remote-imaging system Pomfret Astro.
 
 **Live site:** [https://www.pomfretastro.org](https://www.pomfretastro.org)
 
 This document serves three roles at once:
 
-1. **Tutorial** — A new member can read Part I and learn how to submit imaging, read the schedule, and retrieve data.
+1. **Tutorial** — A new member can read Part I and learn how to use Atlas and Weather, submit imaging in Remote, read the schedule, and retrieve data.
 2. **Operator runbook** — Student operators use Part II to run the observatory night, debug failures, and maintain Vercel, KV, and the Windows NINA agent.
 3. **Technical record** — Developers use Parts III–V and the Appendix for scheduling logic, automation, architecture, and APIs.
-
-The platform is **not** a multi-telescope SaaS. It is a **single observatory** (Pomfret, Connecticut) remote-imaging system: members submit plans on the web; a fair scheduler places them in clear weather; a 24/7 agent on the observatory PC pulls sequences into NINA; data returns via Cloudflare R2.
 
 ---
 
@@ -58,14 +56,12 @@ The platform is **not** a multi-telescope SaaS. It is a **single observatory** (
 
 ### 1. Quick Start & Workflow
 
-1. Open [pomfretastro.org](https://www.pomfretastro.org) and go to **Sign up** (or **Dashboard → Account** if the nav shows “Log In”).
-2. Create an account with your **Pomfret email**, a username, and a password (≥ 8 characters).
-3. Go to **Dashboard → Remote**.
-4. Check **Telescope status** is **Ready** (or understand why it is closed).
-5. Fill in **New imaging session**: pick **Deep Sky Object** or **Variable Star**, enter target/coordinates, filter plan, and your email.
-6. Click **Start Session**. Your row appears under **Current sessions**.
-7. Watch **Tonight’s schedule** for your block; when status becomes **IN PROGRESS**, use **Check progress** for the live log and preview.
-8. When **COMPLETED**, use **Download file** (no separate session password needed when you are logged in as the submitter).
+1. Open [pomfretastro.org](https://www.pomfretastro.org) and click "Log In" in the top right corner
+2. Click "Sign Up", Create an account with your email, name, a username, and a password (≥ 8 characters).
+3. Go to "Remote. Fill in **New imaging session**: pick **Deep Sky Object** or **Variable Star**, enter target/coordinates, filter plan.
+4. Click **Start Session**. Your row appears under **Current sessions**.
+5. Watch **Tonight’s schedule** for your block; when status becomes **IN PROGRESS**, use **Check progress** for the live log and preview.
+6. When **COMPLETED**, use **Download file**.
 
 **Save Session** stores a template on your account; it does **not** submit to the queue. **Run A Saved Session** loads a template into the form.
 
@@ -73,17 +69,12 @@ The platform is **not** a multi-telescope SaaS. It is a **single observatory** (
 
 You do **not** slew the telescope from the website. You **request** imaging; automation does the rest.
 
-```
-Submit form → Queue (pending) → Scheduler (scheduled) → NINA agent pulls sequence
-    → IN PROGRESS → Frames on disk → R2 upload → COMPLETED → Download
-```
-
 #### Session types
 
 | Type | Use for | Project Mode | Filter notes |
 |------|---------|--------------|--------------|
-| **Deep Sky Object (DSO)** | Galaxies, nebulae, clusters | **Yes** (multi-night) | L, R, G, B, Ha, O, etc. |
-| **Variable Star** | Time-series photometry | **No** | **G filter only** (enforced) |
+| **Deep Sky Object (DSO)** | Galaxies, nebulae, clusters | **Yes** (multi-night) | LRGBSHO |
+| **Variable Star** | Time-series photometry | **No** | **G filter only** |
 
 #### Output modes (both types)
 
@@ -91,7 +82,7 @@ Submit form → Queue (pending) → Scheduler (scheduled) → NINA agent pulls s
 |------|---------|
 | **Raw ZIP** | Individual calibrated frames packaged for download |
 | **Stacked Master** | Observatory runs Siril stacking (requires **600 s** exposures) |
-| **None** | No file delivery (policy / calibration-only runs) |
+| **None** | No file delivery |
 
 #### Standard DSO session (single night)
 
@@ -118,10 +109,6 @@ If status is not **Ready**:
 - **Project Mode** (multi-night DSO): see [§9 Project Mode](#9-project-mode-multi-night-dso). Use when total frames exceed **one clear night**.
 - **Variable Star**: see [§10 Variable Star Time-Series](#10-variable-star-time-series).
 
-#### Legacy session password field
-
-When **logged in**, you do **not** need a session password for new submissions. The field may still appear in saved templates for backward compatibility.
-
 ---
 
 ### 2. Dashboard Tour & Schedule Ribbon
@@ -134,7 +121,7 @@ Guests can browse Weather, Atlas, Gallery, Team, and view much of Remote (schedu
 - **NOAA GOES** CONUS cloud animation (proxied via `/api/noaa-goes` to avoid browser CORS issues).
 - **All-sky camera** live view (`AllSkyCameraView` component) — same stream family as the mobile webapp.
 
-Use this page to see **macro weather**; the **scheduler** uses its own hourly rules (stricter than “is it cloudy right now?”).
+Use this page to see **macro weather**; the **scheduler** uses its own hourly rules.
 
 #### Atlas (`/dashboard/atlas`)
 
@@ -271,12 +258,6 @@ Cloud gap in forecast or reconcile found two viable windows.
 
 **Can two projects run together?**  
 No. One project at a time; others use time when its target is below 30°.
-
-**Do I need a session password?**  
-Not for new submissions when logged in. Legacy sessions may still need it.
-
-**What if I didn’t set `IMAGING_QUEUE_SECRET`?**  
-NINA `nina-sequence` and agent uploads work without Bearer tokens (current production default). Setting the secret later requires configuring agent `TOKEN` to match.
 
 | Goal | What to do |
 |------|------------|

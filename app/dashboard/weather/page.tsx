@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AllSkyCameraView from '@/components/AllSkyCameraView'
 import { useAppStore } from '@/lib/store'
 import type { WeatherModel } from '@/lib/types'
@@ -220,18 +220,84 @@ function MoonSection() {
   }
   const fmtSelected = selectedDate
     ? selectedDate.toLocaleString([], {
-        weekday: 'short',
-        month: 'short',
+        weekday: 'long',
+        month: 'long',
         day: 'numeric',
         hour: 'numeric',
         minute: '2-digit',
       })
     : ''
 
+  const TICK_SPACING = 4.5
+  const HALF_RANGE = 84
+  const PADDING = 60
+
+  const midnightOffsets = useMemo(() => {
+    if (nowMs == null) return []
+    const now = new Date(nowMs)
+    const todayMid = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+    const result: { label: string; offsetH: number }[] = []
+    for (let d = -6; d <= 6; d++) {
+      const mid = todayMid + d * 86400_000
+      const offsetH = Math.round((mid - nowMs) / 3600_000)
+      const dt = new Date(mid)
+      result.push({
+        label: d === 0 ? 'TODAY' : dt.toLocaleDateString([], { weekday: 'short' }).toUpperCase(),
+        offsetH,
+      })
+    }
+    return result
+  }, [nowMs])
+
+  const midnightHourSet = useMemo(
+    () => new Set(midnightOffsets.map((d) => d.offsetH)),
+    [midnightOffsets]
+  )
+
+  const scrubberRef = useRef<HTMLDivElement>(null)
+  const draggingRef = useRef(false)
+  const dragStartX = useRef(0)
+  const dragStartOffset = useRef(0)
+
+  const handleScrubStart = useCallback(
+    (clientX: number) => {
+      draggingRef.current = true
+      dragStartX.current = clientX
+      dragStartOffset.current = offsetHours
+    },
+    [offsetHours]
+  )
+
+  const handleScrubMove = useCallback(
+    (clientX: number) => {
+      if (!draggingRef.current) return
+      const dx = clientX - dragStartX.current
+      const dh = Math.round(-dx / TICK_SPACING)
+      setOffsetHours(Math.max(-HALF_RANGE, Math.min(HALF_RANGE, dragStartOffset.current + dh)))
+    },
+    []
+  )
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => handleScrubMove(e.clientX)
+    const onUp = () => { draggingRef.current = false }
+    const onTouchMove = (e: TouchEvent) => { if (e.touches[0]) handleScrubMove(e.touches[0].clientX) }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    window.addEventListener('touchmove', onTouchMove)
+    window.addEventListener('touchend', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      window.removeEventListener('touchmove', onTouchMove)
+      window.removeEventListener('touchend', onUp)
+    }
+  }, [handleScrubMove])
+
   return (
     <div>
       <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-6">Moon</h1>
-      <div className="flex flex-col items-center gap-3 justify-center">
+      <div className="flex flex-col items-center gap-2 justify-center">
         <div
           className="relative w-full isolate"
           style={{ maxWidth: '280px', aspectRatio: '1 / 1', backgroundColor: 'rgb(var(--background-rgb))' }}
@@ -247,54 +313,108 @@ function MoonSection() {
             <div className="absolute inset-0 rounded-full bg-white/5" />
           )}
         </div>
-        <div className="text-center -mt-1 min-h-[2.5rem]">
+
+        <div className="text-center min-h-[2.5rem]">
           {phase && selectedDate ? (
             <>
               <p className="text-base font-semibold text-white">{phase.name}</p>
               <p className="text-xs text-gray-400">
-                {fmtSelected} · {(phase.illumination * 100).toFixed(0)}% illuminated
+                {fmtSelected}
+              </p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {(phase.illumination * 100).toFixed(0)}% illuminated
               </p>
             </>
           ) : (
             <p className="text-xs text-gray-500">Loading…</p>
           )}
         </div>
-        <div className="w-full max-w-[340px] mt-1 flex items-center gap-2">
-          <input
-            type="range"
-            min={-168}
-            max={168}
-            step={1}
-            value={offsetHours}
-            onChange={(e) => setOffsetHours(Number(e.target.value))}
-            disabled={nowMs == null}
-            className="flex-1 accent-white/80"
+
+        {/* Timeline scrubber — fixed pointer, scrolling ticks */}
+        <div className="w-full mt-3 select-none">
+          {/* Fixed center indicator */}
+          <div className="flex justify-center mb-0.5">
+            <svg width="10" height="8" viewBox="0 0 10 8" className="text-sky-400"><path d="M5 8L0 0h10z" fill="currentColor" /></svg>
+          </div>
+
+          {/* Scrolling tick area */}
+          <div
+            ref={scrubberRef}
+            className="relative overflow-hidden cursor-pointer"
+            style={{ height: 22 }}
+            onMouseDown={(e) => handleScrubStart(e.clientX)}
+            onTouchStart={(e) => { if (e.touches[0]) handleScrubStart(e.touches[0].clientX) }}
+            role="slider"
             aria-label="Scrub moon date and time"
-          />
-          <button
-            type="button"
-            onClick={() => setOffsetHours(0)}
-            disabled={nowMs == null}
-            className="shrink-0 rounded-full border border-white/25 bg-[#151616] px-2.5 py-0.5 text-[11px] font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-50"
-            aria-label="Reset to now"
+            aria-valuemin={-HALF_RANGE}
+            aria-valuemax={HALF_RANGE}
+            aria-valuenow={offsetHours}
+            tabIndex={0}
           >
-            Now
-          </button>
-        </div>
-        <div className="w-full grid grid-cols-3 gap-2 text-center text-xs text-gray-400">
-          <div>
-            <p className="text-white font-medium">
-              {altitude == null ? '—' : altitude >= 0 ? `${altitude.toFixed(1)}°` : 'Below'}
-            </p>
-            <p>Altitude</p>
+            <div
+              className="absolute h-full"
+              style={{
+                left: '50%',
+                transform: `translateX(${-offsetHours * TICK_SPACING}px)`,
+                transition: draggingRef.current ? 'none' : 'transform 0.15s ease-out',
+              }}
+            >
+              {Array.from({ length: (HALF_RANGE + PADDING) * 2 + 1 }, (_, i) => {
+                const hour = i - (HALF_RANGE + PADDING)
+                const isMidnight = midnightHourSet.has(hour)
+                const isMid = !isMidnight && midnightOffsets.some((m) => (hour - m.offsetH) % 6 === 0)
+                return (
+                  <div
+                    key={hour}
+                    className="absolute bottom-0"
+                    style={{
+                      left: hour * TICK_SPACING,
+                      width: 1,
+                      height: isMidnight ? 18 : isMid ? 13 : 9,
+                      backgroundColor: isMidnight ? 'rgba(255,255,255,0.7)' : isMid ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.18)',
+                    }}
+                  />
+                )
+              })}
+            </div>
           </div>
-          <div>
-            <p className="text-white font-medium">{fmtTime(riseSet?.moonrise ?? null)}</p>
-            <p>Moonrise</p>
+
+          {/* Scrolling day labels */}
+          <div className="relative overflow-hidden" style={{ height: 18 }}>
+            <div
+              className="absolute h-full"
+              style={{
+                left: '50%',
+                transform: `translateX(${-offsetHours * TICK_SPACING}px)`,
+                transition: draggingRef.current ? 'none' : 'transform 0.15s ease-out',
+              }}
+            >
+              {midnightOffsets.map((day) => (
+                <button
+                  key={day.label + day.offsetH}
+                  type="button"
+                  className={`absolute top-0 whitespace-nowrap text-[11px] font-medium ${day.label === 'TODAY' ? 'text-white' : 'text-gray-500'}`}
+                  style={{
+                    left: day.offsetH * TICK_SPACING,
+                    transform: 'translateX(-50%)',
+                  }}
+                  onClick={() => setOffsetHours(Math.max(-HALF_RANGE, Math.min(HALF_RANGE, day.offsetH)))}
+                >
+                  {day.label}
+                </button>
+              ))}
+            </div>
           </div>
-          <div>
-            <p className="text-white font-medium">{fmtTime(riseSet?.moonset ?? null)}</p>
-            <p>Moonset</p>
+
+          {/* Now button */}
+          <div className="flex justify-center mt-2">
+            <button
+              type="button"
+              onClick={() => setOffsetHours(0)}
+              className="rounded-full border border-white/25 bg-[#151616] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#1b1c1c]"
+            >
+              Now
+            </button>
           </div>
         </div>
       </div>

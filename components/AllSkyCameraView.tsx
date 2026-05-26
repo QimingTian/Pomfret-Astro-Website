@@ -255,7 +255,7 @@ export default function AllSkyCameraView() {
             <AscCompassRose />
           </div>
         ) : (
-          <div className="mt-3 space-y-3 sm:mt-6">
+          <div className="space-y-3">
             <div className={streamAreaClass}>
               {overlay}
               <AscCompassRose />

@@ -19,23 +19,57 @@ function normDeg(x: number) { let v = x % 360; if (v < 0) v += 360; return v }
 function sinD(d: number) { return Math.sin(d * DEG2RAD) }
 function cosD(d: number) { return Math.cos(d * DEG2RAD) }
 
+/** Low-accuracy solar ecliptic longitude (Meeus Ch. 25, ~0.01° accuracy). */
+function sunEclipticLonDeg(date: Date): number {
+  const jd = date.getTime() / 86400000 + 2440587.5
+  const T = (jd - 2451545.0) / 36525
+  const L0 = normDeg(280.46646 + 36000.76983 * T + 0.0003032 * T * T)
+  const M = normDeg(357.52911 + 35999.05029 * T - 0.0001537 * T * T)
+  const C = (1.9146 - 0.004817 * T) * sinD(M) + 0.019993 * sinD(2 * M) + 0.00029 * sinD(3 * M)
+  return normDeg(L0 + C)
+}
+
+/** Moon ecliptic longitude (same terms used in moonEquatorial). */
+function moonEclipticLonDeg(date: Date): number {
+  const jd = date.getTime() / 86400000 + 2440587.5
+  const T = (jd - 2451545.0) / 36525
+  const L0 = normDeg(218.3165 + 481267.8813 * T)
+  const M  = normDeg(134.9634 + 477198.8676 * T)
+  const M1 = normDeg(357.5291 + 35999.0503 * T)
+  const D  = normDeg(297.8502 + 445267.1115 * T)
+  const F  = normDeg(93.2720 + 483202.0175 * T)
+  return normDeg(
+    L0 + 6.289 * sinD(M) + 1.274 * sinD(2 * D - M) + 0.658 * sinD(2 * D)
+       + 0.214 * sinD(2 * M) - 0.186 * sinD(M1) - 0.114 * sinD(2 * F)
+  )
+}
+
 function moonPhaseInfo(now: Date) {
+  const sunLon = sunEclipticLonDeg(now)
+  const moonLon = moonEclipticLonDeg(now)
+  let elongation = moonLon - sunLon
+  if (elongation < 0) elongation += 360
+
+  const phaseAngleRad = Math.PI - Math.abs(elongation - 180) * DEG2RAD
+  // Not exactly phase angle — use elongation directly for illumination:
+  // illumination = (1 + cos(180° - elongation)) / 2 = (1 - cos(elongation)) / 2
+  const illumination = (1 - cosD(elongation)) / 2
+
   const ageDays = (((now.getTime() - NEW_MOON_REF_MS) / 86400000) % SYNODIC_MONTH + SYNODIC_MONTH) % SYNODIC_MONTH
-  const fraction = ageDays / SYNODIC_MONTH
-  const illumination = (1 - Math.cos(fraction * 2 * Math.PI)) / 2
 
   let name: string
-  if (ageDays < 1.85) name = 'New Moon'
-  else if (ageDays < 7.38) name = 'Waxing Crescent'
-  else if (ageDays < 9.23) name = 'First Quarter'
-  else if (ageDays < 14.77) name = 'Waxing Gibbous'
-  else if (ageDays < 16.61) name = 'Full Moon'
-  else if (ageDays < 22.15) name = 'Waning Gibbous'
-  else if (ageDays < 23.99) name = 'Last Quarter'
-  else if (ageDays < 27.68) name = 'Waning Crescent'
+  if (elongation < 22.5) name = 'New Moon'
+  else if (elongation < 82.5) name = 'Waxing Crescent'
+  else if (elongation < 97.5) name = 'First Quarter'
+  else if (elongation < 172.5) name = 'Waxing Gibbous'
+  else if (elongation < 187.5) name = 'Full Moon'
+  else if (elongation < 262.5) name = 'Waning Gibbous'
+  else if (elongation < 277.5) name = 'Last Quarter'
+  else if (elongation < 337.5) name = 'Waning Crescent'
   else name = 'New Moon'
 
-  return { ageDays, fraction, illumination, name }
+  const fraction = elongation / 360
+  return { ageDays, fraction, illumination, name, phaseAngleRad }
 }
 
 /** Simplified Meeus low-accuracy lunar position → equatorial RA/Dec. */

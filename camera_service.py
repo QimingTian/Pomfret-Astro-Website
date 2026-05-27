@@ -250,6 +250,66 @@ def _apply_white_balance_auto(wb_auto: bool):
         print(f"[WB] Manual white balance R={wb_r} B={wb_b}")
 
 
+def _awb_warmup_for_still():
+    """
+    ASI auto-WB converges during video capture, not on a single still exposure.
+    Run a short video burst, read converged WB R/B, then lock manual WB for capture_snapshot.
+    """
+    if not camera.is_open or not camera.is_color_cam or asi_lib is None:
+        return
+    if not camera_state.get('wb_auto') or camera.streaming:
+        return
+
+    width = camera_state['width']
+    height = camera_state['height']
+    gain = camera_state['gain']
+    gamma = camera_state.get('gamma', 50)
+    warmup_exp = max(32, min(int(camera_state.get('video_exposure', 100_000)), 200_000))
+
+    asi_lib.ASISetROIFormat(camera.camera_id, width, height, 1, ASI_IMG_RGB24)
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_GAIN, gain, ASI_FALSE)
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_GAMMA, gamma, ASI_FALSE)
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_EXPOSURE, warmup_exp, ASI_FALSE)
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_R, 0, ASI_TRUE)
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_B, 0, ASI_TRUE)
+
+    if asi_lib.ASIStartVideoCapture(camera.camera_id) != ASI_SUCCESS:
+        print("[AWB warmup] Failed to start video capture")
+        return
+
+    buffer_size = width * height * 3
+    buffer = (ctypes.c_ubyte * buffer_size)()
+    drop_frames = ctypes.c_int(0)
+    try:
+        for _ in range(25):
+            asi_lib.ASIGetVideoData(
+                camera.camera_id,
+                ctypes.byref(buffer),
+                buffer_size,
+                ctypes.byref(drop_frames),
+            )
+            time.sleep(0.05)
+    finally:
+        asi_lib.ASIStopVideoCapture(camera.camera_id)
+        time.sleep(0.2)
+
+    wb_r = ctypes.c_long(0)
+    wb_b = ctypes.c_long(0)
+    auto_r = ctypes.c_int(0)
+    auto_b = ctypes.c_int(0)
+    asi_lib.ASIGetControlValue(camera.camera_id, ASI_WB_R, ctypes.byref(wb_r), ctypes.byref(auto_r))
+    asi_lib.ASIGetControlValue(camera.camera_id, ASI_WB_B, ctypes.byref(wb_b), ctypes.byref(auto_b))
+
+    camera_state['wb_r'] = int(wb_r.value)
+    camera_state['wb_b'] = int(wb_b.value)
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_R, wb_r.value, ASI_FALSE)
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_B, wb_b.value, ASI_FALSE)
+    print(
+        f"[AWB warmup] Locked WB for still capture: R={wb_r.value} B={wb_b.value} "
+        f"(warmup exp {warmup_exp} μs)"
+    )
+
+
 def _capture_photo_to_memory():
     """Capture a still (photo exposure) and store in camera_state['current_frame']."""
     if not camera_state['connected'] or not camera.is_open:
@@ -269,11 +329,11 @@ def _capture_photo_to_memory():
         height = camera_state['height']
         format_applied = False
 
+        # Public auto frames are always RGB24 (RAW stills look green without demosaic).
         if photo_format != ASI_IMG_RGB24:
-            result = asi_lib.ASISetROIFormat(camera.camera_id, width, height, 1, photo_format)
-            if result == ASI_SUCCESS:
-                format_applied = True
-            time.sleep(0.3)
+            asi_lib.ASISetROIFormat(camera.camera_id, width, height, 1, ASI_IMG_RGB24)
+            time.sleep(0.2)
+            format_applied = photo_format != ASI_IMG_RGB24
 
         img = camera.capture_snapshot()
         if format_applied:
@@ -766,15 +826,29 @@ class ASICamera:
             self.stop_stream()
             time.sleep(0.1)  # Brief pause for SDK to process
         
-        # Set exposure and gain (disable auto for photo mode)
+        # Set exposure, gain, gamma, and white balance for still capture
         exposure = camera_state['exposure']
         gain_val = camera_state['gain']
-        
-        # Disable auto exposure and set manual values
+        gamma = camera_state.get('gamma', 50)
+
         asi_lib.ASISetControlValue(self.camera_id, ASI_EXPOSURE, exposure, ASI_FALSE)
         asi_lib.ASISetControlValue(self.camera_id, ASI_GAIN, gain_val, ASI_FALSE)
-        
-        print(f"[capture_snapshot] Starting exposure: {exposure} μs, gain: {gain_val}")
+        asi_lib.ASISetControlValue(self.camera_id, ASI_GAMMA, gamma, ASI_FALSE)
+
+        if self.is_color_cam:
+            if camera_state.get('wb_auto'):
+                # Warmup (if not already done in _capture_photo_to_memory) locks manual R/B
+                _awb_warmup_for_still()
+            else:
+                wb_r = camera_state.get('wb_r', 50)
+                wb_b = camera_state.get('wb_b', 50)
+                asi_lib.ASISetControlValue(self.camera_id, ASI_WB_R, wb_r, ASI_FALSE)
+                asi_lib.ASISetControlValue(self.camera_id, ASI_WB_B, wb_b, ASI_FALSE)
+
+        print(
+            f"[capture_snapshot] Starting exposure: {exposure} μs, gain: {gain_val}, "
+            f"gamma: {gamma}, wb_auto: {camera_state.get('wb_auto')}"
+        )
         
         # Start exposure - SDK will return error if video mode is still active
         result = asi_lib.ASIStartExposure(self.camera_id, 0)  # 0 = not dark frame

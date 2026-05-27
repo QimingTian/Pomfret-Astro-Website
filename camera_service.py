@@ -192,9 +192,11 @@ sequence_state = {
 AUTO_DEFAULT_INTERVAL_S = 60
 AWB_WARMUP_FRAMES = 25
 AWB_WARMUP_MAX_FRAMES = 40
-AWB_WARMUP_MIN_EXPOSURE_US = 10_000
+AWB_WARMUP_FALLBACK_EXPOSURE_US = 100_000  # only when photo/video exposure unset (0)
 AWB_WARMUP_MAX_EXPOSURE_US = 500_000  # cap AWB burst exposure at 0.5 s
 AWB_WARMUP_FRAME_PAUSE_S = 0.04  # let ASI WB servo settle between frames
+AWB_WARMUP_SHORT_EXPOSURE_US = 10_000  # below this, use longer pause (same brightness, more settle)
+AWB_WARMUP_SHORT_PAUSE_S = 0.08
 AWB_WARMUP_STABLE_DELTA = 3  # R/B must change by less than this between reads
 auto_state = {
     'active': False,
@@ -250,15 +252,24 @@ def _apply_white_balance_auto(wb_auto: bool):
 
 
 def _awb_warmup_exposure_us():
-    """Match AWB burst to the exposure that will be used for the still (auto → photo, else video)."""
+    """
+    Use the same exposure as the upcoming still/stream frame for AWB warmup.
+    No minimum floor — a higher warmup exposure (e.g. 10 ms in daytime) blows out the
+    scene and yields useless R/B. Fallback only when exposure is unset (0).
+    """
     if auto_state.get('active'):
-        target = int(camera_state.get('exposure', 100_000))
+        target = int(camera_state.get('exposure', 0))
     else:
-        target = int(camera_state.get('video_exposure', 100_000))
-    return max(
-        AWB_WARMUP_MIN_EXPOSURE_US,
-        min(target, AWB_WARMUP_MAX_EXPOSURE_US),
-    )
+        target = int(camera_state.get('video_exposure', 0))
+    if target <= 0:
+        target = AWB_WARMUP_FALLBACK_EXPOSURE_US
+    return min(target, AWB_WARMUP_MAX_EXPOSURE_US)
+
+
+def _awb_frame_pause_s(exposure_us: int) -> float:
+    if exposure_us < AWB_WARMUP_SHORT_EXPOSURE_US:
+        return AWB_WARMUP_SHORT_PAUSE_S
+    return AWB_WARMUP_FRAME_PAUSE_S
 
 
 def _read_wb_manual_values():
@@ -295,6 +306,7 @@ def _awb_warmup_for_still():
     gain = camera_state['gain']
     gamma = camera_state.get('gamma', 50)
     warmup_exp = _awb_warmup_exposure_us()
+    frame_pause = _awb_frame_pause_s(warmup_exp)
 
     asi_lib.ASISetROIFormat(camera.camera_id, width, height, 1, ASI_IMG_RGB24)
     asi_lib.ASISetControlValue(camera.camera_id, ASI_GAIN, gain, ASI_FALSE)
@@ -320,7 +332,7 @@ def _awb_warmup_for_still():
                 ctypes.byref(drop_frames),
             )
             frames_done = i + 1
-            time.sleep(AWB_WARMUP_FRAME_PAUSE_S)
+            time.sleep(frame_pause)
     finally:
         asi_lib.ASIStopVideoCapture(camera.camera_id)
         time.sleep(0.1)
@@ -349,7 +361,7 @@ def _awb_warmup_for_still():
                         ctypes.byref(drop_frames),
                     )
                     frames_done += 1
-                    time.sleep(AWB_WARMUP_FRAME_PAUSE_S)
+                    time.sleep(frame_pause)
             finally:
                 asi_lib.ASIStopVideoCapture(camera.camera_id)
                 time.sleep(0.1)
@@ -366,9 +378,11 @@ def _awb_warmup_for_still():
     camera_state['wb_still_manual_lock'] = True
     asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_R, r_val, ASI_FALSE)
     asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_B, b_val, ASI_FALSE)
+    photo_exp = int(camera_state.get('exposure', 0))
     print(
         f"[AWB warmup] Locked WB for still: R={r_val} B={b_val} "
-        f"({frames_done} frames, warmup exp {warmup_exp} μs, auto={auto_state.get('active')})"
+        f"({frames_done} frames, warmup exp {warmup_exp} μs, photo exp {photo_exp} μs, "
+        f"pause {frame_pause}s, auto={auto_state.get('active')})"
     )
 
 

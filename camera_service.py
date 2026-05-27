@@ -190,8 +190,12 @@ sequence_state = {
 
 # Server-side auto mode (periodic photo capture for Weather / public view)
 AUTO_DEFAULT_INTERVAL_S = 60
-AWB_WARMUP_FRAMES = 10
-AWB_WARMUP_EXPOSURE_US = 10_000  # fixed short exposure for AWB burst (not video_exposure)
+AWB_WARMUP_FRAMES = 25
+AWB_WARMUP_MAX_FRAMES = 40
+AWB_WARMUP_MIN_EXPOSURE_US = 10_000
+AWB_WARMUP_MAX_EXPOSURE_US = 500_000  # cap AWB burst exposure at 0.5 s
+AWB_WARMUP_FRAME_PAUSE_S = 0.04  # let ASI WB servo settle between frames
+AWB_WARMUP_STABLE_DELTA = 3  # R/B must change by less than this between reads
 auto_state = {
     'active': False,
     'interval': AUTO_DEFAULT_INTERVAL_S,
@@ -245,21 +249,52 @@ def _apply_white_balance_auto(wb_auto: bool):
         print(f"[WB] Manual white balance R={wb_r} B={wb_b}")
 
 
+def _awb_warmup_exposure_us():
+    """Match AWB burst to the exposure that will be used for the still (auto → photo, else video)."""
+    if auto_state.get('active'):
+        target = int(camera_state.get('exposure', 100_000))
+    else:
+        target = int(camera_state.get('video_exposure', 100_000))
+    return max(
+        AWB_WARMUP_MIN_EXPOSURE_US,
+        min(target, AWB_WARMUP_MAX_EXPOSURE_US),
+    )
+
+
+def _read_wb_manual_values():
+    """Disable auto WB, then read latched R/B (reading while auto=1 often returns 0)."""
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_R, 0, ASI_FALSE)
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_B, 0, ASI_FALSE)
+    time.sleep(0.08)
+    wb_r = ctypes.c_long(0)
+    wb_b = ctypes.c_long(0)
+    auto_r = ctypes.c_int(0)
+    auto_b = ctypes.c_int(0)
+    asi_lib.ASIGetControlValue(camera.camera_id, ASI_WB_R, ctypes.byref(wb_r), ctypes.byref(auto_r))
+    asi_lib.ASIGetControlValue(camera.camera_id, ASI_WB_B, ctypes.byref(wb_b), ctypes.byref(auto_b))
+    return int(wb_r.value), int(wb_b.value), auto_r.value, auto_b.value
+
+
 def _awb_warmup_for_still():
     """
     ASI auto-WB needs video frames to converge; latch R/B for the following still.
-    Disable auto (ASI_FALSE) before reading values — reading while auto=1 often returns 0.
+    In auto mode use photo_exposure (video_exposure is often 0 and unrelated to stills).
     """
     if not camera.is_open or not camera.is_color_cam or asi_lib is None:
+        print("[AWB warmup] skipped: camera not ready")
         return
-    if not camera_state.get('wb_auto') or camera.streaming:
+    if not camera_state.get('wb_auto'):
+        print("[AWB warmup] skipped: wb_auto is False")
+        return
+    if camera.streaming:
+        print("[AWB warmup] skipped: camera.streaming is True")
         return
 
     width = camera_state['width']
     height = camera_state['height']
     gain = camera_state['gain']
     gamma = camera_state.get('gamma', 50)
-    warmup_exp = max(AWB_WARMUP_EXPOSURE_US, min(int(camera_state.get('video_exposure', 100_000)), 200_000))
+    warmup_exp = _awb_warmup_exposure_us()
 
     asi_lib.ASISetROIFormat(camera.camera_id, width, height, 1, ASI_IMG_RGB24)
     asi_lib.ASISetControlValue(camera.camera_id, ASI_GAIN, gain, ASI_FALSE)
@@ -275,34 +310,55 @@ def _awb_warmup_for_still():
     buffer_size = width * height * 3
     buffer = (ctypes.c_ubyte * buffer_size)()
     drop_frames = ctypes.c_int(0)
+    frames_done = 0
     try:
-        for _ in range(AWB_WARMUP_FRAMES):
+        for i in range(AWB_WARMUP_MAX_FRAMES):
             asi_lib.ASIGetVideoData(
                 camera.camera_id,
                 ctypes.byref(buffer),
                 buffer_size,
                 ctypes.byref(drop_frames),
             )
+            frames_done = i + 1
+            time.sleep(AWB_WARMUP_FRAME_PAUSE_S)
     finally:
         asi_lib.ASIStopVideoCapture(camera.camera_id)
         time.sleep(0.1)
 
-    # Latch auto-computed WB (disable auto, then read manual values).
-    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_R, 0, ASI_FALSE)
-    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_B, 0, ASI_FALSE)
-    time.sleep(0.05)
-
-    wb_r = ctypes.c_long(0)
-    wb_b = ctypes.c_long(0)
-    auto_r = ctypes.c_int(0)
-    auto_b = ctypes.c_int(0)
-    asi_lib.ASIGetControlValue(camera.camera_id, ASI_WB_R, ctypes.byref(wb_r), ctypes.byref(auto_r))
-    asi_lib.ASIGetControlValue(camera.camera_id, ASI_WB_B, ctypes.byref(wb_b), ctypes.byref(auto_b))
-
-    r_val = int(wb_r.value)
-    b_val = int(wb_b.value)
+    r1, b1, _, _ = _read_wb_manual_values()
+    time.sleep(0.12)
+    r_val, b_val, auto_r, auto_b = _read_wb_manual_values()
+    if (
+        frames_done < AWB_WARMUP_MAX_FRAMES
+        and (
+            abs(r_val - r1) > AWB_WARMUP_STABLE_DELTA
+            or abs(b_val - b1) > AWB_WARMUP_STABLE_DELTA
+        )
+    ):
+        print(f"[AWB warmup] WB still drifting R {r1}→{r_val} B {b1}→{b_val}, extra burst")
+        asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_R, 0, ASI_TRUE)
+        asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_B, 0, ASI_TRUE)
+        if asi_lib.ASIStartVideoCapture(camera.camera_id) == ASI_SUCCESS:
+            try:
+                extra = AWB_WARMUP_MAX_FRAMES - frames_done
+                for _ in range(extra):
+                    asi_lib.ASIGetVideoData(
+                        camera.camera_id,
+                        ctypes.byref(buffer),
+                        buffer_size,
+                        ctypes.byref(drop_frames),
+                    )
+                    frames_done += 1
+                    time.sleep(AWB_WARMUP_FRAME_PAUSE_S)
+            finally:
+                asi_lib.ASIStopVideoCapture(camera.camera_id)
+                time.sleep(0.1)
+            r_val, b_val, auto_r, auto_b = _read_wb_manual_values()
     if r_val < 5 and b_val < 5:
-        print(f"[AWB warmup] WB read R={r_val} B={b_val} (auto flags {auto_r.value}/{auto_b.value}), using defaults")
+        print(
+            f"[AWB warmup] WB read R={r_val} B={b_val} "
+            f"(auto flags {auto_r}/{auto_b}, {frames_done} frames), using defaults"
+        )
         r_val, b_val = 50, 50
 
     camera_state['wb_r'] = r_val
@@ -310,7 +366,10 @@ def _awb_warmup_for_still():
     camera_state['wb_still_manual_lock'] = True
     asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_R, r_val, ASI_FALSE)
     asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_B, b_val, ASI_FALSE)
-    print(f"[AWB warmup] Locked WB for still: R={r_val} B={b_val} (warmup exp {warmup_exp} μs)")
+    print(
+        f"[AWB warmup] Locked WB for still: R={r_val} B={b_val} "
+        f"({frames_done} frames, warmup exp {warmup_exp} μs, auto={auto_state.get('active')})"
+    )
 
 
 def _request_auto_cycle_restart():

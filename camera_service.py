@@ -101,6 +101,37 @@ if asi_lib is None:
     print("3. udev rules are installed: sudo cp ASI_linux_mac_SDK_V1.40/lib/asi.rules /etc/udev/rules.d/")
     print("4. Camera is connected and udev rules are reloaded: sudo udevadm control --reload-rules")
 
+# ctypes layout for ASIGetControlCaps (must match ASICamera2.h)
+class ASI_CONTROL_CAPS(ctypes.Structure):
+    _fields_ = [
+        ("Name", ctypes.c_char * 64),
+        ("Description", ctypes.c_char * 128),
+        ("MaxValue", ctypes.c_long),
+        ("MinValue", ctypes.c_long),
+        ("DefaultValue", ctypes.c_long),
+        ("IsAutoSupported", ctypes.c_int),
+        ("IsWritable", ctypes.c_int),
+        ("ControlType", ctypes.c_int),
+        ("Unused", ctypes.c_char * 32),
+    ]
+
+
+def _configure_asi_lib_ctypes():
+    """Set argtypes/restype for SDK calls used via ctypes (avoids segfaults)."""
+    if asi_lib is None:
+        return
+    asi_lib.ASIGetNumOfControls.argtypes = [ctypes.c_int, ctypes.POINTER(ctypes.c_int)]
+    asi_lib.ASIGetNumOfControls.restype = ctypes.c_int
+    asi_lib.ASIGetControlCaps.argtypes = [
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.POINTER(ASI_CONTROL_CAPS),
+    ]
+    asi_lib.ASIGetControlCaps.restype = ctypes.c_int
+
+
+_configure_asi_lib_ctypes()
+
 # ASI Camera constants (from ASICamera2.h)
 ASI_SUCCESS = 0
 ASI_FALSE = 0
@@ -948,22 +979,13 @@ def _get_control_range(camera_id, control_type):
     if asi_lib is None:
         return None
 
-    class ASI_CONTROL_CAPS(ctypes.Structure):
-        _fields_ = [
-            ("Name", ctypes.c_char * 64),
-            ("Description", ctypes.c_char * 128),
-            ("MaxValue", ctypes.c_long),
-            ("MinValue", ctypes.c_long),
-            ("DefaultValue", ctypes.c_long),
-            ("IsAutoSupported", ctypes.c_int),
-            ("IsWritable", ctypes.c_int),
-            ("ControlType", ctypes.c_int),
-            ("Unused", ctypes.c_char * 32),
-        ]
+    num_controls = ctypes.c_int(0)
+    result = asi_lib.ASIGetNumOfControls(camera_id, ctypes.byref(num_controls))
+    if result != ASI_SUCCESS:
+        return None
 
-    try:
-        num = asi_lib.ASIGetNumOfControls(camera_id)
-    except AttributeError:
+    num = num_controls.value
+    if num <= 0 or num > 128:
         return None
 
     for i in range(num):

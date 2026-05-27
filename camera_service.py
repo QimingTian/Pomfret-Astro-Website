@@ -1366,33 +1366,38 @@ def update_settings():
         was_streaming = camera_state['streaming']
         print(f"[Settings] Setting video exposure: {video_exposure_us} μs ({video_exposure_us/1000:.1f} ms)")
         
-        if camera.is_open:
-            # Video exposure requires stream restart to take effect (manual exposure mode)
-            if was_streaming:
-                print(f"[Settings] Stopping stream to apply video exposure...")
-                camera.stop_stream()
-                time.sleep(0.5)
-            
-            # Set ASI_EXPOSURE directly (manual exposure mode for video)
-            # Set ASI_EXPOSURE directly as we are in manual exposure mode
-            # Note: ASI_AUTO_MAX_EXP is not needed in manual mode
-            result_exp = asi_lib.ASISetControlValue(camera.camera_id, ASI_EXPOSURE, video_exposure_us, ASI_FALSE)
-            
-            # Verify ASI_EXPOSURE was set
+        if camera.is_open and was_streaming:
+            # Video exposure only affects stream mode; auto/off use photo_exposure for stills.
+            print(f"[Settings] Stopping stream to apply video exposure...")
+            camera.stop_stream()
+            time.sleep(0.5)
+
+            result_exp = asi_lib.ASISetControlValue(
+                camera.camera_id, ASI_EXPOSURE, video_exposure_us, ASI_FALSE
+            )
+
             actual_exp = ctypes.c_long(0)
             auto_exp = ctypes.c_int(0)
-            asi_lib.ASIGetControlValue(camera.camera_id, ASI_EXPOSURE, ctypes.byref(actual_exp), ctypes.byref(auto_exp))
-            
-            print(f"[Settings] Set ASI_EXPOSURE to {video_exposure_us} μs (result: {result_exp}, actual: {actual_exp.value} μs, auto: {auto_exp.value})")
-            
-            # Restart stream if it was active
-            if was_streaming:
-                print(f"[Settings] Restarting stream with new video exposure...")
-                time.sleep(0.5)
-                success = camera.start_stream()
-                print(f"[Settings] Stream restart result: {success}, State: {camera_state['streaming']}")
-            
-            updated.append(f"video_exposure={video_exposure_us}us")
+            asi_lib.ASIGetControlValue(
+                camera.camera_id, ASI_EXPOSURE, ctypes.byref(actual_exp), ctypes.byref(auto_exp)
+            )
+
+            print(
+                f"[Settings] Set ASI_EXPOSURE to {video_exposure_us} μs "
+                f"(result: {result_exp}, actual: {actual_exp.value} μs, auto: {auto_exp.value})"
+            )
+
+            print(f"[Settings] Restarting stream with new video exposure...")
+            time.sleep(0.5)
+            success = camera.start_stream()
+            print(f"[Settings] Stream restart result: {success}, State: {camera_state['streaming']}")
+        elif camera.is_open:
+            print(
+                f"[Settings] Saved video exposure {video_exposure_us} μs "
+                f"(not applied to hardware until stream mode)"
+            )
+
+        updated.append(f"video_exposure={video_exposure_us}us")
     
     if 'wb_auto' in data:
         wb_auto = bool(data['wb_auto'])

@@ -736,8 +736,8 @@ export function AllSkyCameraControlPanel() {
   useEffect(() => {
     if (mode !== 'auto' || !camStatus.lastAutoFrameIso) return
     void refreshAutoStats()
-    refreshStream()
-  }, [mode, camStatus.lastAutoFrameIso, refreshAutoStats, refreshStream])
+    // MJPEG /camera/stream re-pushes auto frames; no streamKey bump (avoids preview flash).
+  }, [mode, camStatus.lastAutoFrameIso, refreshAutoStats])
 
   // ------------------------------------------------------------------
   // Sequence status polling (only while active)
@@ -811,9 +811,17 @@ export function AllSkyCameraControlPanel() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         })
-        refreshStream()
-        if (mode === 'auto') {
-          void refreshAutoStats()
+        if (mode === 'stream') {
+          refreshStream()
+        } else if (mode === 'auto') {
+          // Video exposure only applies to stream mode; auto uses photo exposure.
+          const affectsAutoCapture =
+            patch.gain !== undefined ||
+            patch.gamma !== undefined ||
+            patch.photoExposure !== undefined
+          if (affectsAutoCapture) {
+            void refreshAutoStats()
+          }
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Settings update failed')

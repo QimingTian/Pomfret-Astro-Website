@@ -165,8 +165,7 @@ camera_state = {
     'gamma': 50,  # Gamma (default, range 1-100, recommended 50 for linear output)
     'wb_r': 50,  # White balance red channel (default, range 0-100)
     'wb_b': 50,  # White balance blue channel (default, range 0-100)
-    'wb_auto': False,  # Auto white balance enabled (default: manual)
-    'wb_still_manual_lock': False,  # True after AWB warmup until still capture finishes
+    'wb_auto': False,  # Always manual WB from admin UI (wb_r / wb_b)
     'image_format': ASI_IMG_RGB24,  # Default to RGB24
     'current_frame': None,
     'error': None,
@@ -190,14 +189,6 @@ sequence_state = {
 
 # Server-side auto mode (periodic photo capture for Weather / public view)
 AUTO_DEFAULT_INTERVAL_S = 60
-AWB_WARMUP_FRAMES = 25
-AWB_WARMUP_MAX_FRAMES = 40
-AWB_WARMUP_FALLBACK_EXPOSURE_US = 100_000  # only when photo/video exposure unset (0)
-AWB_WARMUP_MAX_EXPOSURE_US = 500_000  # cap AWB burst exposure at 0.5 s
-AWB_WARMUP_FRAME_PAUSE_S = 0.04  # let ASI WB servo settle between frames
-AWB_WARMUP_SHORT_EXPOSURE_US = 10_000  # below this, use longer pause (same brightness, more settle)
-AWB_WARMUP_SHORT_PAUSE_S = 0.08
-AWB_WARMUP_STABLE_DELTA = 3  # R/B must change by less than this between reads
 auto_state = {
     'active': False,
     'interval': AUTO_DEFAULT_INTERVAL_S,
@@ -234,156 +225,15 @@ def _load_persisted_mode():
     return 'off', AUTO_DEFAULT_INTERVAL_S
 
 
-def _apply_white_balance_auto(wb_auto: bool):
-    """Sync wb_auto to state and ASI hardware (color cameras only)."""
-    camera_state['wb_auto'] = wb_auto
+def _apply_manual_white_balance():
+    """Apply manual WB_R / WB_B from camera_state (color cameras only)."""
+    camera_state['wb_auto'] = False
     if not camera.is_open or not camera.is_color_cam or asi_lib is None:
         return
-    if wb_auto:
-        result_wb_r = asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_R, 0, ASI_TRUE)
-        result_wb_b = asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_B, 0, ASI_TRUE)
-        print(f"[WB] Auto white balance enabled (R: {result_wb_r}, B: {result_wb_b})")
-    else:
-        wb_r = camera_state.get('wb_r', 50)
-        wb_b = camera_state.get('wb_b', 50)
-        asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_R, wb_r, ASI_FALSE)
-        asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_B, wb_b, ASI_FALSE)
-        print(f"[WB] Manual white balance R={wb_r} B={wb_b}")
-
-
-def _awb_warmup_exposure_us():
-    """
-    Use the same exposure as the upcoming still/stream frame for AWB warmup.
-    No minimum floor — a higher warmup exposure (e.g. 10 ms in daytime) blows out the
-    scene and yields useless R/B. Fallback only when exposure is unset (0).
-    """
-    if auto_state.get('active'):
-        target = int(camera_state.get('exposure', 0))
-    else:
-        target = int(camera_state.get('video_exposure', 0))
-    if target <= 0:
-        target = AWB_WARMUP_FALLBACK_EXPOSURE_US
-    return min(target, AWB_WARMUP_MAX_EXPOSURE_US)
-
-
-def _awb_frame_pause_s(exposure_us: int) -> float:
-    if exposure_us < AWB_WARMUP_SHORT_EXPOSURE_US:
-        return AWB_WARMUP_SHORT_PAUSE_S
-    return AWB_WARMUP_FRAME_PAUSE_S
-
-
-def _read_wb_manual_values():
-    """Disable auto WB, then read latched R/B (reading while auto=1 often returns 0)."""
-    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_R, 0, ASI_FALSE)
-    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_B, 0, ASI_FALSE)
-    time.sleep(0.08)
-    wb_r = ctypes.c_long(0)
-    wb_b = ctypes.c_long(0)
-    auto_r = ctypes.c_int(0)
-    auto_b = ctypes.c_int(0)
-    asi_lib.ASIGetControlValue(camera.camera_id, ASI_WB_R, ctypes.byref(wb_r), ctypes.byref(auto_r))
-    asi_lib.ASIGetControlValue(camera.camera_id, ASI_WB_B, ctypes.byref(wb_b), ctypes.byref(auto_b))
-    return int(wb_r.value), int(wb_b.value), auto_r.value, auto_b.value
-
-
-def _awb_warmup_for_still():
-    """
-    ASI auto-WB needs video frames to converge; latch R/B for the following still.
-    In auto mode use photo_exposure (video_exposure is often 0 and unrelated to stills).
-    """
-    if not camera.is_open or not camera.is_color_cam or asi_lib is None:
-        print("[AWB warmup] skipped: camera not ready")
-        return
-    if not camera_state.get('wb_auto'):
-        print("[AWB warmup] skipped: wb_auto is False")
-        return
-    if camera.streaming:
-        print("[AWB warmup] skipped: camera.streaming is True")
-        return
-
-    width = camera_state['width']
-    height = camera_state['height']
-    gain = camera_state['gain']
-    gamma = camera_state.get('gamma', 50)
-    warmup_exp = _awb_warmup_exposure_us()
-    frame_pause = _awb_frame_pause_s(warmup_exp)
-
-    asi_lib.ASISetROIFormat(camera.camera_id, width, height, 1, ASI_IMG_RGB24)
-    asi_lib.ASISetControlValue(camera.camera_id, ASI_GAIN, gain, ASI_FALSE)
-    asi_lib.ASISetControlValue(camera.camera_id, ASI_GAMMA, gamma, ASI_FALSE)
-    asi_lib.ASISetControlValue(camera.camera_id, ASI_EXPOSURE, warmup_exp, ASI_FALSE)
-    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_R, 0, ASI_TRUE)
-    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_B, 0, ASI_TRUE)
-
-    if asi_lib.ASIStartVideoCapture(camera.camera_id) != ASI_SUCCESS:
-        print("[AWB warmup] Failed to start video capture")
-        return
-
-    buffer_size = width * height * 3
-    buffer = (ctypes.c_ubyte * buffer_size)()
-    drop_frames = ctypes.c_int(0)
-    frames_done = 0
-    try:
-        for i in range(AWB_WARMUP_MAX_FRAMES):
-            asi_lib.ASIGetVideoData(
-                camera.camera_id,
-                ctypes.byref(buffer),
-                buffer_size,
-                ctypes.byref(drop_frames),
-            )
-            frames_done = i + 1
-            time.sleep(frame_pause)
-    finally:
-        asi_lib.ASIStopVideoCapture(camera.camera_id)
-        time.sleep(0.1)
-
-    r1, b1, _, _ = _read_wb_manual_values()
-    time.sleep(0.12)
-    r_val, b_val, auto_r, auto_b = _read_wb_manual_values()
-    if (
-        frames_done < AWB_WARMUP_MAX_FRAMES
-        and (
-            abs(r_val - r1) > AWB_WARMUP_STABLE_DELTA
-            or abs(b_val - b1) > AWB_WARMUP_STABLE_DELTA
-        )
-    ):
-        print(f"[AWB warmup] WB still drifting R {r1}→{r_val} B {b1}→{b_val}, extra burst")
-        asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_R, 0, ASI_TRUE)
-        asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_B, 0, ASI_TRUE)
-        if asi_lib.ASIStartVideoCapture(camera.camera_id) == ASI_SUCCESS:
-            try:
-                extra = AWB_WARMUP_MAX_FRAMES - frames_done
-                for _ in range(extra):
-                    asi_lib.ASIGetVideoData(
-                        camera.camera_id,
-                        ctypes.byref(buffer),
-                        buffer_size,
-                        ctypes.byref(drop_frames),
-                    )
-                    frames_done += 1
-                    time.sleep(frame_pause)
-            finally:
-                asi_lib.ASIStopVideoCapture(camera.camera_id)
-                time.sleep(0.1)
-            r_val, b_val, auto_r, auto_b = _read_wb_manual_values()
-    if r_val < 5 and b_val < 5:
-        print(
-            f"[AWB warmup] WB read R={r_val} B={b_val} "
-            f"(auto flags {auto_r}/{auto_b}, {frames_done} frames), using defaults"
-        )
-        r_val, b_val = 50, 50
-
-    camera_state['wb_r'] = r_val
-    camera_state['wb_b'] = b_val
-    camera_state['wb_still_manual_lock'] = True
-    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_R, r_val, ASI_FALSE)
-    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_B, b_val, ASI_FALSE)
-    photo_exp = int(camera_state.get('exposure', 0))
-    print(
-        f"[AWB warmup] Locked WB for still: R={r_val} B={b_val} "
-        f"({frames_done} frames, warmup exp {warmup_exp} μs, photo exp {photo_exp} μs, "
-        f"pause {frame_pause}s, auto={auto_state.get('active')})"
-    )
+    wb_r = int(camera_state.get('wb_r', 50))
+    wb_b = int(camera_state.get('wb_b', 50))
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_R, wb_r, ASI_FALSE)
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_B, wb_b, ASI_FALSE)
 
 
 def _request_auto_cycle_restart():
@@ -420,9 +270,6 @@ def _capture_photo_to_memory():
                 camera.stop_stream()
                 time.sleep(0.5)
 
-            if camera_state.get('wb_auto'):
-                _awb_warmup_for_still()
-
             photo_format = camera_state['image_format']
             width = camera_state['width']
             height = camera_state['height']
@@ -457,7 +304,6 @@ def _capture_photo_to_memory():
             traceback.print_exc()
             return False
         finally:
-            camera_state['wb_still_manual_lock'] = False
             if was_streaming and camera_state.get('mode') != 'auto':
                 try:
                     camera.start_stream()
@@ -502,7 +348,7 @@ def start_auto_mode(interval=None):
     camera_state['streaming'] = False
     camera_state['stream_last_frame_iso'] = None
     _persist_mode('auto', auto_state['interval'])
-    _apply_white_balance_auto(True)
+    _apply_manual_white_balance()
     auto_state['thread'] = threading.Thread(target=auto_capture_loop, daemon=True)
     auto_state['thread'].start()
     return True
@@ -645,17 +491,13 @@ class ASICamera:
             # Set initial gamma
             result_gamma = asi_lib.ASISetControlValue(self.camera_id, ASI_GAMMA, camera_state['gamma'], ASI_FALSE)
             
-            # Set initial white balance (only for color cameras)
             if camera_info.IsColorCam:
-                wb_auto = camera_state.get('wb_auto', False)
-                if wb_auto:
-                    # Set auto white balance
-                    result_wb_r = asi_lib.ASISetControlValue(self.camera_id, ASI_WB_R, 0, ASI_TRUE)
-                    result_wb_b = asi_lib.ASISetControlValue(self.camera_id, ASI_WB_B, 0, ASI_TRUE)
-                else:
-                    # Set manual white balance
-                    result_wb_r = asi_lib.ASISetControlValue(self.camera_id, ASI_WB_R, camera_state['wb_r'], ASI_FALSE)
-                    result_wb_b = asi_lib.ASISetControlValue(self.camera_id, ASI_WB_B, camera_state['wb_b'], ASI_FALSE)
+                result_wb_r = asi_lib.ASISetControlValue(
+                    self.camera_id, ASI_WB_R, camera_state['wb_r'], ASI_FALSE
+                )
+                result_wb_b = asi_lib.ASISetControlValue(
+                    self.camera_id, ASI_WB_B, camera_state['wb_b'], ASI_FALSE
+                )
             else:
                 result_wb_r = None
                 result_wb_b = None
@@ -670,12 +512,10 @@ class ASICamera:
             print(f"  Gamma: {camera_state['gamma']} (result: {result_gamma})")
             print(f"  Exposure (for photo): {camera_state['exposure']} μs ({camera_state['exposure']/1000000:.3f} s)")
             if camera_info.IsColorCam:
-                wb_auto = camera_state.get('wb_auto', False)
-                if wb_auto:
-                    print(f"  White Balance: Auto (R result: {result_wb_r}, B result: {result_wb_b})")
-                else:
-                    print(f"  White Balance R: {camera_state['wb_r']} (result: {result_wb_r})")
-                    print(f"  White Balance B: {camera_state['wb_b']} (result: {result_wb_b})")
+                print(
+                    f"  White Balance R: {camera_state['wb_r']} (result: {result_wb_r}), "
+                    f"B: {camera_state['wb_b']} (result: {result_wb_b})"
+                )
             
             camera_state['connected'] = True
             camera_state['error'] = None
@@ -718,19 +558,11 @@ class ASICamera:
         gamma = camera_state.get('gamma', 50)
         result_gamma = asi_lib.ASISetControlValue(self.camera_id, ASI_GAMMA, gamma, ASI_FALSE)
         
-        # Set white balance (only for color cameras)
         if self.is_color_cam:
-            wb_auto = camera_state.get('wb_auto', False)
-            if wb_auto:
-                # Set auto white balance
-                result_wb_r = asi_lib.ASISetControlValue(self.camera_id, ASI_WB_R, 0, ASI_TRUE)
-                result_wb_b = asi_lib.ASISetControlValue(self.camera_id, ASI_WB_B, 0, ASI_TRUE)
-            else:
-                # Set manual white balance
-                wb_r = camera_state.get('wb_r', 50)
-                wb_b = camera_state.get('wb_b', 50)
-                result_wb_r = asi_lib.ASISetControlValue(self.camera_id, ASI_WB_R, wb_r, ASI_FALSE)
-                result_wb_b = asi_lib.ASISetControlValue(self.camera_id, ASI_WB_B, wb_b, ASI_FALSE)
+            wb_r = camera_state.get('wb_r', 50)
+            wb_b = camera_state.get('wb_b', 50)
+            result_wb_r = asi_lib.ASISetControlValue(self.camera_id, ASI_WB_R, wb_r, ASI_FALSE)
+            result_wb_b = asi_lib.ASISetControlValue(self.camera_id, ASI_WB_B, wb_b, ASI_FALSE)
         else:
             result_wb_r = None
             result_wb_b = None
@@ -755,13 +587,12 @@ class ASICamera:
         print(f"[start_stream] Set gain to {gain} (result: {result_gain}, actual: {actual_gain.value})")
         print(f"[start_stream] Set gamma to {gamma} (result: {result_gamma})")
         if self.is_color_cam:
-            wb_auto = camera_state.get('wb_auto', False)
-            if wb_auto:
-                print(f"[start_stream] Set auto white balance (R result: {result_wb_r}, B result: {result_wb_b})")
-            else:
-                wb_r = camera_state.get('wb_r', 50)
-                wb_b = camera_state.get('wb_b', 50)
-                print(f"[start_stream] Set manual white balance R: {wb_r} (result: {result_wb_r}), B: {wb_b} (result: {result_wb_b})")
+            wb_r = camera_state.get('wb_r', 50)
+            wb_b = camera_state.get('wb_b', 50)
+            print(
+                f"[start_stream] Manual white balance R: {wb_r} (result: {result_wb_r}), "
+                f"B: {wb_b} (result: {result_wb_b})"
+            )
         print(f"[start_stream] Set video exposure to {video_exposure} μs ({video_exposure/1000:.1f} ms)")
         print(f"[start_stream] Manual exposure result: {result_manual}, actual: {actual_exp.value} μs, auto: {auto_exp.value}")
         
@@ -876,19 +707,10 @@ class ASICamera:
         asi_lib.ASISetControlValue(self.camera_id, ASI_GAMMA, gamma, ASI_FALSE)
 
         if self.is_color_cam:
-            if camera_state.get('wb_still_manual_lock'):
-                wb_r = camera_state.get('wb_r', 50)
-                wb_b = camera_state.get('wb_b', 50)
-                asi_lib.ASISetControlValue(self.camera_id, ASI_WB_R, wb_r, ASI_FALSE)
-                asi_lib.ASISetControlValue(self.camera_id, ASI_WB_B, wb_b, ASI_FALSE)
-            elif camera_state.get('wb_auto', False):
-                asi_lib.ASISetControlValue(self.camera_id, ASI_WB_R, 0, ASI_TRUE)
-                asi_lib.ASISetControlValue(self.camera_id, ASI_WB_B, 0, ASI_TRUE)
-            else:
-                wb_r = camera_state.get('wb_r', 50)
-                wb_b = camera_state.get('wb_b', 50)
-                asi_lib.ASISetControlValue(self.camera_id, ASI_WB_R, wb_r, ASI_FALSE)
-                asi_lib.ASISetControlValue(self.camera_id, ASI_WB_B, wb_b, ASI_FALSE)
+            wb_r = camera_state.get('wb_r', 50)
+            wb_b = camera_state.get('wb_b', 50)
+            asi_lib.ASISetControlValue(self.camera_id, ASI_WB_R, wb_r, ASI_FALSE)
+            asi_lib.ASISetControlValue(self.camera_id, ASI_WB_B, wb_b, ASI_FALSE)
 
         print(
             f"[capture_snapshot] Starting exposure: {exposure} μs, gain: {gain_val}, gamma: {gamma}"
@@ -1274,6 +1096,16 @@ def _sync_controls_from_camera():
     if asi_lib.ASIGetControlValue(camera.camera_id, ASI_EXPOSURE, ctypes.byref(exposure), ctypes.byref(auto_exp)) == ASI_SUCCESS:
         camera_state['video_exposure'] = int(exposure.value)
 
+    wb_r = ctypes.c_long(0)
+    auto_wb_r = ctypes.c_int(0)
+    if asi_lib.ASIGetControlValue(camera.camera_id, ASI_WB_R, ctypes.byref(wb_r), ctypes.byref(auto_wb_r)) == ASI_SUCCESS:
+        camera_state['wb_r'] = int(wb_r.value)
+
+    wb_b = ctypes.c_long(0)
+    auto_wb_b = ctypes.c_int(0)
+    if asi_lib.ASIGetControlValue(camera.camera_id, ASI_WB_B, ctypes.byref(wb_b), ctypes.byref(auto_wb_b)) == ASI_SUCCESS:
+        camera_state['wb_b'] = int(wb_b.value)
+
 
 def _settings_payload():
     format_names = {ASI_IMG_RGB24: 'RGB24', ASI_IMG_RAW8: 'RAW8', ASI_IMG_RAW16: 'RAW16', ASI_IMG_Y8: 'Y8'}
@@ -1287,6 +1119,9 @@ def _settings_payload():
         'video_exposure': camera_state['video_exposure'],
         'gain_min': camera_state.get('gain_min', 0),
         'gain_max': camera_state.get('gain_max', 500),
+        'wb_r': camera_state.get('wb_r', 50),
+        'wb_b': camera_state.get('wb_b', 50),
+        'wb_auto': False,
         'image_format': format_names.get(camera_state['image_format'], 'RGB24'),
     }
 
@@ -1416,85 +1251,36 @@ def update_settings():
 
         updated.append(f"video_exposure={video_exposure_us}us")
     
-    if 'wb_auto' in data:
-        wb_auto = bool(data['wb_auto'])
-        print(f"[Settings] Setting white balance auto: {wb_auto}")
+    if 'wb_auto' in data and bool(data['wb_auto']):
+        print("[Settings] Ignoring wb_auto=True (manual WB only)")
 
-        was_streaming = camera.is_open and camera_state['streaming']
+    wb_changed = False
+    if 'wb_r' in data:
+        wb_r = max(0, min(100, int(data['wb_r'])))
+        camera_state['wb_r'] = wb_r
+        wb_changed = True
+        updated.append(f"wb_r={wb_r}")
+
+    if 'wb_b' in data:
+        wb_b = max(0, min(100, int(data['wb_b'])))
+        camera_state['wb_b'] = wb_b
+        wb_changed = True
+        updated.append(f"wb_b={wb_b}")
+
+    if wb_changed and camera.is_open:
+        was_streaming = camera_state['streaming']
         if was_streaming:
-            print(f"[Settings] Stopping stream to apply white balance mode...")
             camera.stop_stream()
             time.sleep(0.5)
-
-        _apply_white_balance_auto(wb_auto)
-
+        _apply_manual_white_balance()
+        print(
+            f"[Settings] Manual white balance R={camera_state['wb_r']} "
+            f"B={camera_state['wb_b']}"
+        )
         if was_streaming:
-            print(f"[Settings] Restarting stream with new white balance mode...")
             time.sleep(0.5)
             success = camera.start_stream()
             print(f"[Settings] Stream restart result: {success}, State: {camera_state['streaming']}")
-
-        updated.append(f"wb_auto={wb_auto}")
-    
-    if 'wb_r' in data:
-        # Only set manual values if auto is disabled
-        if not camera_state.get('wb_auto', False):
-            wb_r = int(data['wb_r'])
-            camera_state['wb_r'] = wb_r
-            print(f"[Settings] Setting white balance R: {wb_r}")
-            
-            if camera.is_open:
-                result_wb_r = asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_R, wb_r, ASI_FALSE)
-                
-                # Verify it was set
-                actual_wb_r = ctypes.c_long(0)
-                auto_wb_r = ctypes.c_int(0)
-                asi_lib.ASIGetControlValue(camera.camera_id, ASI_WB_R, ctypes.byref(actual_wb_r), ctypes.byref(auto_wb_r))
-                
-                print(f"[Settings] Set white balance R to {wb_r} (result: {result_wb_r}, actual: {actual_wb_r.value})")
-                
-                # If streaming, restart to apply white balance
-                was_streaming = camera_state['streaming']
-                if was_streaming:
-                    print(f"[Settings] Restarting stream to apply white balance R...")
-                    camera.stop_stream()
-                    time.sleep(0.5)
-                    success = camera.start_stream()
-                    print(f"[Settings] Stream restart result: {success}, State: {camera_state['streaming']}")
-                
-                updated.append(f"wb_r={wb_r}")
-        else:
-            print(f"[Settings] Ignoring wb_r change: auto white balance is enabled")
-    
-    if 'wb_b' in data:
-        # Only set manual values if auto is disabled
-        if not camera_state.get('wb_auto', False):
-            wb_b = int(data['wb_b'])
-            camera_state['wb_b'] = wb_b
-            print(f"[Settings] Setting white balance B: {wb_b}")
-            
-            if camera.is_open:
-                result_wb_b = asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_B, wb_b, ASI_FALSE)
-                
-                # Verify it was set
-                actual_wb_b = ctypes.c_long(0)
-                auto_wb_b = ctypes.c_int(0)
-                asi_lib.ASIGetControlValue(camera.camera_id, ASI_WB_B, ctypes.byref(actual_wb_b), ctypes.byref(auto_wb_b))
-                
-                print(f"[Settings] Set white balance B to {wb_b} (result: {result_wb_b}, actual: {actual_wb_b.value})")
-                
-                # If streaming, restart to apply white balance
-                was_streaming = camera_state['streaming']
-                if was_streaming:
-                    print(f"[Settings] Restarting stream to apply white balance B...")
-                    camera.stop_stream()
-                    time.sleep(0.5)
-                    success = camera.start_stream()
-                    print(f"[Settings] Stream restart result: {success}, State: {camera_state['streaming']}")
-                
-                updated.append(f"wb_b={wb_b}")
-        else:
-            print(f"[Settings] Ignoring wb_b change: auto white balance is enabled")
     
     if 'image_format' in data:
         format_map = {
@@ -1522,9 +1308,9 @@ def update_settings():
     print(f"[Settings] Updated: {', '.join(updated) if updated else 'nothing'}")
     print(f"[Settings] State now - Gain: {camera_state['gain']}, Photo Exposure: {camera_state['exposure']} μs, Video Exposure: {camera_state['video_exposure']} μs, WB R: {camera_state.get('wb_r', 'N/A')}, WB B: {camera_state.get('wb_b', 'N/A')}, Format: {current_format_name}")
 
-    # Auto: gain/gamma/photo exp → wake loop (one capture + fresh interval, with AWB in capture path).
+    # Auto: gain/gamma/photo exp / WB → wake loop (immediate capture + fresh interval).
     if auto_state['active'] and camera_state.get('mode') == 'auto':
-        if any(k in data for k in ('gain', 'gamma', 'photo_exposure')):
+        if any(k in data for k in ('gain', 'gamma', 'photo_exposure', 'wb_r', 'wb_b')):
             _request_auto_cycle_restart()
 
     return jsonify({
@@ -1532,6 +1318,8 @@ def update_settings():
         'gain': camera_state['gain'],
         'exposure': camera_state['exposure'],
         'video_exposure': camera_state['video_exposure'],
+        'wb_r': camera_state.get('wb_r', 50),
+        'wb_b': camera_state.get('wb_b', 50),
         'image_format': current_format_name
     })
 

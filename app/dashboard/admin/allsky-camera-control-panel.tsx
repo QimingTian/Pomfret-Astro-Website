@@ -168,6 +168,8 @@ const fieldInputCompact =
 /** ASI662MC gain range; max updated from /status when camera is connected. UI min is always 0. */
 const GAIN_UI_MIN = 0
 const DEFAULT_GAIN_MAX = 500
+const WB_MIN = 0
+const WB_MAX = 100
 
 const PHOTO_EXP_MIN_S = 0
 /** Log-scale floor when photo exp > 0 (≈32 µs). */
@@ -582,6 +584,8 @@ export function AllSkyCameraControlPanel() {
   const [gamma, setGamma] = useState(50)
   const [videoExposureMs, setVideoExposureMs] = useState(100)
   const [photoExposureS, setPhotoExposureS] = useState(1)
+  const [wbR, setWbR] = useState(50)
+  const [wbB, setWbB] = useState(50)
 
   // Stream refresh key — bump to force the MJPEG <img> to reconnect
   const [streamKey, setStreamKey] = useState(() => Date.now())
@@ -601,11 +605,15 @@ export function AllSkyCameraControlPanel() {
   const gammaInputRef = useRef<NumericInputHandle>(null)
   const videoExpInputRef = useRef<NumericInputHandle>(null)
   const photoExpInputRef = useRef<NumericInputHandle>(null)
+  const wbRInputRef = useRef<NumericInputHandle>(null)
+  const wbBInputRef = useRef<NumericInputHandle>(null)
 
   const [gainInputValid, setGainInputValid] = useState(true)
   const [gammaInputValid, setGammaInputValid] = useState(true)
   const [videoExpInputValid, setVideoExpInputValid] = useState(true)
   const [photoExpInputValid, setPhotoExpInputValid] = useState(true)
+  const [wbRInputValid, setWbRInputValid] = useState(true)
+  const [wbBInputValid, setWbBInputValid] = useState(true)
 
   const seqCountInputRef = useRef<NumericInputHandle>(null)
   const seqIntervalInputRef = useRef<NumericInputHandle>(null)
@@ -699,9 +707,13 @@ export function AllSkyCameraControlPanel() {
         photo_exposure?: number
         video_exposure?: number
         gain_max?: number
+        wb_r?: number
+        wb_b?: number
       }>(base, '/camera/settings')
       if (typeof s.gain === 'number') setGain(s.gain)
       if (typeof s.gamma === 'number') setGamma(s.gamma)
+      if (typeof s.wb_r === 'number') setWbR(Math.max(WB_MIN, Math.min(WB_MAX, s.wb_r)))
+      if (typeof s.wb_b === 'number') setWbB(Math.max(WB_MIN, Math.min(WB_MAX, s.wb_b)))
       if (typeof s.photo_exposure === 'number') {
         setPhotoExposureS(s.photo_exposure / 1_000_000)
       }
@@ -856,13 +868,15 @@ export function AllSkyCameraControlPanel() {
       if (!base) return
       setSettingsBusy(true)
       try {
-        const body: Record<string, unknown> = { wb_auto: true, image_format: 'RGB24' }
+        const body: Record<string, unknown> = { wb_auto: false, image_format: 'RGB24' }
         if (patch.gain !== undefined) body.gain = patch.gain
         if (patch.gamma !== undefined) body.gamma = patch.gamma
         if (patch.photoExposure !== undefined)
           body.photo_exposure = Math.round((patch.photoExposure as number) * 1_000_000)
         if (patch.videoExposure !== undefined)
           body.video_exposure = Math.round((patch.videoExposure as number) * 1_000_000)
+        if (patch.wbR !== undefined) body.wb_r = patch.wbR
+        if (patch.wbB !== undefined) body.wb_b = patch.wbB
         await camJson(base, '/camera/settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -875,7 +889,9 @@ export function AllSkyCameraControlPanel() {
           const affectsAutoCapture =
             patch.gain !== undefined ||
             patch.gamma !== undefined ||
-            patch.photoExposure !== undefined
+            patch.photoExposure !== undefined ||
+            patch.wbR !== undefined ||
+            patch.wbB !== undefined
           if (affectsAutoCapture) {
             void refreshAutoStats()
           }
@@ -956,21 +972,26 @@ export function AllSkyCameraControlPanel() {
         )}
 
         {/* ---- Live Preview + Connection & Stream controls ---- */}
-        <div className="flex gap-4">
-          {/* Stream view */}
-          <div className="w-2/3 shrink-0 overflow-hidden rounded-lg bg-black">
+        <div className="flex items-start gap-4">
+          {/* Stream view — fixed 16:9 so right-column histogram does not stretch preview height */}
+          <div className="relative aspect-video w-2/3 shrink-0 overflow-hidden rounded-lg bg-black">
             {mode === 'stream' || mode === 'auto' ? (
               /* eslint-disable-next-line @next/next/no-img-element */
-              <img key={streamKey} src={`${streamURL}?t=${streamKey}`} alt="" className="block w-full" />
+              <img
+                key={streamKey}
+                src={`${streamURL}?t=${streamKey}`}
+                alt=""
+                className="absolute inset-0 h-full w-full object-contain"
+              />
             ) : (
-              <div className="flex aspect-video items-center justify-center">
+              <div className="flex h-full items-center justify-center">
                 <span className="text-sm text-gray-500">Off</span>
               </div>
             )}
           </div>
 
           {/* Histogram + Status & controls */}
-          <div className="flex min-h-0 flex-1 flex-col gap-3 self-stretch">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
             {camStatus.connected && (
               <StatsHistPanel stats={imageStats} hist={histData} />
             )}
@@ -1166,6 +1187,64 @@ export function AllSkyCameraControlPanel() {
                     void applySettings({
                       photoExposure: photoExpInputRef.current?.commit() ?? photoExposureS,
                     })
+                  }
+                >
+                  Set
+                </button>
+              </div>
+            </div>
+
+            {/* WB R */}
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <span className={`${labelClass} w-28 shrink-0`}>
+                  WB R <span className="text-gray-500">({WB_MIN}-{WB_MAX})</span>
+                </span>
+                <StyledSlider min={WB_MIN} max={WB_MAX} value={wbR} onChange={setWbR} />
+                <NumericInput
+                  ref={wbRInputRef}
+                  value={wbR}
+                  onChange={setWbR}
+                  min={WB_MIN}
+                  max={WB_MAX}
+                  onValidityChange={setWbRInputValid}
+                  className={fieldInputCompact}
+                />
+                <button
+                  type="button"
+                  className={btnSet}
+                  disabled={settingsBusy || !wbRInputValid}
+                  onClick={() =>
+                    void applySettings({ wbR: wbRInputRef.current?.commit() ?? wbR })
+                  }
+                >
+                  Set
+                </button>
+              </div>
+            </div>
+
+            {/* WB B */}
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <span className={`${labelClass} w-28 shrink-0`}>
+                  WB B <span className="text-gray-500">({WB_MIN}-{WB_MAX})</span>
+                </span>
+                <StyledSlider min={WB_MIN} max={WB_MAX} value={wbB} onChange={setWbB} />
+                <NumericInput
+                  ref={wbBInputRef}
+                  value={wbB}
+                  onChange={setWbB}
+                  min={WB_MIN}
+                  max={WB_MAX}
+                  onValidityChange={setWbBInputValid}
+                  className={fieldInputCompact}
+                />
+                <button
+                  type="button"
+                  className={btnSet}
+                  disabled={settingsBusy || !wbBInputValid}
+                  onClick={() =>
+                    void applySettings({ wbB: wbBInputRef.current?.commit() ?? wbB })
                   }
                 >
                   Set

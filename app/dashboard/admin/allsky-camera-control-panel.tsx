@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -164,9 +165,55 @@ const fieldInput =
 const fieldInputCompact =
   'w-[4.5rem] shrink-0 rounded-lg border border-gray-300 bg-transparent px-2 py-1 text-center text-xs font-mono text-white tabular-nums dark:border-gray-600 dark:bg-transparent'
 
-/** ASI662MC gain range; updated from /status when camera is connected. */
-const DEFAULT_GAIN_MIN = 0
+/** ASI662MC gain range; max updated from /status when camera is connected. UI min is always 0. */
+const GAIN_UI_MIN = 0
 const DEFAULT_GAIN_MAX = 500
+
+const PHOTO_EXP_MIN_S = 0
+/** Log-scale floor when photo exp > 0 (≈32 µs). */
+const PHOTO_EXP_LOG_MIN_S = 0.000032
+const PHOTO_EXP_MAX_S = 300
+const PHOTO_EXP_SLIDER_STEPS = 1000
+
+const VIDEO_EXP_MIN_MS = 0
+const VIDEO_EXP_MAX_MS = 2000
+
+const SEQ_COUNT_MIN = 1
+const SEQ_COUNT_MAX = 10000
+const SEQ_COUNT_SLIDER_MAX = 1000
+const SEQ_INTERVAL_MIN = 0
+const SEQ_INTERVAL_MAX = 3600
+
+function roundPhotoExposureS(s: number): number {
+  if (s <= 0) return 0
+  const clamped = Math.min(PHOTO_EXP_MAX_S, s)
+  if (clamped < 0.01) return Math.round(clamped * 1000) / 1000
+  if (clamped < 1) return Math.round(clamped * 100) / 100
+  return Math.round(clamped * 10) / 10
+}
+
+function photoExposureToSlider(s: number): number {
+  if (s <= 0) return 0
+  const minL = Math.log(PHOTO_EXP_LOG_MIN_S)
+  const maxL = Math.log(PHOTO_EXP_MAX_S)
+  const logS = Math.log(Math.min(PHOTO_EXP_MAX_S, s))
+  const t = (logS - minL) / (maxL - minL)
+  return Math.max(
+    1,
+    Math.min(
+      PHOTO_EXP_SLIDER_STEPS,
+      1 + Math.round(t * (PHOTO_EXP_SLIDER_STEPS - 1)),
+    ),
+  )
+}
+
+function sliderToPhotoExposure(pos: number): number {
+  if (pos <= 0) return 0
+  const minL = Math.log(PHOTO_EXP_LOG_MIN_S)
+  const maxL = Math.log(PHOTO_EXP_MAX_S)
+  const t = (Math.max(1, Math.min(PHOTO_EXP_SLIDER_STEPS, pos)) - 1) / (PHOTO_EXP_SLIDER_STEPS - 1)
+  return roundPhotoExposureS(Math.exp(minL + t * (maxL - minL)))
+}
 
 function validateNumericDraft(
   raw: string,
@@ -349,17 +396,31 @@ function analyzeImageData(data: Uint8ClampedArray): { stats: ImageStats; hist: H
 function StatsHistPanel({
   stats,
   hist,
-  active,
 }: {
   stats: ImageStats | null
   hist: HistogramData | null
-  active: boolean
 }) {
+  const histWrapRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
-  useEffect(() => {
+  const drawHistogram = useCallback(() => {
+    const wrap = histWrapRef.current
     const canvas = canvasRef.current
-    if (!canvas || !hist) return
+    if (!wrap || !canvas || !hist) return
+
+    const cssW = Math.max(1, wrap.clientWidth)
+    const cssH = Math.max(1, wrap.clientHeight)
+    const dpr = typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 2) : 1
+
+    canvas.width = Math.round(cssW * dpr)
+    canvas.height = Math.round(cssH * dpr)
+    canvas.style.width = `${cssW}px`
+    canvas.style.height = `${cssH}px`
+
+    const ctx = canvas.getContext('2d')!
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, cssW, cssH)
+
     const { rH, gH, bH } = hist
     let peak = 1
     for (let i = 0; i < 256; i++) {
@@ -367,26 +428,22 @@ function StatsHistPanel({
       if (gH[i] > peak) peak = gH[i]
       if (bH[i] > peak) peak = bH[i]
     }
-    const W = canvas.width
-    const H = canvas.height
-    const ctx = canvas.getContext('2d')!
-    ctx.clearRect(0, 0, W, H)
 
     const drawChannel = (h: Uint32Array, color: string) => {
       ctx.beginPath()
       ctx.strokeStyle = color
       ctx.lineWidth = 1
-      for (let x = 0; x < 256; x++) {
-        const px = (x / 255) * W
-        const py = H - (h[x] / peak) * H
-        if (x === 0) ctx.moveTo(px, py)
+      for (let i = 0; i < 256; i++) {
+        const px = (i / 255) * cssW
+        const py = cssH - (h[i] / peak) * cssH
+        if (i === 0) ctx.moveTo(px, py)
         else ctx.lineTo(px, py)
       }
       ctx.stroke()
-      ctx.globalAlpha = 0.08
+      ctx.globalAlpha = 0.1
       ctx.fillStyle = color
-      ctx.lineTo(W, H)
-      ctx.lineTo(0, H)
+      ctx.lineTo(cssW, cssH)
+      ctx.lineTo(0, cssH)
       ctx.closePath()
       ctx.fill()
       ctx.globalAlpha = 1
@@ -396,10 +453,22 @@ function StatsHistPanel({
     drawChannel(bH, '#3b82f6')
   }, [hist])
 
+  useLayoutEffect(() => {
+    drawHistogram()
+  }, [drawHistogram])
+
+  useEffect(() => {
+    const wrap = histWrapRef.current
+    if (!wrap) return
+    const ro = new ResizeObserver(() => drawHistogram())
+    ro.observe(wrap)
+    return () => ro.disconnect()
+  }, [drawHistogram])
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="shrink-0 font-mono text-[0.6rem] leading-relaxed">
-        <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+      <div className="shrink-0 py-2 font-mono text-xs leading-relaxed">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-2.5">
           <p>
             <span className="text-gray-500">Mean </span>
             <span className="text-red-400">{stats ? stats.mean[0].toFixed(1) : '—'}</span>
@@ -439,17 +508,12 @@ function StatsHistPanel({
             <span className="text-white">{stats ? `${stats.clipWhite.toFixed(1)}%` : '—'}</span>
           </p>
         </div>
-        {!stats && (
-          <p className="mt-1 text-[0.55rem] text-gray-600">
-            {active ? 'Waiting for data…' : 'Auto mode only'}
-          </p>
-        )}
       </div>
 
       <hr className="my-2 shrink-0 border-gray-700" />
 
-      <div className="flex min-h-0 flex-1 flex-col">
-        <canvas ref={canvasRef} width={256} height={128} className="min-h-0 w-full flex-1" />
+      <div ref={histWrapRef} className="min-h-28 w-full flex-1">
+        <canvas ref={canvasRef} className="block h-full w-full" role="img" aria-label="RGB histogram" />
       </div>
     </div>
   )
@@ -514,7 +578,6 @@ export function AllSkyCameraControlPanel() {
 
   // Settings state
   const [gain, setGain] = useState(50)
-  const [gainMin, setGainMin] = useState(DEFAULT_GAIN_MIN)
   const [gainMax, setGainMax] = useState(DEFAULT_GAIN_MAX)
   const [gamma, setGamma] = useState(50)
   const [videoExposureMs, setVideoExposureMs] = useState(100)
@@ -523,10 +586,6 @@ export function AllSkyCameraControlPanel() {
   // Stream refresh key — bump to force the MJPEG <img> to reconnect
   const [streamKey, setStreamKey] = useState(() => Date.now())
   const refreshStream = useCallback(() => setStreamKey(Date.now()), [])
-
-  // Snapshot
-  const [snapshotUrl, setSnapshotUrl] = useState<string | null>(null)
-  const [snapshotBusy, setSnapshotBusy] = useState(false)
 
   // Sequence
   const [seqCount, setSeqCount] = useState(10)
@@ -547,6 +606,11 @@ export function AllSkyCameraControlPanel() {
   const [gammaInputValid, setGammaInputValid] = useState(true)
   const [videoExpInputValid, setVideoExpInputValid] = useState(true)
   const [photoExpInputValid, setPhotoExpInputValid] = useState(true)
+
+  const seqCountInputRef = useRef<NumericInputHandle>(null)
+  const seqIntervalInputRef = useRef<NumericInputHandle>(null)
+  const [seqCountInputValid, setSeqCountInputValid] = useState(true)
+  const [seqIntervalInputValid, setSeqIntervalInputValid] = useState(true)
 
   const settingsLoadedRef = useRef(false)
 
@@ -592,20 +656,15 @@ export function AllSkyCameraControlPanel() {
             lastStreamFrameIso?: string | null
             lastAutoFrameIso?: string | null
             fault?: string | null
-            gainMin?: number
             gainMax?: number
           }
         }
       }>(base, '/status')
       const cam = data.sensors?.allSkyCam
       if (cam) {
-        if (typeof cam.gainMin === 'number') {
-          setGainMin(cam.gainMin)
-          setGain((g) => Math.max(cam.gainMin!, g))
-        }
         if (typeof cam.gainMax === 'number') {
           setGainMax(cam.gainMax)
-          setGain((g) => Math.min(cam.gainMax!, g))
+          setGain((g) => Math.min(cam.gainMax!, Math.max(GAIN_UI_MIN, g)))
         }
         const serverMode: CamMode =
           cam.mode === 'stream' || cam.mode === 'auto' || cam.mode === 'off'
@@ -639,7 +698,6 @@ export function AllSkyCameraControlPanel() {
         gamma?: number
         photo_exposure?: number
         video_exposure?: number
-        gain_min?: number
         gain_max?: number
       }>(base, '/camera/settings')
       if (typeof s.gain === 'number') setGain(s.gain)
@@ -648,9 +706,8 @@ export function AllSkyCameraControlPanel() {
         setPhotoExposureS(s.photo_exposure / 1_000_000)
       }
       if (typeof s.video_exposure === 'number') {
-        setVideoExposureMs(Math.round(s.video_exposure / 1000))
+        setVideoExposureMs(Math.max(VIDEO_EXP_MIN_MS, Math.round(s.video_exposure / 1000)))
       }
-      if (typeof s.gain_min === 'number') setGainMin(s.gain_min)
       if (typeof s.gain_max === 'number') setGainMax(s.gain_max)
     } catch {
       // keep previous values on failure
@@ -833,32 +890,6 @@ export function AllSkyCameraControlPanel() {
   )
 
   // ------------------------------------------------------------------
-  // Snapshot
-  // ------------------------------------------------------------------
-  const takeSnapshot = useCallback(async () => {
-    if (!base) return
-    setSnapshotBusy(true)
-    setError(null)
-    try {
-      const res = await camFetch(base, '/camera/snapshot')
-      if (!res.ok) throw new Error(`Snapshot failed: HTTP ${res.status}`)
-      const blob = await res.blob()
-      if (snapshotUrl) URL.revokeObjectURL(snapshotUrl)
-      setSnapshotUrl(URL.createObjectURL(blob))
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Snapshot failed')
-    } finally {
-      setSnapshotBusy(false)
-    }
-  }, [base, snapshotUrl])
-
-  useEffect(() => {
-    return () => {
-      if (snapshotUrl) URL.revokeObjectURL(snapshotUrl)
-    }
-  }, [snapshotUrl])
-
-  // ------------------------------------------------------------------
   // Sequence
   // ------------------------------------------------------------------
   const startSequence = useCallback(async () => {
@@ -866,12 +897,14 @@ export function AllSkyCameraControlPanel() {
     setSeqBusy(true)
     setError(null)
     try {
+      const count = seqCountInputRef.current?.commit() ?? seqCount
+      const interval = seqIntervalInputRef.current?.commit() ?? seqInterval
       const body: Record<string, unknown> = {
         save_path: seqSavePath,
-        count: seqCount,
+        count,
         file_format: seqFileFormat,
       }
-      if (seqInterval > 0) body.interval = seqInterval
+      if (interval > 0) body.interval = interval
       await camJson(base, '/camera/sequence/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -937,13 +970,9 @@ export function AllSkyCameraControlPanel() {
           </div>
 
           {/* Histogram + Status & controls */}
-          <div className="flex flex-1 flex-col gap-3">
+          <div className="flex min-h-0 flex-1 flex-col gap-3 self-stretch">
             {camStatus.connected && (
-              <StatsHistPanel
-                stats={imageStats}
-                hist={histData}
-                active={mode === 'auto'}
-              />
+              <StatsHistPanel stats={imageStats} hist={histData} />
             )}
 
             {/* Connection + Mode side by side */}
@@ -1013,7 +1042,7 @@ export function AllSkyCameraControlPanel() {
           </div>
         </div>
 
-        {/* ---- Camera Settings + Snapshot/Sequence side by side ---- */}
+        {/* ---- Camera Settings + Sequence Capture side by side ---- */}
         {camStatus.connected && (
           <div className="grid gap-6 lg:grid-cols-2">
             <div className="boxed-fields space-y-4">
@@ -1022,13 +1051,15 @@ export function AllSkyCameraControlPanel() {
             {/* Gain */}
             <div className="space-y-1.5">
               <div className="flex items-center gap-2">
-                <span className={`${labelClass} w-28 shrink-0`}>Gain</span>
-                <StyledSlider min={gainMin} max={gainMax} value={gain} onChange={setGain} />
+                <span className={`${labelClass} w-28 shrink-0`}>
+                  Gain <span className="text-gray-500">({GAIN_UI_MIN}-{gainMax})</span>
+                </span>
+                <StyledSlider min={GAIN_UI_MIN} max={gainMax} value={gain} onChange={setGain} />
                 <NumericInput
                   ref={gainInputRef}
                   value={gain}
                   onChange={setGain}
-                  min={gainMin}
+                  min={GAIN_UI_MIN}
                   max={gainMax}
                   onValidityChange={setGainInputValid}
                   className={fieldInputCompact}
@@ -1077,13 +1108,19 @@ export function AllSkyCameraControlPanel() {
             <div className="space-y-1.5">
               <div className="flex items-center gap-2">
                 <span className={`${labelClass} w-28 shrink-0`}>Video Exp (ms)</span>
-                <StyledSlider min={1} max={2000} step={1} value={videoExposureMs} onChange={setVideoExposureMs} />
+                <StyledSlider
+                  min={VIDEO_EXP_MIN_MS}
+                  max={VIDEO_EXP_MAX_MS}
+                  step={1}
+                  value={videoExposureMs}
+                  onChange={setVideoExposureMs}
+                />
                 <NumericInput
                   ref={videoExpInputRef}
                   value={videoExposureMs}
                   onChange={setVideoExposureMs}
-                  min={1}
-                  max={2000}
+                  min={VIDEO_EXP_MIN_MS}
+                  max={VIDEO_EXP_MAX_MS}
                   onValidityChange={setVideoExpInputValid}
                   className={fieldInputCompact}
                 />
@@ -1101,19 +1138,25 @@ export function AllSkyCameraControlPanel() {
               </div>
             </div>
 
-            {/* Photo Exposure */}
             <div className="space-y-1.5">
               <div className="flex items-center gap-2">
                 <span className={`${labelClass} w-28 shrink-0`}>Photo Exp (s)</span>
+                <StyledSlider
+                  min={0}
+                  max={PHOTO_EXP_SLIDER_STEPS}
+                  step={1}
+                  value={photoExposureToSlider(photoExposureS)}
+                  onChange={(pos) => setPhotoExposureS(sliderToPhotoExposure(pos))}
+                />
                 <NumericInput
                   ref={photoExpInputRef}
                   value={photoExposureS}
                   onChange={setPhotoExposureS}
-                  min={0.001}
-                  max={300}
+                  min={PHOTO_EXP_MIN_S}
+                  max={PHOTO_EXP_MAX_S}
                   decimal
                   onValidityChange={setPhotoExpInputValid}
-                  className={`${fieldInput} flex-1 text-center`}
+                  className={fieldInputCompact}
                 />
                 <button
                   type="button"
@@ -1132,43 +1175,8 @@ export function AllSkyCameraControlPanel() {
 
             </div>
 
-            {/* Right column: Snapshot + Sequence Capture */}
+            {/* Right column: Sequence Capture */}
             <div className="space-y-6">
-              {/* Snapshot */}
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-white">Snapshot</p>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    className={btnPrimary}
-                    disabled={snapshotBusy}
-                    onClick={() => void takeSnapshot()}
-                  >
-                    {snapshotBusy ? 'Capturing…' : 'Take Snapshot'}
-                  </button>
-                  {snapshotUrl && (
-                    <a
-                      href={snapshotUrl}
-                      download="snapshot.jpg"
-                      className={`${btnBase} border-gray-600 text-gray-300 hover:text-white`}
-                    >
-                      Download
-                    </a>
-                  )}
-                </div>
-                {snapshotUrl && (
-                  <div className="relative h-48 w-full overflow-hidden rounded-lg bg-black sm:h-64">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={snapshotUrl}
-                      alt="Snapshot"
-                      className="h-full w-full object-contain"
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* Sequence Capture */}
               <div className="boxed-fields space-y-3">
                 <p className="text-sm font-medium text-white">Sequence Capture</p>
 
@@ -1203,28 +1211,45 @@ export function AllSkyCameraControlPanel() {
               </div>
             ) : (
               <div className="space-y-2">
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <div className="space-y-1">
-                    <span className={labelClass}>Count</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={10000}
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className={`${labelClass} w-28 shrink-0`}>Count</span>
+                    <StyledSlider
+                      min={SEQ_COUNT_MIN}
+                      max={SEQ_COUNT_SLIDER_MAX}
+                      step={1}
+                      value={Math.min(seqCount, SEQ_COUNT_SLIDER_MAX)}
+                      onChange={setSeqCount}
+                    />
+                    <NumericInput
+                      ref={seqCountInputRef}
                       value={seqCount}
-                      onChange={(e) => setSeqCount(Math.max(1, Number(e.target.value)))}
-                      className={fieldInput}
+                      onChange={setSeqCount}
+                      min={SEQ_COUNT_MIN}
+                      max={SEQ_COUNT_MAX}
+                      onValidityChange={setSeqCountInputValid}
+                      className={fieldInputCompact}
                     />
                   </div>
-                  <div className="space-y-1">
-                    <span className={labelClass}>Interval (s, 0 = fast)</span>
-                    <input
-                      type="number"
-                      min={0}
-                      max={3600}
+                </div>
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className={`${labelClass} w-28 shrink-0`}>Interval (s)</span>
+                    <StyledSlider
+                      min={SEQ_INTERVAL_MIN}
+                      max={SEQ_INTERVAL_MAX}
                       step={1}
                       value={seqInterval}
-                      onChange={(e) => setSeqInterval(Math.max(0, Number(e.target.value)))}
-                      className={fieldInput}
+                      onChange={setSeqInterval}
+                    />
+                    <NumericInput
+                      ref={seqIntervalInputRef}
+                      value={seqInterval}
+                      onChange={setSeqInterval}
+                      min={SEQ_INTERVAL_MIN}
+                      max={SEQ_INTERVAL_MAX}
+                      onValidityChange={setSeqIntervalInputValid}
+                      className={fieldInputCompact}
                     />
                   </div>
                 </div>
@@ -1255,7 +1280,12 @@ export function AllSkyCameraControlPanel() {
                 <button
                   type="button"
                   className={btnPrimary}
-                  disabled={seqBusy || !seqSavePath.trim()}
+                  disabled={
+                    seqBusy ||
+                    !seqSavePath.trim() ||
+                    !seqCountInputValid ||
+                    !seqIntervalInputValid
+                  }
                   onClick={() => void startSequence()}
                 >
                   {seqBusy ? 'Starting…' : 'Start Sequence'}

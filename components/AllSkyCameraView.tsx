@@ -89,8 +89,7 @@ function AscCompassRose({ className = '' }: { className?: string }) {
   )
 }
 
-const streamAreaClass =
-  'relative w-full overflow-hidden rounded-lg bg-black min-h-[420px] max-h-[calc(100vh-16rem)] sm:min-h-[420px]'
+const streamAreaClass = 'relative w-full overflow-hidden rounded-lg bg-black'
 
 export default function AllSkyCameraView() {
   const controller = useAppStore((s) => s.controllers.find((c) => c.roles.includes('cameras')))
@@ -270,12 +269,7 @@ export default function AllSkyCameraView() {
             <div className={streamAreaClass}>
               {overlay}
               <AscCompassRose />
-              <MJPEGStream
-                url={streamURL || ''}
-                className="absolute inset-0 h-full w-full"
-                minimal
-                fill
-              />
+              <MJPEGStream url={streamURL || ''} minimal />
             </div>
             <p className="text-center text-[0.7rem] sm:text-xs text-gray-500 dark:text-gray-400">
               Powered by the Pomfret Observatory All-Sky Camera System (ZWO ASI662MC &amp; Raspberry Pi).

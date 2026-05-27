@@ -247,8 +247,8 @@ def _apply_white_balance_auto(wb_auto: bool):
 
 def _awb_warmup_for_still():
     """
-    ASI auto-WB needs video frames to converge; lock resulting R/B for the following still.
-    No caching — runs for every auto still when wb_auto is on.
+    ASI auto-WB needs video frames to converge; latch R/B for the following still.
+    Disable auto (ASI_FALSE) before reading values — reading while auto=1 often returns 0.
     """
     if not camera.is_open or not camera.is_color_cam or asi_lib is None:
         return
@@ -259,11 +259,12 @@ def _awb_warmup_for_still():
     height = camera_state['height']
     gain = camera_state['gain']
     gamma = camera_state.get('gamma', 50)
+    warmup_exp = max(AWB_WARMUP_EXPOSURE_US, min(int(camera_state.get('video_exposure', 100_000)), 200_000))
 
     asi_lib.ASISetROIFormat(camera.camera_id, width, height, 1, ASI_IMG_RGB24)
     asi_lib.ASISetControlValue(camera.camera_id, ASI_GAIN, gain, ASI_FALSE)
     asi_lib.ASISetControlValue(camera.camera_id, ASI_GAMMA, gamma, ASI_FALSE)
-    asi_lib.ASISetControlValue(camera.camera_id, ASI_EXPOSURE, AWB_WARMUP_EXPOSURE_US, ASI_FALSE)
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_EXPOSURE, warmup_exp, ASI_FALSE)
     asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_R, 0, ASI_TRUE)
     asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_B, 0, ASI_TRUE)
 
@@ -284,7 +285,12 @@ def _awb_warmup_for_still():
             )
     finally:
         asi_lib.ASIStopVideoCapture(camera.camera_id)
-        time.sleep(0.05)
+        time.sleep(0.1)
+
+    # Latch auto-computed WB (disable auto, then read manual values).
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_R, 0, ASI_FALSE)
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_B, 0, ASI_FALSE)
+    time.sleep(0.05)
 
     wb_r = ctypes.c_long(0)
     wb_b = ctypes.c_long(0)
@@ -292,12 +298,19 @@ def _awb_warmup_for_still():
     auto_b = ctypes.c_int(0)
     asi_lib.ASIGetControlValue(camera.camera_id, ASI_WB_R, ctypes.byref(wb_r), ctypes.byref(auto_r))
     asi_lib.ASIGetControlValue(camera.camera_id, ASI_WB_B, ctypes.byref(wb_b), ctypes.byref(auto_b))
-    camera_state['wb_r'] = int(wb_r.value)
-    camera_state['wb_b'] = int(wb_b.value)
+
+    r_val = int(wb_r.value)
+    b_val = int(wb_b.value)
+    if r_val < 5 and b_val < 5:
+        print(f"[AWB warmup] WB read R={r_val} B={b_val} (auto flags {auto_r.value}/{auto_b.value}), using defaults")
+        r_val, b_val = 50, 50
+
+    camera_state['wb_r'] = r_val
+    camera_state['wb_b'] = b_val
     camera_state['wb_still_manual_lock'] = True
-    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_R, wb_r.value, ASI_FALSE)
-    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_B, wb_b.value, ASI_FALSE)
-    print(f"[AWB warmup] Locked WB for still: R={wb_r.value} B={wb_b.value}")
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_R, r_val, ASI_FALSE)
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_B, b_val, ASI_FALSE)
+    print(f"[AWB warmup] Locked WB for still: R={r_val} B={b_val} (warmup exp {warmup_exp} μs)")
 
 
 def _request_auto_cycle_restart():
@@ -348,7 +361,12 @@ def _capture_photo_to_memory():
                 time.sleep(0.2)
                 format_applied = photo_format != ASI_IMG_RGB24
 
-            img = camera.capture_snapshot()
+            # Hardware is RGB24; capture_snapshot must decode RGB24 (not stale image_format).
+            camera_state['_snapshot_as_rgb24'] = True
+            try:
+                img = camera.capture_snapshot()
+            finally:
+                camera_state['_snapshot_as_rgb24'] = False
             if format_applied:
                 asi_lib.ASISetROIFormat(camera.camera_id, width, height, 1, ASI_IMG_RGB24)
                 time.sleep(0.2)
@@ -411,9 +429,9 @@ def start_auto_mode(interval=None):
     camera_state['streaming'] = False
     camera_state['stream_last_frame_iso'] = None
     _persist_mode('auto', auto_state['interval'])
+    _apply_white_balance_auto(True)
     auto_state['thread'] = threading.Thread(target=auto_capture_loop, daemon=True)
     auto_state['thread'].start()
-    _apply_white_balance_auto(True)
     return True
 
 
@@ -855,8 +873,12 @@ class ASICamera:
         # Get image data based on format
         width = camera_state['width']
         height = camera_state['height']
-        img_format = camera_state['image_format']
-        
+        img_format = (
+            ASI_IMG_RGB24
+            if camera_state.get('_snapshot_as_rgb24')
+            else camera_state['image_format']
+        )
+
         # Calculate buffer size based on format
         if img_format == ASI_IMG_RGB24:
             buffer_size = width * height * 3

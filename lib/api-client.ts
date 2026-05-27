@@ -1,4 +1,4 @@
-import type { StatusResponse, ControllerConfig, Booking, BookingRequest } from './types'
+import type { StatusResponse, ControllerConfig } from './types'
 
 export class APIClient {
   private baseURL: string
@@ -59,14 +59,6 @@ export class APIClient {
     return this.request('/camera/disconnect', { method: 'POST' })
   }
 
-  async startCameraStream(): Promise<void> {
-    await this.request('/camera/stream/start', { method: 'POST' })
-  }
-
-  async stopCameraStream(): Promise<void> {
-    await this.request('/camera/stream/stop', { method: 'POST' })
-  }
-
   async setCameraMode(
     mode: 'off' | 'stream' | 'auto',
     intervalSeconds = 60,
@@ -76,10 +68,6 @@ export class APIClient {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode, interval: intervalSeconds }),
     })
-  }
-
-  async captureSnapshot(): Promise<Blob> {
-    return this.request<Blob>('/camera/snapshot')
   }
 
   async updateCameraSettings(settings: {
@@ -164,49 +152,6 @@ export class APIClient {
 
   getStreamURL(): string {
     return 'https://cam.pomfretastro.org/camera/stream'
-  }
-
-  async captureSequence(count: number): Promise<{
-    success: boolean
-    count: number
-    photos: (string | null)[]
-  }> {
-    return this.request('/camera/sequence/capture', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ count }),
-    })
-  }
-
-  // Bookings API
-  async fetchBookings(): Promise<Booking[]> {
-    return this.request<Booking[]>('/bookings')
-  }
-
-  async createBooking(booking: BookingRequest): Promise<Booking> {
-    return this.request<Booking>('/bookings', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(booking),
-    })
-  }
-
-  async updateBooking(id: string, booking: BookingRequest): Promise<Booking> {
-    return this.request<Booking>(`/bookings/${id}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(booking),
-    })
-  }
-
-  async deleteBooking(id: string): Promise<void> {
-    await this.request(`/bookings/${id}`, { method: 'DELETE' })
   }
 }
 

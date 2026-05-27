@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ASI Camera Service for Raspberry Pi (Linux)
-Provides HTTP API and MJPEG stream for remote access
+HTTP API: camera connect/settings/mode, MJPEG stream, auto capture, sequence to disk.
 
 System Requirements:
 - Raspberry Pi (Raspberry Pi OS / Debian-based Linux)
@@ -23,7 +23,6 @@ import os
 import platform
 from datetime import datetime, timezone
 import json
-from uuid import uuid4
 
 app = Flask(__name__)
 CORS(app)
@@ -149,16 +148,7 @@ ASI_EXPOSURE = 1
 ASI_GAMMA = 2
 ASI_WB_R = 3
 ASI_WB_B = 4
-ASI_BRIGHTNESS = 5
 ASI_BANDWIDTHOVERLOAD = 6
-ASI_OVERCLOCK = 7
-ASI_TEMPERATURE = 8
-ASI_FLIP = 9
-ASI_AUTO_MAX_GAIN = 10
-ASI_AUTO_MAX_EXP = 11
-ASI_AUTO_TARGET_BRIGHTNESS = 12
-ASI_HARDWARE_BIN = 13
-ASI_HIGH_SPEED_MODE = 14
 
 # Camera state
 camera_state = {
@@ -646,69 +636,6 @@ class ASICamera:
         camera_state['mode'] = 'off'
         camera_state['last_auto_frame_iso'] = None
 
-    def reset_camera(self):
-        """Reset camera by closing and reopening - use when camera is stuck in FAILED state"""
-        if not self.is_open or self.camera_id < 0:
-            return False
-        
-        print("[reset_camera] Attempting to reset camera...")
-        camera_id = self.camera_id
-        width = camera_state['width']
-        height = camera_state['height']
-        gain = camera_state['gain']
-        exposure = camera_state['exposure']
-        image_format = camera_state['image_format']
-        
-        try:
-            # Close camera
-            print("[reset_camera] Closing camera...")
-            asi_lib.ASICloseCamera(camera_id)
-            self.is_open = False
-            time.sleep(1.0)
-            
-            # Reopen camera
-            print("[reset_camera] Reopening camera...")
-            result = asi_lib.ASIOpenCamera(camera_id)
-            if result != ASI_SUCCESS:
-                print(f"[reset_camera] Failed to reopen camera: {result}")
-                return False
-            
-            # Reinitialize camera
-            result = asi_lib.ASIInitCamera(camera_id)
-            if result != ASI_SUCCESS:
-                print(f"[reset_camera] Failed to reinitialize camera: {result}")
-                asi_lib.ASICloseCamera(camera_id)
-                return False
-            
-            self.is_open = True
-            
-            # Restore settings
-            print("[reset_camera] Restoring camera settings...")
-            asi_lib.ASISetROIFormat(camera_id, width, height, 1, image_format)
-            time.sleep(0.3)
-            asi_lib.ASISetControlValue(camera_id, ASI_GAIN, gain, ASI_FALSE)
-            asi_lib.ASISetControlValue(camera_id, ASI_EXPOSURE, exposure, ASI_FALSE)
-            asi_lib.ASISetControlValue(camera_id, ASI_BANDWIDTHOVERLOAD, 40, ASI_FALSE)
-            time.sleep(0.3)
-            
-            # Check status
-            status = ctypes.c_int(0)
-            asi_lib.ASIGetExpStatus(camera_id, ctypes.byref(status))
-            if status.value == 0:
-                print("[reset_camera] Camera successfully reset to IDLE state")
-                return True
-            else:
-                status_names = {0: "ASI_EXP_IDLE", 1: "ASI_EXP_WORKING", 2: "ASI_EXP_SUCCESS", 3: "ASI_EXP_FAILED"}
-                status_name = status_names.get(status.value, f"UNKNOWN_{status.value}")
-                print(f"[reset_camera] Camera reset but still in state {status.value} ({status_name})")
-                return False
-                
-        except Exception as e:
-            print(f"[reset_camera] Exception during reset: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
-    
     def start_stream(self):
         """Start video streaming"""
         if not self.is_open:
@@ -923,23 +850,29 @@ class ASICamera:
                 return None
         
         # Wait for exposure to complete
+        exp_status_names = {
+            0: "ASI_EXP_IDLE",
+            1: "ASI_EXP_WORKING",
+            2: "ASI_EXP_SUCCESS",
+            3: "ASI_EXP_FAILED",
+        }
         status = ctypes.c_int(0)
         timeout = 0
         max_timeout = (exposure // 1000) + 5000  # ms
-        
+
         while timeout < max_timeout:
             asi_lib.ASIGetExpStatus(self.camera_id, ctypes.byref(status))
             if status.value == 2:  # ASI_EXP_SUCCESS
                 break
             if status.value == 3:  # ASI_EXP_FAILED - don't wait, fail immediately
-                status_name = status_names.get(status.value, f"UNKNOWN_{status.value}")
+                status_name = exp_status_names.get(status.value, f"UNKNOWN_{status.value}")
                 print(f"[capture_snapshot] Exposure failed with status: {status.value} ({status_name}) at timeout: {timeout}ms")
                 return None
             time.sleep(0.1)
             timeout += 100
-        
+
         if status.value != 2:
-            status_name = status_names.get(status.value, f"UNKNOWN_{status.value}")
+            status_name = exp_status_names.get(status.value, f"UNKNOWN_{status.value}")
             print(f"[capture_snapshot] Exposure failed with status: {status.value} ({status_name}) after {timeout}ms")
             return None
         
@@ -1195,22 +1128,6 @@ def disconnect_camera():
     camera.disconnect()
     return jsonify({'success': True, 'message': 'Camera disconnected'})
 
-@app.route('/camera/stream/start', methods=['POST'])
-def start_stream():
-    """Start video stream"""
-    if camera.start_stream():
-        return jsonify({'success': True, 'message': 'Stream started'})
-    return jsonify({'success': False, 'message': camera_state['error']}), 500
-
-@app.route('/camera/stream/stop', methods=['POST'])
-def stop_stream():
-    """Stop video stream"""
-    camera.stop_stream()
-    if camera_state.get('mode') == 'stream':
-        camera_state['mode'] = 'off'
-    return jsonify({'success': True, 'message': 'Stream stopped'})
-
-
 @app.route('/camera/mode', methods=['POST'])
 def set_camera_mode_route():
     """Set camera mode: off, stream, or auto (server-side periodic capture)."""
@@ -1239,117 +1156,6 @@ def latest_frame():
     frame.save(img_io, 'JPEG', quality=85)
     img_io.seek(0)
     return send_file(img_io, mimetype='image/jpeg')
-
-@app.route('/camera/snapshot', methods=['GET'])
-def snapshot():
-    """Get a snapshot - automatically stops/resumes stream if needed"""
-    print(f"[Snapshot] Request. Streaming: {camera_state['streaming']}")
-    
-    # Check if camera is connected
-    if not camera_state['connected'] or not camera.is_open:
-        error_msg = "Camera not connected"
-        print(f"[Snapshot] Error: {error_msg}")
-        return jsonify({'error': error_msg}), 500
-    
-    # Remember if we were streaming
-    was_streaming = camera.streaming
-    
-    try:
-        # MUST stop video capture before exposure mode
-        if was_streaming:
-            print("[Snapshot] Stopping stream for capture...")
-            camera.stop_stream()
-            time.sleep(0.5)
-        
-        # Apply image format for photo capture (video stream always uses RGB24)
-        photo_format = camera_state['image_format']
-        width = camera_state['width']
-        height = camera_state['height']
-        format_applied = False
-        
-        if photo_format != ASI_IMG_RGB24:
-            # Apply format for photo capture
-            result = asi_lib.ASISetROIFormat(camera.camera_id, width, height, 1, photo_format)
-            if result != ASI_SUCCESS:
-                error_names = {
-                    1: "ASI_ERROR_INVALID_INDEX",
-                    2: "ASI_ERROR_INVALID_ID", 
-                    3: "ASI_ERROR_INVALID_CONTROL_TYPE",
-                    4: "ASI_ERROR_CAMERA_CLOSED",
-                    5: "ASI_ERROR_CAMERA_REMOVED",
-                    9: "ASI_ERROR_INVALID_IMGTYPE",
-                    10: "ASI_ERROR_OUTOF_BOUNDARY",
-                    14: "ASI_ERROR_VIDEO_MODE_ACTIVE",
-                    15: "ASI_ERROR_EXPOSURE_IN_PROGRESS",
-                    16: "ASI_ERROR_GENERAL_ERROR"
-                }
-                error_name = error_names.get(result, f"UNKNOWN_ERROR_{result}")
-                error_msg = f"Failed to set ROI format: {result} ({error_name})"
-                print(f"[Snapshot] Error: {error_msg}")
-                # Try to restore stream if it was running
-                if was_streaming:
-                    try:
-                        camera.start_stream()
-                    except:
-                        pass
-                return jsonify({'error': error_msg}), 500
-            format_applied = True
-            print(f"[Snapshot] Applied image format {photo_format} for photo capture")
-            # Wait for format to be applied
-            time.sleep(0.3)
-            
-            # Ensure camera is idle after format change
-            status = ctypes.c_int(0)
-            asi_lib.ASIGetExpStatus(camera.camera_id, ctypes.byref(status))
-            if status.value != 0:
-                print(f"[Snapshot] Camera not idle after format change (status: {status.value}), waiting...")
-                timeout = 0
-                while status.value != 0 and timeout < 3000:  # Wait up to 3 seconds
-                    time.sleep(0.1)
-                    asi_lib.ASIGetExpStatus(camera.camera_id, ctypes.byref(status))
-                    timeout += 100
-                if status.value != 0:
-                    print(f"[Snapshot] Warning: Camera still not idle after format change, forcing stop...")
-                    asi_lib.ASIStopExposure(camera.camera_id)
-                    time.sleep(0.5)
-        
-        print(f"[Snapshot] Capturing with exposure: {camera_state['exposure']} μs ({camera_state['exposure']/1000000:.3f} s), format: {photo_format}")
-        img = camera.capture_snapshot()
-        
-        # Restore RGB24 format if needed before resuming stream
-        if was_streaming:
-            if format_applied:
-                # Restore RGB24 for video streaming
-                asi_lib.ASISetROIFormat(camera.camera_id, width, height, 1, ASI_IMG_RGB24)
-                print("[Snapshot] Restored RGB24 format for video streaming")
-                time.sleep(0.3)
-            
-            print("[Snapshot] Resuming stream...")
-            time.sleep(0.3)
-            camera.start_stream()
-        
-        if img:
-            img_io = io.BytesIO()
-            img.save(img_io, 'JPEG', quality=85)
-            img_io.seek(0)
-            print(f"[Snapshot] Success!")
-            return send_file(img_io, mimetype='image/jpeg')
-        else:
-            error_msg = 'Failed to capture snapshot - camera returned None'
-            print(f"[Snapshot] Error: {error_msg}")
-            return jsonify({'error': error_msg}), 500
-            
-    except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
-        print(f"[Snapshot] Exception: {e}")
-        print(f"[Snapshot] Traceback:\n{error_details}")
-        if was_streaming and not camera.streaming:
-            try:
-                camera.start_stream()
-            except:
-                pass
-        return jsonify({'error': f'Exception: {str(e)}'}), 500
 
 @app.route('/camera/stream', methods=['GET'])
 def video_stream():
@@ -1423,7 +1229,6 @@ def get_settings():
 @app.route('/camera/settings', methods=['POST'])
 def update_settings():
     """Update camera settings"""
-    from flask import request
     data = request.get_json()
     print(f"[Settings] Request received: {data}")
     
@@ -1671,7 +1476,6 @@ def update_settings():
 @app.route('/camera/sequence/start', methods=['POST'])
 def start_sequence():
     """Start sequence capture"""
-    from flask import request
     import os
     
     data = request.get_json()
@@ -1794,237 +1598,6 @@ def sequence_status():
         'file_format': sequence_state['file_format'],
         'interval': sequence_state.get('interval', 0)
     })
-
-@app.route('/camera/sequence/capture', methods=['POST'])
-def capture_sequence():
-    """Capture a sequence of photos - simple: stop stream, take N photos, resume stream"""
-    from flask import request
-    import base64
-    
-    data = request.get_json()
-    
-    if not data or 'count' not in data:
-        return jsonify({'error': 'Missing count parameter'}), 400
-    
-    count = int(data.get('count', 1))
-    if count < 1 or count > 100:
-        return jsonify({'error': 'Count must be between 1 and 100'}), 400
-    
-    # Check if camera is connected
-    if not camera_state['connected'] or not camera.is_open:
-        return jsonify({'error': 'Camera not connected'}), 500
-    
-    # Remember if we were streaming
-    was_streaming = camera.streaming
-    
-    try:
-        # Stop stream if running
-        if was_streaming:
-            print(f"[Sequence Capture] Stopping stream for {count} photos...")
-            camera.stop_stream()
-            time.sleep(0.5)
-        
-        # Apply image format if needed
-        photo_format = camera_state['image_format']
-        width = camera_state['width']
-        height = camera_state['height']
-        format_applied = False
-        
-        if photo_format != ASI_IMG_RGB24:
-            asi_lib.ASISetROIFormat(camera.camera_id, width, height, 1, photo_format)
-            format_applied = True
-        
-        # Capture all photos
-        photos = []
-        print(f"[Sequence Capture] Capturing {count} photos...")
-        
-        for i in range(count):
-            print(f"[Sequence Capture] Photo {i+1}/{count}...")
-            img = camera.capture_snapshot()
-            
-            if img:
-                # Convert to JPEG bytes
-                img_io = io.BytesIO()
-                img.save(img_io, 'JPEG', quality=100)
-                img_io.seek(0)
-                img_bytes = img_io.read()
-                # Encode as base64 for JSON
-                img_base64 = base64.b64encode(img_bytes).decode('utf-8')
-                photos.append(img_base64)
-                
-                # Wait between photos (at least exposure time)
-                exposure_s = camera_state['exposure'] / 1000000.0
-                wait_time = max(exposure_s + 0.3, 0.5)
-                if i < count - 1:  # Don't wait after last photo
-                    time.sleep(wait_time)
-            else:
-                print(f"[Sequence Capture] Failed to capture photo {i+1}")
-                photos.append(None)
-        
-        # Restore format if needed
-        if was_streaming and format_applied:
-            asi_lib.ASISetROIFormat(camera.camera_id, width, height, 1, ASI_IMG_RGB24)
-            time.sleep(0.3)
-        
-        # Resume stream if it was running
-        if was_streaming:
-            print("[Sequence Capture] Resuming stream...")
-            time.sleep(0.5)
-            camera.start_stream()
-        
-        print(f"[Sequence Capture] Successfully captured {len([p for p in photos if p])}/{count} photos")
-        
-        return jsonify({
-            'success': True,
-            'count': len([p for p in photos if p]),
-            'photos': photos
-        })
-        
-    except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
-        print(f"[Sequence Capture] Exception: {e}")
-        print(f"[Sequence Capture] Traceback:\n{error_details}")
-        
-        # Try to resume stream if it was running
-        if was_streaming and not camera.streaming:
-            try:
-                camera.start_stream()
-            except:
-                pass
-        
-        return jsonify({'error': f'Exception: {str(e)}'}), 500
-
-# Bookings storage (simple JSON file-based storage)
-BOOKINGS_FILE = 'bookings.json'
-bookings_lock = threading.Lock()
-
-def load_bookings():
-    """Load bookings from JSON file"""
-    if os.path.exists(BOOKINGS_FILE):
-        try:
-            with open(BOOKINGS_FILE, 'r') as f:
-                return json.load(f)
-        except:
-            return []
-    return []
-
-def save_bookings(bookings):
-    """Save bookings to JSON file"""
-    with bookings_lock:
-        with open(BOOKINGS_FILE, 'w') as f:
-            json.dump(bookings, f, indent=2, default=str)
-
-# Booking API Routes
-@app.route('/bookings', methods=['GET'])
-def get_bookings():
-    """Get all bookings"""
-    bookings = load_bookings()
-    return jsonify(bookings)
-
-@app.route('/bookings', methods=['POST'])
-def create_booking():
-    """Create a new booking"""
-    data = request.get_json()
-    
-    if not data:
-        return jsonify({'error': 'Invalid request'}), 400
-    
-    required_fields = ['user_name', 'start_time', 'end_time']
-    for field in required_fields:
-        if field not in data:
-            return jsonify({'error': f'Missing required field: {field}'}), 400
-    
-    # Parse dates
-    try:
-        start_time = datetime.fromisoformat(data['start_time'].replace('Z', '+00:00'))
-        end_time = datetime.fromisoformat(data['end_time'].replace('Z', '+00:00'))
-    except:
-        return jsonify({'error': 'Invalid date format. Use ISO 8601 format (YYYY-MM-DDTHH:MM:SS)'}), 400
-    
-    if end_time <= start_time:
-        return jsonify({'error': 'End time must be after start time'}), 400
-    
-    # Check for overlaps
-    bookings = load_bookings()
-    new_booking = {
-        'id': str(uuid4()),
-        'user_name': data['user_name'],
-        'start_time': data['start_time'],
-        'end_time': data['end_time'],
-        'notes': data.get('notes')
-    }
-    
-    # Check overlaps
-    for booking in bookings:
-        existing_start = datetime.fromisoformat(booking['start_time'].replace('Z', '+00:00'))
-        existing_end = datetime.fromisoformat(booking['end_time'].replace('Z', '+00:00'))
-        if start_time < existing_end and end_time > existing_start:
-            return jsonify({'error': 'Booking overlaps with existing booking'}), 409
-    
-    bookings.append(new_booking)
-    save_bookings(bookings)
-    return jsonify(new_booking), 201
-
-@app.route('/bookings/<booking_id>', methods=['PUT'])
-def update_booking(booking_id):
-    """Update an existing booking"""
-    data = request.get_json()
-    
-    if not data:
-        return jsonify({'error': 'Invalid request'}), 400
-    
-    bookings = load_bookings()
-    booking_index = None
-    for i, booking in enumerate(bookings):
-        if booking['id'] == booking_id:
-            booking_index = i
-            break
-    
-    if booking_index is None:
-        return jsonify({'error': 'Booking not found'}), 404
-    
-    # Parse dates
-    try:
-        start_time = datetime.fromisoformat(data['start_time'].replace('Z', '+00:00'))
-        end_time = datetime.fromisoformat(data['end_time'].replace('Z', '+00:00'))
-    except:
-        return jsonify({'error': 'Invalid date format. Use ISO 8601 format (YYYY-MM-DDTHH:MM:SS)'}), 400
-    
-    if end_time <= start_time:
-        return jsonify({'error': 'End time must be after start time'}), 400
-    
-    # Check for overlaps (excluding self)
-    for booking in bookings:
-        if booking['id'] == booking_id:
-            continue
-        existing_start = datetime.fromisoformat(booking['start_time'].replace('Z', '+00:00'))
-        existing_end = datetime.fromisoformat(booking['end_time'].replace('Z', '+00:00'))
-        if start_time < existing_end and end_time > existing_start:
-            return jsonify({'error': 'Booking overlaps with existing booking'}), 409
-    
-    # Update booking
-    bookings[booking_index].update({
-        'user_name': data.get('user_name', bookings[booking_index]['user_name']),
-        'start_time': data['start_time'],
-        'end_time': data['end_time'],
-        'notes': data.get('notes', bookings[booking_index].get('notes'))
-    })
-    save_bookings(bookings)
-    return jsonify(bookings[booking_index])
-
-@app.route('/bookings/<booking_id>', methods=['DELETE'])
-def delete_booking(booking_id):
-    """Delete a booking"""
-    bookings = load_bookings()
-    original_count = len(bookings)
-    bookings = [b for b in bookings if b['id'] != booking_id]
-    
-    if len(bookings) == original_count:
-        return jsonify({'error': 'Booking not found'}), 404
-    
-    save_bookings(bookings)
-    return jsonify({'success': True})
 
 if __name__ == '__main__':
     print("Starting ASI Camera Service...")

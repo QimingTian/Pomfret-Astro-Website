@@ -176,6 +176,8 @@ camera_state = {
     'wb_r': 50,  # White balance red channel (default, range 0-100)
     'wb_b': 50,  # White balance blue channel (default, range 0-100)
     'wb_auto': False,  # Auto white balance enabled (default: manual)
+    'awb_still_locked': False,  # Cached WB R/B for still capture (avoids repeat warmup)
+    'awb_still_key': None,
     'image_format': ASI_IMG_RGB24,  # Default to RGB24
     'current_frame': None,
     'error': None,
@@ -199,6 +201,9 @@ sequence_state = {
 
 # Server-side auto mode (periodic photo capture for Weather / public view)
 AUTO_DEFAULT_INTERVAL_S = 60
+# Fast AWB warmup for stills (do not use video_exposure here — 200ms × N frames is very slow).
+AWB_WARMUP_FRAMES = 6
+AWB_WARMUP_EXPOSURE_US = 10_000  # 10 ms per warmup frame
 auto_state = {
     'active': False,
     'interval': AUTO_DEFAULT_INTERVAL_S,
@@ -233,6 +238,57 @@ def _load_persisted_mode():
     return 'off', AUTO_DEFAULT_INTERVAL_S
 
 
+def _awb_still_cache_key():
+    return (camera_state.get('gain'), camera_state.get('gamma', 50))
+
+
+def _invalidate_awb_still_cache():
+    camera_state['awb_still_locked'] = False
+
+
+def _apply_locked_awb_to_hardware() -> bool:
+    """Apply cached WB R/B if still valid for current gain/gamma."""
+    if not camera_state.get('awb_still_locked'):
+        return False
+    if camera_state.get('awb_still_key') != _awb_still_cache_key():
+        return False
+    if not camera.is_open or not camera.is_color_cam or asi_lib is None:
+        return False
+    wb_r = camera_state.get('wb_r', 50)
+    wb_b = camera_state.get('wb_b', 50)
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_R, wb_r, ASI_FALSE)
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_B, wb_b, ASI_FALSE)
+    return True
+
+
+def _store_awb_still_cache_from_hardware():
+    if not camera.is_open or not camera.is_color_cam or asi_lib is None:
+        return
+    wb_r = ctypes.c_long(0)
+    wb_b = ctypes.c_long(0)
+    auto_r = ctypes.c_int(0)
+    auto_b = ctypes.c_int(0)
+    asi_lib.ASIGetControlValue(camera.camera_id, ASI_WB_R, ctypes.byref(wb_r), ctypes.byref(auto_r))
+    asi_lib.ASIGetControlValue(camera.camera_id, ASI_WB_B, ctypes.byref(wb_b), ctypes.byref(auto_b))
+    camera_state['wb_r'] = int(wb_r.value)
+    camera_state['wb_b'] = int(wb_b.value)
+    camera_state['awb_still_locked'] = True
+    camera_state['awb_still_key'] = _awb_still_cache_key()
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_R, wb_r.value, ASI_FALSE)
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_B, wb_b.value, ASI_FALSE)
+
+
+def _snapshot_wb_from_stream_before_stop() -> bool:
+    """Reuse WB converged during stream so auto mode skips a long warmup."""
+    if not camera.streaming or not camera_state.get('wb_auto'):
+        return False
+    _store_awb_still_cache_from_hardware()
+    print(
+        f"[AWB] Reused stream WB for stills: R={camera_state['wb_r']} B={camera_state['wb_b']}"
+    )
+    return True
+
+
 def _apply_white_balance_auto(wb_auto: bool):
     """Sync wb_auto to state and ASI hardware (color cameras only)."""
     camera_state['wb_auto'] = wb_auto
@@ -253,23 +309,24 @@ def _apply_white_balance_auto(wb_auto: bool):
 def _awb_warmup_for_still():
     """
     ASI auto-WB converges during video capture, not on a single still exposure.
-    Run a short video burst, read converged WB R/B, then lock manual WB for capture_snapshot.
+    Short burst at fixed 10 ms/frame; skip entirely if WB was cached (e.g. from stream).
     """
     if not camera.is_open or not camera.is_color_cam or asi_lib is None:
         return
     if not camera_state.get('wb_auto') or camera.streaming:
+        return
+    if _apply_locked_awb_to_hardware():
         return
 
     width = camera_state['width']
     height = camera_state['height']
     gain = camera_state['gain']
     gamma = camera_state.get('gamma', 50)
-    warmup_exp = max(32, min(int(camera_state.get('video_exposure', 100_000)), 200_000))
 
     asi_lib.ASISetROIFormat(camera.camera_id, width, height, 1, ASI_IMG_RGB24)
     asi_lib.ASISetControlValue(camera.camera_id, ASI_GAIN, gain, ASI_FALSE)
     asi_lib.ASISetControlValue(camera.camera_id, ASI_GAMMA, gamma, ASI_FALSE)
-    asi_lib.ASISetControlValue(camera.camera_id, ASI_EXPOSURE, warmup_exp, ASI_FALSE)
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_EXPOSURE, AWB_WARMUP_EXPOSURE_US, ASI_FALSE)
     asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_R, 0, ASI_TRUE)
     asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_B, 0, ASI_TRUE)
 
@@ -281,32 +338,21 @@ def _awb_warmup_for_still():
     buffer = (ctypes.c_ubyte * buffer_size)()
     drop_frames = ctypes.c_int(0)
     try:
-        for _ in range(25):
+        for _ in range(AWB_WARMUP_FRAMES):
             asi_lib.ASIGetVideoData(
                 camera.camera_id,
                 ctypes.byref(buffer),
                 buffer_size,
                 ctypes.byref(drop_frames),
             )
-            time.sleep(0.05)
     finally:
         asi_lib.ASIStopVideoCapture(camera.camera_id)
-        time.sleep(0.2)
+        time.sleep(0.05)
 
-    wb_r = ctypes.c_long(0)
-    wb_b = ctypes.c_long(0)
-    auto_r = ctypes.c_int(0)
-    auto_b = ctypes.c_int(0)
-    asi_lib.ASIGetControlValue(camera.camera_id, ASI_WB_R, ctypes.byref(wb_r), ctypes.byref(auto_r))
-    asi_lib.ASIGetControlValue(camera.camera_id, ASI_WB_B, ctypes.byref(wb_b), ctypes.byref(auto_b))
-
-    camera_state['wb_r'] = int(wb_r.value)
-    camera_state['wb_b'] = int(wb_b.value)
-    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_R, wb_r.value, ASI_FALSE)
-    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_B, wb_b.value, ASI_FALSE)
+    _store_awb_still_cache_from_hardware()
     print(
-        f"[AWB warmup] Locked WB for still capture: R={wb_r.value} B={wb_b.value} "
-        f"(warmup exp {warmup_exp} μs)"
+        f"[AWB warmup] Locked WB: R={camera_state['wb_r']} B={camera_state['wb_b']} "
+        f"({AWB_WARMUP_FRAMES}×{AWB_WARMUP_EXPOSURE_US}μs)"
     )
 
 
@@ -321,8 +367,10 @@ def _capture_photo_to_memory():
     was_streaming = camera.streaming
     try:
         if was_streaming:
+            if camera_state.get('wb_auto'):
+                _snapshot_wb_from_stream_before_stop()
             camera.stop_stream()
-            time.sleep(0.5)
+            time.sleep(0.1)
 
         photo_format = camera_state['image_format']
         width = camera_state['width']
@@ -390,9 +438,11 @@ def start_auto_mode(interval=None):
     """Start server-side auto capture (stops video stream)."""
     if interval is not None:
         auto_state['interval'] = max(10, int(interval))
+    if camera.streaming and camera_state.get('wb_auto'):
+        _snapshot_wb_from_stream_before_stop()
     if camera.streaming:
         camera.stop_stream()
-        time.sleep(0.3)
+        time.sleep(0.1)
     stop_auto_mode()
     auto_state['active'] = True
     camera_state['mode'] = 'auto'
@@ -1501,6 +1551,8 @@ def update_settings():
             time.sleep(0.5)
 
         _apply_white_balance_auto(wb_auto)
+        if wb_auto:
+            _invalidate_awb_still_cache()
 
         if was_streaming:
             print(f"[Settings] Restarting stream with new white balance mode...")
@@ -1595,7 +1647,19 @@ def update_settings():
     
     print(f"[Settings] Updated: {', '.join(updated) if updated else 'nothing'}")
     print(f"[Settings] State now - Gain: {camera_state['gain']}, Photo Exposure: {camera_state['exposure']} μs, Video Exposure: {camera_state['video_exposure']} μs, WB R: {camera_state.get('wb_r', 'N/A')}, WB B: {camera_state.get('wb_b', 'N/A')}, Format: {current_format_name}")
-    
+
+    # In auto mode, apply new gain/gamma/photo exposure immediately (do not wait for interval).
+    if auto_state['active'] and camera_state.get('mode') == 'auto':
+        if any(k in data for k in ('gain', 'gamma', 'photo_exposure')):
+            _invalidate_awb_still_cache()
+            threading.Thread(
+                target=_capture_photo_to_memory,
+                daemon=True,
+                name='auto-capture-after-settings',
+            ).start()
+        elif 'wb_auto' in data:
+            _invalidate_awb_still_cache()
+
     return jsonify({
         'success': True,
         'gain': camera_state['gain'],

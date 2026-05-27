@@ -166,6 +166,7 @@ camera_state = {
     'wb_r': 50,  # White balance red channel (default, range 0-100)
     'wb_b': 50,  # White balance blue channel (default, range 0-100)
     'wb_auto': False,  # Auto white balance enabled (default: manual)
+    'wb_still_manual_lock': False,  # True after AWB warmup until still capture finishes
     'image_format': ASI_IMG_RGB24,  # Default to RGB24
     'current_frame': None,
     'error': None,
@@ -189,11 +190,15 @@ sequence_state = {
 
 # Server-side auto mode (periodic photo capture for Weather / public view)
 AUTO_DEFAULT_INTERVAL_S = 60
+AWB_WARMUP_FRAMES = 10
+AWB_WARMUP_EXPOSURE_US = 10_000  # fixed short exposure for AWB burst (not video_exposure)
 auto_state = {
     'active': False,
     'interval': AUTO_DEFAULT_INTERVAL_S,
     'thread': None,
+    'wake': threading.Event(),  # settings change → capture now + restart interval
 }
+auto_capture_lock = threading.Lock()
 frame_lock = threading.Lock()
 MODE_PERSIST_FILE = os.path.expanduser('~/.allsky_camera_mode.json')
 
@@ -240,6 +245,80 @@ def _apply_white_balance_auto(wb_auto: bool):
         print(f"[WB] Manual white balance R={wb_r} B={wb_b}")
 
 
+def _awb_warmup_for_still():
+    """
+    ASI auto-WB needs video frames to converge; lock resulting R/B for the following still.
+    No caching — runs for every auto still when wb_auto is on.
+    """
+    if not camera.is_open or not camera.is_color_cam or asi_lib is None:
+        return
+    if not camera_state.get('wb_auto') or camera.streaming:
+        return
+
+    width = camera_state['width']
+    height = camera_state['height']
+    gain = camera_state['gain']
+    gamma = camera_state.get('gamma', 50)
+
+    asi_lib.ASISetROIFormat(camera.camera_id, width, height, 1, ASI_IMG_RGB24)
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_GAIN, gain, ASI_FALSE)
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_GAMMA, gamma, ASI_FALSE)
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_EXPOSURE, AWB_WARMUP_EXPOSURE_US, ASI_FALSE)
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_R, 0, ASI_TRUE)
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_B, 0, ASI_TRUE)
+
+    if asi_lib.ASIStartVideoCapture(camera.camera_id) != ASI_SUCCESS:
+        print("[AWB warmup] Failed to start video capture")
+        return
+
+    buffer_size = width * height * 3
+    buffer = (ctypes.c_ubyte * buffer_size)()
+    drop_frames = ctypes.c_int(0)
+    try:
+        for _ in range(AWB_WARMUP_FRAMES):
+            asi_lib.ASIGetVideoData(
+                camera.camera_id,
+                ctypes.byref(buffer),
+                buffer_size,
+                ctypes.byref(drop_frames),
+            )
+    finally:
+        asi_lib.ASIStopVideoCapture(camera.camera_id)
+        time.sleep(0.05)
+
+    wb_r = ctypes.c_long(0)
+    wb_b = ctypes.c_long(0)
+    auto_r = ctypes.c_int(0)
+    auto_b = ctypes.c_int(0)
+    asi_lib.ASIGetControlValue(camera.camera_id, ASI_WB_R, ctypes.byref(wb_r), ctypes.byref(auto_r))
+    asi_lib.ASIGetControlValue(camera.camera_id, ASI_WB_B, ctypes.byref(wb_b), ctypes.byref(auto_b))
+    camera_state['wb_r'] = int(wb_r.value)
+    camera_state['wb_b'] = int(wb_b.value)
+    camera_state['wb_still_manual_lock'] = True
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_R, wb_r.value, ASI_FALSE)
+    asi_lib.ASISetControlValue(camera.camera_id, ASI_WB_B, wb_b.value, ASI_FALSE)
+    print(f"[AWB warmup] Locked WB for still: R={wb_r.value} B={wb_b.value}")
+
+
+def _request_auto_cycle_restart():
+    """Settings changed in auto mode: capture immediately, then start a fresh interval."""
+    auto_state['wake'].set()
+
+
+def _wait_auto_interval():
+    """Wait until interval elapses or settings request an immediate capture."""
+    interval = auto_state.get('interval', AUTO_DEFAULT_INTERVAL_S)
+    deadline = time.monotonic() + interval
+    while auto_state['active'] and camera_state['connected']:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        if auto_state['wake'].wait(timeout=min(1.0, remaining)):
+            auto_state['wake'].clear()
+            print("[Auto] Interval restarted after settings change")
+            return
+
+
 def _capture_photo_to_memory():
     """Capture a still (photo exposure) and store in camera_state['current_frame']."""
     if not camera_state['connected'] or not camera.is_open:
@@ -248,70 +327,72 @@ def _capture_photo_to_memory():
         print("[Auto] Skipping capture — sequence active")
         return False
 
-    was_streaming = camera.streaming
-    try:
-        if was_streaming:
-            camera.stop_stream()
-            time.sleep(0.5)
+    with auto_capture_lock:
+        was_streaming = camera.streaming
+        try:
+            if was_streaming:
+                camera.stop_stream()
+                time.sleep(0.5)
 
-        photo_format = camera_state['image_format']
-        width = camera_state['width']
-        height = camera_state['height']
-        format_applied = False
+            if camera_state.get('wb_auto'):
+                _awb_warmup_for_still()
 
-        # Public auto frames are always RGB24 (RAW stills look green without demosaic).
-        if photo_format != ASI_IMG_RGB24:
-            asi_lib.ASISetROIFormat(camera.camera_id, width, height, 1, ASI_IMG_RGB24)
-            time.sleep(0.2)
-            format_applied = photo_format != ASI_IMG_RGB24
+            photo_format = camera_state['image_format']
+            width = camera_state['width']
+            height = camera_state['height']
+            format_applied = False
 
-        img = camera.capture_snapshot()
-        if format_applied:
-            asi_lib.ASISetROIFormat(camera.camera_id, width, height, 1, ASI_IMG_RGB24)
-            time.sleep(0.2)
+            # Public auto frames are always RGB24 (RAW stills look green without demosaic).
+            if photo_format != ASI_IMG_RGB24:
+                asi_lib.ASISetROIFormat(camera.camera_id, width, height, 1, ASI_IMG_RGB24)
+                time.sleep(0.2)
+                format_applied = photo_format != ASI_IMG_RGB24
 
-        if img:
-            with frame_lock:
-                camera_state['current_frame'] = img
-                camera_state['last_auto_frame_iso'] = datetime.now(timezone.utc).isoformat()
-            print(f"[Auto] Frame captured at {camera_state['last_auto_frame_iso']}")
-            return True
-        return False
-    except Exception as e:
-        print(f"[Auto] Capture error: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-    finally:
-        if was_streaming and camera_state.get('mode') != 'auto':
-            try:
-                camera.start_stream()
-            except Exception:
-                pass
+            img = camera.capture_snapshot()
+            if format_applied:
+                asi_lib.ASISetROIFormat(camera.camera_id, width, height, 1, ASI_IMG_RGB24)
+                time.sleep(0.2)
+
+            if img:
+                with frame_lock:
+                    camera_state['current_frame'] = img
+                    camera_state['last_auto_frame_iso'] = datetime.now(timezone.utc).isoformat()
+                print(f"[Auto] Frame captured at {camera_state['last_auto_frame_iso']}")
+                return True
+            return False
+        except Exception as e:
+            print(f"[Auto] Capture error: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+        finally:
+            camera_state['wb_still_manual_lock'] = False
+            if was_streaming and camera_state.get('mode') != 'auto':
+                try:
+                    camera.start_stream()
+                except Exception:
+                    pass
 
 
 def auto_capture_loop():
-    """Background thread: periodic snapshots while auto mode is active."""
+    """Background thread: capture, wait interval, repeat; wake resets wait after settings."""
     print("[Auto] Loop started")
-    _capture_photo_to_memory()
     while auto_state['active'] and camera_state['connected']:
-        interval = auto_state.get('interval', AUTO_DEFAULT_INTERVAL_S)
-        for _ in range(interval):
-            if not auto_state['active'] or not camera_state['connected']:
-                break
-            time.sleep(1)
+        _capture_photo_to_memory()
         if not auto_state['active']:
             break
-        _capture_photo_to_memory()
+        _wait_auto_interval()
     print("[Auto] Loop stopped")
 
 
 def stop_auto_mode():
     """Stop server-side auto capture."""
     auto_state['active'] = False
+    auto_state['wake'].set()
     if auto_state.get('thread') and auto_state['thread'].is_alive():
         auto_state['thread'].join(timeout=5.0)
     auto_state['thread'] = None
+    auto_state['wake'].clear()
     if camera_state.get('mode') == 'auto':
         camera_state['mode'] = 'off'
 
@@ -325,6 +406,7 @@ def start_auto_mode(interval=None):
         time.sleep(0.3)
     stop_auto_mode()
     auto_state['active'] = True
+    auto_state['wake'].clear()
     camera_state['mode'] = 'auto'
     camera_state['streaming'] = False
     camera_state['stream_last_frame_iso'] = None
@@ -703,8 +785,12 @@ class ASICamera:
         asi_lib.ASISetControlValue(self.camera_id, ASI_GAMMA, gamma, ASI_FALSE)
 
         if self.is_color_cam:
-            wb_auto = camera_state.get('wb_auto', False)
-            if wb_auto:
+            if camera_state.get('wb_still_manual_lock'):
+                wb_r = camera_state.get('wb_r', 50)
+                wb_b = camera_state.get('wb_b', 50)
+                asi_lib.ASISetControlValue(self.camera_id, ASI_WB_R, wb_r, ASI_FALSE)
+                asi_lib.ASISetControlValue(self.camera_id, ASI_WB_B, wb_b, ASI_FALSE)
+            elif camera_state.get('wb_auto', False):
                 asi_lib.ASISetControlValue(self.camera_id, ASI_WB_R, 0, ASI_TRUE)
                 asi_lib.ASISetControlValue(self.camera_id, ASI_WB_B, 0, ASI_TRUE)
             else:
@@ -1341,14 +1427,10 @@ def update_settings():
     print(f"[Settings] Updated: {', '.join(updated) if updated else 'nothing'}")
     print(f"[Settings] State now - Gain: {camera_state['gain']}, Photo Exposure: {camera_state['exposure']} μs, Video Exposure: {camera_state['video_exposure']} μs, WB R: {camera_state.get('wb_r', 'N/A')}, WB B: {camera_state.get('wb_b', 'N/A')}, Format: {current_format_name}")
 
-    # In auto mode, re-capture immediately when imaging params change (do not wait for interval).
+    # Auto: gain/gamma/photo exp → wake loop (one capture + fresh interval, with AWB in capture path).
     if auto_state['active'] and camera_state.get('mode') == 'auto':
         if any(k in data for k in ('gain', 'gamma', 'photo_exposure')):
-            threading.Thread(
-                target=_capture_photo_to_memory,
-                daemon=True,
-                name='auto-capture-after-settings',
-            ).start()
+            _request_auto_cycle_restart()
 
     return jsonify({
         'success': True,

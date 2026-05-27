@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ASI Camera Service for Raspberry Pi (Linux)
-HTTP API: camera connect/settings/mode, MJPEG stream, auto capture, sequence to disk.
+HTTP API: camera connect/settings/mode, MJPEG stream, auto capture, sequence upload to Google Drive.
 
 System Requirements:
 - Raspberry Pi (Raspberry Pi OS / Debian-based Linux)
@@ -176,15 +176,17 @@ camera_state = {
     'last_auto_frame_iso': None,
 }
 
-# Sequence capture state
+# Sequence capture state (uploads to Google Drive — no local files)
 sequence_state = {
     'active': False,
-    'save_path': None,
+    'drive_folder_id': None,
+    'drive_folder_name': None,
     'total_count': 0,
     'current_count': 0,
     'file_format': 'JPEG',  # JPEG, PNG, or TIFF
     'interval': 0,  # Interval between photos in seconds (0 = fast mode, >0 = time-lapse mode)
-    'thread': None
+    'last_error': None,
+    'thread': None,
 }
 
 # Server-side auto mode (periodic photo capture for Weather / public view)
@@ -847,9 +849,11 @@ class ASICamera:
         return img
 
 def sequence_capture_loop():
-    """Background thread for sequence capture"""
-    import os
-    
+    """Background thread: capture stills and upload each frame to Google Drive (in-memory only)."""
+    import google_drive_upload as gdrive
+
+    drive_folder_id = sequence_state['drive_folder_id']
+
     while sequence_state['active']:
         try:
             if sequence_state['current_count'] >= sequence_state['total_count']:
@@ -892,33 +896,31 @@ def sequence_capture_loop():
                 camera.start_stream()
             
             if img:
-                # Generate filename
                 sequence_state['current_count'] += 1
                 count = sequence_state['current_count']
                 total = sequence_state['total_count']
-                
+
                 date_formatter = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
                 gain = camera_state['gain']
-                exposure = camera_state['exposure'] / 1000000.0  # Convert to seconds
-                
-                file_format = sequence_state['file_format'].lower()
-                if file_format == 'jpeg':
-                    file_format = 'jpg'
-                
-                filename = f"{date_formatter}_seq{count:04d}of{total:04d}_gain{gain}_exp{exposure:.3f}s.{file_format}"
-                filepath = os.path.join(sequence_state['save_path'], filename)
-                
-                # Save image
-                if sequence_state['file_format'] == 'JPEG':
-                    img.save(filepath, 'JPEG', quality=100)
-                elif sequence_state['file_format'] == 'PNG':
-                    img.save(filepath, 'PNG')
-                elif sequence_state['file_format'] == 'TIFF':
-                    img.save(filepath, 'TIFF')
-                
-                print(f"[Sequence] Saved photo {count}/{total}: {filename}")
+                exposure = camera_state['exposure'] / 1000000.0
+
+                try:
+                    data, mime_type, ext = gdrive.encode_image(img, sequence_state['file_format'])
+                    filename = (
+                        f"{date_formatter}_seq{count:04d}of{total:04d}"
+                        f"_gain{gain}_exp{exposure:.3f}s.{ext}"
+                    )
+                    gdrive.upload_bytes(drive_folder_id, filename, data, mime_type)
+                    sequence_state['last_error'] = None
+                    print(f"[Sequence] Uploaded {count}/{total}: {filename}")
+                except Exception as upload_err:
+                    sequence_state['last_error'] = str(upload_err)
+                    print(f"[Sequence] Upload failed {count}/{total}: {upload_err}")
             else:
-                print(f"[Sequence] Failed to capture photo {sequence_state['current_count'] + 1}/{sequence_state['total_count']}")
+                print(
+                    f"[Sequence] Failed to capture photo "
+                    f"{sequence_state['current_count'] + 1}/{sequence_state['total_count']}"
+                )
             
             # Wait between photos
             interval = sequence_state.get('interval', 0)  # Get interval (0 = fast mode)
@@ -1325,95 +1327,92 @@ def update_settings():
 
 @app.route('/camera/sequence/start', methods=['POST'])
 def start_sequence():
-    """Start sequence capture"""
-    import os
-    
+    """Start sequence capture; each frame uploads to Google Drive (no Pi disk storage)."""
+    import google_drive_upload as gdrive
+
     data = request.get_json()
     print(f"[Sequence Start] Received request data: {data}")
-    
+
     if data is None:
-        print("[Sequence Start] Error: No JSON data received")
         return jsonify({'error': 'No JSON data received'}), 400
-    
+
     if sequence_state['active']:
-        print("[Sequence Start] Error: Sequence already in progress")
         return jsonify({'error': 'Sequence capture already in progress'}), 400
-    
-    if 'save_path' not in data or 'count' not in data:
-        print(f"[Sequence Start] Error: Missing parameters. Received keys: {list(data.keys()) if data else 'None'}")
-        return jsonify({'error': 'Missing required parameters: save_path, count'}), 400
-    
-    save_path = data['save_path']
-    
-    # Validate save path is not empty
-    if not save_path or not save_path.strip():
-        print(f"[Sequence Start] Error: Empty save path")
-        return jsonify({'error': 'Save path cannot be empty'}), 400
-    
+
+    if 'count' not in data:
+        return jsonify({'error': 'Missing required parameter: count'}), 400
+
+    if not gdrive.drive_configured():
+        return jsonify({
+            'error': (
+                'Google Drive is not configured on the Pi. Set '
+                'GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON to the service account JSON path, '
+                'and share the All Sky Camera folder with that service account email.'
+            )
+        }), 503
+
     try:
         count = int(data['count'])
     except (ValueError, TypeError):
-        print(f"[Sequence Start] Error: Invalid count value: {data.get('count')}")
         return jsonify({'error': f'Invalid count value: {data.get("count")}'}), 400
-    
+
     file_format = data.get('file_format', 'JPEG')
-    interval = float(data.get('interval', 0))  # Interval in seconds (0 = fast mode)
-    
-    # Validate interval
+    interval = float(data.get('interval', 0))
+
     if interval < 0:
         return jsonify({'error': 'Interval must be >= 0'}), 400
-    
-    # Validate save path exists and is a directory
-    # Expand user path (~) if present
-    save_path = os.path.expanduser(save_path)
-    
-    if not os.path.exists(save_path):
-        print(f"[Sequence Start] Error: Save path does not exist: {save_path}")
-        return jsonify({'error': f'Save path does not exist on server: {save_path}. Please use a path on the Raspberry Pi.'}), 400
-    
-    if not os.path.isdir(save_path):
-        print(f"[Sequence Start] Error: Invalid save path (not a directory): {save_path}")
-        return jsonify({'error': f'Invalid save path (not a directory): {save_path}'}), 400
-    
-    # Check write permissions
-    if not os.access(save_path, os.W_OK):
-        print(f"[Sequence Start] Error: No write permission for path: {save_path}")
-        return jsonify({'error': f'No write permission for path: {save_path}'}), 400
-    
-    # Validate count
+
     if count < 1 or count > 10000:
         return jsonify({'error': 'Count must be between 1 and 10000'}), 400
-    
-    # Validate file format
+
     if file_format not in ['JPEG', 'PNG', 'TIFF']:
         return jsonify({'error': 'File format must be JPEG, PNG, or TIFF'}), 400
-    
-    # Check if camera is connected
+
     if not camera_state['connected'] or not camera.is_open:
         return jsonify({'error': 'Camera not connected'}), 500
-    
-    # Initialize sequence state
+
+    folder_name = (data.get('folder_name') or data.get('save_path') or '').strip()
+    if not folder_name:
+        folder_name = f"{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_x{count}"
+
+    root_id = gdrive.sequence_root_folder_id()
+    try:
+        drive_folder_id = gdrive.create_folder(root_id, folder_name)
+    except Exception as e:
+        print(f"[Sequence Start] Google Drive error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Google Drive: {e}'}), 503
+
+    drive_url = gdrive.folder_web_url(drive_folder_id)
+
     sequence_state['active'] = True
-    sequence_state['save_path'] = save_path
+    sequence_state['drive_folder_id'] = drive_folder_id
+    sequence_state['drive_folder_name'] = folder_name
     sequence_state['total_count'] = count
     sequence_state['current_count'] = 0
     sequence_state['file_format'] = file_format
     sequence_state['interval'] = interval
-    
-    # Start sequence capture thread
+    sequence_state['last_error'] = None
+
     sequence_state['thread'] = threading.Thread(target=sequence_capture_loop, daemon=True)
     sequence_state['thread'].start()
-    
+
     mode_str = f"time-lapse (interval: {interval}s)" if interval > 0 else "fast mode"
-    print(f"[Sequence] Started: {count} photos to {save_path}, format: {file_format}, {mode_str}")
-    
+    print(
+        f"[Sequence] Started: {count} photos → Drive folder {folder_name} ({drive_url}), "
+        f"format: {file_format}, {mode_str}"
+    )
+
     return jsonify({
         'success': True,
         'message': f'Sequence capture started: {count} photos ({mode_str})',
-        'save_path': save_path,
+        'folder_name': folder_name,
+        'drive_folder_id': drive_folder_id,
+        'drive_url': drive_url,
         'count': count,
         'file_format': file_format,
-        'interval': interval
+        'interval': interval,
     })
 
 @app.route('/camera/sequence/stop', methods=['POST'])
@@ -1440,13 +1439,22 @@ def stop_sequence():
 @app.route('/camera/sequence/status', methods=['GET'])
 def sequence_status():
     """Get sequence capture status"""
+    folder_id = sequence_state.get('drive_folder_id')
+    drive_url = None
+    if folder_id:
+        import google_drive_upload as gdrive
+        drive_url = gdrive.folder_web_url(folder_id)
+
     return jsonify({
         'active': sequence_state['active'],
         'current_count': sequence_state['current_count'],
         'total_count': sequence_state['total_count'],
-        'save_path': sequence_state['save_path'],
+        'folder_name': sequence_state.get('drive_folder_name'),
+        'drive_folder_id': folder_id,
+        'drive_url': drive_url,
         'file_format': sequence_state['file_format'],
-        'interval': sequence_state.get('interval', 0)
+        'interval': sequence_state.get('interval', 0),
+        'last_error': sequence_state.get('last_error'),
     })
 
 if __name__ == '__main__':

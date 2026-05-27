@@ -105,22 +105,25 @@ export class APIClient {
   }
 
   async startSequence(params: {
-    savePath: string
+    folderName?: string
     count: number
     fileFormat: string
     interval?: number
   }): Promise<{
     success: boolean
     message: string
-    save_path: string
+    folder_name?: string
+    drive_url?: string
     count: number
     file_format: string
     interval?: number
   }> {
-    const body: Record<string, any> = {
-      save_path: params.savePath,
+    const body: Record<string, unknown> = {
       count: params.count,
       file_format: params.fileFormat,
+    }
+    if (params.folderName?.trim()) {
+      body.folder_name = params.folderName.trim()
     }
     if (params.interval !== undefined && params.interval > 0) {
       body.interval = params.interval
@@ -143,7 +146,9 @@ export class APIClient {
     active: boolean
     current_count: number
     total_count: number
-    save_path?: string
+    folder_name?: string
+    drive_url?: string
+    last_error?: string | null
     file_format?: string
     interval?: number
   }> {

@@ -24,11 +24,16 @@ type CamStatus = {
   fault: string | null
 }
 
+const DRIVE_SEQUENCE_ROOT_URL =
+  'https://drive.google.com/drive/folders/1aRm-ly3N8CxEUKwUzHQzvumySJrNKXDV'
+
 type SeqStatus = {
   active: boolean
   current_count: number
   total_count: number
-  save_path?: string
+  folder_name?: string
+  drive_url?: string
+  last_error?: string | null
   file_format?: string
   interval?: number
 }
@@ -431,13 +436,15 @@ function StatsHistPanel({
       if (bH[i] > peak) peak = bH[i]
     }
 
+    const padTop = 4
+    const plotH = Math.max(1, cssH - padTop)
     const drawChannel = (h: Uint32Array, color: string) => {
       ctx.beginPath()
       ctx.strokeStyle = color
       ctx.lineWidth = 1
       for (let i = 0; i < 256; i++) {
         const px = (i / 255) * cssW
-        const py = cssH - (h[i] / peak) * cssH
+        const py = padTop + plotH - (h[i] / peak) * plotH
         if (i === 0) ctx.moveTo(px, py)
         else ctx.lineTo(px, py)
       }
@@ -514,7 +521,7 @@ function StatsHistPanel({
 
       <hr className="my-2 shrink-0 border-gray-700" />
 
-      <div ref={histWrapRef} className="min-h-28 w-full flex-1">
+      <div ref={histWrapRef} className="min-h-44 w-full flex-1">
         <canvas ref={canvasRef} className="block h-full w-full" role="img" aria-label="RGB histogram" />
       </div>
     </div>
@@ -593,7 +600,7 @@ export function AllSkyCameraControlPanel() {
 
   // Sequence
   const [seqCount, setSeqCount] = useState(10)
-  const [seqSavePath, setSeqSavePath] = useState('~/captures')
+  const [seqFolderName, setSeqFolderName] = useState('')
   const [seqFileFormat, setSeqFileFormat] = useState('JPEG')
   const [seqInterval, setSeqInterval] = useState(0)
   const [seqStatus, setSeqStatus] = useState<SeqStatus | null>(null)
@@ -916,11 +923,12 @@ export function AllSkyCameraControlPanel() {
       const count = seqCountInputRef.current?.commit() ?? seqCount
       const interval = seqIntervalInputRef.current?.commit() ?? seqInterval
       const body: Record<string, unknown> = {
-        save_path: seqSavePath,
         count,
         file_format: seqFileFormat,
       }
       if (interval > 0) body.interval = interval
+      const folderName = seqFolderName.trim()
+      if (folderName) body.folder_name = folderName
       await camJson(base, '/camera/sequence/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -932,7 +940,7 @@ export function AllSkyCameraControlPanel() {
     } finally {
       setSeqBusy(false)
     }
-  }, [base, seqSavePath, seqCount, seqFileFormat, seqInterval, pollSeqStatus])
+  }, [base, seqFolderName, seqCount, seqFileFormat, seqInterval, pollSeqStatus])
 
   const stopSequence = useCallback(async () => {
     if (!base) return
@@ -972,9 +980,9 @@ export function AllSkyCameraControlPanel() {
         )}
 
         {/* ---- Live Preview + Connection & Stream controls ---- */}
-        <div className="flex items-start gap-4">
-          {/* Stream view — fixed 16:9 so right-column histogram does not stretch preview height */}
-          <div className="relative aspect-video w-2/3 shrink-0 overflow-hidden rounded-lg bg-black">
+        <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-4">
+          {/* Stream view — 16:9 sets row height; preview does not stretch with right column */}
+          <div className="relative aspect-video w-full self-start overflow-hidden rounded-lg bg-black">
             {mode === 'stream' || mode === 'auto' ? (
               /* eslint-disable-next-line @next/next/no-img-element */
               <img
@@ -990,8 +998,8 @@ export function AllSkyCameraControlPanel() {
             )}
           </div>
 
-          {/* Histogram + Status & controls */}
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
+          {/* Same row height as preview; histogram flexes in remaining space */}
+          <div className="flex min-h-0 flex-col gap-3 self-stretch">
             {camStatus.connected && (
               <StatsHistPanel stats={imageStats} hist={histData} />
             )}
@@ -1282,10 +1290,25 @@ export function AllSkyCameraControlPanel() {
                     }}
                   />
                 </div>
-                {seqStatus.save_path && (
+                {seqStatus.folder_name && (
                   <p className="text-xs text-gray-500">
-                    Saving to: {seqStatus.save_path}
+                    Drive folder:{' '}
+                    {seqStatus.drive_url ? (
+                      <a
+                        href={seqStatus.drive_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-400 underline hover:text-blue-300"
+                      >
+                        {seqStatus.folder_name}
+                      </a>
+                    ) : (
+                      seqStatus.folder_name
+                    )}
                   </p>
+                )}
+                {seqStatus.last_error && (
+                  <p className="text-xs text-red-400">Upload error: {seqStatus.last_error}</p>
                 )}
               </div>
             ) : (
@@ -1332,14 +1355,26 @@ export function AllSkyCameraControlPanel() {
                     />
                   </div>
                 </div>
+                <p className="text-xs text-gray-500">
+                  Uploads to{' '}
+                  <a
+                    href={DRIVE_SEQUENCE_ROOT_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-400 underline hover:text-blue-300"
+                  >
+                    All Sky Camera (Google Drive)
+                  </a>
+                  . Each run creates a subfolder (no files stored on the Pi).
+                </p>
                 <div className="grid gap-2 sm:grid-cols-2">
                   <div className="space-y-1">
-                    <span className={labelClass}>Save Path (on Pi)</span>
+                    <span className={labelClass}>Folder name (optional)</span>
                     <input
                       type="text"
-                      value={seqSavePath}
-                      onChange={(e) => setSeqSavePath(e.target.value)}
-                      placeholder="~/captures"
+                      value={seqFolderName}
+                      onChange={(e) => setSeqFolderName(e.target.value)}
+                      placeholder="Auto: date_time x count"
                       className={fieldInput}
                     />
                   </div>
@@ -1359,12 +1394,7 @@ export function AllSkyCameraControlPanel() {
                 <button
                   type="button"
                   className={btnPrimary}
-                  disabled={
-                    seqBusy ||
-                    !seqSavePath.trim() ||
-                    !seqCountInputValid ||
-                    !seqIntervalInputValid
-                  }
+                  disabled={seqBusy || !seqCountInputValid || !seqIntervalInputValid}
                   onClick={() => void startSequence()}
                 >
                   {seqBusy ? 'Starting…' : 'Start Sequence'}

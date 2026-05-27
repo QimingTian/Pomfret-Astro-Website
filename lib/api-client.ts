@@ -51,12 +51,31 @@ export class APIClient {
     return this.request<StatusResponse>('/status')
   }
 
+  async connectCamera(): Promise<{ success: boolean; message: string }> {
+    return this.request('/camera/connect', { method: 'POST' })
+  }
+
+  async disconnectCamera(): Promise<{ success: boolean; message: string }> {
+    return this.request('/camera/disconnect', { method: 'POST' })
+  }
+
   async startCameraStream(): Promise<void> {
     await this.request('/camera/stream/start', { method: 'POST' })
   }
 
   async stopCameraStream(): Promise<void> {
     await this.request('/camera/stream/stop', { method: 'POST' })
+  }
+
+  async setCameraMode(
+    mode: 'off' | 'stream' | 'auto',
+    intervalSeconds = 60,
+  ): Promise<{ success: boolean; message: string; mode?: string; autoMode?: boolean }> {
+    return this.request('/camera/mode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode, interval: intervalSeconds }),
+    })
   }
 
   async captureSnapshot(): Promise<Blob> {

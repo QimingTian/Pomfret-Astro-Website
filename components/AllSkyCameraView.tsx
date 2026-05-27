@@ -151,9 +151,20 @@ export default function AllSkyCameraView() {
         })
         if (!res.ok || cancelled) return
         const data = (await res.json()) as {
-          sensors?: { allSkyCam?: { lastStreamFrameIso?: string | null } }
+          sensors?: {
+            allSkyCam?: {
+              mode?: string
+              autoMode?: boolean
+              lastStreamFrameIso?: string | null
+              lastAutoFrameIso?: string | null
+            }
+          }
         }
-        const iso = data?.sensors?.allSkyCam?.lastStreamFrameIso
+        const cam = data?.sensors?.allSkyCam
+        const iso =
+          cam?.mode === 'auto' || cam?.autoMode
+            ? cam?.lastAutoFrameIso ?? cam?.lastStreamFrameIso
+            : cam?.lastStreamFrameIso
         if (typeof iso === 'string' && iso.length > 0 && !cancelled) {
           const d = new Date(iso)
           if (!Number.isNaN(d.getTime())) {

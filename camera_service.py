@@ -139,6 +139,8 @@ camera_state = {
     'exposure': 1000000,  # microseconds - for photo capture only
     'video_exposure': 100000,  # microseconds - max exposure for video streaming (controls frame rate)
     'gain': 50,
+    'gain_min': 0,
+    'gain_max': 500,  # ASI662MC default; updated from SDK on connect
     'gamma': 50,  # Gamma (default, range 1-100, recommended 50 for linear output)
     'wb_r': 50,  # White balance red channel (default, range 0-100)
     'wb_b': 50,  # White balance blue channel (default, range 0-100)
@@ -148,6 +150,9 @@ camera_state = {
     'error': None,
     # Wall time of last successful video frame (UTC ISO), for web UI "last updated" polling
     'stream_last_frame_iso': None,
+    # off | stream | auto — auto runs on the Pi even when no browser is connected
+    'mode': 'off',
+    'last_auto_frame_iso': None,
 }
 
 # Sequence capture state
@@ -160,6 +165,164 @@ sequence_state = {
     'interval': 0,  # Interval between photos in seconds (0 = fast mode, >0 = time-lapse mode)
     'thread': None
 }
+
+# Server-side auto mode (periodic photo capture for Weather / public view)
+AUTO_DEFAULT_INTERVAL_S = 60
+auto_state = {
+    'active': False,
+    'interval': AUTO_DEFAULT_INTERVAL_S,
+    'thread': None,
+}
+frame_lock = threading.Lock()
+MODE_PERSIST_FILE = os.path.expanduser('~/.allsky_camera_mode.json')
+
+
+def _persist_mode(mode, interval=None):
+    try:
+        payload = {'mode': mode}
+        if interval is not None:
+            payload['interval'] = interval
+        with open(MODE_PERSIST_FILE, 'w') as f:
+            json.dump(payload, f)
+    except OSError as e:
+        print(f"[Mode] Could not persist mode: {e}")
+
+
+def _load_persisted_mode():
+    try:
+        if os.path.isfile(MODE_PERSIST_FILE):
+            with open(MODE_PERSIST_FILE, 'r') as f:
+                data = json.load(f)
+            mode = data.get('mode', 'off')
+            interval = int(data.get('interval', AUTO_DEFAULT_INTERVAL_S))
+            if mode in ('off', 'stream', 'auto'):
+                return mode, max(10, interval)
+    except (OSError, json.JSONDecodeError, TypeError, ValueError) as e:
+        print(f"[Mode] Could not load persisted mode: {e}")
+    return 'off', AUTO_DEFAULT_INTERVAL_S
+
+
+def _capture_photo_to_memory():
+    """Capture a still (photo exposure) and store in camera_state['current_frame']."""
+    if not camera_state['connected'] or not camera.is_open:
+        return False
+    if sequence_state['active']:
+        print("[Auto] Skipping capture — sequence active")
+        return False
+
+    was_streaming = camera.streaming
+    try:
+        if was_streaming:
+            camera.stop_stream()
+            time.sleep(0.5)
+
+        photo_format = camera_state['image_format']
+        width = camera_state['width']
+        height = camera_state['height']
+        format_applied = False
+
+        if photo_format != ASI_IMG_RGB24:
+            result = asi_lib.ASISetROIFormat(camera.camera_id, width, height, 1, photo_format)
+            if result == ASI_SUCCESS:
+                format_applied = True
+            time.sleep(0.3)
+
+        img = camera.capture_snapshot()
+        if format_applied:
+            asi_lib.ASISetROIFormat(camera.camera_id, width, height, 1, ASI_IMG_RGB24)
+            time.sleep(0.2)
+
+        if img:
+            with frame_lock:
+                camera_state['current_frame'] = img
+                camera_state['last_auto_frame_iso'] = datetime.now(timezone.utc).isoformat()
+            print(f"[Auto] Frame captured at {camera_state['last_auto_frame_iso']}")
+            return True
+        return False
+    except Exception as e:
+        print(f"[Auto] Capture error: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+    finally:
+        if was_streaming and camera_state.get('mode') != 'auto':
+            try:
+                camera.start_stream()
+            except Exception:
+                pass
+
+
+def auto_capture_loop():
+    """Background thread: periodic snapshots while auto mode is active."""
+    print("[Auto] Loop started")
+    _capture_photo_to_memory()
+    while auto_state['active'] and camera_state['connected']:
+        interval = auto_state.get('interval', AUTO_DEFAULT_INTERVAL_S)
+        for _ in range(interval):
+            if not auto_state['active'] or not camera_state['connected']:
+                break
+            time.sleep(1)
+        if not auto_state['active']:
+            break
+        _capture_photo_to_memory()
+    print("[Auto] Loop stopped")
+
+
+def stop_auto_mode():
+    """Stop server-side auto capture."""
+    auto_state['active'] = False
+    if auto_state.get('thread') and auto_state['thread'].is_alive():
+        auto_state['thread'].join(timeout=5.0)
+    auto_state['thread'] = None
+    if camera_state.get('mode') == 'auto':
+        camera_state['mode'] = 'off'
+
+
+def start_auto_mode(interval=None):
+    """Start server-side auto capture (stops video stream)."""
+    if interval is not None:
+        auto_state['interval'] = max(10, int(interval))
+    if camera.streaming:
+        camera.stop_stream()
+        time.sleep(0.3)
+    stop_auto_mode()
+    auto_state['active'] = True
+    camera_state['mode'] = 'auto'
+    camera_state['streaming'] = False
+    camera_state['stream_last_frame_iso'] = None
+    _persist_mode('auto', auto_state['interval'])
+    auto_state['thread'] = threading.Thread(target=auto_capture_loop, daemon=True)
+    auto_state['thread'].start()
+    return True
+
+
+def apply_camera_mode(mode, interval=None):
+    """Set operating mode: off, stream, or auto."""
+    mode = (mode or 'off').lower()
+    if mode not in ('off', 'stream', 'auto'):
+        return False, f'Invalid mode: {mode}'
+
+    if mode == 'auto':
+        if not camera_state['connected'] or not camera.is_open:
+            return False, 'Camera not connected'
+        start_auto_mode(interval)
+        return True, 'Auto mode started'
+
+    stop_auto_mode()
+    if mode == 'stream':
+        if not camera_state['connected'] or not camera.is_open:
+            return False, 'Camera not connected'
+        if camera.start_stream():
+            camera_state['mode'] = 'stream'
+            _persist_mode('stream')
+            return True, 'Stream started'
+        return False, camera_state.get('error') or 'Failed to start stream'
+
+    camera.stop_stream()
+    camera_state['mode'] = 'off'
+    _persist_mode('off')
+    return True, 'Camera idle'
+
 
 class ASICamera:
     def __init__(self):
@@ -238,6 +401,11 @@ class ASICamera:
                 return False
             
             self.is_open = True
+
+            gain_range = _get_control_range(self.camera_id, ASI_GAIN)
+            if gain_range:
+                camera_state['gain_min'], camera_state['gain_max'] = gain_range
+                print(f"Gain range: {gain_range[0]} – {gain_range[1]}")
             
             # Set ROI format (full frame, use current format setting)
             result = asi_lib.ASISetROIFormat(
@@ -308,6 +476,7 @@ class ASICamera:
     
     def disconnect(self):
         """Disconnect from camera"""
+        stop_auto_mode()
         self.stop_stream()
         if self.is_open and self.camera_id >= 0:
             asi_lib.ASICloseCamera(self.camera_id)
@@ -315,7 +484,9 @@ class ASICamera:
         camera_state['connected'] = False
         camera_state['streaming'] = False
         camera_state['stream_last_frame_iso'] = None
-    
+        camera_state['mode'] = 'off'
+        camera_state['last_auto_frame_iso'] = None
+
     def reset_camera(self):
         """Reset camera by closing and reopening - use when camera is stuck in FAILED state"""
         if not self.is_open or self.camera_id < 0:
@@ -383,7 +554,9 @@ class ASICamera:
         """Start video streaming"""
         if not self.is_open:
             return False
-        
+
+        stop_auto_mode()
+
         # Enable auto exposure for video mode, but limit max exposure time
         # This allows the camera to adjust exposure automatically while respecting the max limit
         video_exposure = camera_state['video_exposure']  # microseconds
@@ -503,9 +676,10 @@ class ASICamera:
             
             if result == ASI_SUCCESS:
                 consecutive_errors = 0  # Reset error counter
-                # Convert to numpy array
+                # Convert to numpy array — ASI SDK "RGB24" is actually BGR byte order
                 img_array = np.frombuffer(buffer, dtype=np.uint8)
                 img_array = img_array.reshape((height, width, 3))
+                img_array = img_array[:, :, ::-1]  # BGR -> RGB
                 
                 # Convert to PIL Image
                 img = Image.fromarray(img_array, mode='RGB')
@@ -643,6 +817,7 @@ class ASICamera:
         if img_format == ASI_IMG_RGB24:
             img_array = np.frombuffer(buffer, dtype=np.uint8)
             img_array = img_array.reshape((height, width, 3))
+            img_array = img_array[:, :, ::-1]  # BGR -> RGB
             img = Image.fromarray(img_array, 'RGB')
         elif img_format == ASI_IMG_Y8:
             img_array = np.frombuffer(buffer, dtype=np.uint8)
@@ -768,6 +943,38 @@ def sequence_capture_loop():
     print(f"[Sequence] Sequence capture stopped")
     sequence_state['active'] = False
 
+def _get_control_range(camera_id, control_type):
+    """Return (min, max) for an ASI control from SDK caps, or None."""
+    if asi_lib is None:
+        return None
+
+    class ASI_CONTROL_CAPS(ctypes.Structure):
+        _fields_ = [
+            ("Name", ctypes.c_char * 64),
+            ("Description", ctypes.c_char * 128),
+            ("MaxValue", ctypes.c_long),
+            ("MinValue", ctypes.c_long),
+            ("DefaultValue", ctypes.c_long),
+            ("IsAutoSupported", ctypes.c_int),
+            ("IsWritable", ctypes.c_int),
+            ("ControlType", ctypes.c_int),
+            ("Unused", ctypes.c_char * 32),
+        ]
+
+    try:
+        num = asi_lib.ASIGetNumOfControls(camera_id)
+    except AttributeError:
+        return None
+
+    for i in range(num):
+        caps = ASI_CONTROL_CAPS()
+        if asi_lib.ASIGetControlCaps(camera_id, i, ctypes.byref(caps)) != ASI_SUCCESS:
+            continue
+        if caps.ControlType == control_type:
+            return int(caps.MinValue), int(caps.MaxValue)
+    return None
+
+
 # Global camera instance
 camera = ASICamera()
 
@@ -781,9 +988,16 @@ def _status_payload():
             'allSkyCam': {
                 'connected': camera_state['connected'],
                 'streaming': camera_state['streaming'],
-                'lastSnapshot': datetime.now().isoformat() if camera_state['current_frame'] else None,
+                'mode': camera_state.get('mode', 'off'),
+                'autoMode': auto_state['active'],
+                'lastSnapshot': camera_state.get('last_auto_frame_iso') or (
+                    datetime.now().isoformat() if camera_state['current_frame'] else None
+                ),
                 'lastStreamFrameIso': camera_state.get('stream_last_frame_iso'),
+                'lastAutoFrameIso': camera_state.get('last_auto_frame_iso'),
                 'fault': camera_state['error'],
+                'gainMin': camera_state.get('gain_min', 0),
+                'gainMax': camera_state.get('gain_max', 500),
             }
         }
         # No 'roof', 'safety', or 'alerts' - this controller doesn't handle those
@@ -805,7 +1019,10 @@ def get_status_under_camera_prefix():
 def connect_camera():
     """Connect to camera"""
     if camera.connect():
-        return jsonify({'success': True, 'message': 'Camera connected'})
+        saved_mode, saved_interval = _load_persisted_mode()
+        if saved_mode in ('auto', 'stream'):
+            apply_camera_mode(saved_mode, saved_interval)
+        return jsonify({'success': True, 'message': 'Camera connected', 'mode': camera_state.get('mode', 'off')})
     return jsonify({'success': False, 'message': camera_state['error']}), 500
 
 @app.route('/camera/disconnect', methods=['POST'])
@@ -825,7 +1042,39 @@ def start_stream():
 def stop_stream():
     """Stop video stream"""
     camera.stop_stream()
+    if camera_state.get('mode') == 'stream':
+        camera_state['mode'] = 'off'
     return jsonify({'success': True, 'message': 'Stream stopped'})
+
+
+@app.route('/camera/mode', methods=['POST'])
+def set_camera_mode_route():
+    """Set camera mode: off, stream, or auto (server-side periodic capture)."""
+    data = request.get_json() or {}
+    mode = data.get('mode', 'off')
+    interval = data.get('interval')
+    ok, message = apply_camera_mode(mode, interval)
+    if ok:
+        return jsonify({
+            'success': True,
+            'message': message,
+            'mode': camera_state.get('mode', 'off'),
+            'autoMode': auto_state['active'],
+        })
+    return jsonify({'success': False, 'message': message}), 500
+
+
+@app.route('/camera/latest', methods=['GET'])
+def latest_frame():
+    """Latest auto or snapshot frame as JPEG (for polling UIs)."""
+    with frame_lock:
+        frame = camera_state.get('current_frame')
+    if not frame:
+        return jsonify({'error': 'No frame available'}), 404
+    img_io = io.BytesIO()
+    frame.save(img_io, 'JPEG', quality=85)
+    img_io.seek(0)
+    return send_file(img_io, mimetype='image/jpeg')
 
 @app.route('/camera/snapshot', methods=['GET'])
 def snapshot():
@@ -940,25 +1189,72 @@ def snapshot():
 
 @app.route('/camera/stream', methods=['GET'])
 def video_stream():
-    """MJPEG video stream"""
+    """MJPEG stream — live video or latest auto frame (re-sent ~1 Hz in auto mode)."""
     def generate():
-        while camera_state['streaming']:
-            frame = camera.frame_buffer
+        while camera_state['streaming'] or auto_state['active']:
+            frame = None
+            if camera_state['streaming']:
+                frame = camera.frame_buffer
+            elif auto_state['active']:
+                with frame_lock:
+                    frame = camera_state.get('current_frame')
             if frame:
                 img_io = io.BytesIO()
                 frame.save(img_io, 'JPEG', quality=75)
                 img_io.seek(0)
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + img_io.read() + b'\r\n')
-                
-                # Minimal sleep to prevent CPU overload, but let camera capture rate control FPS
-                # The actual FPS will be determined by the camera's exposure time and capture speed
-                time.sleep(0.005)  # 5ms sleep - much shorter than before to allow higher FPS
+                if camera_state['streaming']:
+                    time.sleep(0.005)
+                else:
+                    time.sleep(1.0)
             else:
-                # No frame available, short sleep to avoid busy waiting
-                time.sleep(0.01)
-    
+                time.sleep(0.1)
+
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+def _sync_controls_from_camera():
+    """Read live gain/gamma/video exposure from the camera into camera_state."""
+    if not camera.is_open or asi_lib is None:
+        return
+
+    gain = ctypes.c_long(0)
+    auto_gain = ctypes.c_int(0)
+    if asi_lib.ASIGetControlValue(camera.camera_id, ASI_GAIN, ctypes.byref(gain), ctypes.byref(auto_gain)) == ASI_SUCCESS:
+        camera_state['gain'] = int(gain.value)
+
+    gamma = ctypes.c_long(0)
+    auto_gamma = ctypes.c_int(0)
+    if asi_lib.ASIGetControlValue(camera.camera_id, ASI_GAMMA, ctypes.byref(gamma), ctypes.byref(auto_gamma)) == ASI_SUCCESS:
+        camera_state['gamma'] = int(gamma.value)
+
+    exposure = ctypes.c_long(0)
+    auto_exp = ctypes.c_int(0)
+    if asi_lib.ASIGetControlValue(camera.camera_id, ASI_EXPOSURE, ctypes.byref(exposure), ctypes.byref(auto_exp)) == ASI_SUCCESS:
+        camera_state['video_exposure'] = int(exposure.value)
+
+
+def _settings_payload():
+    format_names = {ASI_IMG_RGB24: 'RGB24', ASI_IMG_RAW8: 'RAW8', ASI_IMG_RAW16: 'RAW16', ASI_IMG_Y8: 'Y8'}
+    if camera_state['connected']:
+        _sync_controls_from_camera()
+    return {
+        'connected': camera_state['connected'],
+        'gain': camera_state['gain'],
+        'gamma': camera_state.get('gamma', 50),
+        'photo_exposure': camera_state['exposure'],
+        'video_exposure': camera_state['video_exposure'],
+        'gain_min': camera_state.get('gain_min', 0),
+        'gain_max': camera_state.get('gain_max', 500),
+        'image_format': format_names.get(camera_state['image_format'], 'RGB24'),
+    }
+
+
+@app.route('/camera/settings', methods=['GET'])
+def get_settings():
+    """Return current camera settings (Pi state, synced from hardware when connected)."""
+    return jsonify(_settings_payload())
+
 
 @app.route('/camera/settings', methods=['POST'])
 def update_settings():
@@ -970,7 +1266,9 @@ def update_settings():
     updated = []
     
     if 'gain' in data:
-        gain = int(data['gain'])
+        gain_min = camera_state.get('gain_min', 0)
+        gain_max = camera_state.get('gain_max', 500)
+        gain = max(gain_min, min(gain_max, int(data['gain'])))
         camera_state['gain'] = gain
         
         # Remember if streaming

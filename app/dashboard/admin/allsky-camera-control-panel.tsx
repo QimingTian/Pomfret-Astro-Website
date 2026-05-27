@@ -1,6 +1,14 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { DashboardPanel } from '@/app/dashboard/account/dashboard-panel'
 import { useAppStore } from '@/lib/store'
 
@@ -154,7 +162,108 @@ const labelClass = 'text-xs text-white'
 const fieldInput =
   'w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm text-white dark:border-gray-600 dark:bg-transparent'
 const fieldInputCompact =
-  'w-16 shrink-0 rounded-lg border border-gray-300 bg-transparent px-2 py-1 text-xs font-mono text-white tabular-nums text-right dark:border-gray-600 dark:bg-transparent'
+  'w-[4.5rem] shrink-0 rounded-lg border border-gray-300 bg-transparent px-2 py-1 text-center text-xs font-mono text-white tabular-nums dark:border-gray-600 dark:bg-transparent'
+
+/** ASI662MC gain range; updated from /status when camera is connected. */
+const DEFAULT_GAIN_MIN = 0
+const DEFAULT_GAIN_MAX = 500
+
+function validateNumericDraft(
+  raw: string,
+  min: number,
+  max: number,
+  decimal: boolean,
+): boolean {
+  const t = raw.trim()
+  if (!t) return false
+  if (decimal) {
+    if (!/^\d+(\.\d+)?$/.test(t)) return false
+    const v = parseFloat(t)
+    return Number.isFinite(v) && v >= min && v <= max
+  }
+  if (!/^\d+$/.test(t)) return false
+  const v = Number(t)
+  return Number.isFinite(v) && v >= min && v <= max
+}
+
+function parseNumericDraft(
+  raw: string,
+  min: number,
+  max: number,
+  decimal: boolean,
+): number | null {
+  if (!validateNumericDraft(raw, min, max, decimal)) return null
+  const t = raw.trim()
+  const v = decimal ? parseFloat(t) : Number(t)
+  return Math.max(min, Math.min(max, v))
+}
+
+export type NumericInputHandle = { commit: () => number }
+
+const NumericInput = forwardRef<
+  NumericInputHandle,
+  {
+    value: number
+    onChange: (v: number) => void
+    min: number
+    max: number
+    className?: string
+    decimal?: boolean
+    onValidityChange?: (valid: boolean) => void
+  }
+>(function NumericInput(
+  { value, onChange, min, max, className, decimal = false, onValidityChange },
+  ref,
+) {
+  const [text, setText] = useState(String(value))
+
+  useEffect(() => {
+    setText(String(value))
+  }, [value])
+
+  useEffect(() => {
+    onValidityChange?.(validateNumericDraft(text, min, max, decimal))
+  }, [text, min, max, decimal, onValidityChange])
+
+  const commit = useCallback((): number => {
+    const parsed = parseNumericDraft(text, min, max, decimal)
+    if (parsed === null) {
+      setText(String(value))
+      return value
+    }
+    onChange(parsed)
+    setText(String(parsed))
+    return parsed
+  }, [text, value, decimal, min, max, onChange])
+
+  useImperativeHandle(ref, () => ({ commit }), [commit])
+
+  const handleChange = (raw: string) => {
+    if (decimal) {
+      if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return
+    } else if (raw !== '' && !/^\d+$/.test(raw)) {
+      return
+    }
+    setText(raw)
+  }
+
+  return (
+    <input
+      type="text"
+      inputMode={decimal ? 'decimal' : 'numeric'}
+      value={text}
+      onChange={(e) => handleChange(e.target.value)}
+      onBlur={() => {
+        if (validateNumericDraft(text, min, max, decimal)) {
+          commit()
+        } else {
+          setText(String(value))
+        }
+      }}
+      className={className}
+    />
+  )
+})
 const fieldSelect =
   'w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm text-white dark:border-gray-600 dark:bg-transparent'
 const btnSet = `${btnBase} border-white/25 bg-[#1d1e1e] text-white hover:bg-[#252626]`
@@ -288,9 +397,8 @@ function StatsHistPanel({
   }, [hist])
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-1.5">
-      {/* Stats panel */}
-      <div className="shrink-0 rounded-lg border border-gray-700 bg-black/40 px-2.5 py-1.5 font-mono text-[0.6rem] leading-relaxed">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="shrink-0 font-mono text-[0.6rem] leading-relaxed">
         <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
           <p>
             <span className="text-gray-500">Mean </span>
@@ -338,9 +446,9 @@ function StatsHistPanel({
         )}
       </div>
 
-      {/* Histogram */}
-      <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-gray-700 bg-black/40 p-2">
-        <p className="mb-1 shrink-0 text-[0.6rem] text-gray-500">Histogram</p>
+      <hr className="my-2 shrink-0 border-gray-700" />
+
+      <div className="flex min-h-0 flex-1 flex-col">
         <canvas ref={canvasRef} width={256} height={128} className="min-h-0 w-full flex-1" />
       </div>
     </div>
@@ -406,13 +514,11 @@ export function AllSkyCameraControlPanel() {
 
   // Settings state
   const [gain, setGain] = useState(50)
+  const [gainMin, setGainMin] = useState(DEFAULT_GAIN_MIN)
+  const [gainMax, setGainMax] = useState(DEFAULT_GAIN_MAX)
   const [gamma, setGamma] = useState(50)
   const [videoExposureMs, setVideoExposureMs] = useState(100)
   const [photoExposureS, setPhotoExposureS] = useState(1)
-  const [wbAuto, setWbAuto] = useState(false)
-  const [wbR, setWbR] = useState(50)
-  const [wbB, setWbB] = useState(50)
-  const [imageFormat, setImageFormat] = useState('RGB24')
 
   // Stream refresh key — bump to force the MJPEG <img> to reconnect
   const [streamKey, setStreamKey] = useState(() => Date.now())
@@ -431,6 +537,18 @@ export function AllSkyCameraControlPanel() {
   const [seqBusy, setSeqBusy] = useState(false)
 
   const [settingsBusy, setSettingsBusy] = useState(false)
+
+  const gainInputRef = useRef<NumericInputHandle>(null)
+  const gammaInputRef = useRef<NumericInputHandle>(null)
+  const videoExpInputRef = useRef<NumericInputHandle>(null)
+  const photoExpInputRef = useRef<NumericInputHandle>(null)
+
+  const [gainInputValid, setGainInputValid] = useState(true)
+  const [gammaInputValid, setGammaInputValid] = useState(true)
+  const [videoExpInputValid, setVideoExpInputValid] = useState(true)
+  const [photoExpInputValid, setPhotoExpInputValid] = useState(true)
+
+  const settingsLoadedRef = useRef(false)
 
   // Mode is enforced on the Pi (server-side auto continues without this browser tab)
   const [mode, setMode] = useState<CamMode>('off')
@@ -474,11 +592,21 @@ export function AllSkyCameraControlPanel() {
             lastStreamFrameIso?: string | null
             lastAutoFrameIso?: string | null
             fault?: string | null
+            gainMin?: number
+            gainMax?: number
           }
         }
       }>(base, '/status')
       const cam = data.sensors?.allSkyCam
       if (cam) {
+        if (typeof cam.gainMin === 'number') {
+          setGainMin(cam.gainMin)
+          setGain((g) => Math.max(cam.gainMin!, g))
+        }
+        if (typeof cam.gainMax === 'number') {
+          setGainMax(cam.gainMax)
+          setGain((g) => Math.min(cam.gainMax!, g))
+        }
         const serverMode: CamMode =
           cam.mode === 'stream' || cam.mode === 'auto' || cam.mode === 'off'
             ? cam.mode
@@ -503,11 +631,47 @@ export function AllSkyCameraControlPanel() {
     }
   }, [base])
 
+  const loadSettings = useCallback(async () => {
+    if (!base) return
+    try {
+      const s = await camJson<{
+        gain?: number
+        gamma?: number
+        photo_exposure?: number
+        video_exposure?: number
+        gain_min?: number
+        gain_max?: number
+      }>(base, '/camera/settings')
+      if (typeof s.gain === 'number') setGain(s.gain)
+      if (typeof s.gamma === 'number') setGamma(s.gamma)
+      if (typeof s.photo_exposure === 'number') {
+        setPhotoExposureS(s.photo_exposure / 1_000_000)
+      }
+      if (typeof s.video_exposure === 'number') {
+        setVideoExposureMs(Math.round(s.video_exposure / 1000))
+      }
+      if (typeof s.gain_min === 'number') setGainMin(s.gain_min)
+      if (typeof s.gain_max === 'number') setGainMax(s.gain_max)
+    } catch {
+      // keep previous values on failure
+    }
+  }, [base])
+
   useEffect(() => {
     void pollStatus()
     const id = setInterval(() => void pollStatus(), STATUS_POLL_MS)
     return () => clearInterval(id)
   }, [pollStatus])
+
+  useEffect(() => {
+    if (!base || !camStatus.connected) {
+      settingsLoadedRef.current = false
+      return
+    }
+    if (settingsLoadedRef.current) return
+    settingsLoadedRef.current = true
+    void loadSettings()
+  }, [base, camStatus.connected, loadSettings])
 
   const switchMode = useCallback(
     async (target: CamMode) => {
@@ -635,17 +799,13 @@ export function AllSkyCameraControlPanel() {
       if (!base) return
       setSettingsBusy(true)
       try {
-        const body: Record<string, unknown> = {}
+        const body: Record<string, unknown> = { wb_auto: true, image_format: 'RGB24' }
         if (patch.gain !== undefined) body.gain = patch.gain
         if (patch.gamma !== undefined) body.gamma = patch.gamma
         if (patch.photoExposure !== undefined)
           body.photo_exposure = Math.round((patch.photoExposure as number) * 1_000_000)
         if (patch.videoExposure !== undefined)
           body.video_exposure = Math.round((patch.videoExposure as number) * 1_000_000)
-        if (patch.imageFormat !== undefined) body.image_format = patch.imageFormat
-        if (patch.wbR !== undefined) body.wb_r = patch.wbR
-        if (patch.wbB !== undefined) body.wb_b = patch.wbB
-        if (patch.wbAuto !== undefined) body.wb_auto = patch.wbAuto
         await camJson(base, '/camera/settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -855,20 +1015,23 @@ export function AllSkyCameraControlPanel() {
             <div className="space-y-1.5">
               <div className="flex items-center gap-2">
                 <span className={`${labelClass} w-28 shrink-0`}>Gain</span>
-                <StyledSlider min={0} max={100} value={gain} onChange={setGain} />
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
+                <StyledSlider min={gainMin} max={gainMax} value={gain} onChange={setGain} />
+                <NumericInput
+                  ref={gainInputRef}
                   value={gain}
-                  onChange={(e) => setGain(Math.max(0, Math.min(100, Number(e.target.value))))}
+                  onChange={setGain}
+                  min={gainMin}
+                  max={gainMax}
+                  onValidityChange={setGainInputValid}
                   className={fieldInputCompact}
                 />
                 <button
                   type="button"
                   className={btnSet}
-                  disabled={settingsBusy}
-                  onClick={() => void applySettings({ gain })}
+                  disabled={settingsBusy || !gainInputValid}
+                  onClick={() =>
+                    void applySettings({ gain: gainInputRef.current?.commit() ?? gain })
+                  }
                 >
                   Set
                 </button>
@@ -880,19 +1043,22 @@ export function AllSkyCameraControlPanel() {
               <div className="flex items-center gap-2">
                 <span className={`${labelClass} w-28 shrink-0`}>Gamma</span>
                 <StyledSlider min={1} max={100} value={gamma} onChange={setGamma} />
-                <input
-                  type="number"
+                <NumericInput
+                  ref={gammaInputRef}
+                  value={gamma}
+                  onChange={setGamma}
                   min={1}
                   max={100}
-                  value={gamma}
-                  onChange={(e) => setGamma(Math.max(1, Math.min(100, Number(e.target.value))))}
+                  onValidityChange={setGammaInputValid}
                   className={fieldInputCompact}
                 />
                 <button
                   type="button"
                   className={btnSet}
-                  disabled={settingsBusy}
-                  onClick={() => void applySettings({ gamma })}
+                  disabled={settingsBusy || !gammaInputValid}
+                  onClick={() =>
+                    void applySettings({ gamma: gammaInputRef.current?.commit() ?? gamma })
+                  }
                 >
                   Set
                 </button>
@@ -904,19 +1070,23 @@ export function AllSkyCameraControlPanel() {
               <div className="flex items-center gap-2">
                 <span className={`${labelClass} w-28 shrink-0`}>Video Exp (ms)</span>
                 <StyledSlider min={1} max={2000} step={1} value={videoExposureMs} onChange={setVideoExposureMs} />
-                <input
-                  type="number"
+                <NumericInput
+                  ref={videoExpInputRef}
+                  value={videoExposureMs}
+                  onChange={setVideoExposureMs}
                   min={1}
                   max={2000}
-                  value={videoExposureMs}
-                  onChange={(e) => setVideoExposureMs(Math.max(1, Math.min(2000, Number(e.target.value))))}
+                  onValidityChange={setVideoExpInputValid}
                   className={fieldInputCompact}
                 />
                 <button
                   type="button"
                   className={btnSet}
-                  disabled={settingsBusy}
-                  onClick={() => void applySettings({ videoExposure: videoExposureMs / 1000 })}
+                  disabled={settingsBusy || !videoExpInputValid}
+                  onClick={() => {
+                    const ms = videoExpInputRef.current?.commit() ?? videoExposureMs
+                    void applySettings({ videoExposure: ms / 1000 })
+                  }}
                 >
                   Set
                 </button>
@@ -927,112 +1097,31 @@ export function AllSkyCameraControlPanel() {
             <div className="space-y-1.5">
               <div className="flex items-center gap-2">
                 <span className={`${labelClass} w-28 shrink-0`}>Photo Exp (s)</span>
-                <input
-                  type="number"
+                <NumericInput
+                  ref={photoExpInputRef}
+                  value={photoExposureS}
+                  onChange={setPhotoExposureS}
                   min={0.001}
                   max={300}
-                  step={0.1}
-                  value={photoExposureS}
-                  onChange={(e) => {
-                    const v = Number(e.target.value)
-                    if (v > 0) setPhotoExposureS(v)
-                  }}
-                  className={`${fieldInput} flex-1`}
+                  decimal
+                  onValidityChange={setPhotoExpInputValid}
+                  className={`${fieldInput} flex-1 text-center`}
                 />
                 <button
                   type="button"
                   className={btnSet}
-                  disabled={settingsBusy}
-                  onClick={() => void applySettings({ photoExposure: photoExposureS })}
+                  disabled={settingsBusy || !photoExpInputValid}
+                  onClick={() =>
+                    void applySettings({
+                      photoExposure: photoExpInputRef.current?.commit() ?? photoExposureS,
+                    })
+                  }
                 >
                   Set
                 </button>
               </div>
             </div>
 
-            {/* White Balance */}
-            <div className="space-y-2">
-              <div className="flex items-center gap-3">
-                <span className={labelClass}>White Balance</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const next = !wbAuto
-                    setWbAuto(next)
-                    void applySettings({ wbAuto: next })
-                  }}
-                  className={`rounded-full border px-2 py-0.5 text-[0.65rem] ${
-                    wbAuto
-                      ? 'border-emerald-500/50 text-emerald-300'
-                      : 'border-gray-600 text-gray-400'
-                  }`}
-                >
-                  {wbAuto ? 'Auto' : 'Manual'}
-                </button>
-              </div>
-              {!wbAuto && (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="flex items-center gap-2">
-                    <span className={`${labelClass} w-10 shrink-0`}>Red</span>
-                    <StyledSlider min={0} max={100} value={wbR} onChange={setWbR} />
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
-                      value={wbR}
-                      onChange={(e) => setWbR(Math.max(0, Math.min(100, Number(e.target.value))))}
-                      className={fieldInputCompact}
-                    />
-                    <button
-                      type="button"
-                      className={btnSet}
-                      disabled={settingsBusy}
-                      onClick={() => void applySettings({ wbR })}
-                    >
-                      Set
-                    </button>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className={`${labelClass} w-10 shrink-0`}>Blue</span>
-                    <StyledSlider min={0} max={100} value={wbB} onChange={setWbB} />
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
-                      value={wbB}
-                      onChange={(e) => setWbB(Math.max(0, Math.min(100, Number(e.target.value))))}
-                      className={fieldInputCompact}
-                    />
-                    <button
-                      type="button"
-                      className={btnSet}
-                      disabled={settingsBusy}
-                      onClick={() => void applySettings({ wbB })}
-                    >
-                      Set
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Image Format (photo only) */}
-            <div className="flex items-center gap-3">
-              <span className={labelClass}>Photo Format</span>
-              <select
-                value={imageFormat}
-                onChange={(e) => {
-                  setImageFormat(e.target.value)
-                  void applySettings({ imageFormat: e.target.value })
-                }}
-                className={fieldSelect}
-              >
-                <option value="RGB24">RGB24</option>
-                <option value="RAW8">RAW8</option>
-                <option value="RAW16">RAW16</option>
-                <option value="Y8">Y8 (Mono)</option>
-              </select>
-            </div>
             </div>
 
             {/* Right column: Snapshot + Sequence Capture */}

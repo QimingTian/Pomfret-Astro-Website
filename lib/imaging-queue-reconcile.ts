@@ -8,6 +8,7 @@ import {
 } from '@/lib/imaging-project-planner'
 import {
   collectTonightProjectSubSessionOccupancy,
+  getDeliverableNight,
   getProjectById,
   listProjects,
   projectHasOpenSessionsForNightKey,
@@ -125,6 +126,7 @@ export async function reconcilePendingScheduleStatus(): Promise<void> {
           nightKey,
           now
         )
+        const existingDeliverable = getDeliverableNight(project, nightKey)
         const insight =
           plans.length > 0
             ? {
@@ -134,6 +136,14 @@ export async function reconcilePendingScheduleStatus(): Promise<void> {
                   `Multi-night project: ${plans.length} session(s) tonight (${plans.reduce((s, p) => s + p.filterPlansTonight.reduce((t, f) => t + f.count, 0), 0)} frame(s)).`,
                 ],
               }
+            : existingDeliverable
+              ? {
+                  status: 'scheduled' as const,
+                  plannedStartIso: existingDeliverable.plannedStartIso ?? null,
+                  reasons: [
+                    'Keeping existing tonight sub-session on the schedule (NINA may still deliver when the observatory is ready).',
+                  ],
+                }
             : {
                 status: 'unscheduled' as const,
                 plannedStartIso: null,
@@ -194,17 +204,22 @@ export async function reconcilePendingScheduleStatus(): Promise<void> {
     const nextQueueStatus = next.status === 'scheduled' ? 'scheduled' : 'pending'
     if (prevQueueStatus === nextQueueStatus && prevPlanned === next.plannedStartIso) continue
     await patchRequestScheduleInsight(r.id, next)
-    if (prevQueueStatus === 'scheduled' && next.status === 'unscheduled') {
+    const nextScheduleState = next.status
+    const previousScheduleState = prevQueueStatus === 'scheduled' ? 'scheduled' : 'unscheduled'
+    if (previousScheduleState !== nextScheduleState) {
       void appendAuditLog({
-        kind: 'queue.schedule_decision',
-        message: `Session ${r.id} moved from scheduled back to pending schedule state.`,
+        kind: 'session.schedule_changed',
+        message: `Session schedule changed: ${r.target} (${r.id}) ${previousScheduleState} -> ${nextScheduleState}.`,
         detail: {
           id: r.id,
           target: r.target,
-          previousStatus: prevQueueStatus,
-          nextStatus: next.status,
+          projectMode: r.projectMode === true,
+          previousStatus: previousScheduleState,
+          nextStatus: nextScheduleState,
           previousPlannedStartIso: prevPlanned,
-          reason: next.reasons.length <= 1 ? (next.reasons[0] ?? 'No reason provided') : next.reasons.join(' | '),
+          plannedStartIso: next.plannedStartIso,
+          reason:
+            next.reasons.length <= 1 ? (next.reasons[0] ?? 'No reason provided') : next.reasons.join(' | '),
           reasons: next.reasons,
         },
       })

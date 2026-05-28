@@ -1,6 +1,6 @@
 """
 Upload sequence captures to Google Drive (service account).
-Share the target folder with the service account email (Editor).
+Share the target folder (or Shared Drive) with the service account email (Content manager or Editor).
 """
 
 from __future__ import annotations
@@ -59,6 +59,31 @@ def get_drive_service():
     return _DRIVE_SERVICE
 
 
+def get_or_create_folder(parent_id: str, name: str) -> str:
+    """Return existing subfolder by name under parent, or create it."""
+    service = get_drive_service()
+    safe_name = name.replace("'", "\\'")
+    query = (
+        f"'{parent_id}' in parents and name = '{safe_name}' "
+        "and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+    )
+    results = (
+        service.files()
+        .list(
+            q=query,
+            fields='files(id,name)',
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
+            pageSize=1,
+        )
+        .execute()
+    )
+    files = results.get('files', [])
+    if files:
+        return files[0]['id']
+    return create_folder(parent_id, name)
+
+
 def create_folder(parent_id: str, name: str) -> str:
     """Create a subfolder; return its Drive folder id."""
     service = get_drive_service()
@@ -67,7 +92,11 @@ def create_folder(parent_id: str, name: str) -> str:
         'mimeType': 'application/vnd.google-apps.folder',
         'parents': [parent_id],
     }
-    folder = service.files().create(body=metadata, fields='id').execute()
+    folder = service.files().create(
+        body=metadata,
+        fields='id',
+        supportsAllDrives=True,
+    ).execute()
     return folder['id']
 
 
@@ -82,6 +111,7 @@ def upload_bytes(folder_id: str, filename: str, data: bytes, mime_type: str) -> 
         body=metadata,
         media_body=media,
         fields='id',
+        supportsAllDrives=True,
     ).execute()
     return created['id']
 

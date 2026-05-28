@@ -658,14 +658,18 @@ export async function replaceScheduledSubsForNightKey(
         : 'Tonight sub-session removed from schedule.')
     for (const night of removed) {
       void appendAuditLog({
-        kind: 'project.sub_session_unscheduled',
-        message: `Project sub-session unscheduled: ${project.target} Session ${night.nightIndex} (${night.id}).`,
+        kind: 'session.schedule_changed',
+        message: `Session schedule changed: ${project.target} Session ${night.nightIndex} (${night.id}) scheduled -> unscheduled.`,
         detail: {
+          id: night.id,
           projectId,
           nightSubId: night.id,
           nightIndex: night.nightIndex,
           nightKey,
           target: project.target,
+          projectMode: true,
+          previousStatus: 'scheduled',
+          nextStatus: 'unscheduled',
           previousPlannedStartIso: night.plannedStartIso ?? null,
           reason,
         },

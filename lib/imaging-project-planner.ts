@@ -785,14 +785,18 @@ function logProjectSubSessionScheduled(
   nightSubId: string
 ): void {
   void appendAuditLog({
-    kind: 'project.sub_session_scheduled',
-    message: `Project sub-session scheduled: ${project.target} Session ${plan.nightIndex} (${nightSubId}).`,
+    kind: 'session.schedule_changed',
+    message: `Session schedule changed: ${project.target} Session ${plan.nightIndex} (${nightSubId}) unscheduled -> scheduled.`,
     detail: {
       projectId: project.id,
+      id: nightSubId,
       nightSubId,
       nightIndex: plan.nightIndex,
       nightKey: plan.nightKey,
       target: project.target,
+      projectMode: true,
+      previousStatus: 'unscheduled',
+      nextStatus: 'scheduled',
       plannedStartIso: plan.plannedStartIso,
       plannedEndIso: plan.plannedEndIso,
       filterPlansTonight: plan.filterPlansTonight,

@@ -11,8 +11,30 @@ import {
   useState,
 } from 'react'
 import { DashboardPanel } from '@/app/dashboard/account/dashboard-panel'
+import {
+  AUTO_TUNING_TARGET_RGB,
+  type AutoTuningSample,
+} from '@/lib/auto-tuning-history'
 import { useAppStore } from '@/lib/store'
 
+import { AutoExposureTuningChart } from './auto-exposure-tuning-chart'
+import { AutoWbTuningChart } from './auto-wb-tuning-chart'
+
+
+type PiAutoTuning = {
+  meanR: number
+  meanG: number
+  meanB: number
+  meanRgb: number
+  expAction: string
+  wbAction: string
+  photoExposureUs: number
+  wbR: number
+  wbB: number
+  expDeltaUs: number
+  wbRDelta: number
+  wbBDelta: number
+}
 
 type CamStatus = {
   connected: boolean
@@ -21,7 +43,39 @@ type CamStatus = {
   autoMode: boolean
   lastStreamFrameIso: string | null
   lastAutoFrameIso: string | null
+  autoTuning: PiAutoTuning | null
   fault: string | null
+}
+
+function saneMean(v: number): number {
+  if (!Number.isFinite(v) || v < 0 || v > 255) return 0
+  return v
+}
+
+function buildAutoTuningSample(frameIso: string, t: PiAutoTuning): AutoTuningSample {
+  const meanR = saneMean(t.meanR)
+  const meanG = saneMean(t.meanG)
+  const meanB = saneMean(t.meanB)
+  const meanRgb = saneMean(t.meanRgb) || (meanR + meanG + meanB) / 3
+  return {
+    frameIso,
+    recordedAt: new Date().toISOString(),
+    meanRgb,
+    meanR,
+    meanG,
+    meanB,
+    expError: meanRgb - AUTO_TUNING_TARGET_RGB,
+    rDiff: meanR - meanG,
+    bDiff: meanB - meanG,
+    expAction: t.expAction ?? 'hold',
+    wbAction: t.wbAction ?? 'hold',
+    photoExposureUs: t.photoExposureUs,
+    wbR: t.wbR,
+    wbB: t.wbB,
+    expDeltaUs: t.expDeltaUs,
+    wbRDelta: t.wbRDelta,
+    wbBDelta: t.wbBDelta,
+  }
 }
 
 const DRIVE_SEQUENCE_ROOT_URL =
@@ -42,12 +96,26 @@ const STATUS_POLL_MS = 5_000
 const SEQ_POLL_MS = 2_000
 const MODE_STORAGE_KEY = 'allsky-camera-mode'
 
-type CamMode = 'stream' | 'auto' | 'off'
+type CamMode = 'stream' | 'auto' | 'half_hour' | 'hour' | 'off'
+
+const AUTO_LIKE_MODES: CamMode[] = ['auto', 'half_hour', 'hour']
+
+function isAutoLikeMode(m: CamMode): boolean {
+  return AUTO_LIKE_MODES.includes(m)
+}
 
 function readSavedMode(): CamMode {
   if (typeof window === 'undefined') return 'off'
   const v = localStorage.getItem(MODE_STORAGE_KEY)
-  if (v === 'stream' || v === 'auto' || v === 'off') return v
+  if (
+    v === 'stream' ||
+    v === 'auto' ||
+    v === 'half_hour' ||
+    v === 'hour' ||
+    v === 'off'
+  ) {
+    return v
+  }
   return 'off'
 }
 
@@ -140,12 +208,14 @@ function StyledSlider({
   step,
   value,
   onChange,
+  disabled = false,
 }: {
   min: number
   max: number
   step?: number
   value: number
   onChange: (v: number) => void
+  disabled?: boolean
 }) {
   const pct = ((value - min) / (max - min)) * 100
   return (
@@ -155,8 +225,9 @@ function StyledSlider({
       max={max}
       step={step}
       value={value}
+      disabled={disabled}
       onChange={(e) => onChange(Number(e.target.value))}
-      className="cam-slider"
+      className={`cam-slider ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
       style={{
         ['--cam-track-bg' as string]: `linear-gradient(to right, ${ACCENT} ${pct}%, ${TRACK_BG} ${pct}%)`,
       } as React.CSSProperties}
@@ -165,6 +236,8 @@ function StyledSlider({
 }
 
 const labelClass = 'text-xs text-white'
+/** Shared grid: label | slider | numeric | Set — keeps Camera Settings and Sequence rows aligned. */
+const camCtrlGrid = 'grid grid-cols-[8.5rem_minmax(0,1fr)_4.5rem_3.25rem] items-center gap-x-2'
 const fieldInput =
   'w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm text-white dark:border-gray-600 dark:bg-transparent'
 const fieldInputCompact =
@@ -264,9 +337,10 @@ const NumericInput = forwardRef<
     className?: string
     decimal?: boolean
     onValidityChange?: (valid: boolean) => void
+    disabled?: boolean
   }
 >(function NumericInput(
-  { value, onChange, min, max, className, decimal = false, onValidityChange },
+  { value, onChange, min, max, className, decimal = false, onValidityChange, disabled = false },
   ref,
 ) {
   const [text, setText] = useState(String(value))
@@ -306,21 +380,29 @@ const NumericInput = forwardRef<
       type="text"
       inputMode={decimal ? 'decimal' : 'numeric'}
       value={text}
+      readOnly={disabled}
+      disabled={disabled}
       onChange={(e) => handleChange(e.target.value)}
       onBlur={() => {
+        if (disabled) return
         if (validateNumericDraft(text, min, max, decimal)) {
           commit()
         } else {
           setText(String(value))
         }
       }}
-      className={className}
+      className={`${className}${disabled ? ' cursor-not-allowed opacity-50' : ''}`}
     />
   )
 })
 const fieldSelect =
   'w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm text-white dark:border-gray-600 dark:bg-transparent'
 const btnSet = `${btnBase} border-white/25 bg-[#1d1e1e] text-white hover:bg-[#252626]`
+const setButtonSpacer = (
+  <span className={`${btnSet} pointer-events-none invisible shrink-0 select-none`} aria-hidden>
+    Set
+  </span>
+)
 
 type ImageStats = {
   mean: [number, number, number]
@@ -528,14 +610,6 @@ function StatsHistPanel({
   )
 }
 
-function StatusDot({ on }: { on: boolean }) {
-  return (
-    <span
-      className={`inline-block h-2 w-2 rounded-full ${on ? 'bg-emerald-400' : 'bg-red-400'}`}
-    />
-  )
-}
-
 /** Derive the camera API base URL from the MJPEG stream URL (public domain). */
 function camApiBase(streamUrl: string): string {
   try {
@@ -580,8 +654,13 @@ export function AllSkyCameraControlPanel() {
     autoMode: false,
     lastStreamFrameIso: null,
     lastAutoFrameIso: null,
+    autoTuning: null,
     fault: null,
   })
+  const [tuningSamples, setTuningSamples] = useState<AutoTuningSample[]>([])
+  const [tuningBusy, setTuningBusy] = useState(false)
+  const [tuningKvError, setTuningKvError] = useState<string | null>(null)
+  const lastRecordedFrameRef = useRef<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -601,7 +680,6 @@ export function AllSkyCameraControlPanel() {
   // Sequence
   const [seqCount, setSeqCount] = useState(10)
   const [seqFolderName, setSeqFolderName] = useState('')
-  const [seqFileFormat, setSeqFileFormat] = useState('JPEG')
   const [seqInterval, setSeqInterval] = useState(0)
   const [seqStatus, setSeqStatus] = useState<SeqStatus | null>(null)
   const [seqBusy, setSeqBusy] = useState(false)
@@ -660,8 +738,9 @@ export function AllSkyCameraControlPanel() {
   // ------------------------------------------------------------------
   const pollStatus = useCallback(async () => {
     if (!base) return
-    try {
-      const data = await camJson<{
+
+    const applyStatus = (cam: NonNullable<
+      {
         sensors?: {
           allSkyCam?: {
             connected?: boolean
@@ -672,36 +751,76 @@ export function AllSkyCameraControlPanel() {
             lastAutoFrameIso?: string | null
             fault?: string | null
             gainMax?: number
+            autoTuning?: PiAutoTuning | null
+          }
+        }
+      }['sensors']
+    >['allSkyCam']) => {
+      if (!cam) return
+      if (typeof cam.gainMax === 'number') {
+        setGainMax(cam.gainMax)
+        setGain((g) => Math.min(cam.gainMax!, Math.max(GAIN_UI_MIN, g)))
+      }
+      const serverMode: CamMode =
+        cam.mode === 'stream' ||
+        cam.mode === 'auto' ||
+        cam.mode === 'half_hour' ||
+        cam.mode === 'hour' ||
+        cam.mode === 'off'
+          ? cam.mode
+          : cam.autoMode
+            ? 'auto'
+            : cam.streaming
+              ? 'stream'
+              : 'off'
+      setCamStatus({
+        connected: cam.connected ?? false,
+        streaming: cam.streaming ?? false,
+        mode: serverMode,
+        autoMode: cam.autoMode ?? false,
+        lastStreamFrameIso: cam.lastStreamFrameIso ?? null,
+        lastAutoFrameIso: cam.lastAutoFrameIso ?? null,
+        autoTuning: cam.autoTuning ?? null,
+        fault: cam.fault ?? null,
+      })
+      setMode(serverMode)
+    }
+
+    try {
+      let data = await camJson<{
+        sensors?: {
+          allSkyCam?: {
+            connected?: boolean
+            streaming?: boolean
+            mode?: string
+            autoMode?: boolean
+            lastStreamFrameIso?: string | null
+            lastAutoFrameIso?: string | null
+            fault?: string | null
+            gainMax?: number
+            autoTuning?: PiAutoTuning | null
           }
         }
       }>(base, '/status')
-      const cam = data.sensors?.allSkyCam
-      if (cam) {
-        if (typeof cam.gainMax === 'number') {
-          setGainMax(cam.gainMax)
-          setGain((g) => Math.min(cam.gainMax!, Math.max(GAIN_UI_MIN, g)))
+      let cam = data.sensors?.allSkyCam
+
+      if (cam && !cam.connected) {
+        try {
+          await camJson(base, '/camera/connect', { method: 'POST' })
+          data = await camJson<typeof data>(base, '/status')
+          cam = data.sensors?.allSkyCam
+        } catch {
+          // Pi reachable but camera connect failed
         }
-        const serverMode: CamMode =
-          cam.mode === 'stream' || cam.mode === 'auto' || cam.mode === 'off'
-            ? cam.mode
-            : cam.autoMode
-              ? 'auto'
-              : cam.streaming
-                ? 'stream'
-                : 'off'
-        setCamStatus({
-          connected: cam.connected ?? false,
-          streaming: cam.streaming ?? false,
-          mode: serverMode,
-          autoMode: cam.autoMode ?? false,
-          lastStreamFrameIso: cam.lastStreamFrameIso ?? null,
-          lastAutoFrameIso: cam.lastAutoFrameIso ?? null,
-          fault: cam.fault ?? null,
-        })
-        setMode(serverMode)
+      }
+
+      if (cam) {
+        applyStatus(cam)
+      } else {
+        setCamStatus((prev) => ({ ...prev, connected: false, streaming: false }))
       }
     } catch {
-      // keep previous state on network failure
+      setCamStatus((prev) => ({ ...prev, connected: false, streaming: false }))
     }
   }, [base])
 
@@ -722,7 +841,8 @@ export function AllSkyCameraControlPanel() {
       if (typeof s.wb_r === 'number') setWbR(Math.max(WB_MIN, Math.min(WB_MAX, s.wb_r)))
       if (typeof s.wb_b === 'number') setWbB(Math.max(WB_MIN, Math.min(WB_MAX, s.wb_b)))
       if (typeof s.photo_exposure === 'number') {
-        setPhotoExposureS(s.photo_exposure / 1_000_000)
+        const sec = s.photo_exposure / 1_000_000
+        setPhotoExposureS(Math.round(sec * 1000) / 1000)
       }
       if (typeof s.video_exposure === 'number') {
         setVideoExposureMs(Math.max(VIDEO_EXP_MIN_MS, Math.round(s.video_exposure / 1000)))
@@ -732,6 +852,65 @@ export function AllSkyCameraControlPanel() {
       // keep previous values on failure
     }
   }, [base])
+
+  const loadTuningHistory = useCallback(async () => {
+    try {
+      const res = await fetch('/api/camera/auto-tuning-history', {
+        credentials: 'include',
+        cache: 'no-store',
+      })
+      if (res.status === 503) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string }
+        setTuningKvError(body.error ?? 'KV not configured on Vercel')
+        return
+      }
+      if (!res.ok) return
+      setTuningKvError(null)
+      const data = (await res.json()) as { samples?: AutoTuningSample[] }
+      if (Array.isArray(data.samples)) setTuningSamples(data.samples)
+    } catch {
+      // keep previous chart data
+    }
+  }, [])
+
+  const recordTuningSample = useCallback(
+    async (frameIso: string, tuning: PiAutoTuning) => {
+      if (lastRecordedFrameRef.current === frameIso) return
+      setTuningBusy(true)
+      try {
+        const res = await fetch('/api/camera/auto-tuning-history', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(buildAutoTuningSample(frameIso, tuning)),
+        })
+        if (res.status === 503) {
+          const body = (await res.json().catch(() => ({}))) as { error?: string }
+          setTuningKvError(body.error ?? 'KV not configured on Vercel')
+          return
+        }
+        if (!res.ok) return
+        setTuningKvError(null)
+        lastRecordedFrameRef.current = frameIso
+        const data = (await res.json()) as { samples?: AutoTuningSample[] }
+        if (Array.isArray(data.samples)) setTuningSamples(data.samples)
+      } catch {
+        // ignore; will retry on next poll
+      } finally {
+        setTuningBusy(false)
+      }
+    },
+    [],
+  )
+
+  useEffect(() => {
+    if (isAutoLikeMode(mode)) void loadTuningHistory()
+  }, [mode, loadTuningHistory])
+
+  useEffect(() => {
+    if (!isAutoLikeMode(mode) || !camStatus.lastAutoFrameIso || !camStatus.autoTuning) return
+    void recordTuningSample(camStatus.lastAutoFrameIso, camStatus.autoTuning)
+  }, [mode, camStatus.lastAutoFrameIso, camStatus.autoTuning, recordTuningSample])
 
   useEffect(() => {
     void pollStatus()
@@ -762,17 +941,18 @@ export function AllSkyCameraControlPanel() {
         setMode(target)
         writeSavedMode(target)
         await pollStatus()
-        if (target === 'stream' || target === 'auto') {
+        if (target === 'stream' || isAutoLikeMode(target)) {
           refreshStream()
         }
-        if (target === 'auto') {
+        if (isAutoLikeMode(target)) {
           void refreshAutoStats()
+          void loadSettings()
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Mode change failed')
       }
     },
-    [base, pollStatus, refreshStream, refreshAutoStats],
+    [base, pollStatus, refreshStream, refreshAutoStats, loadSettings],
   )
 
   // Restore mode after refresh when camera is connected
@@ -785,16 +965,19 @@ export function AllSkyCameraControlPanel() {
     modeRestoredRef.current = true
 
     const serverMode = camStatus.mode
-    if (serverMode === 'stream' || serverMode === 'auto') {
+    if (serverMode === 'stream' || isAutoLikeMode(serverMode)) {
       setMode(serverMode)
       writeSavedMode(serverMode)
-      if (serverMode === 'stream' || serverMode === 'auto') refreshStream()
-      if (serverMode === 'auto') void refreshAutoStats()
+      if (serverMode === 'stream' || isAutoLikeMode(serverMode)) refreshStream()
+      if (isAutoLikeMode(serverMode)) {
+        void refreshAutoStats()
+        void loadSettings()
+      }
       return
     }
 
     const saved = readSavedMode()
-    if (saved === 'auto' || saved === 'stream') {
+    if (saved !== 'off') {
       void switchMode(saved)
     } else {
       setMode('off')
@@ -806,14 +989,18 @@ export function AllSkyCameraControlPanel() {
     switchMode,
     refreshStream,
     refreshAutoStats,
+    loadSettings,
   ])
 
   // Refresh histogram/stats when server captures a new auto frame
   useEffect(() => {
-    if (mode !== 'auto' || !camStatus.lastAutoFrameIso) return
+    if (!isAutoLikeMode(mode) || !camStatus.lastAutoFrameIso) return
     void refreshAutoStats()
+    void loadSettings()
     // MJPEG /camera/stream re-pushes auto frames; no streamKey bump (avoids preview flash).
-  }, [mode, camStatus.lastAutoFrameIso, refreshAutoStats])
+  }, [mode, camStatus.lastAutoFrameIso, refreshAutoStats, loadSettings])
+
+  const settingsAutoManaged = isAutoLikeMode(mode)
 
   // ------------------------------------------------------------------
   // Sequence status polling (only while active)
@@ -858,15 +1045,6 @@ export function AllSkyCameraControlPanel() {
     [pollStatus],
   )
 
-  const connectCamera = () =>
-    wrap(async () => {
-      await camJson(base, '/camera/connect', { method: 'POST' })
-    })
-  const disconnectCamera = () =>
-    wrap(async () => {
-      await camJson(base, '/camera/disconnect', { method: 'POST' })
-    })
-
   // ------------------------------------------------------------------
   // Settings apply (immediate, called on "Set" click)
   // ------------------------------------------------------------------
@@ -891,8 +1069,7 @@ export function AllSkyCameraControlPanel() {
         })
         if (mode === 'stream') {
           refreshStream()
-        } else if (mode === 'auto') {
-          // Video exposure only applies to stream mode; auto uses photo exposure.
+        } else if (isAutoLikeMode(mode)) {
           const affectsAutoCapture =
             patch.gain !== undefined ||
             patch.gamma !== undefined ||
@@ -922,13 +1099,17 @@ export function AllSkyCameraControlPanel() {
     try {
       const count = seqCountInputRef.current?.commit() ?? seqCount
       const interval = seqIntervalInputRef.current?.commit() ?? seqInterval
+      const folderName = seqFolderName.trim()
+      if (!folderName) {
+        setError('Sequence name is required')
+        return
+      }
       const body: Record<string, unknown> = {
         count,
-        file_format: seqFileFormat,
+        file_format: 'TIFF',
+        folder_name: folderName,
       }
       if (interval > 0) body.interval = interval
-      const folderName = seqFolderName.trim()
-      if (folderName) body.folder_name = folderName
       await camJson(base, '/camera/sequence/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -940,7 +1121,7 @@ export function AllSkyCameraControlPanel() {
     } finally {
       setSeqBusy(false)
     }
-  }, [base, seqFolderName, seqCount, seqFileFormat, seqInterval, pollSeqStatus])
+  }, [base, seqFolderName, seqCount, seqInterval, pollSeqStatus])
 
   const stopSequence = useCallback(async () => {
     if (!base) return
@@ -979,11 +1160,15 @@ export function AllSkyCameraControlPanel() {
           </p>
         )}
 
-        {/* ---- Live Preview + Connection & Stream controls ---- */}
+        {/* ---- Live Preview + Mode ---- */}
         <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-4">
           {/* Stream view — 16:9 sets row height; preview does not stretch with right column */}
           <div className="relative aspect-video w-full self-start overflow-hidden rounded-lg bg-black">
-            {mode === 'stream' || mode === 'auto' ? (
+            {!camStatus.connected ? (
+              <div className="flex h-full items-center justify-center">
+                <span className="text-sm text-gray-500">Disconnected</span>
+              </div>
+            ) : mode === 'stream' || isAutoLikeMode(mode) ? (
               /* eslint-disable-next-line @next/next/no-img-element */
               <img
                 key={streamKey}
@@ -1004,267 +1189,272 @@ export function AllSkyCameraControlPanel() {
               <StatsHistPanel stats={imageStats} hist={histData} />
             )}
 
-            {/* Connection + Mode side by side */}
-            <div className="grid shrink-0 grid-cols-2 gap-3">
-              {/* Connection */}
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-2">
-                  <StatusDot on={camStatus.connected} />
-                  <span className="text-sm text-white">
-                    {camStatus.connected ? 'Connected' : 'Disconnected'}
-                  </span>
-                </div>
-                <div className="flex gap-1.5">
-                  <button
-                    type="button"
-                    className={btnSuccess}
-                    disabled={busy || camStatus.connected}
-                    onClick={() => void connectCamera()}
-                  >
-                    Connect
-                  </button>
-                  <button
-                    type="button"
-                    className={btnDanger}
-                    disabled={busy || !camStatus.connected}
-                    onClick={() => void disconnectCamera()}
-                  >
-                    Disconnect
-                  </button>
-                </div>
-                {camStatus.fault && mode === 'stream' && (
-                  <p className="text-xs text-red-400">Fault: {camStatus.fault}</p>
-                )}
+            <div className="shrink-0 space-y-1.5">
+              <span className="block text-sm text-white">Mode</span>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  className={mode === 'stream' ? btnSuccess : btnPrimary}
+                  disabled={busy || !camStatus.connected || mode === 'stream'}
+                  onClick={() => void switchMode('stream')}
+                >
+                  Stream
+                </button>
+                <button
+                  type="button"
+                  className={mode === 'auto' ? btnSuccess : btnPrimary}
+                  disabled={busy || !camStatus.connected || mode === 'auto'}
+                  onClick={() => void switchMode('auto')}
+                >
+                  Auto
+                </button>
+                <button
+                  type="button"
+                  className={mode === 'half_hour' ? btnSuccess : btnPrimary}
+                  disabled={busy || !camStatus.connected || mode === 'half_hour'}
+                  onClick={() => void switchMode('half_hour')}
+                >
+                  Half Hour
+                </button>
+                <button
+                  type="button"
+                  className={mode === 'hour' ? btnSuccess : btnPrimary}
+                  disabled={busy || !camStatus.connected || mode === 'hour'}
+                  onClick={() => void switchMode('hour')}
+                >
+                  Hour
+                </button>
+                <button
+                  type="button"
+                  className={mode === 'off' ? btnDanger : btnPrimary}
+                  disabled={busy || !camStatus.connected || mode === 'off'}
+                  onClick={() => void switchMode('off')}
+                >
+                  Off
+                </button>
               </div>
-
-              {/* Mode */}
-              <div className="space-y-1.5">
-                <span className="block text-sm text-white">Mode</span>
-                <div className="flex gap-1.5">
-                  <button
-                    type="button"
-                    className={mode === 'stream' ? btnSuccess : btnPrimary}
-                    disabled={busy || !camStatus.connected || mode === 'stream'}
-                    onClick={() => void switchMode('stream')}
-                  >
-                    Stream
-                  </button>
-                  <button
-                    type="button"
-                    className={mode === 'auto' ? btnSuccess : btnPrimary}
-                    disabled={busy || !camStatus.connected || mode === 'auto'}
-                    onClick={() => void switchMode('auto')}
-                  >
-                    Auto
-                  </button>
-                  <button
-                    type="button"
-                    className={mode === 'off' ? btnDanger : btnPrimary}
-                    disabled={busy || mode === 'off'}
-                    onClick={() => void switchMode('off')}
-                  >
-                    Off
-                  </button>
-                </div>
-              </div>
+              {camStatus.fault && mode === 'stream' && (
+                <p className="text-xs text-red-400">Fault: {camStatus.fault}</p>
+              )}
             </div>
           </div>
         </div>
 
         {/* ---- Camera Settings + Sequence Capture side by side ---- */}
         {camStatus.connected && (
-          <div className="grid gap-6 lg:grid-cols-2">
-            <div className="boxed-fields space-y-4">
+          <div className="grid gap-6 lg:grid-cols-2 lg:items-stretch">
+            <div
+              className={`boxed-fields space-y-4${settingsAutoManaged ? ' opacity-60' : ''}`}
+            >
             <p className="text-sm font-medium text-white">Camera Settings</p>
 
             {/* Gain */}
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-2">
-                <span className={`${labelClass} w-28 shrink-0`}>
-                  Gain <span className="text-gray-500">({GAIN_UI_MIN}-{gainMax})</span>
-                </span>
-                <StyledSlider min={GAIN_UI_MIN} max={gainMax} value={gain} onChange={setGain} />
-                <NumericInput
-                  ref={gainInputRef}
-                  value={gain}
-                  onChange={setGain}
-                  min={GAIN_UI_MIN}
-                  max={gainMax}
-                  onValidityChange={setGainInputValid}
-                  className={fieldInputCompact}
-                />
-                <button
-                  type="button"
-                  className={btnSet}
-                  disabled={settingsBusy || !gainInputValid}
-                  onClick={() =>
-                    void applySettings({ gain: gainInputRef.current?.commit() ?? gain })
-                  }
-                >
-                  Set
-                </button>
-              </div>
+            <div className={camCtrlGrid}>
+              <span className={labelClass}>
+                Gain <span className="text-gray-500">({GAIN_UI_MIN}-{gainMax})</span>
+              </span>
+              <StyledSlider
+                min={GAIN_UI_MIN}
+                max={gainMax}
+                value={gain}
+                onChange={setGain}
+                disabled={settingsAutoManaged}
+              />
+              <NumericInput
+                ref={gainInputRef}
+                value={gain}
+                onChange={setGain}
+                min={GAIN_UI_MIN}
+                max={gainMax}
+                onValidityChange={setGainInputValid}
+                disabled={settingsAutoManaged}
+                className={fieldInputCompact}
+              />
+              <button
+                type="button"
+                className={btnSet}
+                disabled={settingsAutoManaged || settingsBusy || !gainInputValid}
+                onClick={() =>
+                  void applySettings({ gain: gainInputRef.current?.commit() ?? gain })
+                }
+              >
+                Set
+              </button>
             </div>
 
             {/* Gamma */}
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-2">
-                <span className={`${labelClass} w-28 shrink-0`}>Gamma</span>
-                <StyledSlider min={1} max={100} value={gamma} onChange={setGamma} />
-                <NumericInput
-                  ref={gammaInputRef}
-                  value={gamma}
-                  onChange={setGamma}
-                  min={1}
-                  max={100}
-                  onValidityChange={setGammaInputValid}
-                  className={fieldInputCompact}
-                />
-                <button
-                  type="button"
-                  className={btnSet}
-                  disabled={settingsBusy || !gammaInputValid}
-                  onClick={() =>
-                    void applySettings({ gamma: gammaInputRef.current?.commit() ?? gamma })
-                  }
-                >
-                  Set
-                </button>
-              </div>
+            <div className={camCtrlGrid}>
+              <span className={labelClass}>Gamma</span>
+              <StyledSlider
+                min={1}
+                max={100}
+                value={gamma}
+                onChange={setGamma}
+                disabled={settingsAutoManaged}
+              />
+              <NumericInput
+                ref={gammaInputRef}
+                value={gamma}
+                onChange={setGamma}
+                min={1}
+                max={100}
+                onValidityChange={setGammaInputValid}
+                disabled={settingsAutoManaged}
+                className={fieldInputCompact}
+              />
+              <button
+                type="button"
+                className={btnSet}
+                disabled={settingsAutoManaged || settingsBusy || !gammaInputValid}
+                onClick={() =>
+                  void applySettings({ gamma: gammaInputRef.current?.commit() ?? gamma })
+                }
+              >
+                Set
+              </button>
             </div>
 
             {/* Video Exposure */}
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-2">
-                <span className={`${labelClass} w-28 shrink-0`}>Video Exp (ms)</span>
-                <StyledSlider
-                  min={VIDEO_EXP_MIN_MS}
-                  max={VIDEO_EXP_MAX_MS}
-                  step={1}
-                  value={videoExposureMs}
-                  onChange={setVideoExposureMs}
-                />
-                <NumericInput
-                  ref={videoExpInputRef}
-                  value={videoExposureMs}
-                  onChange={setVideoExposureMs}
-                  min={VIDEO_EXP_MIN_MS}
-                  max={VIDEO_EXP_MAX_MS}
-                  onValidityChange={setVideoExpInputValid}
-                  className={fieldInputCompact}
-                />
-                <button
-                  type="button"
-                  className={btnSet}
-                  disabled={settingsBusy || !videoExpInputValid}
-                  onClick={() => {
-                    const ms = videoExpInputRef.current?.commit() ?? videoExposureMs
-                    void applySettings({ videoExposure: ms / 1000 })
-                  }}
-                >
-                  Set
-                </button>
-              </div>
+            <div className={camCtrlGrid}>
+              <span className={labelClass}>Video Exp (ms)</span>
+              <StyledSlider
+                min={VIDEO_EXP_MIN_MS}
+                max={VIDEO_EXP_MAX_MS}
+                step={1}
+                value={videoExposureMs}
+                onChange={setVideoExposureMs}
+                disabled={settingsAutoManaged}
+              />
+              <NumericInput
+                ref={videoExpInputRef}
+                value={videoExposureMs}
+                onChange={setVideoExposureMs}
+                min={VIDEO_EXP_MIN_MS}
+                max={VIDEO_EXP_MAX_MS}
+                onValidityChange={setVideoExpInputValid}
+                disabled={settingsAutoManaged}
+                className={fieldInputCompact}
+              />
+              <button
+                type="button"
+                className={btnSet}
+                disabled={settingsAutoManaged || settingsBusy || !videoExpInputValid}
+                onClick={() => {
+                  const ms = videoExpInputRef.current?.commit() ?? videoExposureMs
+                  void applySettings({ videoExposure: ms / 1000 })
+                }}
+              >
+                Set
+              </button>
             </div>
 
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-2">
-                <span className={`${labelClass} w-28 shrink-0`}>Photo Exp (s)</span>
-                <StyledSlider
-                  min={0}
-                  max={PHOTO_EXP_SLIDER_STEPS}
-                  step={1}
-                  value={photoExposureToSlider(photoExposureS)}
-                  onChange={(pos) => setPhotoExposureS(sliderToPhotoExposure(pos))}
-                />
-                <NumericInput
-                  ref={photoExpInputRef}
-                  value={photoExposureS}
-                  onChange={setPhotoExposureS}
-                  min={PHOTO_EXP_MIN_S}
-                  max={PHOTO_EXP_MAX_S}
-                  decimal
-                  onValidityChange={setPhotoExpInputValid}
-                  className={fieldInputCompact}
-                />
-                <button
-                  type="button"
-                  className={btnSet}
-                  disabled={settingsBusy || !photoExpInputValid}
-                  onClick={() =>
-                    void applySettings({
-                      photoExposure: photoExpInputRef.current?.commit() ?? photoExposureS,
-                    })
-                  }
-                >
-                  Set
-                </button>
-              </div>
+            <div className={camCtrlGrid}>
+              <span className={labelClass}>Photo Exp (s)</span>
+              <StyledSlider
+                min={0}
+                max={PHOTO_EXP_SLIDER_STEPS}
+                step={1}
+                value={photoExposureToSlider(photoExposureS)}
+                onChange={(pos) => setPhotoExposureS(sliderToPhotoExposure(pos))}
+                disabled={settingsAutoManaged}
+              />
+              <NumericInput
+                ref={photoExpInputRef}
+                value={photoExposureS}
+                onChange={setPhotoExposureS}
+                min={PHOTO_EXP_MIN_S}
+                max={PHOTO_EXP_MAX_S}
+                decimal
+                onValidityChange={setPhotoExpInputValid}
+                disabled={settingsAutoManaged}
+                className={fieldInputCompact}
+              />
+              <button
+                type="button"
+                className={btnSet}
+                disabled={settingsAutoManaged || settingsBusy || !photoExpInputValid}
+                onClick={() =>
+                  void applySettings({
+                    photoExposure: photoExpInputRef.current?.commit() ?? photoExposureS,
+                  })
+                }
+              >
+                Set
+              </button>
             </div>
 
             {/* WB R */}
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-2">
-                <span className={`${labelClass} w-28 shrink-0`}>
-                  WB R <span className="text-gray-500">({WB_MIN}-{WB_MAX})</span>
-                </span>
-                <StyledSlider min={WB_MIN} max={WB_MAX} value={wbR} onChange={setWbR} />
-                <NumericInput
-                  ref={wbRInputRef}
-                  value={wbR}
-                  onChange={setWbR}
-                  min={WB_MIN}
-                  max={WB_MAX}
-                  onValidityChange={setWbRInputValid}
-                  className={fieldInputCompact}
-                />
-                <button
-                  type="button"
-                  className={btnSet}
-                  disabled={settingsBusy || !wbRInputValid}
-                  onClick={() =>
-                    void applySettings({ wbR: wbRInputRef.current?.commit() ?? wbR })
-                  }
-                >
-                  Set
-                </button>
-              </div>
+            <div className={camCtrlGrid}>
+              <span className={labelClass}>
+                WB R <span className="text-gray-500">({WB_MIN}-{WB_MAX})</span>
+              </span>
+              <StyledSlider
+                min={WB_MIN}
+                max={WB_MAX}
+                value={wbR}
+                onChange={setWbR}
+                disabled={settingsAutoManaged}
+              />
+              <NumericInput
+                ref={wbRInputRef}
+                value={wbR}
+                onChange={setWbR}
+                min={WB_MIN}
+                max={WB_MAX}
+                onValidityChange={setWbRInputValid}
+                disabled={settingsAutoManaged}
+                className={fieldInputCompact}
+              />
+              <button
+                type="button"
+                className={btnSet}
+                disabled={settingsAutoManaged || settingsBusy || !wbRInputValid}
+                onClick={() =>
+                  void applySettings({ wbR: wbRInputRef.current?.commit() ?? wbR })
+                }
+              >
+                Set
+              </button>
             </div>
 
             {/* WB B */}
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-2">
-                <span className={`${labelClass} w-28 shrink-0`}>
-                  WB B <span className="text-gray-500">({WB_MIN}-{WB_MAX})</span>
-                </span>
-                <StyledSlider min={WB_MIN} max={WB_MAX} value={wbB} onChange={setWbB} />
-                <NumericInput
-                  ref={wbBInputRef}
-                  value={wbB}
-                  onChange={setWbB}
-                  min={WB_MIN}
-                  max={WB_MAX}
-                  onValidityChange={setWbBInputValid}
-                  className={fieldInputCompact}
-                />
-                <button
-                  type="button"
-                  className={btnSet}
-                  disabled={settingsBusy || !wbBInputValid}
-                  onClick={() =>
-                    void applySettings({ wbB: wbBInputRef.current?.commit() ?? wbB })
-                  }
-                >
-                  Set
-                </button>
-              </div>
+            <div className={camCtrlGrid}>
+              <span className={labelClass}>
+                WB B <span className="text-gray-500">({WB_MIN}-{WB_MAX})</span>
+              </span>
+              <StyledSlider
+                min={WB_MIN}
+                max={WB_MAX}
+                value={wbB}
+                onChange={setWbB}
+                disabled={settingsAutoManaged}
+              />
+              <NumericInput
+                ref={wbBInputRef}
+                value={wbB}
+                onChange={setWbB}
+                min={WB_MIN}
+                max={WB_MAX}
+                onValidityChange={setWbBInputValid}
+                disabled={settingsAutoManaged}
+                className={fieldInputCompact}
+              />
+              <button
+                type="button"
+                className={btnSet}
+                disabled={settingsAutoManaged || settingsBusy || !wbBInputValid}
+                onClick={() =>
+                  void applySettings({ wbB: wbBInputRef.current?.commit() ?? wbB })
+                }
+              >
+                Set
+              </button>
             </div>
 
             </div>
 
-            {/* Right column: Sequence Capture */}
-            <div className="space-y-6">
-              <div className="boxed-fields space-y-3">
+            <div className="flex h-full min-h-0 flex-col">
+            <div className="boxed-fields flex min-h-0 flex-1 flex-col space-y-4">
                 <p className="text-sm font-medium text-white">Sequence Capture</p>
 
             {seqStatus?.active ? (
@@ -1312,97 +1502,101 @@ export function AllSkyCameraControlPanel() {
                 )}
               </div>
             ) : (
-              <div className="space-y-2">
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-2">
-                    <span className={`${labelClass} w-28 shrink-0`}>Count</span>
-                    <StyledSlider
-                      min={SEQ_COUNT_MIN}
-                      max={SEQ_COUNT_SLIDER_MAX}
-                      step={1}
-                      value={Math.min(seqCount, SEQ_COUNT_SLIDER_MAX)}
-                      onChange={setSeqCount}
-                    />
-                    <NumericInput
-                      ref={seqCountInputRef}
-                      value={seqCount}
-                      onChange={setSeqCount}
-                      min={SEQ_COUNT_MIN}
-                      max={SEQ_COUNT_MAX}
-                      onValidityChange={setSeqCountInputValid}
-                      className={fieldInputCompact}
-                    />
-                  </div>
+              <div className="space-y-4">
+                <div className={camCtrlGrid}>
+                  <span className={labelClass}>Count</span>
+                  <StyledSlider
+                    min={SEQ_COUNT_MIN}
+                    max={SEQ_COUNT_SLIDER_MAX}
+                    step={1}
+                    value={Math.min(seqCount, SEQ_COUNT_SLIDER_MAX)}
+                    onChange={setSeqCount}
+                  />
+                  <NumericInput
+                    ref={seqCountInputRef}
+                    value={seqCount}
+                    onChange={setSeqCount}
+                    min={SEQ_COUNT_MIN}
+                    max={SEQ_COUNT_MAX}
+                    onValidityChange={setSeqCountInputValid}
+                    className={fieldInputCompact}
+                  />
+                  {setButtonSpacer}
                 </div>
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-2">
-                    <span className={`${labelClass} w-28 shrink-0`}>Interval (s)</span>
-                    <StyledSlider
-                      min={SEQ_INTERVAL_MIN}
-                      max={SEQ_INTERVAL_MAX}
-                      step={1}
-                      value={seqInterval}
-                      onChange={setSeqInterval}
-                    />
-                    <NumericInput
-                      ref={seqIntervalInputRef}
-                      value={seqInterval}
-                      onChange={setSeqInterval}
-                      min={SEQ_INTERVAL_MIN}
-                      max={SEQ_INTERVAL_MAX}
-                      onValidityChange={setSeqIntervalInputValid}
-                      className={fieldInputCompact}
-                    />
-                  </div>
+                <div className={camCtrlGrid}>
+                  <span className={labelClass}>Interval (s)</span>
+                  <StyledSlider
+                    min={SEQ_INTERVAL_MIN}
+                    max={SEQ_INTERVAL_MAX}
+                    step={1}
+                    value={seqInterval}
+                    onChange={setSeqInterval}
+                  />
+                  <NumericInput
+                    ref={seqIntervalInputRef}
+                    value={seqInterval}
+                    onChange={setSeqInterval}
+                    min={SEQ_INTERVAL_MIN}
+                    max={SEQ_INTERVAL_MAX}
+                    onValidityChange={setSeqIntervalInputValid}
+                    className={fieldInputCompact}
+                  />
+                  {setButtonSpacer}
                 </div>
-                <p className="text-xs text-gray-500">
-                  Uploads to{' '}
-                  <a
-                    href={DRIVE_SEQUENCE_ROOT_URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-400 underline hover:text-blue-300"
-                  >
-                    All Sky Camera (Google Drive)
-                  </a>
-                  . Each run creates a subfolder (no files stored on the Pi).
-                </p>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <div className="space-y-1">
-                    <span className={labelClass}>Folder name (optional)</span>
-                    <input
-                      type="text"
-                      value={seqFolderName}
-                      onChange={(e) => setSeqFolderName(e.target.value)}
-                      placeholder="Auto: date_time x count"
-                      className={fieldInput}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <span className={labelClass}>File Format</span>
-                    <select
-                      value={seqFileFormat}
-                      onChange={(e) => setSeqFileFormat(e.target.value)}
-                      className={fieldSelect}
+                <div className={camCtrlGrid}>
+                  <span className={labelClass}>Sequence Name</span>
+                  <input
+                    type="text"
+                    value={seqFolderName}
+                    onChange={(e) => setSeqFolderName(e.target.value)}
+                    className={`${fieldInput} col-span-3 min-w-0`}
+                  />
+                </div>
+                <div className={`${camCtrlGrid} pt-1`}>
+                  <div className="col-span-4 col-start-1 flex flex-wrap items-center gap-2 sm:col-start-2 sm:col-span-3">
+                    <button
+                      type="button"
+                      className={btnPrimary}
+                      disabled={
+                        seqBusy ||
+                        !seqCountInputValid ||
+                        !seqIntervalInputValid ||
+                        !seqFolderName.trim()
+                      }
+                      onClick={() => void startSequence()}
                     >
-                      <option value="JPEG">JPEG</option>
-                      <option value="PNG">PNG</option>
-                      <option value="TIFF">TIFF</option>
-                    </select>
+                      {seqBusy ? 'Starting…' : 'Start Sequence'}
+                    </button>
+                    <a
+                      href={DRIVE_SEQUENCE_ROOT_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={btnPrimary}
+                    >
+                      Check Files
+                    </a>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  className={btnPrimary}
-                  disabled={seqBusy || !seqCountInputValid || !seqIntervalInputValid}
-                  onClick={() => void startSequence()}
-                >
-                  {seqBusy ? 'Starting…' : 'Start Sequence'}
-                </button>
               </div>
             )}
-              </div>
             </div>
+            </div>
+
+            {isAutoLikeMode(mode) && (
+              <AutoExposureTuningChart
+                samples={tuningSamples}
+                loading={tuningBusy}
+                kvError={tuningKvError}
+              />
+            )}
+
+            {isAutoLikeMode(mode) && (
+              <AutoWbTuningChart
+                samples={tuningSamples}
+                loading={tuningBusy}
+                kvError={tuningKvError}
+              />
+            )}
           </div>
         )}
       </div>

@@ -6,6 +6,7 @@ import {
 } from '@/lib/imaging-project-store'
 import { removePreviewImage } from '@/lib/imaging-preview-store'
 import { deleteR2ObjectForQueueId } from '@/lib/r2-session-download'
+import { deleteProjectCascade } from '@/lib/imaging-project-delete'
 
 function projectRetentionBasisMs(project: ImagingProject): number | null {
   const at = Date.parse(project.completedAt ?? '')
@@ -22,19 +23,8 @@ export async function purgeExpiredProjectAssets(maxAgeMs: number): Promise<strin
     const basisMs = projectRetentionBasisMs(project)
     if (basisMs == null || now - basisMs < maxAgeMs) continue
 
-    if (project.outputMode !== 'none') {
-      for (const night of project.nights) {
-        purged.push(night.id)
-        await deleteR2ObjectForQueueId(night.id)
-        await removePreviewImage(night.id)
-      }
-    }
-
-    purged.push(project.id)
-    await deleteR2ObjectForQueueId(project.id)
-    await removePreviewImage(project.id)
-    await boardRemove(project.id)
-    await deleteProjectById(project.id)
+    const cascade = await deleteProjectCascade(project.id)
+    purged.push(...cascade.touchedIds)
   }
 
   return purged

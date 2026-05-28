@@ -161,7 +161,10 @@ export default function AllSkyCameraView() {
         }
         const cam = data?.sensors?.allSkyCam
         const iso =
-          cam?.mode === 'auto' || cam?.autoMode
+          cam?.mode === 'auto' ||
+            cam?.mode === 'half_hour' ||
+            cam?.mode === 'hour' ||
+            cam?.autoMode
             ? cam?.lastAutoFrameIso ?? cam?.lastStreamFrameIso
             : cam?.lastStreamFrameIso
         if (typeof iso === 'string' && iso.length > 0 && !cancelled) {

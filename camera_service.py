@@ -24,6 +24,11 @@ import platform
 from datetime import datetime, timezone
 import json
 
+import auto_exposure as auto_exp
+import auto_white_balance as auto_wb
+import imaging_drive
+import observatory_solar as obs_solar
+
 app = Flask(__name__)
 CORS(app)
 
@@ -158,6 +163,8 @@ camera_state = {
     'width': 1280,
     'height': 960,
     'exposure': 1000000,  # microseconds - for photo capture only
+    'exposure_min_us': auto_exp.PHOTO_EXP_MIN_US,
+    'exposure_max_us': auto_exp.PHOTO_EXP_MAX_US,
     'video_exposure': 100000,  # microseconds - max exposure for video streaming (controls frame rate)
     'gain': 50,
     'gain_min': 0,
@@ -191,11 +198,24 @@ sequence_state = {
 
 # Server-side auto mode (periodic photo capture for Weather / public view)
 AUTO_DEFAULT_INTERVAL_S = 60
+AUTO_LIKE_MODES = frozenset({'auto', 'half_hour', 'hour'})
+VALID_CAMERA_MODES = frozenset({'off', 'stream', 'auto', 'half_hour', 'hour'})
 auto_state = {
     'active': False,
     'interval': AUTO_DEFAULT_INTERVAL_S,
     'thread': None,
     'wake': threading.Event(),  # settings change → capture now + restart interval
+    'last_brightness_mean': None,
+    'last_mean_r': None,
+    'last_mean_g': None,
+    'last_mean_b': None,
+    'last_auto_exp_action': None,
+    'last_auto_wb_action': None,
+    'last_exp_delta_us': 0,
+    'last_wb_r_delta': 0,
+    'last_wb_b_delta': 0,
+    'last_auto_daytime': None,
+    'last_auto_target_gain': None,
 }
 auto_capture_lock = threading.Lock()
 frame_lock = threading.Lock()
@@ -220,7 +240,7 @@ def _load_persisted_mode():
                 data = json.load(f)
             mode = data.get('mode', 'off')
             interval = int(data.get('interval', AUTO_DEFAULT_INTERVAL_S))
-            if mode in ('off', 'stream', 'auto'):
+            if mode in VALID_CAMERA_MODES:
                 return mode, max(10, interval)
     except (OSError, json.JSONDecodeError, TypeError, ValueError) as e:
         print(f"[Mode] Could not load persisted mode: {e}")
@@ -257,13 +277,103 @@ def _wait_auto_interval():
             return
 
 
+def _apply_auto_mode_scheduled_gain(now=None):
+    """Auto mode only: pin gain to 0 (nautical dawn–astronomical dark) or 150 (night)."""
+    if not auto_state['active']:
+        return
+    if now is None:
+        now = datetime.now(timezone.utc)
+    daytime = obs_solar.is_auto_mode_daytime(now)
+    target = obs_solar.auto_mode_target_gain(now)
+    auto_state['last_auto_daytime'] = daytime
+    auto_state['last_auto_target_gain'] = target
+    if camera_state['gain'] != target:
+        prev = camera_state['gain']
+        camera_state['gain'] = target
+        print(f"[AutoGain] gain {prev} → {target}")
+
+
+def _apply_auto_exposure_from_frame(img):
+    """After auto capture: auto WB + exposure from frame stats (no HTTP, no wake)."""
+    if img is None or not auto_state['active']:
+        return
+    _apply_auto_mode_scheduled_gain()
+    target_gain = obs_solar.auto_mode_target_gain()
+    camera_state['gain'] = target_gain
+
+    stats = auto_exp.compute_brightness_mean(img)
+    mean_rgb = stats['mean_rgb']
+    auto_state['last_brightness_mean'] = mean_rgb
+    auto_state['last_mean_r'] = stats['mean_r']
+    auto_state['last_mean_g'] = stats['mean_g']
+    auto_state['last_mean_b'] = stats['mean_b']
+
+    exp_before_us = int(camera_state['exposure'])
+    wb_r_before = int(camera_state.get('wb_r', auto_wb.AUTO_WB_R_START))
+    wb_b_before = int(camera_state.get('wb_b', auto_wb.AUTO_WB_B_START))
+
+    wb_adj = auto_wb.decide_auto_white_balance_adjustment(
+        mean_r=stats['mean_r'],
+        mean_g=stats['mean_g'],
+        mean_b=stats['mean_b'],
+        wb_r=camera_state.get('wb_r', auto_wb.AUTO_WB_R_START),
+        wb_b=camera_state.get('wb_b', auto_wb.AUTO_WB_B_START),
+        clip_white_pct=stats['clip_white_pct'],
+        valid_pixel_frac=stats.get('valid_pixel_frac', 1.0),
+    )
+    if wb_adj is None:
+        auto_state['last_auto_wb_action'] = 'hold'
+        print(
+            f"[AutoWB] hold R={stats['mean_r']:.1f} G={stats['mean_g']:.1f} B={stats['mean_b']:.1f} "
+            f"wb_r={camera_state.get('wb_r')} wb_b={camera_state.get('wb_b')}"
+        )
+    else:
+        camera_state['wb_r'] = wb_adj['wb_r']
+        camera_state['wb_b'] = wb_adj['wb_b']
+        _apply_manual_white_balance()
+        auto_state['last_auto_wb_action'] = wb_adj['action']
+        print(
+            f"[AutoWB] {wb_adj['action']}: {wb_adj['reason']} → "
+            f"wb_r={wb_adj['wb_r']} wb_b={wb_adj['wb_b']}"
+        )
+
+    adjustment = auto_exp.decide_auto_exposure_adjustment(
+        mean_rgb=mean_rgb,
+        clip_white_pct=stats['clip_white_pct'],
+        exposure_us=camera_state['exposure'],
+        gain=target_gain,
+        gain_min=target_gain,
+        gain_max=target_gain,
+        exposure_min_us=camera_state.get('exposure_min_us', auto_exp.PHOTO_EXP_MIN_US),
+        exposure_max_us=camera_state.get('exposure_max_us', auto_exp.PHOTO_EXP_MAX_US),
+    )
+    if adjustment is None:
+        auto_state['last_auto_exp_action'] = 'hold'
+        print(
+            f"[AutoExp] hold mean={mean_rgb:.1f} "
+            f"exp={camera_state['exposure']/1e6:.4f}s gain={camera_state['gain']}"
+        )
+    else:
+        camera_state['exposure'] = adjustment['exposure_us']
+        camera_state['gain'] = target_gain
+        auto_state['last_auto_exp_action'] = adjustment['action']
+        print(
+            f"[AutoExp] {adjustment['action']}: {adjustment['reason']} → "
+            f"exp={adjustment['exposure_us']/1e6:.4f}s gain={adjustment['gain']}"
+        )
+
+    auto_state['last_exp_delta_us'] = int(camera_state['exposure']) - exp_before_us
+    auto_state['last_wb_r_delta'] = int(camera_state.get('wb_r', wb_r_before)) - wb_r_before
+    auto_state['last_wb_b_delta'] = int(camera_state.get('wb_b', wb_b_before)) - wb_b_before
+
+
 def _capture_photo_to_memory():
-    """Capture a still (photo exposure) and store in camera_state['current_frame']."""
+    """Capture a still (photo exposure) and store in camera_state['current_frame']. Returns PIL Image or None."""
     if not camera_state['connected'] or not camera.is_open:
-        return False
+        return None
     if sequence_state['active']:
         print("[Auto] Skipping capture — sequence active")
-        return False
+        return None
 
     with auto_capture_lock:
         was_streaming = camera.streaming
@@ -298,13 +408,13 @@ def _capture_photo_to_memory():
                     camera_state['current_frame'] = img
                     camera_state['last_auto_frame_iso'] = datetime.now(timezone.utc).isoformat()
                 print(f"[Auto] Frame captured at {camera_state['last_auto_frame_iso']}")
-                return True
-            return False
+                return img
+            return None
         except Exception as e:
             print(f"[Auto] Capture error: {e}")
             import traceback
             traceback.print_exc()
-            return False
+            return None
         finally:
             if was_streaming and camera_state.get('mode') != 'auto':
                 try:
@@ -317,7 +427,11 @@ def auto_capture_loop():
     """Background thread: capture, wait interval, repeat; wake resets wait after settings."""
     print("[Auto] Loop started")
     while auto_state['active'] and camera_state['connected']:
-        _capture_photo_to_memory()
+        _apply_auto_mode_scheduled_gain()
+        img = _capture_photo_to_memory()
+        if img is not None:
+            _apply_auto_exposure_from_frame(img)
+            imaging_drive.after_auto_capture(img, camera_state.get('mode', 'off'))
         if not auto_state['active']:
             break
         _wait_auto_interval()
@@ -332,12 +446,16 @@ def stop_auto_mode():
         auto_state['thread'].join(timeout=5.0)
     auto_state['thread'] = None
     auto_state['wake'].clear()
-    if camera_state.get('mode') == 'auto':
+    if camera_state.get('mode') in AUTO_LIKE_MODES:
         camera_state['mode'] = 'off'
+    imaging_drive.sync_from_camera_mode('off')
 
 
-def start_auto_mode(interval=None):
-    """Start server-side auto capture (stops video stream)."""
+def start_auto_mode(interval=None, drive_mode='auto'):
+    """Start server-side auto capture (stops video stream). drive_mode: auto, half_hour, or hour."""
+    drive_mode = (drive_mode or 'auto').lower()
+    if drive_mode not in AUTO_LIKE_MODES:
+        drive_mode = 'auto'
     if interval is not None:
         auto_state['interval'] = max(10, int(interval))
     if camera.streaming:
@@ -346,27 +464,40 @@ def start_auto_mode(interval=None):
     stop_auto_mode()
     auto_state['active'] = True
     auto_state['wake'].clear()
-    camera_state['mode'] = 'auto'
+    camera_state['mode'] = drive_mode
     camera_state['streaming'] = False
     camera_state['stream_last_frame_iso'] = None
-    _persist_mode('auto', auto_state['interval'])
+    _persist_mode(drive_mode, auto_state['interval'])
+    imaging_drive.sync_from_camera_mode(drive_mode)
+    camera_state['exposure'] = obs_solar.AUTO_MODE_START_EXPOSURE_US
+    camera_state['wb_r'] = auto_wb.AUTO_WB_R_START
+    camera_state['wb_b'] = auto_wb.AUTO_WB_B_START
+    auto_exp.reset_auto_exposure()
+    print(f"[Auto] Start exposure reset to {camera_state['exposure'] / 1e6:.3f} s")
+    print(f"[Auto] Start white balance wb_r={camera_state['wb_r']} wb_b={camera_state['wb_b']}")
     _apply_manual_white_balance()
+    _apply_auto_mode_scheduled_gain()
     auto_state['thread'] = threading.Thread(target=auto_capture_loop, daemon=True)
     auto_state['thread'].start()
     return True
 
 
 def apply_camera_mode(mode, interval=None):
-    """Set operating mode: off, stream, or auto."""
-    mode = (mode or 'off').lower()
-    if mode not in ('off', 'stream', 'auto'):
+    """Set operating mode: off, stream, auto, half_hour, or hour."""
+    mode = (mode or 'off').lower().replace('-', '_')
+    if mode not in VALID_CAMERA_MODES:
         return False, f'Invalid mode: {mode}'
 
-    if mode == 'auto':
+    if mode in AUTO_LIKE_MODES:
         if not camera_state['connected'] or not camera.is_open:
             return False, 'Camera not connected'
-        start_auto_mode(interval)
-        return True, 'Auto mode started'
+        start_auto_mode(interval, drive_mode=mode)
+        labels = {
+            'auto': 'Auto (every frame → Drive)',
+            'half_hour': 'Half Hour (auto capture, save on :00/:30 ET)',
+            'hour': 'Hour (auto capture, save each hour ET)',
+        }
+        return True, f'{labels.get(mode, mode)} started'
 
     stop_auto_mode()
     if mode == 'stream':
@@ -466,6 +597,15 @@ class ASICamera:
             if gain_range:
                 camera_state['gain_min'], camera_state['gain_max'] = gain_range
                 print(f"Gain range: {gain_range[0]} – {gain_range[1]}")
+
+            exp_range = _get_control_range(self.camera_id, ASI_EXPOSURE)
+            if exp_range:
+                camera_state['exposure_min_us'] = max(auto_exp.PHOTO_EXP_MIN_US, int(exp_range[0]))
+                camera_state['exposure_max_us'] = min(auto_exp.PHOTO_EXP_MAX_US, int(exp_range[1]))
+                print(
+                    f"Exposure range: {camera_state['exposure_min_us']} – "
+                    f"{camera_state['exposure_max_us']} μs"
+                )
             
             # Set ROI format (full frame, use current format setting)
             result = asi_lib.ASISetROIFormat(
@@ -971,6 +1111,26 @@ def _get_control_range(camera_id, control_type):
 camera = ASICamera()
 
 # API Routes
+def _auto_tuning_status():
+    """Per-frame auto tuning metrics for website history chart (not persisted on Pi)."""
+    if auto_state.get('last_mean_r') is None:
+        return None
+    return {
+        'meanR': auto_state.get('last_mean_r'),
+        'meanG': auto_state.get('last_mean_g'),
+        'meanB': auto_state.get('last_mean_b'),
+        'meanRgb': auto_state.get('last_brightness_mean'),
+        'expAction': auto_state.get('last_auto_exp_action'),
+        'wbAction': auto_state.get('last_auto_wb_action'),
+        'photoExposureUs': camera_state.get('exposure'),
+        'wbR': camera_state.get('wb_r'),
+        'wbB': camera_state.get('wb_b'),
+        'expDeltaUs': auto_state.get('last_exp_delta_us', 0),
+        'wbRDelta': auto_state.get('last_wb_r_delta', 0),
+        'wbBDelta': auto_state.get('last_wb_b_delta', 0),
+    }
+
+
 def _status_payload():
     """Shared JSON for /status and /camera/status (reverse proxies often mount only /camera/*)."""
     return {
@@ -990,6 +1150,12 @@ def _status_payload():
                 'fault': camera_state['error'],
                 'gainMin': camera_state.get('gain_min', 0),
                 'gainMax': camera_state.get('gain_max', 500),
+                'autoExposureBrightness': auto_state.get('last_brightness_mean'),
+                'autoExposureLastAction': auto_state.get('last_auto_exp_action'),
+                'autoWhiteBalanceLastAction': auto_state.get('last_auto_wb_action'),
+                'autoTuning': _auto_tuning_status(),
+                'autoModeDaytime': auto_state.get('last_auto_daytime'),
+                'autoModeTargetGain': auto_state.get('last_auto_target_gain'),
             }
         }
         # No 'roof', 'safety', or 'alerts' - this controller doesn't handle those
@@ -1012,7 +1178,7 @@ def connect_camera():
     """Connect to camera"""
     if camera.connect():
         saved_mode, saved_interval = _load_persisted_mode()
-        if saved_mode in ('auto', 'stream'):
+        if saved_mode in VALID_CAMERA_MODES and saved_mode != 'off':
             apply_camera_mode(saved_mode, saved_interval)
         return jsonify({'success': True, 'message': 'Camera connected', 'mode': camera_state.get('mode', 'off')})
     return jsonify({'success': False, 'message': camera_state['error']}), 500
@@ -1111,7 +1277,8 @@ def _sync_controls_from_camera():
 
 def _settings_payload():
     format_names = {ASI_IMG_RGB24: 'RGB24', ASI_IMG_RAW8: 'RAW8', ASI_IMG_RAW16: 'RAW16', ASI_IMG_Y8: 'Y8'}
-    if camera_state['connected']:
+    # Auto mode: return Pi state (auto exposure / scheduled gain), not a hardware resync.
+    if camera_state['connected'] and not auto_state['active']:
         _sync_controls_from_camera()
     return {
         'connected': camera_state['connected'],
@@ -1456,6 +1623,7 @@ def sequence_status():
         'interval': sequence_state.get('interval', 0),
         'last_error': sequence_state.get('last_error'),
     })
+
 
 if __name__ == '__main__':
     print("Starting ASI Camera Service...")

@@ -164,6 +164,12 @@ h3 {
   border-bottom-color: rgba(255, 255, 255, 0.6) !important;
 }
 
+.dark .boxed-fields input::placeholder,
+.dark .boxed-fields textarea::placeholder {
+  color: rgba(156, 163, 175, 1) !important;
+  opacity: 1 !important;
+}
+
 /* Cards/panels: always visible border against black background. */
 .dark .border,
 .dark .border-gray-100,

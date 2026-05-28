@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
+import { deleteProjectCascade } from '@/lib/imaging-project-delete'
 import { getAdminFromRequest } from '@/lib/imaging-admin-auth'
 import { authorizeImagingSession } from '@/lib/imaging-session-access'
 import { getCurrentUser } from '@/lib/member-auth'
@@ -18,7 +19,7 @@ import {
   type CreateImagingInput,
   type ImagingRequestStatus,
 } from '@/lib/imaging-queue-store'
-import { applyPendingProjectQueueEdit, deleteProjectById } from '@/lib/imaging-project-store'
+import { applyPendingProjectQueueEdit, deleteProjectById, getProjectById } from '@/lib/imaging-project-store'
 import { planAndScheduleProjectTonight } from '@/lib/imaging-project-planner'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import { getTonightWeatherPermittedIntervals } from '@/lib/tonight-weather-gate'
@@ -215,7 +216,8 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
 
   const inQueue = await getRequestById(id)
   const onBoard = await getBoardEntry(id)
-  if (!inQueue && !onBoard) {
+  const project = await getProjectById(id)
+  if (!inQueue && !onBoard && !project) {
     return withImagingCors({ ok: false as const, error: 'Not found' }, 404)
   }
 
@@ -226,11 +228,17 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
   }
   const adminUser = await getAdminFromRequest(request)
 
-  await deleteRequestById(id)
-  await boardRemove(id)
-  await deleteR2ObjectForQueueId(id)
-  await removePreviewImage(id)
-  const projectRecordRemoved = await deleteProjectById(id)
+  let projectRecordRemoved = false
+  if (inQueue?.projectMode === true || onBoard?.projectMode === true || project?.projectMode === true) {
+    const cascade = await deleteProjectCascade(id)
+    projectRecordRemoved = cascade.deletedProjectRecord
+  } else {
+    await deleteRequestById(id)
+    await boardRemove(id)
+    await deleteR2ObjectForQueueId(id)
+    await removePreviewImage(id)
+    projectRecordRemoved = await deleteProjectById(id)
+  }
 
   void appendAuditLog({
     kind: 'queue.deleted',

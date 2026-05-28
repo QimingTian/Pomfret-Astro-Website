@@ -28,6 +28,7 @@ import {
 } from '@/lib/imaging-session-board'
 import { removePreviewImage } from '@/lib/imaging-preview-store'
 import { deleteR2ObjectForQueueId } from '@/lib/r2-session-download'
+import { deleteProjectCascade } from '@/lib/imaging-project-delete'
 
 export type SessionControlEntry = {
   sessionId: string
@@ -274,11 +275,7 @@ export async function adminDeleteSession(sessionId: string): Promise<{ ok: true 
     await removePreviewImage(sessionId)
     const remaining = await getProjectById(match.project.id)
     if (remaining && remaining.nights.length === 0) {
-      await deleteRequestById(match.project.id)
-      await boardRemove(match.project.id)
-      await deleteProjectById(match.project.id)
-      await deleteR2ObjectForQueueId(match.project.id)
-      await removePreviewImage(match.project.id)
+      await deleteProjectCascade(match.project.id)
     }
     void appendAuditLog({
       kind: 'queue.deleted',
@@ -293,11 +290,17 @@ export async function adminDeleteSession(sessionId: string): Promise<{ ok: true 
   const onBoard = await getBoardEntry(sessionId)
   if (!inQueue && !onBoard) return { error: 'Session not found' }
 
-  await deleteRequestById(sessionId)
-  await boardRemove(sessionId)
-  await deleteR2ObjectForQueueId(sessionId)
-  await removePreviewImage(sessionId)
-  const projectRemoved = await deleteProjectById(sessionId)
+  let projectRemoved = false
+  if (inQueue?.projectMode === true || onBoard?.projectMode === true) {
+    const cascade = await deleteProjectCascade(sessionId)
+    projectRemoved = cascade.deletedProjectRecord
+  } else {
+    await deleteRequestById(sessionId)
+    await boardRemove(sessionId)
+    await deleteR2ObjectForQueueId(sessionId)
+    await removePreviewImage(sessionId)
+    projectRemoved = await deleteProjectById(sessionId)
+  }
 
   void appendAuditLog({
     kind: 'queue.deleted',

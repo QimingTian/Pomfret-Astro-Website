@@ -27,6 +27,10 @@ yarn-error.log*
 # local env files
 .env*.local
 
+# GCP service account keys (never commit)
+pomfret-astro*.json
+*-service-account*.json
+
 # vercel
 .vercel
 

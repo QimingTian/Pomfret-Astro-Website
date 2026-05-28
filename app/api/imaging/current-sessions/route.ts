@@ -251,10 +251,11 @@ export async function GET(request: NextRequest) {
   }
 
   for (const p of projects) {
-    if (!queueIds.has(p.id) && p.onBoard) {
-      queueIds.add(p.id)
-      sessions.push(projectRow(p))
-    }
+    if (queueIds.has(p.id)) continue
+    // Current Sessions is an inventory view: show every non-deleted project record
+    // regardless of board/onBoard status.
+    queueIds.add(p.id)
+    sessions.push(projectRow(p))
   }
 
   for (const b of boardAfterBackfill) {

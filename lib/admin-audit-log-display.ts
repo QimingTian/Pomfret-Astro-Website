@@ -15,12 +15,30 @@ const FAILED_MESSAGE_RE = /fail|rejected|unauthorized|error/i
 export function auditLogLineFailed(row: AuditLogRowLike): boolean {
   if (FAILED_KINDS.has(row.kind)) return true
   if (row.kind === 'queue.status' && FAILED_MESSAGE_RE.test(row.message)) return true
-  if (row.kind === 'project.sub_session_unscheduled') return false
+  if (row.kind === 'project.sub_session_unscheduled' || row.kind === 'session.schedule_changed') return false
   return FAILED_MESSAGE_RE.test(row.message) && !/completed|scheduled/i.test(row.message)
 }
 
 /** One-line headline for the log list (Check Progress terminal style). */
 export function auditLogHeadline(row: AuditLogRowLike): string {
+  if (row.kind === 'session.schedule_changed') {
+    const d = row.detail
+    const target = typeof d?.target === 'string' ? d.target.trim() : ''
+    const nightIndex = typeof d?.nightIndex === 'number' ? d.nightIndex : null
+    const id =
+      typeof d?.nightSubId === 'string'
+        ? d.nightSubId
+        : typeof d?.id === 'string'
+          ? d.id
+          : ''
+    const previousStatus = d?.previousStatus === 'scheduled' ? 'scheduled' : 'unscheduled'
+    const nextStatus = d?.nextStatus === 'scheduled' ? 'scheduled' : 'unscheduled'
+    const label = nightIndex != null ? `Session ${nightIndex}` : 'Session'
+    const targetPart = target ? ` — ${target}` : ''
+    const idPart = id ? ` (${id})` : ''
+    return `${label}${targetPart}${idPart}: ${previousStatus} -> ${nextStatus}`
+  }
+
   const scheduled = row.message.match(
     /sub-session scheduled:\s*(.+?)\s+Session\s+(\d+)/i
   )

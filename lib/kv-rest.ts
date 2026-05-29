@@ -17,14 +17,24 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
   })
 }
 
+/** Run one Redis command via Upstash REST (value in POST body — no URL size limit). */
+async function redisCommand(command: string, ...args: (string | number)[]): Promise<unknown> {
+  const res = await request('', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify([command, ...args]),
+  })
+  if (!res.ok) return undefined
+  const body = (await res.json()) as { result?: unknown }
+  return body.result
+}
+
 export async function kvGetJson<T>(key: string): Promise<T | undefined> {
   if (!enabled()) return undefined
   try {
-    const res = await request(`/get/${encodeURIComponent(key)}`)
-    if (!res.ok) return undefined
-    const body = (await res.json()) as { result?: unknown }
-    if (typeof body.result !== 'string') return undefined
-    return JSON.parse(body.result) as T
+    const raw = await redisCommand('GET', key)
+    if (typeof raw !== 'string') return undefined
+    return JSON.parse(raw) as T
   } catch {
     return undefined
   }
@@ -33,9 +43,9 @@ export async function kvGetJson<T>(key: string): Promise<T | undefined> {
 export async function kvSetJson(key: string, value: unknown): Promise<boolean> {
   if (!enabled()) return false
   try {
-    const payload = encodeURIComponent(JSON.stringify(value))
-    const res = await request(`/set/${encodeURIComponent(key)}/${payload}`, { method: 'POST' })
-    return res.ok
+    const json = JSON.stringify(value)
+    const result = await redisCommand('SET', key, json)
+    return result === 'OK'
   } catch {
     return false
   }
@@ -44,8 +54,8 @@ export async function kvSetJson(key: string, value: unknown): Promise<boolean> {
 export async function kvDel(key: string): Promise<boolean> {
   if (!enabled()) return false
   try {
-    const res = await request(`/del/${encodeURIComponent(key)}`, { method: 'POST' })
-    return res.ok
+    const result = await redisCommand('DEL', key)
+    return result === 1 || result === '1'
   } catch {
     return false
   }

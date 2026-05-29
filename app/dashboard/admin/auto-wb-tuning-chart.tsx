@@ -67,19 +67,19 @@ function ValueBar({
 function sampleTitle(s: NormalizedSample) {
   return `${new Date(s.frameIso).toLocaleString()}
 wb: ${s.wbAction} (ΔR ${s.wbRDelta}, ΔB ${s.wbBDelta})
-wb R ${s.wbR} (Δ target ${s.wbRError}), wb B ${s.wbB} (Δ target ${s.wbBError})
-mean R−G ${s.rDiff.toFixed(1)}, B−G ${s.bDiff.toFixed(1)}`
+mean R−G ${s.rDiff.toFixed(1)}, B−G ${s.bDiff.toFixed(1)}
+wb R ${s.wbR}, wb B ${s.wbB}`
 }
 
 export function AutoWbTuningChart({ samples, loading, kvError }: Props) {
   const { slots, step, normalized } = useChartSlots(samples)
   const leftTicks = axisTicks(LEFT_MIN, LEFT_MAX, LEFT_STEP)
 
-  const wbRErrors = slots.map((s) =>
-    s ? clamp(s.wbRError, WB_RIGHT_AXIS.min, WB_RIGHT_AXIS.max) : null,
+  const rDiffs = slots.map((s) =>
+    s ? clamp(s.rDiff, WB_RIGHT_AXIS.min, WB_RIGHT_AXIS.max) : null,
   )
-  const wbBErrors = slots.map((s) =>
-    s ? clamp(s.wbBError, WB_RIGHT_AXIS.min, WB_RIGHT_AXIS.max) : null,
+  const bDiffs = slots.map((s) =>
+    s ? clamp(s.bDiff, WB_RIGHT_AXIS.min, WB_RIGHT_AXIS.max) : null,
   )
 
   const bars = slots.map((s, i) => {
@@ -112,8 +112,8 @@ export function AutoWbTuningChart({ samples, loading, kvError }: Props) {
     )
   })
 
-  const lineR = polylinePoints(wbRErrors, step, WB_RIGHT_AXIS.min, WB_RIGHT_AXIS.max)
-  const lineB = polylinePoints(wbBErrors, step, WB_RIGHT_AXIS.min, WB_RIGHT_AXIS.max)
+  const lineR = polylinePoints(rDiffs, step, WB_RIGHT_AXIS.min, WB_RIGHT_AXIS.max)
+  const lineB = polylinePoints(bDiffs, step, WB_RIGHT_AXIS.min, WB_RIGHT_AXIS.max)
 
   return (
     <div className="w-full space-y-1 pt-2">
@@ -166,10 +166,10 @@ export function AutoWbTuningChart({ samples, loading, kvError }: Props) {
           Correction (Left)
         </span>
         <span>
-          <span className="inline-block h-0.5 w-3 bg-red-400 align-middle" /> WB R Error (Right)
+          <span className="inline-block h-0.5 w-3 bg-red-400 align-middle" /> Mean R−G (Right)
         </span>
         <span>
-          <span className="inline-block h-0.5 w-3 bg-teal-400 align-middle" /> WB B Error (Right)
+          <span className="inline-block h-0.5 w-3 bg-teal-400 align-middle" /> Mean B−G (Right)
         </span>
       </div>
     </div>

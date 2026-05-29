@@ -20,8 +20,6 @@ export type NormalizedSample = AutoTuningSample & {
   expError: number
   rDiff: number
   bDiff: number
-  wbRError: number
-  wbBError: number
 }
 
 export function clamp(v: number, lo: number, hi: number): number {
@@ -50,8 +48,8 @@ export function normalizeSample(s: AutoTuningSample): NormalizedSample {
     expError: meanRgb - AUTO_TUNING_TARGET_RGB,
     rDiff: meanR - meanG,
     bDiff: meanB - meanG,
-    wbRError: wbR - AUTO_WB_TARGET_R,
-    wbBError: wbB - AUTO_WB_TARGET_B,
+    wbR,
+    wbB,
     expDeltaUs: Number.isFinite(s.expDeltaUs) ? s.expDeltaUs : 0,
     photoExposureUs: Number.isFinite(s.photoExposureUs) ? s.photoExposureUs : 0,
     wbRDelta: Number.isFinite(s.wbRDelta) ? s.wbRDelta : 0,

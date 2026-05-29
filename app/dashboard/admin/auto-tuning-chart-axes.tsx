@@ -25,7 +25,7 @@ export const EXPOSURE_RIGHT_AXIS: RightAxisScale = {
   labelTicks: [-24, -12, 12, 24],
 }
 
-/** WB chart: wb vs target on right */
+/** WB chart: channel mean vs G (same signal as auto_wb deadband) */
 export const WB_RIGHT_AXIS: RightAxisScale = {
   min: -21,
   max: 21,

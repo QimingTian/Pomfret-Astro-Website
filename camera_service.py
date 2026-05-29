@@ -1133,6 +1133,7 @@ def _auto_tuning_status():
 
 def _status_payload():
     """Shared JSON for /status and /camera/status (reverse proxies often mount only /camera/*)."""
+    imaging_drive.ensure_scheduler_running()
     return {
         'sensors': {
             'temperature': None,  # This controller doesn't have environment sensors
@@ -1156,6 +1157,7 @@ def _status_payload():
                 'autoTuning': _auto_tuning_status(),
                 'autoModeDaytime': auto_state.get('last_auto_daytime'),
                 'autoModeTargetGain': auto_state.get('last_auto_target_gain'),
+                'imagingDrive': imaging_drive.status_payload(),
             }
         }
         # No 'roof', 'safety', or 'alerts' - this controller doesn't handle those
@@ -1631,6 +1633,10 @@ if __name__ == '__main__':
     
     if camera.connect():
         print("Camera connected successfully!")
+        saved_mode, saved_interval = _load_persisted_mode()
+        if saved_mode in VALID_CAMERA_MODES and saved_mode != 'off':
+            print(f"[Mode] Restoring persisted mode: {saved_mode}")
+            apply_camera_mode(saved_mode, saved_interval)
     else:
         print(f"Failed to connect to camera: {camera_state['error']}")
         print("Service will start anyway, you can try connecting via API")

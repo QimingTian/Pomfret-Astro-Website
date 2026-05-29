@@ -1,9 +1,11 @@
-import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
+import { kvDel, kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 
-const KEY = 'imaging-preview-latest'
+/** Legacy monolithic map (pre per-queueId keys). Read-only fallback. */
+const LEGACY_KEY = 'imaging-preview-latest'
+const INDEX_KEY = 'imaging-preview-index'
 const MAX_ENTRIES = 50
 
-type PreviewEntry = {
+export type PreviewEntry = {
   imageId: string
   queueId: string
   updatedAt: string
@@ -13,40 +15,42 @@ type PreviewEntry = {
   frameNumber?: number
 }
 
-type Payload = { byQueueId: Record<string, PreviewEntry> }
+type PreviewIndexRow = { queueId: string; updatedAt: string }
 
 type GlobalWithPreview = typeof globalThis & {
-  __pomfret_imaging_preview_latest__?: Record<string, PreviewEntry>
+  __pomfret_imaging_preview_by_queue__?: Record<string, PreviewEntry>
+}
+
+function previewKvKey(queueId: string): string {
+  return `imaging-preview:${queueId}`
 }
 
 function memoryMap(): Record<string, PreviewEntry> {
   const g = globalThis as GlobalWithPreview
-  if (!g.__pomfret_imaging_preview_latest__) g.__pomfret_imaging_preview_latest__ = {}
-  return g.__pomfret_imaging_preview_latest__
+  if (!g.__pomfret_imaging_preview_by_queue__) g.__pomfret_imaging_preview_by_queue__ = {}
+  return g.__pomfret_imaging_preview_by_queue__
 }
 
-async function readMap(): Promise<Record<string, PreviewEntry>> {
-  if (kvEnabled()) {
-    const remote = await kvGetJson<Payload>(KEY)
-    if (remote && typeof remote === 'object' && remote.byQueueId && typeof remote.byQueueId === 'object') {
-      return remote.byQueueId
-    }
-  }
-  return { ...memoryMap() }
+async function readLegacyEntry(queueId: string): Promise<PreviewEntry | null> {
+  const legacy = await kvGetJson<{ byQueueId?: Record<string, PreviewEntry> }>(LEGACY_KEY)
+  const e = legacy?.byQueueId?.[queueId]
+  return e && e.dataBase64 ? e : null
 }
 
-async function writeMap(byQueueId: Record<string, PreviewEntry>): Promise<void> {
-  const values = Object.values(byQueueId).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-  const trimmed = values.slice(0, MAX_ENTRIES)
-  const next: Record<string, PreviewEntry> = {}
-  for (const e of trimmed) next[e.queueId] = e
-  if (kvEnabled()) {
-    const ok = await kvSetJson(KEY, { byQueueId: next })
-    if (ok) return
+async function trimPreviewIndex(keepQueueId: string, updatedAt: string): Promise<void> {
+  const prev = (await kvGetJson<PreviewIndexRow[]>(INDEX_KEY)) ?? []
+  const next = [
+    { queueId: keepQueueId, updatedAt },
+    ...prev.filter((r) => r.queueId !== keepQueueId),
+  ]
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .slice(0, MAX_ENTRIES)
+
+  const dropped = prev.filter((r) => !next.some((n) => n.queueId === r.queueId))
+  await kvSetJson(INDEX_KEY, next)
+  for (const row of dropped) {
+    await kvDel(previewKvKey(row.queueId))
   }
-  const mem = memoryMap()
-  for (const k of Object.keys(mem)) delete mem[k]
-  Object.assign(mem, next)
 }
 
 export async function upsertPreviewImage(
@@ -55,10 +59,10 @@ export async function upsertPreviewImage(
   contentType: string,
   dataBase64: string
 ): Promise<number> {
-  const byQueueId = await readMap()
-  const prev = byQueueId[queueId]
-  const frameNumber = (prev?.frameNumber ?? 0) + 1
-  byQueueId[queueId] = {
+  const existing =
+    memoryMap()[queueId] ?? (await getPreviewImage(queueId))
+  const frameNumber = (existing?.frameNumber ?? 0) + 1
+  const entry: PreviewEntry = {
     imageId,
     queueId,
     updatedAt: new Date().toISOString(),
@@ -66,13 +70,36 @@ export async function upsertPreviewImage(
     dataBase64,
     frameNumber,
   }
-  await writeMap(byQueueId)
+
+  memoryMap()[queueId] = entry
+
+  if (kvEnabled()) {
+    const ok = await kvSetJson(previewKvKey(queueId), entry)
+    if (ok) {
+      await trimPreviewIndex(queueId, entry.updatedAt)
+    }
+  }
+
   return frameNumber
 }
 
 export async function getPreviewImage(queueId: string): Promise<PreviewEntry | null> {
-  const byQueueId = await readMap()
-  return byQueueId[queueId] ?? null
+  const mem = memoryMap()[queueId]
+  if (mem?.dataBase64) return mem
+
+  const fromKv = await kvGetJson<PreviewEntry>(previewKvKey(queueId))
+  if (fromKv?.dataBase64) {
+    memoryMap()[queueId] = fromKv
+    return fromKv
+  }
+
+  const legacy = await readLegacyEntry(queueId)
+  if (legacy) {
+    memoryMap()[queueId] = legacy
+    return legacy
+  }
+
+  return null
 }
 
 export async function hasPreviewImage(queueId: string): Promise<boolean> {
@@ -81,8 +108,16 @@ export async function hasPreviewImage(queueId: string): Promise<boolean> {
 }
 
 export async function removePreviewImage(queueId: string): Promise<void> {
-  const byQueueId = await readMap()
-  if (!(queueId in byQueueId)) return
-  delete byQueueId[queueId]
-  await writeMap(byQueueId)
+  const mem = memoryMap()
+  if (queueId in mem) delete mem[queueId]
+
+  await kvDel(previewKvKey(queueId))
+
+  if (kvEnabled()) {
+    const prev = (await kvGetJson<PreviewIndexRow[]>(INDEX_KEY)) ?? []
+    const next = prev.filter((r) => r.queueId !== queueId)
+    if (next.length !== prev.length) {
+      await kvSetJson(INDEX_KEY, next)
+    }
+  }
 }

@@ -1133,7 +1133,6 @@ def _auto_tuning_status():
 
 def _status_payload():
     """Shared JSON for /status and /camera/status (reverse proxies often mount only /camera/*)."""
-    imaging_drive.ensure_scheduler_running()
     return {
         'sensors': {
             'temperature': None,  # This controller doesn't have environment sensors

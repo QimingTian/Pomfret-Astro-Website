@@ -19,12 +19,14 @@ DriveMode = Literal['off', 'auto', 'half_hour', 'hour']
 AUTO_LIKE_MODES = frozenset({'auto', 'half_hour', 'hour'})
 
 _imaging_lock = threading.Lock()
+_stop_event = threading.Event()
 _state = {
     'mode': 'off',
     'thread': None,
     'last_error': None,
     'last_upload_iso': None,
     'last_upload_filename': None,
+    'last_completed_slot': None,
     'upload_count': 0,
     'drive_folder_id': None,
     'drive_folder_name': None,
@@ -103,11 +105,29 @@ def status_payload() -> Dict[str, Any]:
         }
 
 
+def _get_camera_module():
+    """
+    Return the live camera_service module.
+    When camera_service.py runs as __main__, `import camera_service` would load a
+    separate inactive copy — auto_state.active would always be False there.
+    """
+    import sys
+
+    main = sys.modules.get('__main__')
+    if main is not None and hasattr(main, 'auto_state') and hasattr(main, 'camera_state'):
+        return main
+    import camera_service as cam
+
+    return cam
+
+
 def _join_scheduler_thread() -> None:
+    _stop_event.set()
     with _imaging_lock:
         thread = _state.get('thread')
     if thread and thread.is_alive():
         thread.join(timeout=5.0)
+    _stop_event.clear()
     with _imaging_lock:
         _state['thread'] = None
 
@@ -124,9 +144,6 @@ def sync_from_camera_mode(mode: str) -> None:
         if _state.get('mode') == mode and mode in ('half_hour', 'hour') and _scheduler_alive():
             return
 
-    with _imaging_lock:
-        if _state['mode'] in ('half_hour', 'hour'):
-            _state['mode'] = 'off'
     _join_scheduler_thread()
 
     with _imaging_lock:
@@ -162,14 +179,17 @@ def sync_from_camera_mode(mode: str) -> None:
 
 def ensure_scheduler_running() -> None:
     """Restart half_hour/hour scheduler if camera mode expects it but the thread died."""
-    import camera_service as cam
+    cam = _get_camera_module()
 
     cam_mode = (cam.camera_state.get('mode') or 'off').lower().replace('-', '_')
     if cam_mode not in ('half_hour', 'hour'):
         return
     if not cam.auto_state.get('active'):
         return
-    if _scheduler_should_run(cam_mode) and _scheduler_alive():
+    with _imaging_lock:
+        state_mode = _state.get('mode')
+        alive = _scheduler_alive()
+    if state_mode == cam_mode and alive:
         return
     print(f"[Imaging] Scheduler missing for {cam_mode}; restarting")
     sync_from_camera_mode(cam_mode)
@@ -195,29 +215,35 @@ def _filename_for_hour_slot(slot: datetime) -> str:
     return slot.strftime('%Y-%m-%d_%H00')
 
 
-def _seconds_until_next_half_hour(now: datetime) -> float:
-    """Seconds until the next ET :00/:30 boundary (fires immediately if just past one)."""
+def _next_half_hour_boundary(now: datetime) -> datetime:
+    """Next ET :00 or :30 at or after `now` (seconds precision)."""
     base = now.replace(microsecond=0)
-    slot_min = 0 if base.minute < 30 else 30
-    slot_start = base.replace(minute=slot_min, second=0, microsecond=0)
-    elapsed = (base - slot_start).total_seconds()
-    if 0 <= elapsed <= 90:
-        return 0.5
-    if base.minute < 30:
-        next_boundary = base.replace(minute=30, second=0, microsecond=0)
-    else:
-        next_boundary = (base.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
-    return max(0.5, (next_boundary - base).total_seconds())
+    hour = base.replace(minute=0, second=0, microsecond=0)
+    half = base.replace(minute=30, second=0, microsecond=0)
+    for candidate in (hour, half, hour + timedelta(hours=1)):
+        if candidate >= base:
+            return candidate
+    return hour + timedelta(hours=1)
+
+
+def _next_hour_boundary(now: datetime) -> datetime:
+    base = now.replace(microsecond=0)
+    hour = base.replace(minute=0, second=0, microsecond=0)
+    if hour >= base:
+        return hour
+    return hour + timedelta(hours=1)
+
+
+def _seconds_until_next_half_hour(now: datetime) -> float:
+    nxt = _next_half_hour_boundary(now)
+    delta = (nxt - now.replace(microsecond=0)).total_seconds()
+    return max(0.5, delta)
 
 
 def _seconds_until_next_hour(now: datetime) -> float:
-    base = now.replace(microsecond=0)
-    hour_start = base.replace(minute=0, second=0, microsecond=0)
-    elapsed = (base - hour_start).total_seconds()
-    if 0 <= elapsed <= 90:
-        return 0.5
-    next_boundary = hour_start + timedelta(hours=1)
-    return max(0.5, (next_boundary - base).total_seconds())
+    nxt = _next_hour_boundary(now)
+    delta = (nxt - now.replace(microsecond=0)).total_seconds()
+    return max(0.5, delta)
 
 
 def _half_hour_slot_at_trigger(now: datetime) -> datetime:
@@ -232,7 +258,7 @@ def _hour_slot_at_trigger(now: datetime) -> datetime:
 
 
 def _latest_auto_image():
-    import camera_service as cam
+    cam = _get_camera_module()
 
     with cam.frame_lock:
         frame = cam.camera_state.get('current_frame')
@@ -241,12 +267,40 @@ def _latest_auto_image():
         return frame.copy()
 
 
+def _slot_key(mode: DriveMode, now: datetime) -> str:
+    if mode == 'half_hour':
+        return _filename_for_half_hour_slot(_half_hour_slot_at_trigger(now))
+    return _filename_for_hour_slot(_hour_slot_at_trigger(now))
+
+
+def _slot_already_saved(mode: DriveMode, now: datetime) -> bool:
+    key = _slot_key(mode, now)
+    with _imaging_lock:
+        return _state.get('last_completed_slot') == key
+
+
+def _mark_slot_saved(mode: DriveMode, now: datetime) -> None:
+    with _imaging_lock:
+        _state['last_completed_slot'] = _slot_key(mode, now)
+
+
+def _catch_up_current_slot(mode: DriveMode) -> None:
+    """Upload now if this :00/:30 (or hour) slot has not been saved yet."""
+    now = _observatory_now()
+    if _slot_already_saved(mode, now):
+        return
+    print(f"[Imaging] Catch-up upload for slot {_slot_key(mode, now)}")
+    _upload_scheduled(mode)
+
+
 def _upload_scheduled(mode: DriveMode) -> None:
-    import camera_service as cam
+    cam = _get_camera_module()
 
     if not cam.auto_state.get('active'):
+        print(f"[Imaging] Skip scheduled {mode}: auto loop not active")
         return
     if not _scheduler_should_run(mode):
+        print(f"[Imaging] Skip scheduled {mode}: scheduler mode mismatch")
         return
     img = _latest_auto_image()
     if img is None:
@@ -261,8 +315,12 @@ def _upload_scheduled(mode: DriveMode) -> None:
         slot = _hour_slot_at_trigger(now)
         folder = IMAGING_FOLDER_HOUR
         filename = _filename_for_hour_slot(slot)
+    if _slot_already_saved(mode, now):
+        print(f"[Imaging] Skip scheduled {mode}: slot {filename} already saved")
+        return
     try:
         _upload_tiff(folder, filename, img)
+        _mark_slot_saved(mode, now)
         print(f"[Imaging] {mode} slot {slot.strftime('%Y-%m-%d %H:%M')} → {filename}")
     except Exception as e:
         _record_error(str(e))
@@ -274,9 +332,10 @@ def _scheduler_should_run(expected: DriveMode) -> bool:
 
 
 def _scheduler_loop(mode: DriveMode) -> None:
-    while True:
+    _catch_up_current_slot(mode)
+    while not _stop_event.is_set():
         try:
-            if not _scheduler_should_run(mode):
+            if not _scheduler_should_run(mode) or _stop_event.is_set():
                 print(f"[Imaging] Scheduler stopped ({mode})")
                 return
             now = _observatory_now()
@@ -286,11 +345,13 @@ def _scheduler_loop(mode: DriveMode) -> None:
                 wait_s = _seconds_until_next_hour(now)
             end = time.time() + wait_s
             while time.time() < end:
-                if not _scheduler_should_run(mode):
+                if not _scheduler_should_run(mode) or _stop_event.is_set():
                     print(f"[Imaging] Scheduler stopped ({mode})")
                     return
                 time.sleep(min(1.0, end - time.time()))
             _upload_scheduled(mode)
+            # Step past the boundary so the next wait targets the following slot.
+            time.sleep(1.0)
         except Exception as e:
             _record_error(f'scheduler {mode}: {e}')
             traceback.print_exc()

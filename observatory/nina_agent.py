@@ -80,7 +80,7 @@ RECONCILE_EVERY_N_POLLS = 8
 # Optional override. Otherwise: env POMFRET_CRON_SECRET (same as Vercel CRON_SECRET), then TOKEN.
 RECONCILE_BEARER = ""
 
-# Optional bearer for nina-sequence / uploads. Leave "" if public.
+# Optional bearer for nina-sequence / uploads. Required for production pomfretastro.org URLs.
 TOKEN = ""
 
 POLL_SECONDS = 45
@@ -173,10 +173,16 @@ def log(message: str) -> None:
     print(f"[{now}] {message}", flush=True)
 
 
+def queue_bearer_token() -> str:
+    """Bearer for nina-sequence / uploads. Prefer Windows env IMAGING_QUEUE_SECRET; never commit secrets."""
+    return (TOKEN.strip() or os.environ.get("IMAGING_QUEUE_SECRET", "").strip())
+
+
 def build_headers() -> Dict[str, str]:
     headers: Dict[str, str] = {"Accept": "application/json"}
-    if TOKEN.strip():
-        headers["Authorization"] = f"Bearer {TOKEN}"
+    bearer = queue_bearer_token()
+    if bearer:
+        headers["Authorization"] = f"Bearer {bearer}"
     return headers
 
 
@@ -261,6 +267,13 @@ def wait_for_nina_exit(process: subprocess.Popen[bytes]) -> None:
 def validate_config() -> None:
     if "your-domain.com" in SEQUENCE_JSON_URL:
         raise ValueError("Please set SEQUENCE_JSON_URL.")
+    host = (_nina_seq.hostname or "").lower()
+    is_production_host = host.endswith("pomfretastro.org")
+    if is_production_host and not queue_bearer_token():
+        raise ValueError(
+            "Production SEQUENCE_JSON_URL requires a bearer token (same as Vercel IMAGING_QUEUE_SECRET). "
+            "Set Windows env IMAGING_QUEUE_SECRET on this PC — do not commit secrets into this file."
+        )
     if RECONCILE_EVERY_N_POLLS > 0 and not str(RECONCILE_QUEUE_URL).strip():
         raise ValueError("RECONCILE_QUEUE_URL is empty (check SEQUENCE_JSON_URL).")
     if RECONCILE_EVERY_N_POLLS > 0 and str(RECONCILE_QUEUE_URL).strip() and not reconcile_queue_bearer_token():

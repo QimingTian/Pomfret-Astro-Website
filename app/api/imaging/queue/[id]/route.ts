@@ -6,6 +6,8 @@ import { authorizeImagingSession } from '@/lib/imaging-session-access'
 import { getCurrentUser } from '@/lib/member-auth'
 import {
   imagingCorsOptions,
+  imagingQueueAuthorized,
+  imagingUnauthorized,
   withImagingCors,
 } from '@/lib/imaging-queue-auth'
 import { boardRemove, getBoardEntry } from '@/lib/imaging-session-board'
@@ -34,6 +36,10 @@ export function OPTIONS() {
 const allowed: ImagingRequestStatus[] = ['in_progress', 'completed', 'failed']
 
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+  if (!imagingQueueAuthorized(request)) {
+    return imagingUnauthorized()
+  }
+
   const id = params.id
   if (!id) {
     return withImagingCors({ ok: false as const, error: 'Missing id' }, 400)

@@ -10,15 +10,9 @@ import {
   type ReactNode,
 } from 'react'
 
-export type MemberProfile = {
-  id: string
-  email: string
-  firstName: string
-  lastName: string
-  username: string
-  role: 'member' | 'admin'
-  createdAt: string
-}
+import type { PublicMemberUser } from '@/lib/member-store'
+
+export type MemberProfile = PublicMemberUser
 
 type MemberState =
   | { status: 'loading' }

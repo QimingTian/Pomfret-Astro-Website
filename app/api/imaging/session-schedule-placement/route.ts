@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { requireUser } from '@/lib/member-auth'
 import { isProjectNightSubId } from '@/lib/imaging-project-ids'
 import { setNightScheduleBar } from '@/lib/imaging-project-store'
 import { boardSetScheduleBar, getBoardEntry } from '@/lib/imaging-session-board'
@@ -17,6 +18,11 @@ export function OPTIONS() {
  * Terminal rows (completed/failed) ignore updates once frozen for the current strip night.
  */
 export async function POST(request: NextRequest) {
+  const auth = await requireUser(request)
+  if (!auth.ok) {
+    return withImagingCors(auth.body, auth.status)
+  }
+
   let body: unknown
   try {
     body = await request.json()

@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server'
-import { maybeReconcileQueueWhenScheduleWeatherColumnChanged } from '@/lib/imaging-queue-weather-column-reconcile'
 import { MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS } from '@/lib/tonight-weather-gate'
 
 export const runtime = 'nodejs'
@@ -170,17 +169,6 @@ export async function GET(request: Request) {
         (nowSec >= windowStartSec && nowSec < windowEndSec)
     }
     if (isNighttimeNow) {
-      if (hasExternalWindow) {
-        const precipitationHitHourStartsSec = precipitationHits.map((h) => h.hourStartSec).sort((a, b) => a - b)
-        await maybeReconcileQueueWhenScheduleWeatherColumnChanged(windowStartSec, windowEndSec, {
-          prediction: 'unavailable',
-          hasAnyPrecipitationTonight,
-          readyHourStartsSec,
-          nightHourStartsSec,
-          notPermittedHourReasons,
-          precipitationHitHourStartsSec,
-        })
-      }
       return NextResponse.json({
         ok: true as const,
         prediction: 'unavailable',
@@ -230,18 +218,6 @@ export async function GET(request: Request) {
       }
 
       permitted = allNightPrecipUnder10 && windAllowedByHours && hasMinConsecutiveUnder10
-    }
-
-    if (hasExternalWindow) {
-      const precipitationHitHourStartsSec = precipitationHits.map((h) => h.hourStartSec).sort((a, b) => a - b)
-      await maybeReconcileQueueWhenScheduleWeatherColumnChanged(windowStartSec, windowEndSec, {
-        prediction: permitted ? 'permitted' : 'not_permitted',
-        hasAnyPrecipitationTonight,
-        readyHourStartsSec,
-        nightHourStartsSec,
-        notPermittedHourReasons,
-        precipitationHitHourStartsSec,
-      })
     }
 
     return NextResponse.json({

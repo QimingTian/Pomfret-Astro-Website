@@ -60,13 +60,38 @@ function fileNameFromObjectKey(objectKey: string): string {
   return slash === -1 ? cleaned : cleaned.slice(slash + 1)
 }
 
+const GALLERY_PREFIX = 'gallery-submissions/'
+
+function sessionKeyPrefix(queueId: string): string {
+  return `sessions/${queueId}/`
+}
+
+/** Reject path traversal and keys outside the session namespace. */
+export function isAllowedSessionObjectKey(queueId: string, objectKey: string): boolean {
+  const key = objectKey.trim()
+  if (!key || key.includes('..')) return false
+  if (key.startsWith(GALLERY_PREFIX)) return false
+  const prefix = sessionKeyPrefix(queueId)
+  if (key.startsWith(prefix)) return true
+  // Legacy flat keys: queueId or queueId + suffix only.
+  const suffix = (process.env.R2_SESSION_OBJECT_SUFFIX ?? '').trim()
+  const legacy = suffix ? `${queueId}${suffix}` : queueId
+  return key === legacy || key === queueId
+}
+
 export async function upsertR2ObjectKey(queueId: string, objectKey: string): Promise<void> {
+  if (!isAllowedSessionObjectKey(queueId, objectKey)) {
+    throw new Error('Invalid R2 object key for session')
+  }
   const current = ((await kvGetJson<MappingPayload>(KEY)) ?? { byQueueId: {} }) as MappingPayload
   current.byQueueId[queueId] = objectKey
   await kvSetJson(KEY, current)
 }
 
 export async function upsertR2PreviewObjectKey(queueId: string, objectKey: string): Promise<void> {
+  if (!isAllowedSessionObjectKey(queueId, objectKey)) {
+    throw new Error('Invalid R2 preview object key for session')
+  }
   const current = ((await kvGetJson<MappingPayload>(PREVIEW_KEY)) ?? { byQueueId: {} }) as MappingPayload
   current.byQueueId[queueId] = objectKey
   await kvSetJson(PREVIEW_KEY, current)
@@ -130,7 +155,16 @@ export async function hasR2PreviewObjectForQueueId(queueId: string): Promise<boo
 export async function buildSignedDownloadUrl(queueId: string, overrideObjectKey?: string): Promise<string | null> {
   if (!r2Enabled()) return null
 
-  const objectKey = (overrideObjectKey ?? (await getR2ObjectKey(queueId))).trim()
+  const mapped = (await getR2ObjectKey(queueId)).trim()
+  let objectKey = mapped
+  if (overrideObjectKey?.trim()) {
+    const candidate = overrideObjectKey.trim()
+    if (!isAllowedSessionObjectKey(queueId, candidate)) return null
+    if (candidate !== mapped && !candidate.startsWith(sessionKeyPrefix(queueId))) {
+      return null
+    }
+    objectKey = candidate
+  }
   if (!objectKey) return null
   if (!(await objectExists(objectKey))) return null
 

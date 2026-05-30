@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { logMissingProductionSecret, observatorySecretConfigured } from '@/lib/production-secrets'
 
 /**
  * When `NINA_MOUNT_TELEMETRY_SECRET` is set, POST/GET require one of:
@@ -36,7 +37,13 @@ export function mountTelemetryAuthorized(request: NextRequest): boolean {
   const secret = bearerSecret()
   const basicPass = basicPassword()
 
-  if (!secret && !basicPass) return true
+  if (!secret && !basicPass) {
+    if (!observatorySecretConfigured(undefined)) {
+      logMissingProductionSecret('NINA_MOUNT_TELEMETRY_SECRET or NINA_MOUNT_TELEMETRY_BASIC_PASSWORD')
+      return false
+    }
+    return true
+  }
 
   if (secret) {
     const auth = request.headers.get('authorization')

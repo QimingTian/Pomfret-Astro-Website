@@ -1,51 +1,27 @@
 import { NextRequest } from 'next/server'
 
-import { appendAuditLog } from '@/lib/imaging-audit-log'
-import { purgeExpiredProjectAssets } from '@/lib/imaging-project-retention'
-import { boardPurgeCompletedOlderThan } from '@/lib/imaging-session-board'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
-import { removePreviewImage } from '@/lib/imaging-preview-store'
-import { deleteR2ObjectForQueueId } from '@/lib/r2-session-download'
+import { cronAuthorized } from '@/lib/cron-auth'
+import {
+  runImagingRetentionCleanup,
+  runImagingScheduleMaintenance,
+} from '@/lib/imaging-session-maintenance'
 
 export const runtime = 'nodejs'
-
-const RETENTION_MS = 48 * 60 * 60 * 1000
 
 export function OPTIONS() {
   return imagingCorsOptions()
 }
 
-function cronAuthorized(request: NextRequest): boolean {
-  const expected = process.env.CRON_SECRET
-  if (!expected) return true
-  const auth = request.headers.get('authorization')
-  return auth === `Bearer ${expected}`
-}
-
-/** Vercel Cron: purge completed sessions older than 48 hours. */
+/** Vercel Cron: maintenance + purge completed sessions older than 48 hours. */
 export async function GET(request: NextRequest) {
   if (!cronAuthorized(request)) {
     return withImagingCors({ ok: false as const, error: 'Unauthorized' }, 401)
   }
-  const purgedBoardIds = await boardPurgeCompletedOlderThan(RETENTION_MS)
-  for (const queueId of purgedBoardIds) {
-    await deleteR2ObjectForQueueId(queueId)
-    await removePreviewImage(queueId)
-    void appendAuditLog({
-      kind: 'queue.deleted',
-      message: `Session ${queueId} deleted by daily cron retention cleanup.`,
-      detail: { id: queueId, source: 'cron_retention_48h' },
-    })
-  }
-  const purgedProjectIds = await purgeExpiredProjectAssets(RETENTION_MS)
-  for (const queueId of purgedProjectIds) {
-    void appendAuditLog({
-      kind: 'queue.deleted',
-      message: `Project assets ${queueId} deleted by cron retention after project completion.`,
-      detail: { id: queueId, source: 'cron_retention_48h_project' },
-    })
-  }
-  const purgedIds = Array.from(new Set([...purgedBoardIds, ...purgedProjectIds]))
+
+  await runImagingScheduleMaintenance()
+  const purgedIds = await runImagingRetentionCleanup('cron_retention_48h')
+
   return withImagingCors({
     ok: true as const,
     purged: purgedIds.length,

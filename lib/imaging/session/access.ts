@@ -1,4 +1,5 @@
 import type { NextRequest } from 'next/server'
+import { checkSessionPasswordRateLimit } from '@/lib/auth-rate-limit'
 import { getCurrentUser } from '@/lib/member-auth'
 import { isAdminUser, normalizeMemberEmail } from '@/lib/member-store'
 import { getProjectById, getProjectByNightSubId } from '@/lib/imaging-project-store'
@@ -98,6 +99,12 @@ export async function authorizeImagingSession(
   if (!providedPassword || providedPassword.trim() === '') {
     return { ok: false, status: 401, error: 'Session password required' }
   }
+
+  const allowed = await checkSessionPasswordRateLimit(request, sessionId)
+  if (!allowed) {
+    return { ok: false, status: 429, error: 'Too many password attempts. Try again later.' }
+  }
+
   const isValid = await verifySessionPasswordHash(providedPassword, refs.sessionPasswordHash!)
   if (!isValid) {
     return { ok: false, status: 403, error: 'Invalid session password' }

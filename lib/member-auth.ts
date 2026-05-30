@@ -15,8 +15,8 @@ import {
 export const MEMBER_SESSION_COOKIE = 'pomfret_session'
 
 const SESSION_KEY_PREFIX = 'member-session:'
-/** Persists in the browser until the user logs out. */
-const PERSISTENT_SESSION_MS = 365 * 24 * 60 * 60 * 1000
+/** Persists in the browser until logout (90 days). */
+const PERSISTENT_SESSION_MS = 90 * 24 * 60 * 60 * 1000
 
 type SessionPayload = {
   userId: string

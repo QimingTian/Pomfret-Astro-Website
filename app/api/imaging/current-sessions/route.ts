@@ -1,25 +1,18 @@
 import type { NextRequest } from 'next/server'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import { getCurrentUser } from '@/lib/member-auth'
-import { appendAuditLog } from '@/lib/imaging-audit-log'
 import {
   effectiveProjectStatus,
-  compactStaleProjectBoardRows,
-  expireMissedScheduledProjectNights,
   listProjects,
   tonightDurationSecondsFromPlans,
   type ImagingProject,
   type ProjectNight,
 } from '@/lib/imaging-project-store'
 import { projectFrameCounts } from '@/lib/imaging-total-frames'
-import { boardEnsureScheduleBarForTerminal, boardPurgeCompletedOlderThan, listBoardEntries } from '@/lib/imaging-session-board'
-import { listAll, toPublicImagingRequest, type CreateImagingInput } from '@/lib/imaging-queue-store'
-import { purgeExpiredProjectAssets } from '@/lib/imaging-project-retention'
-import { reconcilePendingScheduleStatus } from '@/lib/imaging-queue-reconcile'
-import { deleteR2ObjectForQueueId, hasR2ObjectForQueueId } from '@/lib/r2-session-download'
-
-const RETENTION_MS = 48 * 60 * 60 * 1000
-import { hasPreviewImage, removePreviewImage } from '@/lib/imaging-preview-store'
+import { listBoardEntries } from '@/lib/imaging-session-board'
+import { listAll, toPublicImagingRequest } from '@/lib/imaging-queue-store'
+import { hasR2ObjectForQueueId } from '@/lib/r2-session-download'
+import { hasPreviewImage } from '@/lib/imaging-preview-store'
 
 export const runtime = 'nodejs'
 
@@ -28,8 +21,8 @@ export function OPTIONS() {
 }
 
 /**
- * Queue rows (e.g. pending) + board rows (in_progress / completed after NINA download).
- * NINA still uses GET /api/imaging/queue (pending) and GET /api/imaging/nina-sequence (consume).
+ * Read-only inventory for Remote dashboard. Side-effect maintenance (retention, reconcile)
+ * runs via Vercel cron and observatory agent only — see lib/imaging-session-maintenance.ts.
  */
 function redactContactFields<T extends { email?: string | null; firstName?: string | null; lastName?: string | null }>(
   row: T,
@@ -43,49 +36,8 @@ export async function GET(request: NextRequest) {
   const viewer = await getCurrentUser(request)
   const includeContact = viewer != null
 
-  await reconcilePendingScheduleStatus()
-  await expireMissedScheduledProjectNights()
-  const prunedBoardIds = await compactStaleProjectBoardRows()
-  for (const id of prunedBoardIds) {
-    void appendAuditLog({
-      kind: 'queue.deleted',
-      message: `Removed stale project board row ${id} (project record missing).`,
-      detail: { id, source: 'compact_stale_project_board' },
-    })
-  }
-
-  const purgedBoardIds = await boardPurgeCompletedOlderThan(RETENTION_MS)
-  for (const queueId of purgedBoardIds) {
-    await deleteR2ObjectForQueueId(queueId)
-    await removePreviewImage(queueId)
-    void appendAuditLog({
-      kind: 'queue.deleted',
-      message: `Session ${queueId} deleted by 48h retention trigger (current-sessions refresh).`,
-      detail: { id: queueId, source: 'retention_48h_current_sessions' },
-    })
-  }
-  const purgedProjectIds = await purgeExpiredProjectAssets(RETENTION_MS)
-  for (const queueId of purgedProjectIds) {
-    void appendAuditLog({
-      kind: 'queue.deleted',
-      message: `Project assets ${queueId} deleted by 48h retention after project completion.`,
-      detail: { id: queueId, source: 'retention_48h_project_complete' },
-    })
-  }
-
   const queue = await listAll()
   const board = await listBoardEntries()
-
-  const boardNeedsBar = board.filter(
-    (b) =>
-      (b.status === 'completed' || b.status === 'failed') &&
-      !(typeof b.scheduleBarStartMs === 'number' && typeof b.scheduleBarEndMs === 'number')
-  )
-  if (boardNeedsBar.length > 0) {
-    await Promise.all(boardNeedsBar.map((b) => boardEnsureScheduleBarForTerminal(b.id)))
-  }
-
-  const boardAfterBackfill = boardNeedsBar.length > 0 ? await listBoardEntries() : board
 
   type Row = {
     id: string
@@ -164,8 +116,8 @@ export async function GET(request: NextRequest) {
   const projects = await listProjects()
   const projectById = new Map(projects.map((p) => [p.id, p]))
 
-  function projectRow(p: ImagingProject, queueStatus?: string): Row {
-    const boardEntry = boardAfterBackfill.find((b) => b.id === p.id)
+  function projectRow(p: ImagingProject): Row {
+    const boardEntry = board.find((b) => b.id === p.id)
     const status = effectiveProjectStatus(p)
     const { total: projectFramesTotal, captured: projectFramesCaptured } = projectFrameCounts(p)
     return {
@@ -216,7 +168,7 @@ export async function GET(request: NextRequest) {
     queueIds.add(p.id)
     const project = projectById.get(p.id)
     if (project) {
-      sessions.push(projectRow(project, p.status))
+      sessions.push(projectRow(project))
       continue
     }
     sessions.push({
@@ -252,13 +204,11 @@ export async function GET(request: NextRequest) {
 
   for (const p of projects) {
     if (queueIds.has(p.id)) continue
-    // Current Sessions is an inventory view: show every non-deleted project record
-    // regardless of board/onBoard status.
     queueIds.add(p.id)
     sessions.push(projectRow(p))
   }
 
-  for (const b of boardAfterBackfill) {
+  for (const b of board) {
     if (!queueIds.has(b.id)) {
       if (projectById.has(b.id)) continue
       sessions.push({

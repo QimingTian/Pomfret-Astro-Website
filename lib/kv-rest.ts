@@ -64,3 +64,19 @@ export async function kvDel(key: string): Promise<boolean> {
 export function kvEnabled(): boolean {
   return enabled()
 }
+
+/** Increment a counter with TTL (sliding window rate limit). Returns new count. */
+export async function kvIncrWithExpire(key: string, windowSec: number): Promise<number | undefined> {
+  if (!enabled()) return undefined
+  try {
+    const count = await redisCommand('INCR', key)
+    if (count === 1) {
+      await redisCommand('EXPIRE', key, windowSec)
+    }
+    if (typeof count === 'number') return count
+    if (typeof count === 'string') return Number.parseInt(count, 10)
+    return undefined
+  } catch {
+    return undefined
+  }
+}

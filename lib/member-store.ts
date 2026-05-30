@@ -2,6 +2,7 @@ import crypto from 'crypto'
 
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 import { hashSessionPassword, verifySessionPasswordHash } from '@/lib/session-password'
+import { isProductionRuntime, logMissingProductionSecret } from '@/lib/production-secrets'
 
 export type MemberRole = 'member' | 'admin'
 
@@ -17,6 +18,12 @@ export type MemberUser = {
   role: MemberRole
   createdAt: string
   updatedAt: string
+  /** ISO timestamp when email was verified; null until verified. */
+  emailVerifiedAt?: string | null
+  /** ISO timestamp when admin approved imaging (non-pomfret) or auto on verify (pomfret). */
+  imagingApprovedAt?: string | null
+  /** Set when admin rejects imaging access. */
+  imagingRejectedAt?: string | null
 }
 
 export type PublicMemberUser = {
@@ -27,6 +34,10 @@ export type PublicMemberUser = {
   username: string
   role: MemberRole
   createdAt: string
+  emailVerified: boolean
+  imagingApproved: boolean
+  imagingPending: boolean
+  imagingRejected: boolean
 }
 
 const USERS_KEY = 'member-users'
@@ -70,8 +81,16 @@ export function normalizeMemberUsername(username: string): string {
   return username.trim().toLowerCase()
 }
 
+export function isPomfretOrgEmail(email: string): boolean {
+  return normalizeMemberEmail(email).endsWith('@pomfret.org')
+}
+
 function bootstrapAdminEmails(): Set<string> {
   const configured = process.env.BOOTSTRAP_ADMIN_EMAILS?.trim()
+  if (isProductionRuntime() && !configured) {
+    logMissingProductionSecret('BOOTSTRAP_ADMIN_EMAILS')
+    return new Set()
+  }
   const raw = configured && configured.length > 0 ? configured : 'qtian.28@pomfret.org'
   return new Set(
     raw
@@ -120,6 +139,19 @@ function hydrateLegacyUser(raw: Record<string, unknown>): MemberUser | null {
     role: raw.role,
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString(),
     updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : new Date().toISOString(),
+    emailVerifiedAt:
+      typeof raw.emailVerifiedAt === 'string'
+        ? raw.emailVerifiedAt
+        : isPomfretOrgEmail(raw.email) || raw.role === 'admin'
+          ? new Date().toISOString()
+          : null,
+    imagingApprovedAt:
+      typeof raw.imagingApprovedAt === 'string'
+        ? raw.imagingApprovedAt
+        : isPomfretOrgEmail(raw.email) || raw.role === 'admin'
+          ? new Date().toISOString()
+          : null,
+    imagingRejectedAt: typeof raw.imagingRejectedAt === 'string' ? raw.imagingRejectedAt : null,
   }
 }
 
@@ -141,6 +173,11 @@ export async function syncBootstrapAdminRole(user: MemberUser): Promise<MemberUs
 }
 
 function toPublicUser(u: MemberUser): PublicMemberUser {
+  const emailVerified = Boolean(u.emailVerifiedAt)
+  const imagingRejected = Boolean(u.imagingRejectedAt)
+  const imagingApproved = Boolean(u.imagingApprovedAt) && !imagingRejected
+  const imagingPending =
+    emailVerified && !imagingApproved && !imagingRejected && !isPomfretOrgEmail(u.email)
   return {
     id: u.id,
     email: u.email,
@@ -149,6 +186,10 @@ function toPublicUser(u: MemberUser): PublicMemberUser {
     username: u.username,
     role: u.role,
     createdAt: u.createdAt,
+    emailVerified,
+    imagingApproved,
+    imagingPending,
+    imagingRejected,
   }
 }
 
@@ -281,6 +322,9 @@ export async function createMember(input: {
     role: roleForNewUser(email),
     createdAt: now,
     updatedAt: now,
+    emailVerifiedAt: null,
+    imagingApprovedAt: null,
+    imagingRejectedAt: null,
   }
 
   const users = await readUsers()
@@ -355,13 +399,17 @@ export function memberLevelLabel(role: MemberRole): string {
   return role === 'admin' ? 'Admin' : 'Member'
 }
 
-/** Admin directory: profile fields only (no password or hash). */
+/** Admin directory: profile + access flags (no password). */
 export type AdminMemberDirectoryEntry = {
   id: string
   firstName: string
   lastName: string
   email: string
   role: MemberRole
+  emailVerified: boolean
+  imagingApproved: boolean
+  imagingPending: boolean
+  imagingRejected: boolean
 }
 
 export async function listMembersForAdminDirectory(): Promise<AdminMemberDirectoryEntry[]> {
@@ -373,6 +421,14 @@ export async function listMembersForAdminDirectory(): Promise<AdminMemberDirecto
       lastName: u.lastName,
       email: u.email,
       role: u.role,
+      emailVerified: Boolean(u.emailVerifiedAt),
+      imagingApproved: Boolean(u.imagingApprovedAt) && !u.imagingRejectedAt,
+      imagingPending:
+        Boolean(u.emailVerifiedAt) &&
+        !u.imagingApprovedAt &&
+        !u.imagingRejectedAt &&
+        !isPomfretOrgEmail(u.email),
+      imagingRejected: Boolean(u.imagingRejectedAt),
     }))
     .sort((a, b) => a.email.localeCompare(b.email))
 }
@@ -424,6 +480,57 @@ export async function setMemberAsAdmin(
   }
 
   users[idx] = { ...target, role: 'admin', updatedAt: new Date().toISOString() }
+  await writeUsers(users)
+  return { ok: true }
+}
+
+export async function markMemberEmailVerified(userId: string): Promise<MemberUser | null> {
+  const users = await readUsers()
+  const idx = users.findIndex((u) => u.id === userId)
+  if (idx < 0) return null
+  const now = new Date().toISOString()
+  const user = users[idx]!
+  const updated: MemberUser = {
+    ...user,
+    emailVerifiedAt: now,
+    updatedAt: now,
+    ...(isPomfretOrgEmail(user.email) && !user.imagingRejectedAt
+      ? { imagingApprovedAt: user.imagingApprovedAt ?? now }
+      : {}),
+  }
+  users[idx] = updated
+  await writeUsers(users)
+  return updated
+}
+
+export async function setMemberImagingApproval(
+  targetUserId: string,
+  action: 'approve' | 'reject'
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!targetUserId) return { ok: false, error: 'Member id is required.' }
+  const users = await readUsers()
+  const idx = users.findIndex((u) => u.id === targetUserId)
+  if (idx < 0) return { ok: false, error: 'Member not found.' }
+  const target = users[idx]!
+  if (!target.emailVerifiedAt) {
+    return { ok: false, error: 'Member must verify email before imaging approval.' }
+  }
+  const now = new Date().toISOString()
+  if (action === 'approve') {
+    users[idx] = {
+      ...target,
+      imagingApprovedAt: now,
+      imagingRejectedAt: null,
+      updatedAt: now,
+    }
+  } else {
+    users[idx] = {
+      ...target,
+      imagingApprovedAt: null,
+      imagingRejectedAt: now,
+      updatedAt: now,
+    }
+  }
   await writeUsers(users)
   return { ok: true }
 }

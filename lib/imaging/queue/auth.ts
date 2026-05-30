@@ -1,6 +1,7 @@
 import { headers } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/member-auth'
+import { logMissingProductionSecret, observatorySecretConfigured } from '@/lib/production-secrets'
 
 /** Fallback for tools without an `Origin` header (e.g. NINA HTTP client). */
 export const imagingCorsHeaders = {
@@ -67,12 +68,25 @@ export function withImagingCors<T extends object>(
   })
 }
 
-/** When IMAGING_QUEUE_SECRET is set, all queue routes require Authorization: Bearer <secret>. */
+/** Observatory Bearer secret. Production fails closed when IMAGING_QUEUE_SECRET is unset. */
 export function imagingQueueAuthorized(request: NextRequest): boolean {
-  const secret = process.env.IMAGING_QUEUE_SECRET
-  if (!secret) return true
+  const secret = process.env.IMAGING_QUEUE_SECRET?.trim()
+  if (!secret) {
+    if (!observatorySecretConfigured(secret)) {
+      logMissingProductionSecret('IMAGING_QUEUE_SECRET')
+      return false
+    }
+    return true
+  }
   const auth = request.headers.get('authorization')
   return auth === `Bearer ${secret}`
+}
+
+/** Member cookie, admin, or observatory Bearer. */
+export async function imagingQueueOrMemberAuthorized(request: NextRequest): Promise<boolean> {
+  if (imagingQueueAuthorized(request)) return true
+  const user = await getCurrentUser(request)
+  return user != null
 }
 
 export function imagingUnauthorized() {

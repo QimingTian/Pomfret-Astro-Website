@@ -30,7 +30,19 @@ import imaging_drive
 import observatory_solar as obs_solar
 
 app = Flask(__name__)
-CORS(app)
+CORS(
+    app,
+    resources={
+        r"/*": {
+            "origins": [
+                "https://www.pomfretastro.org",
+                "https://pomfretastro.org",
+                "http://localhost:3000",
+                "http://127.0.0.1:3000",
+            ]
+        }
+    },
+)
 
 # Load ASI Camera library
 asi_lib = None

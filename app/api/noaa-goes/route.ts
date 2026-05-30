@@ -1,11 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+const ALLOWED_HOST = 'cdn.star.nesdis.noaa.gov'
+const DEFAULT_GOES_PATH = '/GOES19/ABI/CONUS/GEOCOLOR/GOES19-CONUS-GEOCOLOR-625x375.gif'
+
+function resolveNoaaGoesUrl(raw: string | null): string | null {
+  const fallback = `https://${ALLOWED_HOST}${DEFAULT_GOES_PATH}`
+  if (!raw?.trim()) return fallback
+
+  let parsed: URL
+  try {
+    parsed = new URL(raw.trim())
+  } catch {
+    return null
+  }
+  if (parsed.protocol !== 'https:') return null
+  if (parsed.hostname.toLowerCase() !== ALLOWED_HOST) return null
+  if (!parsed.pathname.startsWith('/GOES')) return null
+  return parsed.toString()
+}
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams
-  const url = searchParams.get('url')
+  const url = resolveNoaaGoesUrl(searchParams.get('url'))
 
   if (!url) {
-    return NextResponse.json({ error: 'Missing url parameter' }, { status: 400 })
+    return NextResponse.json({ error: 'Invalid or disallowed NOAA GOES URL' }, { status: 400 })
   }
 
   try {
@@ -14,7 +33,7 @@ export async function GET(request: NextRequest) {
         'User-Agent': 'Pomfret Observatory/1.0 (Web)',
       },
       cache: 'no-store',
-      redirect: 'follow',
+      redirect: 'error',
     })
 
     if (!response.ok) {
@@ -30,19 +49,14 @@ export async function GET(request: NextRequest) {
 
     if (imageBuffer.byteLength === 0) {
       console.error('NOAA GOES API: Empty image buffer')
-      return NextResponse.json(
-        { error: 'Empty image data' },
-        { status: 500 }
-      )
+      return NextResponse.json({ error: 'Empty image data' }, { status: 500 })
     }
-
-    console.log(`NOAA GOES API: Successfully fetched image, size: ${imageBuffer.byteLength} bytes, type: ${contentType}`)
 
     return new NextResponse(imageBuffer, {
       status: 200,
       headers: {
         'Content-Type': contentType,
-        'Cache-Control': 'public, max-age=600', // Cache for 10 minutes
+        'Cache-Control': 'public, max-age=600',
         'Access-Control-Allow-Origin': '*',
       },
     })
@@ -54,4 +68,3 @@ export async function GET(request: NextRequest) {
     )
   }
 }
-

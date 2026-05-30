@@ -38,6 +38,29 @@ export function AccountInfoSection({
   const [newPassword, setNewPassword] = useState('')
   const [passwordError, setPasswordError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [verifyMsg, setVerifyMsg] = useState<string | null>(null)
+  const [verifySending, setVerifySending] = useState(false)
+
+  async function resendVerification() {
+    setVerifySending(true)
+    setVerifyMsg(null)
+    try {
+      const res = await fetch('/api/auth/verify-email', {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || data?.ok !== true) {
+        setVerifyMsg(typeof data.error === 'string' ? data.error : 'Could not send email.')
+        return
+      }
+      setVerifyMsg('Verification email sent. Check your inbox.')
+    } catch {
+      setVerifyMsg('Could not send email.')
+    } finally {
+      setVerifySending(false)
+    }
+  }
 
   const closePasswordModal = useCallback(() => {
     setPasswordModalOpen(false)
@@ -92,6 +115,29 @@ export function AccountInfoSection({
 
   const body = (
     <>
+      {!user.emailVerified ? (
+        <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-950/30 px-4 py-3 text-sm text-amber-100">
+          <p>Verify your email to use imaging features.</p>
+          <button
+            type="button"
+            disabled={verifySending}
+            onClick={() => void resendVerification()}
+            className={`${actionButtonClass} mt-2`}
+          >
+            {verifySending ? 'Sending…' : 'Resend verification email'}
+          </button>
+          {verifyMsg ? <p className="mt-2 text-xs text-amber-200/90">{verifyMsg}</p> : null}
+        </div>
+      ) : user.imagingPending ? (
+        <div className="mb-4 rounded-lg border border-sky-500/40 bg-sky-950/30 px-4 py-3 text-sm text-sky-100">
+          Imaging access is pending administrator approval for non-@pomfret.org accounts.
+        </div>
+      ) : user.imagingRejected ? (
+        <div className="mb-4 rounded-lg border border-red-500/40 bg-red-950/30 px-4 py-3 text-sm text-red-200">
+          Imaging access was not approved for this account. Contact the observatory team.
+        </div>
+      ) : null}
+
       <div className="flex w-full flex-wrap items-end justify-between gap-x-6 gap-y-2 sm:gap-x-8 lg:gap-x-10">
         <div className="flex min-w-0 flex-1 flex-wrap items-end gap-x-6 gap-y-2 sm:gap-x-8 lg:gap-x-10">
           <InfoRow label="Email" value={user.email} />

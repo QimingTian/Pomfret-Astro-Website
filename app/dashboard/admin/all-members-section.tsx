@@ -10,6 +10,10 @@ type Row = {
   lastName: string
   email: string
   role: MemberRole
+  emailVerified: boolean
+  imagingApproved: boolean
+  imagingPending: boolean
+  imagingRejected: boolean
 }
 
 export function AllMembersSection({ className = '' }: { className?: string }) {
@@ -19,6 +23,7 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
   const [error, setError] = useState<string | null>(null)
   const [removingId, setRemovingId] = useState<string | null>(null)
   const [promotingId, setPromotingId] = useState<string | null>(null)
+  const [imagingActionId, setImagingActionId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -70,6 +75,37 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
       setError('Could not update member.')
     } finally {
       setPromotingId(null)
+    }
+  }
+
+  async function setImagingAccess(row: Row, action: 'approve' | 'reject') {
+    const label = action === 'approve' ? 'approve imaging for' : 'reject imaging for'
+    const name = [row.firstName, row.lastName].filter(Boolean).join(' ').trim() || row.email
+    if (!window.confirm(`${label} “${name}”?`)) return
+    setImagingActionId(row.id)
+    setError(null)
+    try {
+      const res = await fetch('/api/admin/members', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: row.id, imagingAction: action }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || data?.ok !== true) {
+        setError(typeof data.error === 'string' ? data.error : 'Could not update imaging access.')
+        return
+      }
+      if (Array.isArray(data.members)) {
+        setMembers(data.members as Row[])
+        setTotal(typeof data.total === 'number' ? data.total : (data.members as Row[]).length)
+      } else {
+        await load()
+      }
+    } catch {
+      setError('Could not update imaging access.')
+    } finally {
+      setImagingActionId(null)
     }
   }
 
@@ -127,7 +163,17 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
             const name = [m.firstName, m.lastName].filter(Boolean).join(' ').trim() || '—'
             const busyRemove = removingId === m.id
             const busyPromote = promotingId === m.id
-            const busy = busyRemove || busyPromote
+            const busyImaging = imagingActionId === m.id
+            const busy = busyRemove || busyPromote || busyImaging
+            const accessLabel = m.imagingApproved
+              ? 'Imaging OK'
+              : m.imagingPending
+                ? 'Imaging pending'
+                : m.imagingRejected
+                  ? 'Imaging rejected'
+                  : m.emailVerified
+                    ? 'Email verified'
+                    : 'Email unverified'
             return (
               <li
                 key={m.id}
@@ -139,9 +185,31 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
                   <span className="break-all">{m.email}</span>
                   <span className="mx-2">·</span>
                   <span>{memberLevelLabel(m.role)}</span>
+                  <span className="mx-2">·</span>
+                  <span className="text-gray-400">{accessLabel}</span>
                 </p>
                 {m.role === 'member' ? (
                   <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    {m.imagingPending ? (
+                      <>
+                        <button
+                          type="button"
+                          disabled={busy || loading}
+                          onClick={() => void setImagingAccess(m, 'approve')}
+                          className="rounded-full border border-emerald-500/50 px-3 py-1 text-xs text-emerald-300 disabled:opacity-40"
+                        >
+                          {busyImaging ? '…' : 'Approve imaging'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy || loading}
+                          onClick={() => void setImagingAccess(m, 'reject')}
+                          className="rounded-full border border-amber-500/50 px-3 py-1 text-xs text-amber-200 disabled:opacity-40"
+                        >
+                          Reject
+                        </button>
+                      </>
+                    ) : null}
                     <button
                       type="button"
                       disabled={busy || loading}

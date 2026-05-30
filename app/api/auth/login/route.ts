@@ -1,15 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { authRateLimitKey, checkAuthRateLimit } from '@/lib/auth-rate-limit'
-import {
-  buildSessionCookie,
-  createMemberSession,
-} from '@/lib/member-auth'
+import { checkAuthRateLimitAsync } from '@/lib/auth-rate-limit'
+import { buildSessionCookie, createMemberSession } from '@/lib/member-auth'
 import { toPublicMemberUser, verifyMemberCredentials } from '@/lib/member-store'
 
 export const runtime = 'nodejs'
 
 export async function POST(request: NextRequest) {
-  if (!checkAuthRateLimit(authRateLimitKey(request, 'login'))) {
+  if (!(await checkAuthRateLimitAsync(request, 'login', 20))) {
     return NextResponse.json(
       { ok: false, error: 'Too many login attempts. Try again later.' },
       { status: 429 }

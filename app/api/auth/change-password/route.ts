@@ -1,16 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { authRateLimitKey, checkAuthRateLimit } from '@/lib/auth-rate-limit'
+import { checkAuthRateLimitAsync } from '@/lib/auth-rate-limit'
+import { isSameSiteMutation } from '@/lib/csrf-origin'
 import { requireUser } from '@/lib/member-auth'
 import { updateMemberPassword, verifyMemberPassword } from '@/lib/member-store'
 
 export const runtime = 'nodejs'
 
 export async function POST(request: NextRequest) {
-  if (!checkAuthRateLimit(authRateLimitKey(request, 'change-password'), 15)) {
+  if (!(await checkAuthRateLimitAsync(request, 'change-password', 15))) {
     return NextResponse.json(
       { ok: false, error: 'Too many attempts. Try again later.' },
       { status: 429 }
     )
+  }
+
+  if (!isSameSiteMutation(request)) {
+    return NextResponse.json({ ok: false, error: 'Invalid request origin.' }, { status: 403 })
   }
 
   const auth = await requireUser(request)

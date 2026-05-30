@@ -50,7 +50,6 @@ function nasaMoonImageUrl(when: Date): string {
 
 function NOAAGoesCloudMap() {
   const store = useAppStore()
-  const imageURL = 'https://cdn.star.nesdis.noaa.gov/GOES19/ABI/CONUS/GEOCOLOR/GOES19-CONUS-GEOCOLOR-625x375.gif'
   // Start at 0 so SSR and first client paint produce identical markup. After mount we
   // bump to a real timestamp to bust cache.
   const [refreshKey, setRefreshKey] = useState(0)
@@ -74,7 +73,7 @@ function NOAAGoesCloudMap() {
       <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-6">Cloud Map</h1>
       <div className="relative w-full rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-800" style={{ aspectRatio: '4 / 3' }}>
         <img
-          src={`/api/noaa-goes?url=${encodeURIComponent(imageURL)}&t=${refreshKey}`}
+          src={`/api/noaa-goes?t=${refreshKey}`}
           alt="NOAA GOES-East Satellite Cloud Map Animation"
           key={refreshKey}
           className="absolute inset-0 h-full w-full object-cover"

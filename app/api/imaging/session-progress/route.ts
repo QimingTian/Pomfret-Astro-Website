@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { logMissingProductionSecret, observatorySecretConfigured } from '@/lib/production-secrets'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { sendCompletionEmail } from '@/lib/imaging-completion-email'
 import { notifyProjectNightCompletionEmail } from '@/lib/imaging-project-night-email'
@@ -57,7 +58,13 @@ function parseBasicCredentials(authorization: string | null): { user: string; pa
 
 function authorized(request: NextRequest): boolean {
   const expectedPass = authPassword()
-  if (!expectedPass) return true
+  if (!expectedPass) {
+    if (!observatorySecretConfigured(expectedPass)) {
+      logMissingProductionSecret('NINA_SESSION_PROGRESS_BASIC_PASSWORD')
+      return false
+    }
+    return true
+  }
 
   const expectedUser = expectedBasicUser()
   const basic = parseBasicCredentials(request.headers.get('authorization'))

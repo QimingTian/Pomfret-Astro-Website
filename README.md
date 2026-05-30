@@ -626,7 +626,9 @@ website/
 
 **Required production:** `KV_REST_API_URL`, `KV_REST_API_TOKEN`
 
-**Auth:** `BOOTSTRAP_ADMIN_EMAILS` (comma-separated admin emails)
+**Auth:** `BOOTSTRAP_ADMIN_EMAILS` (comma-separated admin emails), `SITE_URL` (verification links)
+
+**Security:** See [SECURITY_SETUP.md](SECURITY_SETUP.md) for production secret checklist and post-deploy verification.
 
 **Imaging:** `IMAGING_QUEUE_SECRET`, `CRON_SECRET`, `IMAGING_R2_WRITE_SECRET`, R2 S3 vars, `NINA_SESSION_PROGRESS_BASIC_*`, `NINA_MOUNT_TELEMETRY_*`
 

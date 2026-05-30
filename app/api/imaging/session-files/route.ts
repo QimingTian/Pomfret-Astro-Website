@@ -89,9 +89,13 @@ export async function POST(request: NextRequest) {
     return withImagingCors({ ok: false as const, error: 'No valid objectKey found in files' }, 400)
   }
 
-  await upsertR2ObjectKey(queueId, chosen)
-  if (previewObjectKey) {
-    await upsertR2PreviewObjectKey(queueId, previewObjectKey)
+  try {
+    await upsertR2ObjectKey(queueId, chosen)
+    if (previewObjectKey) {
+      await upsertR2PreviewObjectKey(queueId, previewObjectKey)
+    }
+  } catch {
+    return withImagingCors({ ok: false as const, error: 'Invalid object key for session' }, 400)
   }
   return withImagingCors({
     ok: true as const,

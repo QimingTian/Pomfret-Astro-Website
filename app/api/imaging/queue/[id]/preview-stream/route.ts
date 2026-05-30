@@ -15,11 +15,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     return new Response(JSON.stringify({ ok: false, error: 'Missing id' }), { status: 400 })
   }
 
-  const requestUrl = new URL(request.url)
-  const providedPassword =
-    request.headers.get('x-session-password')?.trim() ||
-    requestUrl.searchParams.get('password')?.trim() ||
-    null
+  const providedPassword = request.headers.get('x-session-password')?.trim() || null
   const auth = await authorizeImagingSession(request, id, providedPassword)
   if (!auth.ok) {
     return new Response(JSON.stringify({ ok: false, error: auth.error }), { status: auth.status })

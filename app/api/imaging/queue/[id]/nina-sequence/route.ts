@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { imagingCorsHeadersResolved, imagingCorsOptions } from '@/lib/imaging-queue-auth'
+import {
+  imagingCorsHeadersResolved,
+  imagingCorsOptions,
+  imagingQueueOrMemberAuthorized,
+  imagingUnauthorized,
+} from '@/lib/imaging-queue-auth'
 import { getRequestById, VARIABLE_STAR_SESSION_OVERHEAD_SEC } from '@/lib/imaging-queue-store'
 import { buildNinaSequenceJson } from '@/lib/build-nina-sequence-json'
 
@@ -9,8 +14,12 @@ export function OPTIONS() {
   return imagingCorsOptions()
 }
 
-/** Returns the generated NINA sequence JSON for this queue item (same auth as the queue API). */
+/** Returns NINA sequence JSON for this queue item (member or observatory Bearer). */
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+  if (!(await imagingQueueOrMemberAuthorized(request))) {
+    return imagingUnauthorized()
+  }
+
   const id = params.id
   if (!id) {
     return NextResponse.json({ error: 'Missing id' }, { status: 400, headers: imagingCorsHeadersResolved() })

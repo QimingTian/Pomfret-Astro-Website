@@ -1,7 +1,12 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { sendSessionStartedEmail } from '@/lib/imaging-completion-email'
-import { imagingCorsHeadersResolved, imagingCorsOptions } from '@/lib/imaging-queue-auth'
+import {
+  imagingCorsHeadersResolved,
+  imagingCorsOptions,
+  imagingQueueAuthorized,
+  imagingUnauthorized,
+} from '@/lib/imaging-queue-auth'
 import { buildNinaSequenceJson } from '@/lib/build-nina-sequence-json'
 import {
   getActiveOnBoardProject,
@@ -274,7 +279,11 @@ function endNightSequenceJson(queueId: string): string {
  * closed windows, and current target altitude ≥ 30° before handing JSON to NINA. End-night shutdown JSON
  * bypasses observatory readiness; empty nights are offered at nautical dawn only.
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
+  if (!imagingQueueAuthorized(request)) {
+    return imagingUnauthorized()
+  }
+
   await touchObservatoryPoll()
   const now = new Date()
   await expireMissedScheduledProjectNights(now)

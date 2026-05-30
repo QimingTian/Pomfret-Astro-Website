@@ -23,7 +23,7 @@ export default function ContactPage() {
         </article>
         <article className="boxed-fields space-y-3">
           <img src="/lucas.jpg" alt="Lucas Shi" className="h-64 w-full rounded-lg object-cover" />
-          <ContactCard name="Lucas Shi" role="Development Team" email="jshi.29@pomfret.org" />
+          <ContactCard name="Lucas Shi" role="ASC Cloud AI Model Developer" email="jshi.29@pomfret.org" />
         </article>
       </div>
     </div>

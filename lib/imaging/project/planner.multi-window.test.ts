@@ -5,9 +5,9 @@ import {
   mergeAdjacentIntervals,
   planTonightFilterFrames,
   planTonightSubSessions,
-} from './imaging-project-planner'
-import type { ImagingProject } from './imaging-project-store'
-import { getTonightSchedulingWindow } from './sunrise-window'
+} from './planner'
+import type { ImagingProject } from './store'
+import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 
 function mockProject(): ImagingProject {
   return {

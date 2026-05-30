@@ -3,8 +3,8 @@ import test from 'node:test'
 import {
   hasDeliverableTonightSubs,
   isPlannedTonight,
-} from './imaging-tonight-complete'
-import type { ImagingProject } from './imaging-project-store'
+} from './tonight-complete'
+import type { ImagingProject } from '../project/store'
 
 const nightKey = '2026-05-17'
 const nightStartMs = Date.parse('2026-05-17T22:00:00.000Z')

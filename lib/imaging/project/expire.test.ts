@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { projectSubSessionWindowEndMs } from './imaging-project-store'
-import type { ProjectNight } from './imaging-project-store'
+import { projectSubSessionWindowEndMs } from './store'
+import type { ProjectNight } from './store'
 
 test('projectSubSessionWindowEndMs uses planned start plus duration', () => {
   const night: ProjectNight = {

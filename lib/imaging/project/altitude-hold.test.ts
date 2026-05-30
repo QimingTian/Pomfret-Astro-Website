@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { projectAltitudeHoldIntervals } from './imaging-project-altitude-hold'
-import { plannerFreeIntervalsBehindInProgressProject } from './imaging-project-planner'
-import type { ImagingProject } from './imaging-project-store'
-import { getTonightSchedulingWindow } from './sunrise-window'
+import { projectAltitudeHoldIntervals } from './altitude-hold'
+import { plannerFreeIntervalsBehindInProgressProject } from './planner'
+import type { ImagingProject } from './store'
+import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 
 test('plannerFreeIntervalsBehindInProgressProject removes active target >=30° windows', () => {
   const now = new Date('2026-05-17T22:00:00.000Z')

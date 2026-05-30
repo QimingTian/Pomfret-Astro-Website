@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test, { mock } from 'node:test'
-import { computeScheduleInsight, type SchedulePendingRow } from './imaging-queue-schedule-insight'
-import type { TimeInterval } from './tonight-weather-gate'
+import { computeScheduleInsight, type SchedulePendingRow } from './schedule-insight'
+import type { TimeInterval } from '@/lib/tonight-weather-gate'
 
 // Night of 2026-05-31/06-01: moon up (~19°) and ~full near astronomical midnight.
 // Target ra 17.23h, dec 50° sits ~78° from the moon (broadband-blocked, Ha-allowed)

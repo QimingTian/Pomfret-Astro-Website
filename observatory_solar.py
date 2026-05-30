@@ -102,10 +102,10 @@ def is_auto_mode_daytime(now: datetime | None = None) -> bool:
 def auto_mode_target_gain(now: datetime | None = None) -> int:
     """
     Auto mode gain by solar phase (observatory local day, America/New_York):
-    - Civil dawn → sunrise: 80
+    - Nautical dawn → sunrise: 80
     - Sunrise → sunset: 0
-    - Sunset → civil dusk: 80
-    - Civil dusk → next civil dawn: 150
+    - Sunset → nautical dusk: 80
+    - Nautical dusk → next nautical dawn: 150
     """
     if now is None:
         now = datetime.now(timezone.utc)
@@ -115,24 +115,16 @@ def auto_mode_target_gain(now: datetime | None = None) -> int:
         now = now.astimezone(timezone.utc)
 
     local_day = observatory_local_calendar_anchor_utc(now)
-    next_day = local_day + timedelta(days=1)
-    prev_day = local_day - timedelta(days=1)
 
-    civil_dawn = solar_event_utc_for_date(local_day, _ZENITH_CIVIL, is_sunrise=True)
+    nautical_dawn = solar_event_utc_for_date(local_day, _ZENITH_NAUTICAL, is_sunrise=True)
     sunrise = solar_event_utc_for_date(local_day, _ZENITH_SUN, is_sunrise=True)
     sunset = solar_event_utc_for_date(local_day, _ZENITH_SUN, is_sunrise=False)
-    civil_dusk = solar_event_utc_for_date(local_day, _ZENITH_CIVIL, is_sunrise=False)
-    civil_dusk_prev = solar_event_utc_for_date(prev_day, _ZENITH_CIVIL, is_sunrise=False)
+    nautical_dusk = solar_event_utc_for_date(local_day, _ZENITH_NAUTICAL, is_sunrise=False)
 
-    if civil_dawn <= now < sunrise:
+    if nautical_dawn <= now < sunrise:
         return AUTO_MODE_GAIN_TWILIGHT
     if sunrise <= now < sunset:
         return AUTO_MODE_GAIN_DAY
-    if sunset <= now < civil_dusk:
+    if sunset <= now < nautical_dusk:
         return AUTO_MODE_GAIN_TWILIGHT
-    if now >= civil_dusk:
-        return AUTO_MODE_NIGHT_GAIN
-  # Before civil dawn: still previous night (after yesterday's civil dusk)
-    if now >= civil_dusk_prev:
-        return AUTO_MODE_NIGHT_GAIN
     return AUTO_MODE_NIGHT_GAIN

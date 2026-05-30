@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   buildTonightWeatherWindows,
   mergeAdjacentIntervals,
+  planTonightFilterFrames,
   planTonightSubSessions,
 } from './imaging-project-planner'
 import type { ImagingProject } from './imaging-project-store'
@@ -93,6 +94,59 @@ test('planTonightSubSessions can start after predecessor when weather spans a sh
     startMs <= markarianEnd + 60_000,
     `expected start right after Markarian ends, got ${plans[0]!.plannedStartIso}`
   )
+})
+
+function moonBlockedRgbHaProject(): ImagingProject {
+  // Target ~78° from a near-full moon that is up on the night of 2026-05-31/06-01:
+  // broadband (R/G/B) fails moon avoidance, Ha passes.
+  const p = mockProject()
+  p.raHours = 17.23
+  p.decDeg = 50
+  p.filterPlansTotal = [
+    { filterName: 'R', exposureSeconds: 120, count: 10 },
+    { filterName: 'G', exposureSeconds: 120, count: 10 },
+    { filterName: 'B', exposureSeconds: 120, count: 10 },
+    { filterName: 'H', exposureSeconds: 120, count: 10 },
+  ]
+  p.remainingByFilter = p.filterPlansTotal.map((f) => ({
+    filterName: f.filterName,
+    exposureSeconds: f.exposureSeconds,
+    countRemaining: f.count,
+  }))
+  return p
+}
+
+test('planTonightFilterFrames skips moon-blocked broadband and packs only Ha', () => {
+  const project = moonBlockedRgbHaProject()
+  const startMs = Date.parse('2026-06-01T02:15:00.000Z')
+  const endMs = startMs + 3 * 3600_000
+  const { filterPlansTonight } = planTonightFilterFrames(
+    project,
+    startMs,
+    endMs,
+    project.remainingByFilter
+  )
+  assert.deepEqual(
+    filterPlansTonight.map((p) => p.filterName),
+    ['H'],
+    'only Ha should survive moon avoidance for this window'
+  )
+})
+
+test('planTonightFilterFrames does not backfill leftover window with moon-blocked filters', () => {
+  const project = moonBlockedRgbHaProject()
+  const startMs = Date.parse('2026-06-01T02:15:00.000Z')
+  // Window far longer than the Ha frames need; broadband must NOT fill the leftover time.
+  const endMs = startMs + 8 * 3600_000
+  const { filterPlansTonight } = planTonightFilterFrames(
+    project,
+    startMs,
+    endMs,
+    project.remainingByFilter
+  )
+  assert.deepEqual(filterPlansTonight.map((p) => p.filterName), ['H'])
+  const haRow = filterPlansTonight.find((p) => p.filterName === 'H')!
+  assert.equal(haRow.count, 10, 'all remaining Ha frames packed; RGB frames carry over')
 })
 
 test('planTonightSubSessions fills multiple clear spells and leftover time in a spell', () => {

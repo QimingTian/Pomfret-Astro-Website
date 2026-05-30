@@ -4,110 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AllSkyCameraView from '@/components/AllSkyCameraView'
 import { useAppStore } from '@/lib/store'
 import type { WeatherModel } from '@/lib/types'
-import { OBS_LAT_DEG, OBS_LON_DEG } from '@/lib/target-altitude'
+import { moonAltDeg, moonPhaseInfo } from '@/lib/moon-avoidance'
 
 /* ------------------------------------------------------------------ */
-/*  Moon computation helpers                                          */
+/*  Moon display helpers (math lives in lib/moon-avoidance.ts)        */
 /* ------------------------------------------------------------------ */
-
-const DEG2RAD = Math.PI / 180
-const RAD2DEG = 180 / Math.PI
-const SYNODIC_MONTH = 29.530588853
-const NEW_MOON_REF_MS = Date.UTC(2000, 0, 6, 18, 14, 0)
-
-function normDeg(x: number) { let v = x % 360; if (v < 0) v += 360; return v }
-function sinD(d: number) { return Math.sin(d * DEG2RAD) }
-function cosD(d: number) { return Math.cos(d * DEG2RAD) }
-
-/** Low-accuracy solar ecliptic longitude (Meeus Ch. 25, ~0.01° accuracy). */
-function sunEclipticLonDeg(date: Date): number {
-  const jd = date.getTime() / 86400000 + 2440587.5
-  const T = (jd - 2451545.0) / 36525
-  const L0 = normDeg(280.46646 + 36000.76983 * T + 0.0003032 * T * T)
-  const M = normDeg(357.52911 + 35999.05029 * T - 0.0001537 * T * T)
-  const C = (1.9146 - 0.004817 * T) * sinD(M) + 0.019993 * sinD(2 * M) + 0.00029 * sinD(3 * M)
-  return normDeg(L0 + C)
-}
-
-/** Moon ecliptic longitude (same terms used in moonEquatorial). */
-function moonEclipticLonDeg(date: Date): number {
-  const jd = date.getTime() / 86400000 + 2440587.5
-  const T = (jd - 2451545.0) / 36525
-  const L0 = normDeg(218.3165 + 481267.8813 * T)
-  const M  = normDeg(134.9634 + 477198.8676 * T)
-  const M1 = normDeg(357.5291 + 35999.0503 * T)
-  const D  = normDeg(297.8502 + 445267.1115 * T)
-  const F  = normDeg(93.2720 + 483202.0175 * T)
-  return normDeg(
-    L0 + 6.289 * sinD(M) + 1.274 * sinD(2 * D - M) + 0.658 * sinD(2 * D)
-       + 0.214 * sinD(2 * M) - 0.186 * sinD(M1) - 0.114 * sinD(2 * F)
-  )
-}
-
-function moonPhaseInfo(now: Date) {
-  const sunLon = sunEclipticLonDeg(now)
-  const moonLon = moonEclipticLonDeg(now)
-  let elongation = moonLon - sunLon
-  if (elongation < 0) elongation += 360
-
-  const phaseAngleRad = Math.PI - Math.abs(elongation - 180) * DEG2RAD
-  // Not exactly phase angle — use elongation directly for illumination:
-  // illumination = (1 + cos(180° - elongation)) / 2 = (1 - cos(elongation)) / 2
-  const illumination = (1 - cosD(elongation)) / 2
-
-  const ageDays = (((now.getTime() - NEW_MOON_REF_MS) / 86400000) % SYNODIC_MONTH + SYNODIC_MONTH) % SYNODIC_MONTH
-
-  let name: string
-  if (elongation < 22.5) name = 'New Moon'
-  else if (elongation < 82.5) name = 'Waxing Crescent'
-  else if (elongation < 97.5) name = 'First Quarter'
-  else if (elongation < 172.5) name = 'Waxing Gibbous'
-  else if (elongation < 187.5) name = 'Full Moon'
-  else if (elongation < 262.5) name = 'Waning Gibbous'
-  else if (elongation < 277.5) name = 'Last Quarter'
-  else if (elongation < 337.5) name = 'Waning Crescent'
-  else name = 'New Moon'
-
-  const fraction = elongation / 360
-  return { ageDays, fraction, illumination, name, phaseAngleRad }
-}
-
-/** Simplified Meeus low-accuracy lunar position → equatorial RA/Dec. */
-function moonEquatorial(date: Date): { raHours: number; decDeg: number } {
-  const jd = date.getTime() / 86400000 + 2440587.5
-  const T = (jd - 2451545.0) / 36525
-
-  const L0 = normDeg(218.3165 + 481267.8813 * T)
-  const M  = normDeg(134.9634 + 477198.8676 * T)
-  const M1 = normDeg(357.5291 + 35999.0503 * T)
-  const D  = normDeg(297.8502 + 445267.1115 * T)
-  const F  = normDeg(93.2720 + 483202.0175 * T)
-
-  const lon = normDeg(
-    L0 + 6.289 * sinD(M) + 1.274 * sinD(2 * D - M) + 0.658 * sinD(2 * D)
-       + 0.214 * sinD(2 * M) - 0.186 * sinD(M1) - 0.114 * sinD(2 * F)
-  )
-  const lat = 5.128 * sinD(F) + 0.281 * sinD(M + F) + 0.278 * sinD(M - F)
-
-  const obl = 23.4393 - 0.0130 * T
-  const lonR = lon * DEG2RAD, latR = lat * DEG2RAD, oblR = obl * DEG2RAD
-  const ra = Math.atan2(Math.sin(lonR) * Math.cos(oblR) - Math.tan(latR) * Math.sin(oblR), Math.cos(lonR))
-  const dec = Math.asin(Math.sin(latR) * Math.cos(oblR) + Math.cos(latR) * Math.sin(oblR) * Math.sin(lonR))
-
-  return { raHours: normDeg(ra * RAD2DEG) / 15, decDeg: dec * RAD2DEG }
-}
-
-function moonAltDeg(date: Date): number {
-  const { raHours, decDeg } = moonEquatorial(date)
-  const jd = date.getTime() / 86400000 + 2440587.5
-  const T = (jd - 2451545.0) / 36525
-  const gmst = normDeg(280.46061837 + 360.98564736629 * (jd - 2451545.0) + 0.000387933 * T * T - T * T * T / 38710000)
-  const lst = normDeg(gmst + OBS_LON_DEG)
-  let ha = lst - raHours * 15; if (ha > 180) ha -= 360; if (ha < -180) ha += 360
-
-  const sinAlt = sinD(decDeg) * sinD(OBS_LAT_DEG) + cosD(decDeg) * cosD(OBS_LAT_DEG) * cosD(ha)
-  return Math.asin(Math.max(-1, Math.min(1, sinAlt))) * RAD2DEG
-}
 
 function findMoonRiseSet(now: Date): { moonrise: Date | null; moonset: Date | null } {
   const STEP = 5 * 60 * 1000

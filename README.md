@@ -423,6 +423,10 @@ Example: if another session ends at 1:36 AM and weather is clear before and afte
 
 Target must stay **≥ 30°** for **100%** of the scheduled exposure interval (checked in 5-minute steps).
 
+#### Moon avoidance
+
+Each filter must keep a minimum angular separation from the Moon for **100%** of the session window, using the ACP/NINA **Lorentzian** model (separation scales with lunar phase; `lib/moon-avoidance.ts`). Broadband (L/R/G/B) needs the most separation, then OIII, SII, and Ha the least; the requirement relaxes when the Moon is low and drops to zero when it is below the horizon. Normal sessions stay **unscheduled** (not rejected) when any requested filter fails — the Moon moves night to night. In Project Mode, moon-blocked filters are **skipped** for that window (no backfill) and their frames carry to a later night. **Variable-star** sessions are exempt.
+
 #### Queue fairness
 
 1. Pending rows ordered by **`createdAt`** (submission time).

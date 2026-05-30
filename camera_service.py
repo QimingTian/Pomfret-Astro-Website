@@ -278,7 +278,7 @@ def _wait_auto_interval():
 
 
 def _apply_auto_mode_scheduled_gain(now=None):
-    """Auto mode only: pin gain to 0 (nautical dawn–astronomical dark) or 150 (night)."""
+    """Auto mode only: scheduled gain by solar phase (0 / 80 / 150)."""
     if not auto_state['active']:
         return
     if now is None:

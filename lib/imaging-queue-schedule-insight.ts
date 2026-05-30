@@ -8,6 +8,7 @@ import {
 } from '@/lib/target-altitude'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import { weatherPermittedCoverageMs, weatherCoverageOk, type TimeInterval } from '@/lib/tonight-weather-gate'
+import { moonBlockedFilters } from '@/lib/moon-avoidance'
 
 export type { ProjectSubSessionOccupancy }
 
@@ -31,6 +32,8 @@ export type SchedulePendingRow = {
   estimatedDurationSeconds?: number
   status?: string
   plannedStartIso?: string | null
+  /** Variable-star sessions are exempt from moon avoidance. */
+  sequenceTemplate?: 'dso' | 'variable_star'
 }
 
 type FreeInterval = { startMs: number; endMs: number }
@@ -94,6 +97,8 @@ function buildUnscheduledReasons(input: {
   failedByIntervalLength: number
   failedByAltitudeCoverage: number
   failedByWeatherCoverage: number
+  failedByMoon: number
+  moonBlockedFilterNames: string[]
   hasRaDec: boolean
 }): string[] {
   const reasons: string[] = []
@@ -157,6 +162,12 @@ function buildUnscheduledReasons(input: {
   }
   if (input.failedByWeatherCoverage > 0) {
     reasons.push('No remaining slot has weather-permitted coverage >= 80% of session duration.')
+  }
+  if (input.failedByMoon > 0) {
+    const filters = input.moonBlockedFilterNames.length > 0 ? input.moonBlockedFilterNames.join(', ') : 'requested filters'
+    reasons.push(
+      `Moon is too close for filter(s) ${filters} during every otherwise-valid slot tonight (Lorentzian moon avoidance).`
+    )
   }
   if (!input.hasRaDec && input.failedByAltitudeRise === 0 && input.failedByAltitudeCoverage === 0) {
     reasons.push('No RA/Dec on request; altitude rules not applied.')
@@ -308,11 +319,19 @@ export function computeScheduleInsight(
     let failedByIntervalLength = 0
     let failedByAltitudeCoverage = 0
     let failedByWeatherCoverage = 0
+    let failedByMoon = 0
+    const moonBlockedFilterNames = new Set<string>()
     const hasRaDec =
       typeof req.raHours === 'number' &&
       Number.isFinite(req.raHours) &&
       typeof req.decDeg === 'number' &&
       Number.isFinite(req.decDeg)
+    const moonExempt = req.sequenceTemplate === 'variable_star'
+
+    const moonBlockedForWindow = (startMs: number, endMs: number): string[] => {
+      if (moonExempt || !hasRaDec || !req.filterPlans?.length) return []
+      return moonBlockedFilters(req.filterPlans, req.raHours!, req.decDeg!, startMs, endMs)
+    }
 
     const tryStartCandidateMs = (
       interval: { startMs: number; endMs: number },
@@ -340,6 +359,7 @@ export function computeScheduleInsight(
       const weatherCoveragePct = durationMs > 0 ? (weatherCoveredMs / durationMs) * 100 : 0
       if (!weatherCoverageOk(weatherPermittedIntervals, startMs, endMs, 0.8)) return null
       if (hasRaDec && !altitudeSessionCoverageOk(req.raHours!, req.decDeg!, startMs, endMs)) return null
+      if (moonBlockedForWindow(startMs, endMs).length > 0) return null
       return { startMs, endMs, riseAtMs, weatherCoveragePct, baselineStartMs }
     }
 
@@ -394,6 +414,12 @@ export function computeScheduleInsight(
         }
         if (hasRaDec && !altitudeSessionCoverageOk(req.raHours!, req.decDeg!, startMs, endMs)) {
           failedByAltitudeCoverage += 1
+          continue
+        }
+        const blocked = moonBlockedForWindow(startMs, endMs)
+        if (blocked.length > 0) {
+          failedByMoon += 1
+          blocked.forEach((f) => moonBlockedFilterNames.add(f))
         }
       }
     }
@@ -417,6 +443,8 @@ export function computeScheduleInsight(
             failedByIntervalLength,
             failedByAltitudeCoverage,
             failedByWeatherCoverage,
+            failedByMoon,
+            moonBlockedFilterNames: Array.from(moonBlockedFilterNames),
             hasRaDec,
           }),
         }

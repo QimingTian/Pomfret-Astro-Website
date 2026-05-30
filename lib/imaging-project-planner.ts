@@ -39,6 +39,7 @@ import {
   weatherPermittedCoverageMs,
   type TimeInterval,
 } from '@/lib/tonight-weather-gate'
+import { moonFilterSessionOk, normalizeFilterName } from '@/lib/moon-avoidance'
 
 export type ProjectTonightPlan = {
   nightKey: string
@@ -124,6 +125,13 @@ function buildProjectSubSessionScheduleReasons(input: {
   const frameTotal = finalPlans.reduce((s, p) => s + p.count, 0)
   reasons.push(`Frames in this session: ${frameParts.join(', ')} (${frameTotal} exposure(s) total).`)
 
+  const moonBlocked = moonBlockedFiltersForWindow(project, workingRemainingBefore, placedStart, placedEnd)
+  if (moonBlocked.length > 0) {
+    reasons.push(
+      `Moon avoidance: filter(s) ${moonBlocked.join(', ')} skipped for this run (Moon too close); their frames carry to a later night/window.`
+    )
+  }
+
   const altAtStart = currentAltitudeDeg(project.raHours, project.decDeg, new Date(placedStart))
   const riseAt = firstAltitudeAllowedTimeMs(
     project.raHours,
@@ -205,6 +213,12 @@ export function planTonightFilterFrames(
     const countRemaining = row?.countRemaining ?? 0
     if (countRemaining <= 0) continue
 
+    // Skip filters that fail moon avoidance for THIS window. Leftover time is not
+    // backfilled with this filter; its frames carry to a later night/window.
+    if (!moonFilterSessionOk(total.filterName, project.raHours, project.decDeg, usableStartMs, usableEndMs)) {
+      continue
+    }
+
     const exposureMs = total.exposureSeconds * 1000
     const windowMs = Math.max(0, usableEndMs - cursorMs)
     if (windowMs < exposureMs + SESSION_OVERHEAD_MS) break
@@ -224,6 +238,24 @@ export function planTonightFilterFrames(
   const durationMs =
     filterPlansTonight.reduce((s, p) => s + p.count * p.exposureSeconds, 0) * 1000 + SESSION_OVERHEAD_MS
   return { filterPlansTonight, durationMs }
+}
+
+/** Filters with frames still to shoot that fail moon avoidance for [startMs, endMs]. */
+function moonBlockedFiltersForWindow(
+  project: ImagingProject,
+  remaining: FilterRemainingRow[],
+  startMs: number,
+  endMs: number
+): string[] {
+  const blocked: string[] = []
+  for (const total of project.filterPlansTotal) {
+    const row = remaining.find((r) => r.filterName === total.filterName)
+    if ((row?.countRemaining ?? 0) <= 0) continue
+    if (!moonFilterSessionOk(total.filterName, project.raHours, project.decDeg, startMs, endMs)) {
+      blocked.push(normalizeFilterName(total.filterName) || total.filterName)
+    }
+  }
+  return blocked
 }
 
 function minExposureMs(project: ImagingProject): number {
@@ -700,7 +732,18 @@ export function explainWhyNoPlansTonight(
       workingRemaining
     )
     if (draftPlans.length === 0) {
-      reasons.push(`${label}: interval too short for one exposure plus session overhead.`)
+      const moonBlocked = moonBlockedFiltersForWindow(project, workingRemaining, cursorMs, planningEndMs)
+      const remainingFilterCount = project.filterPlansTotal.filter((t) => {
+        const row = workingRemaining.find((r) => r.filterName === t.filterName)
+        return (row?.countRemaining ?? 0) > 0
+      }).length
+      if (moonBlocked.length > 0 && moonBlocked.length >= remainingFilterCount) {
+        reasons.push(
+          `${label}: Moon too close for all remaining filter(s) ${moonBlocked.join(', ')} (Lorentzian moon avoidance).`
+        )
+      } else {
+        reasons.push(`${label}: interval too short for one exposure plus session overhead.`)
+      }
       continue
     }
 

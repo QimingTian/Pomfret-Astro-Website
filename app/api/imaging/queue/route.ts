@@ -292,6 +292,9 @@ export async function POST(request: NextRequest) {
     weatherIntervals.status !== 'ok' ||
     weatherIntervals.globalHardBlocked === true ||
     insight.reasons.some((r) => r.toLowerCase().includes('weather'))
+  // Moon avoidance is transient (the Moon moves night to night): keep the session
+  // pending/unscheduled instead of rejecting it, mirroring the weather posture.
+  const unscheduledByMoon = insight.reasons.some((r) => r.toLowerCase().includes('moon'))
 
   await patchRequestScheduleInsight(result.id, insight)
 
@@ -300,7 +303,8 @@ export async function POST(request: NextRequest) {
     !result.projectMode &&
     isObservatoryReady(obsStatus) &&
     whenClosedBehavior !== 'queue_until_ready' &&
-    !unscheduledByWeather
+    !unscheduledByWeather &&
+    !unscheduledByMoon
   ) {
     await markQueueRejected(result.id, insight.reasons)
     const rejectedRow = await getRequestById(result.id)

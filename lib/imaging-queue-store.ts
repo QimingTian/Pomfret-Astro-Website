@@ -16,6 +16,7 @@ import {
   firstAltitudeAllowedTimeMs,
   requiredAltitudeCoverageMs,
 } from '@/lib/target-altitude'
+import { allFiltersMoonOk } from '@/lib/moon-avoidance'
 
 /** Queue lifecycle: mutually exclusive (no separate scheduleStatus flag). */
 export type ImagingRequestStatus =
@@ -305,7 +306,8 @@ function canFitInIdealNight(
   decDeg: number,
   durationMs: number,
   windowStartMs: number,
-  windowEndMs: number
+  windowEndMs: number,
+  moonFilterPlans?: Array<{ filterName: string }>
 ): boolean {
   if (!Number.isFinite(durationMs) || durationMs <= 0) return false
   if (windowEndMs - windowStartMs < durationMs) return false
@@ -313,14 +315,20 @@ function canFitInIdealNight(
   const STEP_MS = 5 * 60 * 1000
 
   // Search possible starts under ideal conditions: no weather limits, no queue blockers.
-  // Still enforce target >= 30deg for the full session duration (100% altitude coverage).
+  // Still enforce target >= 30deg for the full session duration (100% altitude coverage),
+  // and — when filter plans are supplied — moon avoidance for every filter over the window.
   let cursor = windowStartMs
   while (cursor <= latestStartMs) {
     const startMs = firstAltitudeAllowedTimeMs(raHours, decDeg, cursor, latestStartMs)
     if (startMs == null) return false
     const endMs = startMs + durationMs
     if (endMs > windowEndMs) return false
-    if (altitudeSessionCoverageOk(raHours, decDeg, startMs, endMs)) return true
+    if (
+      altitudeSessionCoverageOk(raHours, decDeg, startMs, endMs) &&
+      (!moonFilterPlans?.length || allFiltersMoonOk(moonFilterPlans, raHours, decDeg, startMs, endMs))
+    ) {
+      return true
+    }
     cursor = startMs + STEP_MS
   }
   return false
@@ -478,6 +486,23 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
       return {
         error:
           'Session has no valid imaging window tonight even under ideal conditions (clear weather and empty schedule). Please shorten it or change target.',
+      }
+    }
+
+    if (sequenceTemplate !== 'variable_star') {
+      const moonFeasible = canFitInIdealNight(
+        raHours,
+        decDeg,
+        durationMs,
+        idealWindowStartMs,
+        idealWindowEndMs,
+        normalizedFilterPlans
+      )
+      if (!moonFeasible) {
+        return {
+          error:
+            'The Moon is too close to this target tonight for the requested filter(s). Please image after the Moon moves away, choose narrowband filters, or pick another target.',
+        }
       }
     }
   }
@@ -681,6 +706,22 @@ export async function updatePendingRequestById(
       return {
         error:
           'Session has no valid imaging window tonight even under ideal conditions (clear weather and empty schedule). Please shorten it or change target.',
+      }
+    }
+    if (sequenceTemplate !== 'variable_star') {
+      const moonFeasible = canFitInIdealNight(
+        raHours,
+        decDeg,
+        estimatedDurationSeconds * 1000,
+        nauticalDuskUtc.getTime(),
+        nauticalDawnUtc.getTime(),
+        normalizedFilterPlans
+      )
+      if (!moonFeasible) {
+        return {
+          error:
+            'The Moon is too close to this target tonight for the requested filter(s). Please image after the Moon moves away, choose narrowband filters, or pick another target.',
+        }
       }
     }
   }

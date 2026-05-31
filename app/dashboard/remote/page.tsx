@@ -387,6 +387,46 @@ function sessionDurationMsFromItem(item: {
   return Math.max(estimatedSeconds, 60) * 1000
 }
 
+type ScheduledStripItem = TerminalSessionLike & { target: string }
+
+function listScheduledPendingPlacements(
+  scheduleStripItems: ScheduledStripItem[],
+  imagingStartMs: number,
+  schedulingDeadlineMs: number
+): Array<{ item: ScheduledStripItem; startMs: number; endMs: number }> {
+  return scheduleStripItems
+    .filter((item) => item.status === 'scheduled')
+    .map((item) => {
+      const startMsRaw = item.plannedStartIso ? Date.parse(item.plannedStartIso) : Number.NaN
+      if (!Number.isFinite(startMsRaw)) return null
+      if (startMsRaw < imagingStartMs - 60_000) return null
+      const durationMs = sessionDurationMsFromItem(item)
+      const startMs = Math.max(startMsRaw, imagingStartMs)
+      const endMs = Math.min(startMs + durationMs, schedulingDeadlineMs)
+      if (endMs <= startMs) return null
+      return { item, startMs, endMs }
+    })
+    .filter((x): x is { item: ScheduledStripItem; startMs: number; endMs: number } => x != null)
+    .sort((a, b) => a.startMs - b.startMs)
+}
+
+function placementToTimelineBlock(
+  scheduled: { item: { id: string; target: string }; startMs: number; endMs: number },
+  windowStartMs: number,
+  windowEndMs: number
+): { id: string; startMs: number; endMs: number; topPct: number; heightPct: number; label: string } {
+  const topPct = ((scheduled.startMs - windowStartMs) / (windowEndMs - windowStartMs)) * 100
+  const heightPct = ((scheduled.endMs - scheduled.startMs) / (windowEndMs - windowStartMs)) * 100
+  return {
+    id: scheduled.item.id,
+    startMs: scheduled.startMs,
+    endMs: scheduled.endMs,
+    topPct,
+    heightPct,
+    label: scheduled.item.target,
+  }
+}
+
 /** Placement for in_progress / completed when the weather-aware packer cannot run or fails.
  *  Prefer an existing lock, then planned start, then created time, then "now" for in_progress. */
 /** Earliest time a session block may appear on the strip (after 4pm anchor, not before nautical dusk). */
@@ -1953,6 +1993,14 @@ export default function RemotePage() {
           newlyLocked[item.id] = { startMs, endMs }
         }
       }
+      // Server-scheduled sessions keep their planned bar even when later hours fail the global gate.
+      for (const scheduled of listScheduledPendingPlacements(
+        scheduleStripItems,
+        imagingStartMs,
+        schedulingDeadlineMs
+      )) {
+        blocks.push(placementToTimelineBlock(scheduled, windowStartMs, windowEndMs))
+      }
       blocks.sort((a, b) => a.startMs - b.startMs)
       return { blocks, newlyLocked }
     }
@@ -2140,43 +2188,18 @@ export default function RemotePage() {
       blocks.push({ id: item.id, startMs, endMs, topPct, heightPct, label: item.target })
     }
 
-    const scheduledPending = scheduleStripItems
-      .filter((item) => item.status === 'scheduled')
-      .map((item) => {
-        const startMsRaw = item.plannedStartIso ? Date.parse(item.plannedStartIso) : Number.NaN
-        if (!Number.isFinite(startMsRaw)) return null
-        if (startMsRaw < imagingStartMs - 60_000) return null
-        const estimatedSeconds =
-          typeof item.estimatedDurationSeconds === 'number' && Number.isFinite(item.estimatedDurationSeconds)
-            ? item.estimatedDurationSeconds
-            : estimateDurationSecondsFromPlans(item.filterPlans)
-        const durationMs = Math.max(estimatedSeconds, 60) * 1000
-        const startMs = Math.max(startMsRaw, imagingStartMs)
-        const endMs = Math.min(startMs + durationMs, schedulingDeadlineMs)
-        if (endMs <= startMs) return null
-        return { item, startMs, endMs }
-      })
-      .filter(
-        (x): x is { item: (typeof scheduleStripItems)[number]; startMs: number; endMs: number } =>
-          x != null
-      )
-      .sort((a, b) => a.startMs - b.startMs)
+    const scheduledPending = listScheduledPendingPlacements(
+      scheduleStripItems,
+      imagingStartMs,
+      schedulingDeadlineMs
+    )
 
     for (const scheduled of scheduledPending) {
       freeIntervals = subtractInterval(freeIntervals, {
         startMs: scheduled.startMs,
         endMs: scheduled.endMs,
       })
-      const topPct = ((scheduled.startMs - windowStartMs) / (windowEndMs - windowStartMs)) * 100
-      const heightPct = ((scheduled.endMs - scheduled.startMs) / (windowEndMs - windowStartMs)) * 100
-      blocks.push({
-        id: scheduled.item.id,
-        startMs: scheduled.startMs,
-        endMs: scheduled.endMs,
-        topPct,
-        heightPct,
-        label: scheduled.item.target,
-      })
+      blocks.push(placementToTimelineBlock(scheduled, windowStartMs, windowEndMs))
     }
 
     blocks.sort((a, b) => a.startMs - b.startMs)

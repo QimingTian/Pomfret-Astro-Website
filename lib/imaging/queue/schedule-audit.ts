@@ -27,7 +27,6 @@ export function deriveQueueScheduleState(
     )
     if (hasScheduledSubTonight) return 'scheduled'
   }
-  if (row?.status === 'scheduled') return 'scheduled'
   return 'unscheduled'
 }
 

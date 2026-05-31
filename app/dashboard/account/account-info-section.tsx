@@ -116,7 +116,7 @@ export function AccountInfoSection({
   const body = (
     <>
       {!user.emailVerified ? (
-        <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-950/30 px-4 py-3 text-sm text-amber-100">
+        <div className="mb-4 rounded-lg border border-amber-500/40 bg-transparent px-4 py-3 text-sm text-amber-100">
           <p>Verify your email to use imaging features.</p>
           <button
             type="button"
@@ -129,7 +129,7 @@ export function AccountInfoSection({
           {verifyMsg ? <p className="mt-2 text-xs text-amber-200/90">{verifyMsg}</p> : null}
         </div>
       ) : user.imagingPending ? (
-        <div className="mb-4 rounded-lg border border-sky-500/40 bg-sky-950/30 px-4 py-3 text-sm text-sky-100">
+        <div className="mb-4 rounded-lg border border-sky-500/40 bg-transparent px-4 py-3 text-sm text-sky-100">
           Imaging access is pending administrator approval for non-@pomfret.org accounts.
         </div>
       ) : user.imagingRejected ? (

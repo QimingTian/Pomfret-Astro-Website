@@ -7,6 +7,7 @@ import { DashboardPanel } from '@/app/dashboard/account/dashboard-panel'
 import { AccountMemberGrid } from '@/app/dashboard/account/account-member-grid'
 import { AdminActivityLogPanel } from '@/app/dashboard/admin/admin-activity-log-panel'
 import { GalleryRequestsSection } from '@/app/dashboard/admin/gallery-requests-section'
+import { ImagingRequestsSection } from '@/app/dashboard/admin/imaging-requests-section'
 import { AllMembersSection } from '@/app/dashboard/admin/all-members-section'
 import { AllSkyCameraControlPanel } from '@/app/dashboard/admin/allsky-camera-control-panel'
 import { statusOptions, useAdminTools } from '@/app/dashboard/admin/use-admin-tools'
@@ -130,7 +131,8 @@ export function AdminDashboardGrid() {
       <AccountTwoColRow
         left={
           <DashboardPanel title="Schedule Control">
-            <form className="boxed-fields space-y-3" onSubmit={(e) => void t.submitClosedWindow(e)}>
+            <div className="boxed-fields space-y-3">
+            <form className="space-y-3" onSubmit={(e) => void t.submitClosedWindow(e)}>
               <input
                 type="text"
                 value={t.closedWindowDescription}
@@ -198,6 +200,7 @@ export function AdminDashboardGrid() {
                 ))}
             </ul>
             ) : null}
+            </div>
           </DashboardPanel>
         }
         right={
@@ -268,7 +271,7 @@ export function AdminDashboardGrid() {
 
       <AccountFullBleedRule />
 
-      <GalleryRequestsSection />
+      <AccountTwoColRow left={<GalleryRequestsSection />} right={<ImagingRequestsSection />} />
 
       <AccountFullBleedRule />
 

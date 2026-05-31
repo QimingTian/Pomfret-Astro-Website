@@ -6,6 +6,7 @@ import {
   upsertMemberSavedSession,
 } from '@/lib/member-saved-sessions'
 import { requireUser } from '@/lib/member-auth'
+import { canSubmitImaging } from '@/lib/member-access'
 import type { RemoteSavedSessionFormV1 } from '@/lib/remote-saved-session'
 
 export const runtime = 'nodejs'
@@ -41,6 +42,10 @@ export async function POST(request: NextRequest) {
   const auth = await requireUser(request)
   if (!auth.ok) {
     return NextResponse.json(auth.body, { status: auth.status })
+  }
+  const imagingAccess = canSubmitImaging(auth.user)
+  if (!imagingAccess.ok) {
+    return NextResponse.json({ ok: false, error: imagingAccess.error }, { status: 403 })
   }
 
   let body: unknown

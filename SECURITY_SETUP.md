@@ -18,7 +18,7 @@ In Vercel → Project → Settings → Environment Variables → **Production**,
 | `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | Yes |
 | `RESEND_API_KEY`, `IMAGING_MAIL_FROM` | Yes (email verification) |
 | `BOOTSTRAP_ADMIN_EMAILS` | Yes (comma-separated `@pomfret.org` admins only) |
-| `SITE_URL` or `NEXT_PUBLIC_SITE_URL` | Recommended (`https://www.pomfretastro.org`) |
+| `SITE_URL` or `NEXT_PUBLIC_SITE_URL` | **Yes** (`https://www.pomfretastro.org`) — verification email links and post-verify redirects |
 
 **Rotate** all shared secrets if they were ever committed, logged, or shared. Generate new values with a password manager.
 

@@ -23,6 +23,15 @@ const nextConfig = {
           { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
         ],
       },
+      // Atlas embeds /stellarium/engine.html in an iframe; DENY above blocks the sky viewer.
+      // Last matching rule wins for duplicate keys (Next.js merges headers).
+      {
+        source: '/stellarium/:path*',
+        headers: [
+          { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+          { key: 'Content-Security-Policy', value: "frame-ancestors 'self'" },
+        ],
+      },
       {
         source: '/stellarium/js/stellarium-web-engine.wasm',
         headers: [{ key: 'Content-Type', value: 'application/wasm' }],

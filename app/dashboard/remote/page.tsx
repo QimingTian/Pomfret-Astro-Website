@@ -30,6 +30,7 @@ import {
   type MemberSavedSessionApiEntry,
   type RemoteSavedSessionFormV1,
 } from '@/lib/remote-saved-session'
+import { canSubmitImagingPublic } from '@/lib/member-access'
 import { DSO_SESSION_OVERHEAD_SEC } from '@/lib/imaging-session-overhead'
 import { parseProjectNightSubId } from '@/lib/imaging-project-ids'
 
@@ -640,6 +641,8 @@ export default function RemotePage() {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [verifyMsg, setVerifyMsg] = useState<string | null>(null)
+  const [verifySending, setVerifySending] = useState(false)
   const [status, setStatus] = useState<ObservatoryStatus>('loading')
   const [tonightWeatherPrediction, setTonightWeatherPrediction] = useState<
     'permitted' | 'not_permitted' | 'unavailable' | 'loading'
@@ -764,6 +767,13 @@ export default function RemotePage() {
       lastName: member.user.lastName.trim() || null,
       email: member.user.email,
     }
+  }, [member])
+
+  const imagingAccess = useMemo(() => {
+    if (member.status !== 'authenticated') {
+      return { ok: false as const, error: 'Sign in to submit a session.' }
+    }
+    return canSubmitImagingPublic(member.user)
   }, [member])
 
   const currentMemberId = member.status === 'authenticated' ? member.user.id : null
@@ -1682,6 +1692,7 @@ export default function RemotePage() {
   }, [sessionType, filterPlans, outputMode])
 
   const canSaveRemoteSessionSpec = useMemo(() => {
+    if (!imagingAccess.ok) return false
     if (!requestName.trim()) return false
     if (!loggedInContact?.email) return false
     const coord = parseCoordsFromFormParts(
@@ -1714,6 +1725,7 @@ export default function RemotePage() {
     }
     return true
   }, [
+    imagingAccess.ok,
     requestName,
     loggedInContact,
     raHourPart,
@@ -2637,6 +2649,10 @@ export default function RemotePage() {
       setSubmitError('Sign in to submit a session.')
       return
     }
+    if (!imagingAccess.ok) {
+      setSubmitError(imagingAccess.error)
+      return
+    }
 
     if (sessionType === 'variable_star') {
       if (!variableStarDurationPick || !variableStarDurationPick.coordsOk) {
@@ -2719,9 +2735,13 @@ export default function RemotePage() {
     setSubmitSuccess(
       editingSessionId
         ? 'Session edited successfully.'
-        : whenClosedBehavior === 'queue_until_ready'
-          ? 'Session accepted. It will be available for download when observatory is Ready.'
-          : 'Session started successfully.'
+        : data.adminApprovalPending === true
+          ? typeof data.message === 'string'
+            ? data.message
+            : 'Project submitted for administrator approval (over 30 hours total).'
+          : whenClosedBehavior === 'queue_until_ready'
+            ? 'Session accepted. It will be available for download when observatory is Ready.'
+            : 'Session started successfully.'
     )
     await refreshQueue()
   }
@@ -3164,7 +3184,56 @@ export default function RemotePage() {
                 }}
               />
             ) : (
+            <>
+            {!imagingAccess.ok ? (
+              member.status === 'authenticated' && !member.user.emailVerified ? (
+                <div className="rounded-lg border border-amber-500/40 bg-transparent px-4 py-3 text-sm text-amber-100">
+                  <p>Verify your email before submitting imaging sessions.</p>
+                  <button
+                    type="button"
+                    disabled={verifySending}
+                    onClick={async () => {
+                      setVerifySending(true)
+                      setVerifyMsg(null)
+                      try {
+                        const res = await fetch('/api/auth/verify-email', {
+                          method: 'POST',
+                          credentials: 'include',
+                        })
+                        const data = await res.json().catch(() => ({}))
+                        if (!res.ok || data?.ok !== true) {
+                          setVerifyMsg(typeof data.error === 'string' ? data.error : 'Could not send email.')
+                          return
+                        }
+                        setVerifyMsg('Verification email sent. Check your inbox.')
+                      } catch {
+                        setVerifyMsg('Could not send email.')
+                      } finally {
+                        setVerifySending(false)
+                      }
+                    }}
+                    className="mt-2 rounded-full border border-white/25 bg-[#151616] px-4 py-2 text-sm font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-50"
+                  >
+                    {verifySending ? 'Sending…' : 'Resend verification email'}
+                  </button>
+                  {verifyMsg ? <p className="mt-2 text-xs text-amber-200/90">{verifyMsg}</p> : null}
+                </div>
+              ) : member.status === 'authenticated' && member.user.imagingPending ? (
+                <div className="rounded-lg border border-sky-500/40 bg-transparent px-4 py-3 text-sm text-sky-100">
+                  Imaging access is pending administrator approval for non-@pomfret.org accounts.
+                </div>
+              ) : member.status === 'authenticated' && member.user.imagingRejected ? (
+                <div className="rounded-lg border border-red-500/40 bg-red-950/30 px-4 py-3 text-sm text-red-200">
+                  Imaging access was not approved for this account. Contact the observatory team.
+                </div>
+              ) : (
+                <div className="rounded-lg border border-amber-500/40 bg-transparent px-4 py-3 text-sm text-amber-100">
+                  <p>{imagingAccess.error}</p>
+                </div>
+              )
+            ) : null}
             <form onSubmit={handleSubmit} className="boxed-fields grid gap-4 sm:grid-cols-2">
+            <fieldset disabled={!imagingAccess.ok} className="contents min-w-0 border-0 p-0 m-0">
           <div className="sm:col-span-2 flex flex-wrap items-start gap-x-10 gap-y-4">
             <div className="space-y-2 min-w-0">
             <span className="text-sm font-medium text-white">Session Type</span>
@@ -3772,19 +3841,21 @@ export default function RemotePage() {
           <div className="sm:col-span-2 flex flex-wrap items-center gap-2">
             <button
               type="submit"
-              disabled={submitting}
+              disabled={submitting || !imagingAccess.ok}
               className="inline-flex items-center justify-center rounded-full border border-white/25 bg-[#151616] px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#1b1c1c] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {submitting ? (editingSessionId ? 'Finishing...' : 'Starting...') : editingSessionId ? 'Finish Editing' : 'Start Session'}
             </button>
             <button
               type="button"
+              disabled={!imagingAccess.ok}
               onClick={() => {
+                if (!imagingAccess.ok) return
                 setRunModalError(null)
                 setRunModalName('')
                 setShowRunRemoteSessionModal(true)
               }}
-              className="inline-flex items-center justify-center rounded-full border border-white/25 bg-[#151616] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#1b1c1c]"
+              className="inline-flex items-center justify-center rounded-full border border-white/25 bg-[#151616] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#1b1c1c] disabled:cursor-not-allowed disabled:opacity-50"
             >
               Run A Saved Session
             </button>
@@ -3816,7 +3887,9 @@ export default function RemotePage() {
                 ? '--'
                 : formatDurationShort(dsoEstimatedDurationPreviewSeconds)}
           </p>
+            </fieldset>
             </form>
+            </>
             )}
           </div>
         </section>

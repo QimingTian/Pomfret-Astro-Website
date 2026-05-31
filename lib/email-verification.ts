@@ -1,6 +1,7 @@
 import crypto from 'crypto'
 
 import { kvDel, kvGetJson, kvSetJson, kvEnabled } from '@/lib/kv-rest'
+import { publicSiteOrigin } from '@/lib/site-url'
 
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000
 const KEY_PREFIX = 'email-verify:'
@@ -69,13 +70,6 @@ function env(name: string): string {
   return (process.env[name] ?? '').trim()
 }
 
-function siteOrigin(): string {
-  const configured = env('NEXT_PUBLIC_SITE_URL') || env('SITE_URL')
-  if (configured) return configured.replace(/\/+$/, '')
-  if (env('VERCEL_URL')) return `https://${env('VERCEL_URL')}`
-  return 'http://localhost:3000'
-}
-
 export async function sendEmailVerificationEmail(input: {
   email: string
   firstName: string
@@ -87,7 +81,7 @@ export async function sendEmailVerificationEmail(input: {
     return { sent: false, reason: 'Mail env not configured' }
   }
 
-  const link = `${siteOrigin()}/api/auth/verify-email?token=${encodeURIComponent(input.token)}`
+  const link = `${publicSiteOrigin()}/api/auth/verify-email?token=${encodeURIComponent(input.token)}`
   const greet = input.firstName.trim() ? `Hi ${input.firstName},` : 'Hi,'
   const subject = 'Verify your Pomfret Astro account'
   const text = [

@@ -5,8 +5,11 @@ import {
   mergeAdjacentIntervals,
   planTonightFilterFrames,
   planTonightSubSessions,
+  projectTonightScheduleInsight,
+  shouldKeepExistingDeliverableTonight,
 } from './planner'
-import type { ImagingProject } from './store'
+import type { ImagingProject, ProjectNight } from './store'
+import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 
 function mockProject(): ImagingProject {
@@ -176,4 +179,36 @@ test('planTonightSubSessions fills multiple clear spells and leftover time in a 
     const nextStart = Date.parse(plans[i]!.plannedStartIso)
     assert.ok(nextStart >= prevEnd - 1000)
   }
+})
+
+test('shouldKeepExistingDeliverableTonight drops scheduled sub when admin closed removes all weather windows', () => {
+  const now = new Date('2026-05-30T22:00:00.000Z')
+  const nightKey = getTonightScheduleStrip(now).nightKey
+  const plannedStartIso = '2026-05-31T01:00:00.000Z'
+  const scheduledNight: ProjectNight = {
+    id: 'sub-3',
+    nightIndex: 3,
+    nightKey,
+    status: 'scheduled',
+    plannedStartIso,
+    filterPlansTonight: [{ filterName: 'Red', exposureSeconds: 300, count: 4 }],
+    ninaSequenceJson: '{"mock":true}',
+  }
+  const project: ImagingProject = {
+    ...mockProject(),
+    status: 'in_progress',
+    nights: [scheduledNight],
+    remainingByFilter: [{ filterName: 'Red', exposureSeconds: 300, countRemaining: 40 }],
+  }
+  const { windowStart, windowEnd } = tonightSchedulingSpan(now)
+  const free = [{ startMs: windowStart, endMs: windowEnd }]
+  const weatherBlocked: Array<{ startMs: number; endMs: number }> = []
+
+  assert.equal(
+    shouldKeepExistingDeliverableTonight(project, free, weatherBlocked, nightKey, now),
+    false
+  )
+  const insight = projectTonightScheduleInsight(project, [], free, weatherBlocked, nightKey, now)
+  assert.equal(insight.status, 'unscheduled')
+  assert.equal(insight.plannedStartIso, null)
 })

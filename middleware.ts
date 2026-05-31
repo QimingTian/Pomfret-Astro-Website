@@ -5,6 +5,7 @@ const CSP = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
+  "frame-src 'self'",
   "img-src 'self' data: blob: https://cdn.star.nesdis.noaa.gov https://*.r2.cloudflarestorage.com https://svs.gsfc.nasa.gov https://www.pomfretastro.org https://cam.pomfretastro.org",
   "connect-src 'self' https://api.open-meteo.com https://svs.gsfc.nasa.gov https://cdn.star.nesdis.noaa.gov https://*.r2.cloudflarestorage.com https://cam.pomfretastro.org wss:",
   "font-src 'self' data:",
@@ -29,5 +30,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|stellarium/).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|stellarium/|skydata/).*)'],
 }

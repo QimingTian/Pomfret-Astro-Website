@@ -7,26 +7,27 @@ import {
   storeEmailVerificationToken,
 } from '@/lib/email-verification'
 import { markMemberEmailVerified } from '@/lib/member-store'
+import { publicSiteUrl } from '@/lib/site-url'
 
 export const runtime = 'nodejs'
 
 export async function GET(request: NextRequest) {
   const token = request.nextUrl.searchParams.get('token')?.trim() ?? ''
   if (!token) {
-    return NextResponse.redirect(new URL('/login?verify=missing', request.url))
+    return NextResponse.redirect(publicSiteUrl('/login?verify=missing'))
   }
 
   const payload = await consumeEmailVerificationToken(token)
   if (!payload) {
-    return NextResponse.redirect(new URL('/login?verify=invalid', request.url))
+    return NextResponse.redirect(publicSiteUrl('/login?verify=invalid'))
   }
 
   const user = await markMemberEmailVerified(payload.userId)
   if (!user) {
-    return NextResponse.redirect(new URL('/login?verify=invalid', request.url))
+    return NextResponse.redirect(publicSiteUrl('/login?verify=invalid'))
   }
 
-  return NextResponse.redirect(new URL('/login?verified=1', request.url))
+  return NextResponse.redirect(publicSiteUrl('/login?verified=1'))
 }
 
 /** Resend verification (authenticated). */

@@ -24,7 +24,11 @@ import {
 } from '@/lib/imaging-project-store'
 import { projectAltitudeHoldIntervals } from '@/lib/imaging-project-altitude-hold'
 import { DSO_SESSION_OVERHEAD_SEC } from '@/lib/imaging-session-overhead'
-import { patchRequestScheduleInsight } from '@/lib/imaging-queue-store'
+import { patchRequestScheduleInsight, getRequestById } from '@/lib/imaging-queue-store'
+import {
+  deriveQueueScheduleState,
+  logQueueScheduleInsightChange,
+} from '@/lib/imaging/queue/schedule-audit'
 import { subtractOccupiedFromFree } from '@/lib/imaging-queue-free-intervals'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import {
@@ -485,6 +489,71 @@ function hasSchedulableFreeTonight(
   return false
 }
 
+/** Keep a deliverable scheduled sub when replan is empty but weather still permits imaging (not admin-closed). */
+export function shouldKeepExistingDeliverableTonight(
+  project: ImagingProject,
+  freeIntervals: Array<{ startMs: number; endMs: number }>,
+  weatherPermittedIntervals: TimeInterval[],
+  nightKey: string,
+  now = new Date()
+): boolean {
+  const existing = getDeliverableNight(project, nightKey)
+  if (!existing) return false
+  if (hasInProgressSessionTonight(project, nightKey)) return true
+
+  const nowMs = now.getTime()
+  const window = getTonightSchedulingWindow(now)
+  const windowStartMs = Math.max(nowMs, window.nauticalDuskUtc.getTime())
+  const deadlineMs = window.nauticalDawnUtc.getTime()
+  const minWindowMs = minExposureMs(project) + SESSION_OVERHEAD_MS
+  return hasSchedulableFreeTonight(
+    freeIntervals,
+    weatherPermittedIntervals,
+    windowStartMs,
+    deadlineMs,
+    minWindowMs
+  )
+}
+
+export function projectTonightScheduleInsight(
+  project: ImagingProject,
+  plans: ProjectTonightPlan[],
+  freeIntervals: Array<{ startMs: number; endMs: number }>,
+  weatherPermittedIntervals: TimeInterval[],
+  nightKey: string,
+  now = new Date()
+): ProjectScheduleInsight {
+  if (plans.length > 0) {
+    return {
+      status: 'scheduled',
+      plannedStartIso: plans[0]!.plannedStartIso,
+      reasons: [
+        `Multi-night project: ${plans.length} session(s) tonight (${plans.reduce((s, p) => s + p.filterPlansTonight.reduce((t, f) => t + f.count, 0), 0)} frame(s)).`,
+      ],
+    }
+  }
+
+  const existingDeliverable = getDeliverableNight(project, nightKey)
+  if (
+    existingDeliverable &&
+    shouldKeepExistingDeliverableTonight(project, freeIntervals, weatherPermittedIntervals, nightKey, now)
+  ) {
+    return {
+      status: 'scheduled',
+      plannedStartIso: existingDeliverable.plannedStartIso ?? null,
+      reasons: [
+        'Keeping existing tonight sub-session on the schedule (NINA may still deliver when the observatory is ready).',
+      ],
+    }
+  }
+
+  return {
+    status: 'unscheduled',
+    plannedStartIso: null,
+    reasons: explainWhyNoPlansTonight(project, freeIntervals, weatherPermittedIntervals, now),
+  }
+}
+
 /** One sub-session plan per schedulable free interval tonight (global session indices). */
 export function planTonightSubSessions(
   project: ImagingProject,
@@ -668,7 +737,10 @@ function hasScheduledSubsTonight(project: ImagingProject, nightKey: string): boo
 async function applyTonightPlansOrClearScheduled(
   projectId: string,
   nightKey: string,
-  plans: ProjectTonightPlan[]
+  plans: ProjectTonightPlan[],
+  freeIntervals: Array<{ startMs: number; endMs: number }>,
+  weatherPermittedIntervals: TimeInterval[],
+  now: Date
 ): Promise<void> {
   if (plans.length > 0) {
     await applyProjectTonightPlans(projectId, plans)
@@ -676,12 +748,13 @@ async function applyTonightPlansOrClearScheduled(
   }
   const project = await getProjectById(projectId)
   if (!project || !hasScheduledSubsTonight(project, nightKey)) return
-  // Keep deliverable scheduled subs when replan is briefly empty (stuck in_progress, API flicker).
   if (hasInProgressSessionTonight(project, nightKey)) return
-  if (getDeliverableNight(project, nightKey)) return
+  if (shouldKeepExistingDeliverableTonight(project, freeIntervals, weatherPermittedIntervals, nightKey, now)) {
+    return
+  }
   await replaceScheduledSubsForNightKey(projectId, nightKey, [], {
     clearReason:
-      'Tonight sub-session cleared: no schedulable plan (weather, target altitude, or free window).',
+      'Tonight sub-session cleared: no schedulable plan (weather, admin closed window, target altitude, or free window).',
   })
 }
 
@@ -1038,40 +1111,61 @@ export async function reconcileOneProjectTonight(
   weatherPermittedIntervals: TimeInterval[],
   nightKey: string,
   now: Date
-): Promise<ProjectTonightPlan[]> {
+): Promise<{ plans: ProjectTonightPlan[]; insight: ProjectScheduleInsight }> {
   const plannerFree = subtractInProgressSubsTonight(project, projectFree, nightKey)
   const plans = planTonightSubSessions(project, plannerFree, weatherPermittedIntervals, now)
-  const existingDeliverable = getDeliverableNight(project, nightKey)
-  const insight =
-    plans.length > 0
-      ? {
-          status: 'scheduled' as const,
-          plannedStartIso: plans[0]!.plannedStartIso,
-          reasons: [
-            `Multi-night project: ${plans.length} session(s) tonight (${plans.reduce((s, p) => s + p.filterPlansTonight.reduce((t, f) => t + f.count, 0), 0)} frame(s)).`,
-          ],
-        }
-      : existingDeliverable
-        ? {
-            status: 'scheduled' as const,
-            plannedStartIso: existingDeliverable.plannedStartIso ?? null,
-            reasons: [
-              'Keeping existing tonight sub-session on the schedule (NINA may still deliver when the observatory is ready).',
-            ],
-          }
-        : {
-            status: 'unscheduled' as const,
-            plannedStartIso: null,
-            reasons: explainWhyNoPlansTonight(project, plannerFree, weatherPermittedIntervals, now),
-          }
+  const insight = projectTonightScheduleInsight(
+    project,
+    plans,
+    plannerFree,
+    weatherPermittedIntervals,
+    nightKey,
+    now
+  )
+
+  const prevRow = await getRequestById(project.id)
+  const previousState = deriveQueueScheduleState(prevRow, project, nightKey)
 
   await patchRequestScheduleInsight(project.id, insight)
 
+  let clearedScheduled: typeof project.nights = []
   if (shouldRefreshTonightSubs(project, nightKey)) {
-    await applyTonightPlansOrClearScheduled(project.id, nightKey, plans)
+    const scheduledBefore = project.nights.filter(
+      (n) => n.nightKey === nightKey && n.status === 'scheduled'
+    )
+    await applyTonightPlansOrClearScheduled(
+      project.id,
+      nightKey,
+      plans,
+      plannerFree,
+      weatherPermittedIntervals,
+      now
+    )
+    const refreshedProject = (await getProjectById(project.id)) ?? project
+    clearedScheduled = scheduledBefore.filter(
+      (n) => !refreshedProject.nights.some((x) => x.id === n.id && x.status === 'scheduled')
+    )
   }
 
-  return plans
+  if (previousState !== insight.status && clearedScheduled.length === 0) {
+    const primary = clearedScheduled[0]
+    await logQueueScheduleInsightChange({
+      row: {
+        id: project.id,
+        target: project.target,
+        projectMode: true,
+        status: prevRow?.status ?? 'pending',
+        plannedStartIso: prevRow?.plannedStartIso ?? null,
+      },
+      previousState,
+      next: insight,
+      previousPlannedStartIso: primary?.plannedStartIso ?? prevRow?.plannedStartIso ?? null,
+      nightIndex: primary?.nightIndex ?? null,
+      nightSubId: primary?.id ?? null,
+    })
+  }
+
+  return { plans, insight }
 }
 
 /** Refresh tonight sub-sessions for the one in-progress project (full night; not altitude-gapped). */

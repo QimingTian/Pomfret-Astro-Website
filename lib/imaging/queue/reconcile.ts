@@ -1,4 +1,3 @@
-import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { projectAltitudeHoldIntervals } from '@/lib/imaging-project-altitude-hold'
 import {
   plannerFreeIntervalsBehindInProgressProject,
@@ -8,7 +7,6 @@ import {
 } from '@/lib/imaging-project-planner'
 import {
   collectTonightProjectSubSessionOccupancy,
-  getDeliverableNight,
   getProjectById,
   listProjects,
   projectHasOpenSessionsForNightKey,
@@ -21,6 +19,10 @@ import {
 } from '@/lib/imaging-queue-schedule-insight'
 import { subtractOccupiedFromFree } from '@/lib/imaging-queue-free-intervals'
 import { listPending, patchRequestScheduleInsight, type ImagingRequest } from '@/lib/imaging-queue-store'
+import {
+  deriveQueueScheduleState,
+  logQueueScheduleInsightChange,
+} from '@/lib/imaging/queue/schedule-audit'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import { getTonightWeatherPermittedIntervals, type TimeInterval } from '@/lib/tonight-weather-gate'
@@ -119,36 +121,13 @@ export async function reconcilePendingScheduleStatus(): Promise<void> {
         const project = await getProjectById(r.id)
         if (!project || project.status !== 'pending') continue
 
-        const plans = await reconcileOneProjectTonight(
+        const { plans, insight } = await reconcileOneProjectTonight(
           project,
           fifoFree,
           permitted,
           nightKey,
           now
         )
-        const existingDeliverable = getDeliverableNight(project, nightKey)
-        const insight =
-          plans.length > 0
-            ? {
-                status: 'scheduled' as const,
-                plannedStartIso: plans[0]!.plannedStartIso,
-                reasons: [
-                  `Multi-night project: ${plans.length} session(s) tonight (${plans.reduce((s, p) => s + p.filterPlansTonight.reduce((t, f) => t + f.count, 0), 0)} frame(s)).`,
-                ],
-              }
-            : existingDeliverable
-              ? {
-                  status: 'scheduled' as const,
-                  plannedStartIso: existingDeliverable.plannedStartIso ?? null,
-                  reasons: [
-                    'Keeping existing tonight sub-session on the schedule (NINA may still deliver when the observatory is ready).',
-                  ],
-                }
-            : {
-                status: 'unscheduled' as const,
-                plannedStartIso: null,
-                reasons: ['Project could not be scheduled for tonight; will retry on a later night.'],
-              }
         nextById.set(r.id, insight)
 
         fifoFree = subtractProjectTonightPlansFromFree(fifoFree, plans)
@@ -203,25 +182,15 @@ export async function reconcilePendingScheduleStatus(): Promise<void> {
     const prevPlanned = r.plannedStartIso ?? null
     const nextQueueStatus = next.status === 'scheduled' ? 'scheduled' : 'pending'
     if (prevQueueStatus === nextQueueStatus && prevPlanned === next.plannedStartIso) continue
+    const project = r.projectMode ? await getProjectById(r.id) : null
+    const previousScheduleState = deriveQueueScheduleState(r, project ?? undefined, nightKey)
     await patchRequestScheduleInsight(r.id, next)
-    const nextScheduleState = next.status
-    const previousScheduleState = prevQueueStatus === 'scheduled' ? 'scheduled' : 'unscheduled'
-    if (previousScheduleState !== nextScheduleState) {
-      void appendAuditLog({
-        kind: 'session.schedule_changed',
-        message: `Session schedule changed: ${r.target} (${r.id}) ${previousScheduleState} -> ${nextScheduleState}.`,
-        detail: {
-          id: r.id,
-          target: r.target,
-          projectMode: r.projectMode === true,
-          previousStatus: previousScheduleState,
-          nextStatus: nextScheduleState,
-          previousPlannedStartIso: prevPlanned,
-          plannedStartIso: next.plannedStartIso,
-          reason:
-            next.reasons.length <= 1 ? (next.reasons[0] ?? 'No reason provided') : next.reasons.join(' | '),
-          reasons: next.reasons,
-        },
+    if (previousScheduleState !== next.status) {
+      await logQueueScheduleInsightChange({
+        row: r,
+        previousState: previousScheduleState,
+        next,
+        previousPlannedStartIso: prevPlanned,
       })
     }
   }

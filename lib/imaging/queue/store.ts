@@ -59,6 +59,8 @@ export interface ImagingRequest {
   projectMode?: boolean
   /** Member who submitted this session (new sessions). */
   userId?: string
+  /** Large project mode (>30h total) awaiting admin approval before scheduling. */
+  adminApprovalPending?: boolean
 }
 
 /** Strip large JSON from API list responses; expose download path instead. */
@@ -206,8 +208,37 @@ export async function listAll(): Promise<ImagingRequest[]> {
 export async function listPending(): Promise<ImagingRequest[]> {
   const all = await listAll()
   return all
-    .filter((r) => r.status === 'pending' || r.status === 'scheduled')
+    .filter(
+      (r) =>
+        (r.status === 'pending' || r.status === 'scheduled') && r.adminApprovalPending !== true
+    )
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+}
+
+export async function listQueueAwaitingAdminApproval(): Promise<ImagingRequest[]> {
+  const all = await listAll()
+  return all
+    .filter((r) => r.adminApprovalPending === true && r.projectMode === true)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+}
+
+export async function setRequestAdminApprovalPending(
+  id: string,
+  pending: boolean
+): Promise<ImagingRequest | undefined> {
+  await ensureLoadedFromDisk()
+  const mem = getMemory()
+  const idx = mem.findIndex((r) => r.id === id)
+  if (idx < 0) return undefined
+  const ts = new Date().toISOString()
+  const next: ImagingRequest = {
+    ...mem[idx]!,
+    updatedAt: ts,
+    ...(pending ? { adminApprovalPending: true as const } : { adminApprovalPending: undefined }),
+  }
+  mem[idx] = next
+  await persist()
+  return next
 }
 
 export async function getRequestById(id: string): Promise<ImagingRequest | undefined> {

@@ -58,6 +58,8 @@ export type ImagingProject = {
   onBoard?: boolean
   /** When the entire project finished (all nights done or project failed). */
   completedAt?: string
+  /** Total project duration >30h; blocked from scheduling until admin approves. */
+  adminApprovalPending?: boolean
 }
 
 const KEY = 'imaging-projects'
@@ -320,8 +322,38 @@ export function projectQueueBlockedReason(earlier: ImagingProject): string {
 /** First pending project by submission time that may receive tonight's sub-session plans. */
 export function getNextPendingProject(projects: ImagingProject[]): ImagingProject | undefined {
   return projects
-    .filter((p) => p.status === 'pending' && remainingFramesTotal(p) > 0)
+    .filter(
+      (p) =>
+        p.status === 'pending' &&
+        remainingFramesTotal(p) > 0 &&
+        p.adminApprovalPending !== true
+    )
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0]
+}
+
+export async function setProjectAdminApprovalPending(
+  id: string,
+  pending: boolean
+): Promise<ImagingProject | undefined> {
+  const all = await readProjects()
+  const idx = all.findIndex((p) => p.id === id)
+  if (idx < 0) return undefined
+  const ts = new Date().toISOString()
+  const next: ImagingProject = {
+    ...all[idx]!,
+    updatedAt: ts,
+    ...(pending ? { adminApprovalPending: true as const } : { adminApprovalPending: undefined }),
+  }
+  all[idx] = next
+  await writeProjects(all)
+  return next
+}
+
+export async function listProjectsAwaitingAdminApproval(): Promise<ImagingProject[]> {
+  const all = await readProjects()
+  return all
+    .filter((p) => p.adminApprovalPending === true)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
 }
 
 /** Project that has started imaging (at least one sub-session delivered to NINA). */
@@ -657,7 +689,7 @@ export async function replaceScheduledSubsForNightKey(
         ? 'Replaced by updated tonight sub-session plan.'
         : 'Tonight sub-session removed from schedule.')
     for (const night of removed) {
-      void appendAuditLog({
+      await appendAuditLog({
         kind: 'session.schedule_changed',
         message: `Session schedule changed: ${project.target} Session ${night.nightIndex} (${night.id}) scheduled -> unscheduled.`,
         detail: {

@@ -18,6 +18,7 @@ import {
   listAll,
   listPending,
   patchRequestScheduleInsight,
+  setRequestAdminApprovalPending,
   toPublicImagingRequest,
   type CreateImagingInput,
 } from '@/lib/imaging-queue-store'
@@ -26,7 +27,9 @@ import {
   createImagingProject,
   getProjectById,
   listProjects,
+  setProjectAdminApprovalPending,
 } from '@/lib/imaging-project-store'
+import { projectTotalDurationNeedsAdminApproval } from '@/lib/imaging/large-project-approval'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { planAndScheduleProjectTonight } from '@/lib/imaging-project-planner'
 import { getScheduleReservedIntervalsForActiveProject } from '@/lib/imaging-project-altitude-hold'
@@ -231,6 +234,41 @@ export async function POST(request: NextRequest) {
       ...(result.sessionPasswordHash ? { sessionPasswordHash: result.sessionPasswordHash } : {}),
       ...(result.userId ? { userId: result.userId } : {}),
     })
+  }
+
+  const needsLargeProjectApproval =
+    result.projectMode === true &&
+    projectTotalDurationNeedsAdminApproval(result.estimatedDurationSeconds) &&
+    auth.user.role !== 'admin'
+
+  if (needsLargeProjectApproval) {
+    await setRequestAdminApprovalPending(result.id, true)
+    await setProjectAdminApprovalPending(result.id, true)
+    void appendAuditLog({
+      kind: 'queue.admin_approval_pending',
+      message: `Large project awaiting admin approval: ${result.target} (${result.id}).`,
+      detail: {
+        id: result.id,
+        target: result.target,
+        estimatedDurationSeconds: result.estimatedDurationSeconds ?? null,
+        userId: result.userId ?? null,
+      },
+    })
+    const pendingRow = await getRequestById(result.id)
+    const finalRow = pendingRow ?? result
+    if (finalRow.userId) {
+      void recordMemberSessionHistory(finalRow.userId, memberSessionHistoryRowFromQueue(finalRow))
+    }
+    return withImagingCors(
+      {
+        ok: true as const,
+        adminApprovalPending: true as const,
+        request: toPublicImagingRequest(finalRow),
+        message:
+          'This project exceeds 30 hours total and requires administrator approval before it can be scheduled.',
+      },
+      201
+    )
   }
 
   const [pendingNow, precipGate, weatherIntervals] = await Promise.all([

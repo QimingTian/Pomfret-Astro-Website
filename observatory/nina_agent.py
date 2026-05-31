@@ -9,9 +9,10 @@ This version supports a simple workflow:
 
 Usage:
   1) Copy this file to the observatory PC.
-  2) Edit the CONFIG section below.
-  3) For queue weather reconcile on Vercel Hobby (no cron), set environment variable
-     POMFRET_CRON_SECRET to the same value as production CRON_SECRET (or set TOKEN / RECONCILE_BEARER).
+  2) Edit the CONFIG section below (paths only — no secrets in git).
+  3) Set Windows environment variables (same names as Vercel where noted):
+       IMAGING_QUEUE_SECRET, POMFRET_CRON_SECRET (same as CRON_SECRET),
+       R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET.
   4) Run: python nina_agent.py
 """
 
@@ -120,13 +121,13 @@ OUTPUT_MODE_STACKED_MASTER = "stacked_master"
 OUTPUT_MODE_NONE = "none"
 
 # -------- R2 upload config (optional, but recommended) --------
-# Install dependency on observatory PC once:
-#   pip install boto3
+# Install dependency on observatory PC once: pip install boto3
+# Credentials: Windows env R2_* (same values as Vercel). Never commit secrets here.
 R2_ENABLED = True
-R2_ACCOUNT_ID = "44118b098fcf2269947320e88db2afff"
-R2_ACCESS_KEY_ID = "8394dbcc36f456ab49196d0a78324aa2"
-R2_SECRET_ACCESS_KEY = "242780ebae3887812ed01887fab8d1dac4a1b172e6c1fe3032dce176eb4c7d28"
-R2_BUCKET = "pomfretolmstedobservatory"
+R2_ACCOUNT_ID = ""
+R2_ACCESS_KEY_ID = ""
+R2_SECRET_ACCESS_KEY = ""
+R2_BUCKET = ""
 R2_PUBLIC_BASE_URL = ""  # e.g. "https://files.pomfretastro.org"
 R2_PREFIX = "imaging"
 
@@ -197,6 +198,38 @@ def reconcile_queue_headers() -> Dict[str, str]:
         headers["Authorization"] = f"Bearer {bearer}"
     return headers
 
+
+def _r2_env(name: str, inline: str) -> str:
+    return (inline.strip() or os.environ.get(name, "").strip())
+
+
+def r2_account_id() -> str:
+    return _r2_env("R2_ACCOUNT_ID", R2_ACCOUNT_ID)
+
+
+def r2_access_key_id() -> str:
+    return _r2_env("R2_ACCESS_KEY_ID", R2_ACCESS_KEY_ID)
+
+
+def r2_secret_access_key() -> str:
+    return _r2_env("R2_SECRET_ACCESS_KEY", R2_SECRET_ACCESS_KEY)
+
+
+def r2_bucket_name() -> str:
+    return _r2_env("R2_BUCKET", R2_BUCKET)
+
+
+def r2_public_base_url() -> str:
+    return _r2_env("R2_PUBLIC_BASE_URL", R2_PUBLIC_BASE_URL)
+
+
+def r2_object_prefix() -> str:
+    prefix = _r2_env("R2_PREFIX", R2_PREFIX)
+    return prefix or "imaging"
+
+
+def r2_credentials_configured() -> bool:
+    return bool(r2_account_id() and r2_access_key_id() and r2_secret_access_key() and r2_bucket_name())
 
 def try_reconcile_queue_schedule() -> None:
     url = str(RECONCILE_QUEUE_URL).strip()
@@ -288,6 +321,12 @@ def validate_config() -> None:
         raise ValueError(f"NINA_OUTPUT_DIR not found: {NINA_OUTPUT_DIR}")
     if R2_ENABLED and boto3 is None:
         raise ValueError("R2_ENABLED is True but boto3 is not installed. Run: pip install boto3")
+    if R2_ENABLED and not r2_credentials_configured():
+        raise ValueError(
+            "R2_ENABLED is True but R2 credentials are missing. Set Windows env "
+            "R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and R2_BUCKET "
+            "(same values as Vercel) — do not commit secrets into this file."
+        )
     if SIRIL_ENABLED and not Path(SIRIL_CALIBRATION_DIR).exists():
         raise ValueError(f"SIRIL_CALIBRATION_DIR not found: {SIRIL_CALIBRATION_DIR}")
 
@@ -406,12 +445,13 @@ def sanitize_for_key(value: str) -> str:
 
 
 def create_r2_client():
-    endpoint = f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+    account_id = r2_account_id()
+    endpoint = f"https://{account_id}.r2.cloudflarestorage.com"
     return boto3.client(
         "s3",
         endpoint_url=endpoint,
-        aws_access_key_id=R2_ACCESS_KEY_ID,
-        aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+        aws_access_key_id=r2_access_key_id(),
+        aws_secret_access_key=r2_secret_access_key(),
         region_name="auto",
     )
 
@@ -432,8 +472,9 @@ def upload_files_to_r2(files: list[Path], run_id: str, output_root: Path) -> lis
             relative = path.relative_to(output_root)
         except ValueError:
             relative = Path(path.name)
-        object_key = f"{R2_PREFIX}/{run_id}/{str(relative).replace('\\', '/')}"
-        client.upload_file(str(path), R2_BUCKET, object_key)
+        object_key = f"{r2_object_prefix()}/{run_id}/{str(relative).replace('\\', '/')}"
+        bucket = r2_bucket_name()
+        client.upload_file(str(path), bucket, object_key)
         uploaded += 1
         uploaded_files.append(
             {
@@ -442,11 +483,12 @@ def upload_files_to_r2(files: list[Path], run_id: str, output_root: Path) -> lis
                 "sizeBytes": path.stat().st_size,
             }
         )
-        if R2_PUBLIC_BASE_URL.strip():
-            public_url = f"{R2_PUBLIC_BASE_URL.rstrip('/')}/{object_key}"
+        public_base = r2_public_base_url()
+        if public_base:
+            public_url = f"{public_base.rstrip('/')}/{object_key}"
             log(f"Uploaded: {path.name} -> {public_url}")
         else:
-            log(f"Uploaded: {path.name} -> s3://{R2_BUCKET}/{object_key}")
+            log(f"Uploaded: {path.name} -> s3://{bucket}/{object_key}")
     log(f"Upload phase complete. Uploaded {uploaded} files.")
     return uploaded_files
 
@@ -546,8 +588,8 @@ def report_uploaded_files(session_id: str, files: list[dict]) -> None:
         return
     payload = {
         "queueId": session_id,
-        "bucket": R2_BUCKET,
-        "prefix": R2_PREFIX,
+        "bucket": r2_bucket_name(),
+        "prefix": r2_object_prefix(),
         "files": files,
     }
     post_json(UPLOAD_REPORT_URL, payload)

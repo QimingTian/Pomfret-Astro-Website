@@ -618,7 +618,7 @@ website/
 └── vercel.json                           # iad1 + daily cleanup cron
 ```
 
-**Tests:** `npx tsx --test lib/*.test.ts lib/imaging/**/*.test.ts`
+**Tests:** `npm test` (or `npm run test:types` for typecheck only)
 
 ---
 
@@ -638,8 +638,8 @@ website/
 
 ```bash
 npm install && npm run dev    # http://localhost:3000
-npx tsc --noEmit
-npx tsx --test lib/*.test.ts lib/imaging/**/*.test.ts
+npm run test:types
+npm test
 ```
 
 **Deploy:** `npm run deploy` (Vercel prod, region `iad1`). Cron: `GET /api/imaging/cleanup-sessions` daily 05:00 UTC. Reconcile: agent-only (Hobby plan — no sub-daily Vercel cron).

@@ -61,3 +61,6 @@ public/DJI_0149.MP4
 # Local private backups (never commit)
 .local-private/
 
+# Separate local Next app (not part of pomfretastro.org deploy)
+Pomfret Astro Special Event/
+

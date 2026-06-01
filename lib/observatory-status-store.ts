@@ -10,6 +10,7 @@ import { onObservatoryFinalStatusChanged } from '@/lib/imaging-session-failure'
 export type ObservatoryStatus =
   | 'ready'
   | 'busy_in_use'
+  | 'disconnected'
   | 'closed_weather_not_permitted'
   | 'closed_daytime'
   | 'closed_observatory_maintenance'
@@ -20,13 +21,17 @@ type GlobalState = typeof globalThis & {
   __pomfret_manual_status__?: ObservatoryStatus
   __pomfret_mode__?: ObservatoryMode
   __pomfret_last_poll_ts__?: number
+  __pomfret_last_agent_seen_ts__?: number
+  __pomfret_nina_running__?: boolean
+  __pomfret_nina_running_reported_at__?: number
   /** Last auto-computed base for transition log; `undefined` = never set on this instance. */
   __pomfret_auto_audit_last_base__?: ObservatoryStatus
 }
 
 const statusFile = process.env.OBSERVATORY_STATUS_FILE
 let loaded = false
-const BUSY_TIMEOUT_MS = 90_000
+const NINA_RUNNING_STALE_MS = 90_000
+const AGENT_DISCONNECTED_MS = 90_000
 const WEATHER_CACHE_MS = 0
 const KMH_TO_MS = 1 / 3.6
 let weatherCache:
@@ -109,6 +114,7 @@ async function resetAutoBaseAuditCursor(): Promise<void> {
 function autoBaseLabel(s: ObservatoryStatus): string {
   if (s === 'ready') return 'Ready'
   if (s === 'busy_in_use') return 'Busy -- In Use'
+  if (s === 'disconnected') return 'Disconnected'
   if (s === 'closed_weather_not_permitted') return 'Closed -- Weather Not Permitted'
   if (s === 'closed_daytime') return 'Closed -- Daytime'
   return 'Closed -- Observatory Maintenance'
@@ -168,7 +174,7 @@ async function maybeLogAutoComputedBaseChange(input: {
 
   const message = `Auto observatory base: ${autoBaseLabel(previousCursor)} → ${autoBaseLabel(base)}${
     pollTimeoutApplied && finalStatus === 'busy_in_use' && base !== 'busy_in_use'
-      ? ' (display shows Busy -- In Use: no nina-sequence poll within 90s)'
+      ? ' (display shows Busy -- In Use: agent reports NINA is running)'
       : ''
   }`
 
@@ -196,6 +202,7 @@ function applyObservatoryPayload(parsed: { status?: unknown; mode?: unknown; las
   if (
     parsed.status === 'ready' ||
     parsed.status === 'busy_in_use' ||
+    parsed.status === 'disconnected' ||
     parsed.status === 'closed_weather_not_permitted' ||
     parsed.status === 'closed_daytime' ||
     parsed.status === 'closed_observatory_maintenance'
@@ -207,6 +214,21 @@ function applyObservatoryPayload(parsed: { status?: unknown; mode?: unknown; las
   }
   if (typeof parsed.lastPollTs === 'number' && Number.isFinite(parsed.lastPollTs)) {
     memory().__pomfret_last_poll_ts__ = parsed.lastPollTs
+  }
+  if (
+    typeof (parsed as { lastAgentSeenTs?: unknown }).lastAgentSeenTs === 'number' &&
+    Number.isFinite((parsed as { lastAgentSeenTs: number }).lastAgentSeenTs)
+  ) {
+    memory().__pomfret_last_agent_seen_ts__ = (parsed as { lastAgentSeenTs: number }).lastAgentSeenTs
+  }
+  if (typeof (parsed as { ninaRunning?: unknown }).ninaRunning === 'boolean') {
+    memory().__pomfret_nina_running__ = (parsed as { ninaRunning: boolean }).ninaRunning
+  }
+  if (
+    typeof (parsed as { ninaRunningReportedAt?: unknown }).ninaRunningReportedAt === 'number' &&
+    Number.isFinite((parsed as { ninaRunningReportedAt: number }).ninaRunningReportedAt)
+  ) {
+    memory().__pomfret_nina_running_reported_at__ = (parsed as { ninaRunningReportedAt: number }).ninaRunningReportedAt
   }
 }
 
@@ -245,15 +267,30 @@ async function ensureLoaded() {
  */
 async function mergeObservatorySnapshotFromKv(): Promise<void> {
   if (!kvEnabled()) return
-  const remote = await kvGetJson<{ status?: unknown; mode?: unknown; lastPollTs?: unknown }>(
+  const remote = await kvGetJson<{
+    status?: unknown
+    mode?: unknown
+    lastPollTs?: unknown
+    lastAgentSeenTs?: unknown
+    ninaRunning?: unknown
+    ninaRunningReportedAt?: unknown
+  }>(
     'observatory-status'
   )
   if (!remote || (remote.mode !== 'manual' && remote.mode !== 'auto')) return
 
   const prevPoll = memory().__pomfret_last_poll_ts__ ?? 0
+  const prevAgentSeen = memory().__pomfret_last_agent_seen_ts__ ?? 0
+  const prevReportedAt = memory().__pomfret_nina_running_reported_at__ ?? 0
   applyObservatoryPayload(remote)
   if (typeof remote.lastPollTs === 'number' && Number.isFinite(remote.lastPollTs)) {
     memory().__pomfret_last_poll_ts__ = Math.max(remote.lastPollTs, prevPoll)
+  }
+  if (typeof remote.lastAgentSeenTs === 'number' && Number.isFinite(remote.lastAgentSeenTs)) {
+    memory().__pomfret_last_agent_seen_ts__ = Math.max(remote.lastAgentSeenTs, prevAgentSeen)
+  }
+  if (typeof remote.ninaRunningReportedAt === 'number' && Number.isFinite(remote.ninaRunningReportedAt)) {
+    memory().__pomfret_nina_running_reported_at__ = Math.max(remote.ninaRunningReportedAt, prevReportedAt)
   }
 }
 
@@ -272,6 +309,9 @@ async function persist() {
     mode: currentMode(),
     status: currentManualStatus(),
     lastPollTs: memory().__pomfret_last_poll_ts__ ?? null,
+    lastAgentSeenTs: memory().__pomfret_last_agent_seen_ts__ ?? null,
+    ninaRunning: memory().__pomfret_nina_running__ ?? null,
+    ninaRunningReportedAt: memory().__pomfret_nina_running_reported_at__ ?? null,
   }
   if (kvEnabled()) {
     const ok = await kvSetJson('observatory-status', payload)
@@ -294,7 +334,9 @@ export async function getObservatoryStatus(): Promise<ObservatoryStatus> {
   await refreshLastPollTsFromKv()
   const mode = currentMode()
   const now = Date.now()
-  const lastPollTs = memory().__pomfret_last_poll_ts__ ?? 0
+  const lastAgentSeenTs = memory().__pomfret_last_agent_seen_ts__ ?? 0
+  const ninaRunning = memory().__pomfret_nina_running__ ?? false
+  const ninaRunningReportedAt = memory().__pomfret_nina_running_reported_at__ ?? 0
 
   let base: ObservatoryStatus
   if (await isWithinAdminClosedWindow(now)) {
@@ -309,9 +351,11 @@ export async function getObservatoryStatus(): Promise<ObservatoryStatus> {
   }
 
   let final: ObservatoryStatus
-  if (base === 'busy_in_use') {
+  if (isObservatoryAgentDisconnected(now, lastAgentSeenTs)) {
+    final = 'disconnected'
+  } else if (base === 'busy_in_use') {
     final = 'busy_in_use'
-  } else if (lastPollTs > 0 && now - lastPollTs > BUSY_TIMEOUT_MS) {
+  } else if (isObservatoryBusyFromNinaReport(now, ninaRunning, ninaRunningReportedAt)) {
     final = 'busy_in_use'
   } else {
     final = base
@@ -324,7 +368,7 @@ export async function getObservatoryStatus(): Promise<ObservatoryStatus> {
       base,
       finalStatus: final,
       nowMs: now,
-      pollTimeoutApplied: final === 'busy_in_use' && base !== 'busy_in_use',
+      pollTimeoutApplied: final === 'busy_in_use' && base !== 'busy_in_use' && ninaRunning,
     })
   }
 
@@ -363,6 +407,34 @@ export async function getObservatoryMode(): Promise<ObservatoryMode> {
 
 export async function touchObservatoryPoll(): Promise<void> {
   await ensureLoaded()
-  memory().__pomfret_last_poll_ts__ = Date.now()
+  const now = Date.now()
+  memory().__pomfret_last_poll_ts__ = now
+  memory().__pomfret_last_agent_seen_ts__ = now
+  memory().__pomfret_nina_running__ = false
+  memory().__pomfret_nina_running_reported_at__ = now
   await persist()
+}
+
+export function isObservatoryBusyFromNinaReport(
+  nowMs: number,
+  ninaRunning: boolean,
+  ninaRunningReportedAt: number
+): boolean {
+  if (!ninaRunning) return false
+  if (!Number.isFinite(ninaRunningReportedAt) || ninaRunningReportedAt <= 0) return false
+  return nowMs - ninaRunningReportedAt <= NINA_RUNNING_STALE_MS
+}
+
+export async function reportObservatoryAgentPulse(input: { ninaRunning: boolean }): Promise<void> {
+  await ensureLoaded()
+  const now = Date.now()
+  memory().__pomfret_nina_running__ = input.ninaRunning
+  memory().__pomfret_nina_running_reported_at__ = now
+  memory().__pomfret_last_agent_seen_ts__ = now
+  await persist()
+}
+
+export function isObservatoryAgentDisconnected(nowMs: number, lastAgentSeenTs: number): boolean {
+  if (!Number.isFinite(lastAgentSeenTs) || lastAgentSeenTs <= 0) return true
+  return nowMs - lastAgentSeenTs > AGENT_DISCONNECTED_MS
 }

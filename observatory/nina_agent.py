@@ -75,6 +75,11 @@ RECONCILE_QUEUE_URL = (
     if _nina_seq.scheme and _nina_seq.netloc
     else ""
 )
+AGENT_PULSE_URL = (
+    f"{_nina_seq.scheme}://{_nina_seq.netloc}/api/imaging/agent-pulse"
+    if _nina_seq.scheme and _nina_seq.netloc
+    else ""
+)
 # Vercel Hobby cannot run sub-daily crons; 24/7 agent triggers reconcile instead.
 # N idle poll cycles × POLL_SECONDS ≈ interval (e.g. 8×45s ≈ 6 minutes).
 RECONCILE_EVERY_N_POLLS = 8
@@ -98,6 +103,7 @@ SKIP_WHEN_NINA_RUNNING = True
 
 # Poll interval while waiting for started NINA process to exit.
 RUNNING_CHECK_SECONDS = 15
+RUNNING_PULSE_INTERVAL_SECONDS = 30
 
 # NINA image output root folder (scan recursively after each run).
 NINA_OUTPUT_DIR = r"C:\Users\Observatory\Documents\N.I.N.A"
@@ -263,6 +269,20 @@ def post_json(url: str, payload: dict) -> Optional[dict]:
         if not raw:
             return None
         return json.loads(raw)
+
+def report_agent_pulse(nina_running: bool) -> bool:
+    url = str(AGENT_PULSE_URL).strip()
+    if not url:
+        return False
+    try:
+        post_json(url, {"ninaRunning": nina_running})
+        return True
+    except urllib.error.HTTPError as ex:
+        body = ex.read().decode("utf-8", errors="replace").strip() if ex.fp else ""
+        log(f"Agent pulse HTTP {ex.code}: {body[:300]}")
+    except Exception as ex:
+        log(f"Agent pulse failed: {ex}")
+    return False
 
 
 def is_nina_running() -> bool:
@@ -899,11 +919,16 @@ def wait_for_nina_and_stream_previews(
 ) -> None:
     log("NINA started; agent will pause URL polling until NINA exits.")
     rolling_snapshot = dict(baseline_snapshot)
+    last_running_pulse_at = 0.0
     while True:
         code = process.poll()
         if code is not None:
             log(f"NINA exited with code {code}. Resuming URL polling.")
             return
+        now_monotonic = time.monotonic()
+        if now_monotonic - last_running_pulse_at >= RUNNING_PULSE_INTERVAL_SECONDS:
+            report_agent_pulse(True)
+            last_running_pulse_at = now_monotonic
         if PREVIEW_ENABLED and session_id:
             changed = find_new_or_updated_files(rolling_snapshot, output_root)
             if changed:
@@ -938,6 +963,7 @@ def run_loop() -> None:
 
     log("Agent started.")
     poll_tick = 0
+    last_pulsed_nina_running: Optional[bool] = None
 
     def sleep_between_polls() -> None:
         nonlocal poll_tick
@@ -951,9 +977,13 @@ def run_loop() -> None:
     while True:
         try:
             if SKIP_WHEN_NINA_RUNNING and is_nina_running():
+                if report_agent_pulse(True):
+                    last_pulsed_nina_running = True
                 log("NINA is already running. Skipping this poll.")
                 sleep_between_polls()
                 continue
+            if last_pulsed_nina_running is not False and report_agent_pulse(False):
+                last_pulsed_nina_running = False
 
             try:
                 content = download_bytes(SEQUENCE_JSON_URL)
@@ -993,6 +1023,8 @@ def run_loop() -> None:
                 run_id = sanitize_for_key(current_fingerprint)
                 log("Session id not found in JSON, using fingerprint for R2 folder.")
             nina_process = start_nina(sequence_path)
+            if report_agent_pulse(True):
+                last_pulsed_nina_running = True
             wait_for_nina_and_stream_previews(
                 nina_process,
                 session_id=session_id,
@@ -1002,6 +1034,8 @@ def run_loop() -> None:
                 jobs_dir=jobs_dir,
                 baseline_snapshot=before_snapshot,
             )
+            if report_agent_pulse(False):
+                last_pulsed_nina_running = False
             new_files = find_new_or_updated_files(before_snapshot, output_root)
             postprocess_queue.put(
                 {

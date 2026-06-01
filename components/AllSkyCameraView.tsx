@@ -8,6 +8,7 @@ import MJPEGStream from '@/components/MJPEGStream'
 type ObservatoryApiStatus =
   | 'ready'
   | 'busy_in_use'
+  | 'disconnected'
   | 'closed_weather_not_permitted'
   | 'closed_daytime'
   | 'closed_observatory_maintenance'
@@ -16,6 +17,7 @@ function observatoryStatusLabel(status: ObservatoryApiStatus | null): string {
   if (!status) return '—'
   if (status === 'ready') return 'Ready'
   if (status === 'busy_in_use') return 'Busy'
+  if (status === 'disconnected') return 'Disconnected'
   return 'Closed'
 }
 
@@ -187,7 +189,7 @@ export default function AllSkyCameraView() {
 
   const overlay = useMemo(() => {
     const obsText = observatoryStatusLabel(obsStatus)
-    const obsValueRed = obsText === 'Busy' || obsText === 'Closed'
+    const obsValueRed = obsText === 'Busy' || obsText === 'Closed' || obsText === 'Disconnected'
 
     const cloudText =
       cloudPct != null && Number.isFinite(cloudPct) ? `${Math.round(cloudPct)}%` : '—'

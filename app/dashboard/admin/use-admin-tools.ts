@@ -27,6 +27,7 @@ export type ObservatoryMode = 'manual' | 'auto'
 export type ObservatoryStatus =
   | 'ready'
   | 'busy_in_use'
+  | 'disconnected'
   | 'closed_weather_not_permitted'
   | 'closed_daytime'
   | 'closed_observatory_maintenance'
@@ -34,6 +35,7 @@ export type ObservatoryStatus =
 export const statusOptions: { value: ObservatoryStatus; label: string }[] = [
   { value: 'ready', label: 'Ready' },
   { value: 'busy_in_use', label: 'Busy -- In Use' },
+  { value: 'disconnected', label: 'Disconnected' },
   { value: 'closed_weather_not_permitted', label: 'Closed -- Weather Not Permitted' },
   { value: 'closed_daytime', label: 'Closed -- Daytime' },
   { value: 'closed_observatory_maintenance', label: 'Closed -- Observatory Maintenance' },

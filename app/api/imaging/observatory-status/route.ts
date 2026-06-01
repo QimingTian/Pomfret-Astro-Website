@@ -16,6 +16,7 @@ export const runtime = 'nodejs'
 const allowedStatuses: ObservatoryStatus[] = [
   'ready',
   'busy_in_use',
+  'disconnected',
   'closed_weather_not_permitted',
   'closed_daytime',
   'closed_observatory_maintenance',

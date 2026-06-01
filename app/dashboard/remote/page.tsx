@@ -220,6 +220,7 @@ type ObservatoryStatus =
   | 'loading'
   | 'ready'
   | 'busy_in_use'
+  | 'disconnected'
   | 'closed_weather_not_permitted'
   | 'closed_daytime'
   | 'closed_observatory_maintenance'
@@ -228,6 +229,7 @@ function statusLabel(status: ObservatoryStatus): string {
   if (status === 'loading') return '...'
   if (status === 'ready') return 'Ready'
   if (status === 'busy_in_use') return 'Busy -- In Use'
+  if (status === 'disconnected') return 'Disconnected'
   if (status === 'closed_weather_not_permitted') return 'Closed -- Weather Not Permitted'
   if (status === 'closed_daytime') return 'Closed -- Daytime'
   return 'Closed -- Observatory Maintenance'
@@ -1025,6 +1027,7 @@ export default function RemotePage() {
         res.ok &&
         (data.status === 'ready' ||
           data.status === 'busy_in_use' ||
+          data.status === 'disconnected' ||
           data.status === 'closed_weather_not_permitted' ||
           data.status === 'closed_daytime' ||
           data.status === 'closed_observatory_maintenance')
@@ -4734,11 +4737,17 @@ export default function RemotePage() {
                   setSubmitError(
                     status === 'busy_in_use'
                       ? 'Observatory is busy. Session was not started.'
+                      : status === 'disconnected'
+                        ? 'Observatory is disconnected. Session was not started.'
                       : 'Observatory is closed. Session was not started.'
                   )
                 }}
               >
-                1. {status === 'busy_in_use' ? 'Observatory busy: do not start now.' : 'Observatory closed: cannot start now.'}
+                1. {status === 'busy_in_use'
+                  ? 'Observatory busy: do not start now.'
+                  : status === 'disconnected'
+                    ? 'Observatory disconnected: do not start now.'
+                    : 'Observatory closed: cannot start now.'}
               </button>
               <button
                 type="button"
@@ -4758,6 +4767,8 @@ export default function RemotePage() {
               >
                 2. {status === 'busy_in_use'
                   ? 'Start now, and wait until the previous task is finished.'
+                  : status === 'disconnected'
+                    ? 'Start now, and wait until the agent reconnects and observatory returns to Ready.'
                   : 'Start now, and wait until observatory is Ready before it is available for download.'}
               </button>
             </div>

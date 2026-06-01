@@ -6,6 +6,7 @@ import {
   sendEmailVerificationEmail,
   storeEmailVerificationToken,
 } from '@/lib/email-verification'
+import { buildSessionCookie, createMemberSession } from '@/lib/member-auth'
 import { markMemberEmailVerified } from '@/lib/member-store'
 import { publicSiteUrl } from '@/lib/site-url'
 
@@ -27,7 +28,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(publicSiteUrl('/login?verify=invalid'))
   }
 
-  return NextResponse.redirect(publicSiteUrl('/login?verified=1'))
+  const session = await createMemberSession(user.id)
+  const response = NextResponse.redirect(publicSiteUrl('/dashboard/account?verified=1'))
+  response.cookies.set(buildSessionCookie(session.token, session.maxAgeSec))
+  return response
 }
 
 /** Resend verification (authenticated). */

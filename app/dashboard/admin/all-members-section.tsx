@@ -132,15 +132,6 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
             const busyRemove = removingId === m.id
             const busyPromote = promotingId === m.id
             const busy = busyRemove || busyPromote
-            const accessLabel = m.imagingApproved
-              ? 'Imaging OK'
-              : m.imagingPending
-                ? 'Imaging pending'
-                : m.imagingRejected
-                  ? 'Imaging rejected'
-                  : m.emailVerified
-                    ? 'Email verified'
-                    : 'Email unverified'
             return (
               <li
                 key={m.id}
@@ -152,8 +143,6 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
                   <span className="break-all">{m.email}</span>
                   <span className="mx-2">·</span>
                   <span>{memberLevelLabel(m.role)}</span>
-                  <span className="mx-2">·</span>
-                  <span className="text-gray-400">{accessLabel}</span>
                 </p>
                 {m.role === 'member' ? (
                   <div className="flex shrink-0 flex-wrap items-center gap-2">

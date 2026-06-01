@@ -1,5 +1,6 @@
 import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { sendSessionFailedEmail } from '@/lib/imaging-completion-email'
+import { sendObservatoryDisconnectedAlertEmail } from '@/lib/observatory-alert-email'
 import { publishProgress } from '@/lib/imaging-progress-live'
 import { listProjects, markNightFailed } from '@/lib/imaging-project-store'
 import { notifyProjectNightFailedEmail } from '@/lib/imaging-project-night-email'
@@ -153,6 +154,22 @@ export async function failInProgressBoardSessions(
  */
 export async function onObservatoryFinalStatusChanged(final: ObservatoryStatus): Promise<void> {
   const previous = await readLastFinalStatus()
+  if (previous !== 'disconnected' && final === 'disconnected') {
+    void sendObservatoryDisconnectedAlertEmail().then((result) => {
+      if (!result.sent) {
+        return appendAuditLog({
+          kind: 'observatory.alert_email',
+          message: `Disconnected alert email skipped/failed: ${result.reason ?? 'unknown reason'}`,
+          detail: { sent: false, reason: result.reason ?? null, recipients: result.recipients ?? [] },
+        })
+      }
+      return appendAuditLog({
+        kind: 'observatory.alert_email',
+        message: 'Disconnected alert email sent to observatory administrators.',
+        detail: { sent: true, recipients: result.recipients ?? [] },
+      })
+    })
+  }
   if (previous === 'busy_in_use' && final === 'ready') {
     await failInProgressProjectSubSessions('observatory_busy_to_ready')
     await failInProgressBoardSessions(undefined, 'observatory_busy_to_ready')

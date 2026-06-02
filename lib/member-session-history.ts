@@ -1,4 +1,4 @@
-import { listProjects } from '@/lib/imaging-project-store'
+import { effectiveProjectStatus, listProjects } from '@/lib/imaging-project-store'
 import { listBoardEntries } from '@/lib/imaging-session-board'
 import { listAll, type ImagingRequest } from '@/lib/imaging-queue-store'
 import { syncMemberSessionHistoryArchive } from '@/lib/member-session-history-archive'
@@ -88,13 +88,14 @@ export async function listMemberSessionHistory(
 
   for (const p of projects) {
     if (!belongsToMember(p, userId, userEmail)) continue
+    const projectStatus = effectiveProjectStatus(p)
     const existing = byId.get(p.id)
     if (existing) {
       byId.set(p.id, {
         ...existing,
         kind: 'project',
-        status: p.status,
-        displayStatus: p.status,
+        status: projectStatus,
+        displayStatus: projectStatus,
         projectMode: true,
         nights: p.nights.length,
         updatedAt: p.updatedAt,
@@ -104,8 +105,8 @@ export async function listMemberSessionHistory(
         id: p.id,
         kind: 'project',
         target: p.target,
-        status: p.status,
-        displayStatus: p.status,
+        status: projectStatus,
+        displayStatus: projectStatus,
         createdAt: p.createdAt,
         updatedAt: p.updatedAt,
         projectMode: true,

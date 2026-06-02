@@ -399,8 +399,19 @@ export function remainingFramesTotal(project: ImagingProject): number {
   return project.remainingByFilter.reduce((sum, r) => sum + Math.max(0, r.countRemaining), 0)
 }
 
-/** UI / API status mirrors the project store (only one project may be `in_progress` at a time). */
+/**
+ * Status for member UI (Current Sessions, Session History).
+ * Parent `project.status` can lag the queue row; sub-sessions and board state are authoritative.
+ */
 export function effectiveProjectStatus(project: ImagingProject): ProjectStatus {
+  if (project.nights.some((n) => n.status === 'in_progress')) return 'in_progress'
+  if (project.status === 'completed' && remainingFramesTotal(project) > 0) return 'in_progress'
+  if (
+    project.nights.some((n) => n.status === 'scheduled' && typeof n.plannedStartIso === 'string') &&
+    (project.status === 'pending' || project.status === 'scheduled')
+  ) {
+    return 'scheduled'
+  }
   return project.status
 }
 

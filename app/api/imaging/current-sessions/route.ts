@@ -1,7 +1,6 @@
 import type { NextRequest } from 'next/server'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import { getCurrentUser } from '@/lib/member-auth'
-import { syncProjectNightsCompleteWhenR2Present } from '@/lib/imaging/project/complete-night-on-upload'
 import {
   effectiveProjectStatus,
   listProjects,
@@ -36,8 +35,6 @@ function redactContactFields<T extends { email?: string | null; firstName?: stri
 export async function GET(request: NextRequest) {
   const viewer = await getCurrentUser(request)
   const includeContact = viewer != null
-
-  await syncProjectNightsCompleteWhenR2Present()
 
   const queue = await listAll()
   const board = await listBoardEntries()
@@ -102,7 +99,7 @@ export async function GET(request: NextRequest) {
     if (outputMode === 'none') return nights
     return Promise.all(
       nights.map(async (n) => {
-        if (n.status !== 'completed' && n.status !== 'in_progress') return n
+        if (n.status !== 'completed') return n
         const hasDownload = await hasR2ObjectForQueueId(n.id)
         if (!hasDownload) return n
         return {

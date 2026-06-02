@@ -4110,7 +4110,7 @@ export default function RemotePage() {
           <div className="w-full max-w-5xl rounded-xl border border-gray-700 bg-[#08090a] text-gray-100 shadow-xl flex flex-col max-h-[85vh]">
             <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-800">
               <div>
-                <h2 className="text-sm font-semibold text-white">Session Dashboard</h2>
+                <h2 className="text-sm font-semibold text-white">Session progress</h2>
                 <p className="text-xs text-gray-500 font-mono truncate max-w-[20rem] sm:max-w-md">{terminalSessionId}</p>
               </div>
               <div className="flex items-center gap-2">
@@ -4249,7 +4249,7 @@ export default function RemotePage() {
                 : 0
               const pickerNights = (projectItem?.nights ?? []).filter((n) => {
                 if (nightPickerPurpose === 'download') {
-                  return n.hasDownload === true
+                  return n.status === 'completed' && n.hasDownload === true
                 }
                 return (
                   n.status === 'scheduled' ||
@@ -4262,7 +4262,7 @@ export default function RemotePage() {
                 return (
                   <p className="text-sm text-gray-400 py-2">
                     {nightPickerPurpose === 'download'
-                      ? 'No session with a download yet.'
+                      ? 'No completed session with a download yet.'
                       : 'No Session Scheduled'}
                   </p>
                 )

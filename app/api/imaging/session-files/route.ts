@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server'
 
+import { completeProjectNightAfterUpload } from '@/lib/imaging/project/complete-night-on-upload'
 import { imagingCorsOptions, imagingQueueAuthorized, withImagingCors } from '@/lib/imaging-queue-auth'
 import { upsertR2ObjectKey, upsertR2PreviewObjectKey } from '@/lib/r2-session-download'
 
@@ -97,6 +98,9 @@ export async function POST(request: NextRequest) {
   } catch {
     return withImagingCors({ ok: false as const, error: 'Invalid object key for session' }, 400)
   }
+
+  await completeProjectNightAfterUpload(queueId)
+
   return withImagingCors({
     ok: true as const,
     queueId,

@@ -192,12 +192,6 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
                   <span className="break-all">{m.email}</span>
                   <span className="mx-2">·</span>
                   <span>{memberLevelLabel(m.role)}</span>
-                  {m.bootstrapAdmin ? (
-                    <>
-                      <span className="mx-2">·</span>
-                      <span className="text-gray-400">Bootstrap admin</span>
-                    </>
-                  ) : null}
                 </p>
                 {manageable ? (
                   <div className="flex shrink-0 flex-wrap items-center gap-2">

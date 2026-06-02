@@ -16,27 +16,6 @@ type MemberSessionRow = {
   nights?: number
 }
 
-function statusLabel(status: string): string {
-  switch (status) {
-    case 'pending':
-      return 'Pending'
-    case 'scheduled':
-      return 'Scheduled'
-    case 'in_progress':
-      return 'In progress'
-    case 'completed':
-      return 'Completed'
-    case 'failed':
-      return 'Failed'
-    case 'rejected':
-      return 'Rejected'
-    case 'unscheduled':
-      return 'Unscheduled'
-    default:
-      return status
-  }
-}
-
 export function SessionHistorySection({
   variant = 'panel',
   className = '',
@@ -90,9 +69,7 @@ export function SessionHistorySection({
         <ul className="max-h-[16rem] space-y-2 overflow-y-auto">
           {sessions.map((s) => (
             <li key={s.id} className="rounded-lg border border-gray-700 px-3 py-2 text-sm">
-              <p className="font-medium text-white">
-                {s.target} | {statusLabel(s.displayStatus)}
-              </p>
+              <p className="font-medium text-white">{s.target}</p>
               <p className="mt-1 text-xs text-gray-400">{new Date(s.updatedAt).toLocaleString()}</p>
             </li>
           ))}

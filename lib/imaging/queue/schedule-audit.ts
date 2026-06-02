@@ -43,6 +43,8 @@ export async function logQueueScheduleInsightChange(input: {
   nightSubId?: string | null
 }): Promise<void> {
   const { row, previousState, next, previousPlannedStartIso = row.plannedStartIso ?? null } = input
+  // Multi-night projects log sub-session changes in applyProjectTonightPlans / replaceScheduledSubsForNightKey.
+  if (row.projectMode === true) return
   if (previousState === next.status) return
   if (
     previousState === 'scheduled' &&
@@ -60,7 +62,7 @@ export async function logQueueScheduleInsightChange(input: {
     detail: {
       id: row.id,
       target: row.target,
-      projectMode: row.projectMode === true,
+      projectMode: false,
       ...(input.nightSubId ? { nightSubId: input.nightSubId } : {}),
       ...(input.nightIndex != null ? { nightIndex: input.nightIndex } : {}),
       previousStatus: previousState,

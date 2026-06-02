@@ -12,6 +12,15 @@ const FAILED_KINDS = new Set([
 ])
 const FAILED_MESSAGE_RE = /fail|rejected|unauthorized|error/i
 
+/** Hide reconcile spam; full history remains in CSV export. */
+export function auditLogRowVisible(row: AuditLogRowLike): boolean {
+  if (row.kind !== 'session.schedule_changed') return true
+  const d = row.detail
+  // Parent project queue row mirrors sub-sessions — only sub-session lines are useful.
+  if (d?.projectMode === true && typeof d?.nightSubId !== 'string') return false
+  return true
+}
+
 export function auditLogLineFailed(row: AuditLogRowLike): boolean {
   if (FAILED_KINDS.has(row.kind)) return true
   if (row.kind === 'queue.status' && FAILED_MESSAGE_RE.test(row.message)) return true

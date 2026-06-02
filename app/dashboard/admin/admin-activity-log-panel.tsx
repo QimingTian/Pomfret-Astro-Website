@@ -5,6 +5,7 @@ import {
   auditLogDetailFields,
   auditLogHeadline,
   auditLogLineFailed,
+  auditLogRowVisible,
   type AuditLogRowLike,
 } from '@/lib/admin-audit-log-display'
 import type { AuditLogRow } from '@/app/dashboard/admin/use-admin-tools'
@@ -37,7 +38,7 @@ export function AdminActivityLogPanel({ entries, loading, error }: Props) {
           <p className="text-sm text-gray-500">No log entries yet.</p>
         ) : (
           <>
-            {entries.map((row) => {
+            {entries.filter(auditLogRowVisible).map((row) => {
               const failed = auditLogLineFailed(row)
               const headline = auditLogHeadline(row)
               const timeLabel = Number.isFinite(Date.parse(row.at))

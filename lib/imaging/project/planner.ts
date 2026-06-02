@@ -24,11 +24,7 @@ import {
 } from '@/lib/imaging-project-store'
 import { projectAltitudeHoldIntervals } from '@/lib/imaging-project-altitude-hold'
 import { DSO_SESSION_OVERHEAD_SEC } from '@/lib/imaging-session-overhead'
-import { patchRequestScheduleInsight, getRequestById } from '@/lib/imaging-queue-store'
-import {
-  deriveQueueScheduleState,
-  logQueueScheduleInsightChange,
-} from '@/lib/imaging/queue/schedule-audit'
+import { patchRequestScheduleInsight } from '@/lib/imaging-queue-store'
 import { subtractOccupiedFromFree } from '@/lib/imaging-queue-free-intervals'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import {
@@ -1123,16 +1119,9 @@ export async function reconcileOneProjectTonight(
     now
   )
 
-  const prevRow = await getRequestById(project.id)
-  const previousState = deriveQueueScheduleState(prevRow, project, nightKey)
-
   await patchRequestScheduleInsight(project.id, insight)
 
-  let clearedScheduled: typeof project.nights = []
   if (shouldRefreshTonightSubs(project, nightKey)) {
-    const scheduledBefore = project.nights.filter(
-      (n) => n.nightKey === nightKey && n.status === 'scheduled'
-    )
     await applyTonightPlansOrClearScheduled(
       project.id,
       nightKey,
@@ -1141,28 +1130,6 @@ export async function reconcileOneProjectTonight(
       weatherPermittedIntervals,
       now
     )
-    const refreshedProject = (await getProjectById(project.id)) ?? project
-    clearedScheduled = scheduledBefore.filter(
-      (n) => !refreshedProject.nights.some((x) => x.id === n.id && x.status === 'scheduled')
-    )
-  }
-
-  if (previousState !== insight.status && clearedScheduled.length === 0) {
-    const primary = clearedScheduled[0]
-    await logQueueScheduleInsightChange({
-      row: {
-        id: project.id,
-        target: project.target,
-        projectMode: true,
-        status: prevRow?.status ?? 'pending',
-        plannedStartIso: prevRow?.plannedStartIso ?? null,
-      },
-      previousState,
-      next: insight,
-      previousPlannedStartIso: primary?.plannedStartIso ?? prevRow?.plannedStartIso ?? null,
-      nightIndex: primary?.nightIndex ?? null,
-      nightSubId: primary?.id ?? null,
-    })
   }
 
   return { plans, insight }

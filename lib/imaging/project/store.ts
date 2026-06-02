@@ -688,7 +688,10 @@ export async function replaceScheduledSubsForNightKey(
       (subs.length > 0
         ? 'Replaced by updated tonight sub-session plan.'
         : 'Tonight sub-session removed from schedule.')
+    const rescheduledIds = new Set(subs.map((s) => s.id))
     for (const night of removed) {
+      // Replacing a sub with an updated plan reuses the same id — skip noisy unscheduled lines.
+      if (rescheduledIds.has(night.id)) continue
       await appendAuditLog({
         kind: 'session.schedule_changed',
         message: `Session schedule changed: ${project.target} Session ${night.nightIndex} (${night.id}) scheduled -> unscheduled.`,

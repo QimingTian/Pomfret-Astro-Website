@@ -66,6 +66,21 @@ function sessionKeyPrefix(queueId: string): string {
   return `sessions/${queueId}/`
 }
 
+/** Matches observatory/nina_agent.py `sanitize_for_key` (R2 run folder name). */
+export function sanitizeForR2RunId(queueId: string): string {
+  return queueId.replace(/[^a-zA-Z0-9._-]/g, '_')
+}
+
+/** Prefix used by nina_agent uploads (`R2_PREFIX`, default `imaging`). */
+export function imagingAgentObjectPrefix(): string {
+  const raw = (process.env.R2_PREFIX ?? 'imaging').trim().replace(/\/+$/, '')
+  return raw || 'imaging'
+}
+
+function imagingAgentKeyPrefix(queueId: string): string {
+  return `${imagingAgentObjectPrefix()}/${sanitizeForR2RunId(queueId)}/`
+}
+
 /** Reject path traversal and keys outside the session namespace. */
 export function isAllowedSessionObjectKey(queueId: string, objectKey: string): boolean {
   const key = objectKey.trim()
@@ -73,6 +88,8 @@ export function isAllowedSessionObjectKey(queueId: string, objectKey: string): b
   if (key.startsWith(GALLERY_PREFIX)) return false
   const prefix = sessionKeyPrefix(queueId)
   if (key.startsWith(prefix)) return true
+  const agentPrefix = imagingAgentKeyPrefix(queueId)
+  if (key.startsWith(agentPrefix)) return true
   // Legacy flat keys: queueId or queueId + suffix only.
   const suffix = (process.env.R2_SESSION_OBJECT_SUFFIX ?? '').trim()
   const legacy = suffix ? `${queueId}${suffix}` : queueId

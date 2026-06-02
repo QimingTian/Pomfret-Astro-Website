@@ -14,3 +14,11 @@ test('isAllowedSessionObjectKey rejects gallery keys', () => {
 test('isAllowedSessionObjectKey rejects path traversal', () => {
   assert.equal(isAllowedSessionObjectKey('x', '../gallery-submissions/secret'), false)
 })
+
+test('isAllowedSessionObjectKey accepts nina_agent imaging prefix', () => {
+  const id = 'a9a609e6-0e7c-41e7-a1b0-857ae61105d7::night-3'
+  assert.equal(
+    isAllowedSessionObjectKey(id, `imaging/a9a609e6-0e7c-41e7-a1b0-857ae61105d7__night-3/night-3.zip`),
+    true
+  )
+})

@@ -587,8 +587,8 @@ nina_agent.py                # root launcher → observatory/
 
 - **Stream:** Pi `camera_service.py` → MJPEG; shown on Weather page and admin panel.
 - **Auto modes:** `stream`, `auto`, `half_hour`, `hour`, `off` — gain scheduled by `observatory_solar.py` (0 day / 80 twilight / 150 night using **nautical** dawn/dusk).
-- **ASC cloud AI:** In `auto`, `half_hour`, and `hour` modes, each captured frame runs Teachable Machine cloud + rain models (`observatory/asc_cloud_ai.py`). **Nautical dawn → nautical dusk** uses `Day_*` models; otherwise `Night_*`. Results are exposed on camera `/status` as `sensors.allSkyCam.ascCloud`. Weather page **Cloud Cover** and the all-sky overlay read this field (not Open-Meteo). Rain is inferred and stored in status JSON but not shown in the UI yet.
-- **Models:** `observatory/models/{Day,Night}_{Cloud,Rain}_Model}/` (TFJS export). Pi install: `pip install -r observatory/requirements-ai.txt` (TensorFlow + tensorflowjs; optional — capture continues if AI deps are missing).
+- **ASC cloud AI:** In `auto`, `half_hour`, and `hour` modes, each captured frame runs Teachable Machine cloud + rain models (`observatory/asc_cloud_ai.py`). **Nautical dawn → nautical dusk** uses `Day_*` models; otherwise `Night_*`. Results are exposed on camera `/status` as `sensors.allSkyCam.ascCloud` (includes `modelVersion`, currently **ASC AI Model Version 1** / `v1`). Weather page **Cloud Cover** and the all-sky overlay read this field (not Open-Meteo). Rain is inferred and stored in status JSON but not shown in the UI yet.
+- **Models:** `AI Models/` (training exports) and `observatory/models/` (Pi runtime). Version manifest: `ASC_AI_MODEL_VERSION.json`. See [AI Models/README.md](AI%20Models/README.md). Pi install: `pip install -r observatory/requirements-ai.txt` (TensorFlow + tensorflowjs; optional — capture continues if AI deps are missing).
 - **Auto exposure / WB:** closed-loop on Pi; samples posted to `/api/camera/auto-tuning-history`; admin charts in **All Sky Camera Control**.
 - **Half Hour / Hour modes:** timed capture uploads to Google Drive via `imaging_drive.py`.
 

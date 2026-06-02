@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "label": "ASC AI Model Version 1",
+  "released": "2026-06-01",
+  "summary": "Initial Teachable Machine cloud-cover and rain classifiers for the Pomfret all-sky camera (~900 training images per cloud model).",
+  "framework": "Teachable Machine Image (TensorFlow.js export)",
+  "cloudLabels": ["0", "10", "20", "30", "40", "50", "60", "70", "80", "90", "100"],
+  "bundles": {
+    "Day_Cloud_Model": "Cloud cover, nautical dawn → nautical dusk",
+    "Night_Cloud_Model": "Cloud cover, nautical dusk → nautical dawn",
+    "Day_Rain_Model": "Rain vs no rain, day phase",
+    "Night_Rain_Model": "Rain vs no rain, night phase"
+  },
+  "deployPathPi": "observatory/models/",
+  "notes": "Future ASC AI Model Version 2 (v2) may replace these weights; keep this file when bumping versions."
+}

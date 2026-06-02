@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import observatory_solar as obs_solar
 
 _MODELS_DIR = os.path.join(os.path.dirname(__file__), 'models')
+_VERSION_MANIFEST = os.path.join(_MODELS_DIR, 'ASC_AI_MODEL_VERSION.json')
 _IMAGE_SIZE = 224
 # Top-1 softmax above this → use that class label; otherwise weighted expected cover.
 _CLOUD_ARGMAX_MIN_CONFIDENCE = 0.5
@@ -23,6 +24,34 @@ _models: Dict[str, Any] = {}
 _metadata: Dict[str, dict] = {}
 _load_error: Optional[str] = None
 _last_result: Optional[Dict[str, Any]] = None
+_model_version_info: Optional[Dict[str, Any]] = None
+
+
+def model_version_info() -> Dict[str, Any]:
+    """ASC AI bundle version (v1, v2, …) from observatory/models/ASC_AI_MODEL_VERSION.json."""
+    global _model_version_info
+    if _model_version_info is not None:
+        return dict(_model_version_info)
+    fallback = {'version': 'unknown', 'label': 'ASC AI Model (version manifest missing)'}
+    try:
+        with open(_VERSION_MANIFEST, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        _model_version_info = {
+            'version': data.get('version', 'unknown'),
+            'label': data.get('label', data.get('version', 'unknown')),
+            'released': data.get('released'),
+        }
+    except OSError:
+        _model_version_info = fallback
+    except json.JSONDecodeError:
+        _model_version_info = fallback
+    return dict(_model_version_info)
+
+
+def _with_model_version(payload: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(payload)
+    out['modelVersion'] = model_version_info()
+    return out
 
 
 def _model_dir(name: str) -> str:
@@ -165,14 +194,14 @@ def analyze_frame(img, now: datetime | None = None) -> Dict[str, Any]:
 
     ensure_models_loaded()
     if _load_error:
-        return {
+        return _with_model_version({
             'cloudCoverPercent': None,
             'cloudConfidence': None,
             'modelPhase': 'day' if obs_solar.is_asc_model_daytime(now) else 'night',
             'frameIso': now.isoformat(),
             'rain': None,
             'lastError': _load_error,
-        }
+        })
 
     daytime = obs_solar.is_asc_model_daytime(now)
     cloud_key = 'Day_Cloud_Model' if daytime else 'Night_Cloud_Model'
@@ -187,25 +216,25 @@ def analyze_frame(img, now: datetime | None = None) -> Dict[str, Any]:
         rain_labels = _metadata[rain_key].get('labels', [])
         cover, confidence = _cloud_expected_percent(cloud_probs, cloud_labels)
         rain = _rain_from_probs(rain_probs, rain_labels)
-        return {
+        return _with_model_version({
             'cloudCoverPercent': cover,
             'cloudConfidence': confidence,
             'modelPhase': phase,
             'frameIso': now.isoformat(),
             'rain': rain,
             'lastError': None,
-        }
+        })
     except Exception as e:
         msg = str(e)
         print(f'[ASC-AI] inference error: {msg}')
-        return {
+        return _with_model_version({
             'cloudCoverPercent': None,
             'cloudConfidence': None,
             'modelPhase': phase,
             'frameIso': now.isoformat(),
             'rain': None,
             'lastError': msg,
-        }
+        })
 
 
 def analyze_and_store(img, now: datetime | None = None) -> None:
@@ -229,13 +258,13 @@ def status_payload() -> Optional[Dict[str, Any]]:
     with _lock:
         if _last_result is None:
             if _load_error:
-                return {
+                return _with_model_version({
                     'cloudCoverPercent': None,
                     'cloudConfidence': None,
                     'modelPhase': None,
                     'frameIso': None,
                     'rain': None,
                     'lastError': _load_error,
-                }
+                })
             return None
-        return dict(_last_result)
+        return _with_model_version(dict(_last_result))

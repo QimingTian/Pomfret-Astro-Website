@@ -44,10 +44,17 @@ export interface AscCloudRainInference {
   label?: string
 }
 
+export interface AscCloudModelVersion {
+  version?: string
+  label?: string
+  released?: string
+}
+
 export interface AscCloudInference {
   cloudCoverPercent?: number | null
   cloudConfidence?: number | null
   modelPhase?: 'day' | 'night' | null
+  modelVersion?: AscCloudModelVersion | null
   frameIso?: string | null
   rain?: AscCloudRainInference | null
   lastError?: string | null

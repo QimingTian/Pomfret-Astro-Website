@@ -50,3 +50,23 @@ export async function fetchAscCloud(statusUrl?: string | null): Promise<AscCloud
     return null
   }
 }
+
+/** Observatory Ready weather gate — cloud/rain from ASC AI; wind checked separately (Open-Meteo). */
+export const OBSERVATORY_READY_MAX_CLOUD_PERCENT = 20
+export const OBSERVATORY_READY_MAX_WIND_MS = 10
+export const OBSERVATORY_READY_GATE_RULE =
+  'ASC AI cloud < 20% and no rain detected and wind_speed_10m < 10 m/s (Open-Meteo)'
+
+export function evaluateObservatoryReadyWeather(args: {
+  cloudCoverPercent: number | null | undefined
+  rainDetected: boolean | undefined
+  windSpeedMs: number
+}): boolean {
+  const cloud = args.cloudCoverPercent
+  if (cloud == null || !Number.isFinite(cloud)) return false
+  if (args.rainDetected === true) return false
+  if (!Number.isFinite(args.windSpeedMs) || args.windSpeedMs >= OBSERVATORY_READY_MAX_WIND_MS) {
+    return false
+  }
+  return cloud < OBSERVATORY_READY_MAX_CLOUD_PERCENT
+}

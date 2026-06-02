@@ -1088,12 +1088,20 @@ def run_loop() -> None:
             session_id, output_mode, session_filter = extract_sequence_metadata(content)
             last_fingerprint = read_last_fingerprint(jobs_dir)
             if current_fingerprint == last_fingerprint:
-                sleep_between_polls()
-                continue
-
-            log("New sequence content detected, downloading and launching.")
-            sequence_path.write_bytes(content)
-            write_last_fingerprint(jobs_dir, current_fingerprint)
+                if is_nina_running():
+                    sleep_between_polls()
+                    continue
+                if last_fingerprint and sequence_path.is_file():
+                    log("Sequence unchanged since last download and NINA is not running; re-launching.")
+                    content = sequence_path.read_bytes()
+                    session_id, output_mode, session_filter = extract_sequence_metadata(content)
+                else:
+                    sleep_between_polls()
+                    continue
+            else:
+                log("New sequence content detected, downloading and launching.")
+                sequence_path.write_bytes(content)
+                write_last_fingerprint(jobs_dir, current_fingerprint)
             before_snapshot = snapshot_output_files(output_root)
             if session_id:
                 run_id = sanitize_for_key(session_id)

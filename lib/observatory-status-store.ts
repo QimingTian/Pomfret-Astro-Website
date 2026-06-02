@@ -13,6 +13,11 @@ import { OBS_LAT_DEG, OBS_LON_DEG } from '@/lib/target-altitude'
 import { getDaytimeClosedWindowDetail, isWithinDaytimeClosedWindow } from '@/lib/sunrise-window'
 import { isWithinAdminClosedWindow } from '@/lib/admin-closed-window-store'
 import { onObservatoryFinalStatusChanged } from '@/lib/imaging-session-failure'
+import {
+  evaluateObservatoryReadyWeather,
+  fetchAscCloud,
+  OBSERVATORY_READY_GATE_RULE,
+} from '@/lib/asc-cloud'
 
 export type ObservatoryStatus =
   | 'ready'
@@ -46,9 +51,14 @@ let weatherCache:
   | {
       ts: number
       cloudCover: number
+      rainDetected: boolean
       precipitation: number
       windSpeed: number
       weatherAllowed: boolean
+      ascAvailable: boolean
+      ascFrameIso: string | null
+      ascModelPhase: string | null
+      ascLastError: string | null
     }
   | undefined
 
@@ -64,29 +74,59 @@ function currentMode(): ObservatoryMode {
   return memory().__pomfret_mode__ ?? 'manual'
 }
 
+async function fetchOpenMeteoWindSpeedMs(): Promise<number> {
+  const url =
+    `https://api.open-meteo.com/v1/forecast?latitude=${OBS_LAT_DEG}&longitude=${OBS_LON_DEG}` +
+    '&current=wind_speed_10m&timezone=UTC'
+  const res = await fetch(url, { cache: 'no-store' })
+  if (!res.ok) throw new Error(`weather http ${res.status}`)
+  const data = (await res.json()) as { current?: { wind_speed_10m?: number } }
+  const windSpeedRaw = Number(data.current?.wind_speed_10m ?? 999)
+  return Number.isFinite(windSpeedRaw) ? windSpeedRaw * KMH_TO_MS : 999
+}
+
 async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
   if (weatherCache && now - weatherCache.ts < WEATHER_CACHE_MS) {
     return weatherCache.weatherAllowed
   }
 
   try {
-    const url =
-      `https://api.open-meteo.com/v1/forecast?latitude=${OBS_LAT_DEG}&longitude=${OBS_LON_DEG}` +
-      '&current=cloud_cover,precipitation,wind_speed_10m&timezone=UTC'
-    const res = await fetch(url, { cache: 'no-store' })
-    if (!res.ok) throw new Error(`weather http ${res.status}`)
-    const data = (await res.json()) as {
-      current?: { cloud_cover?: number; precipitation?: number; wind_speed_10m?: number }
+    const [ascCloud, windSpeed] = await Promise.all([fetchAscCloud(), fetchOpenMeteoWindSpeedMs()])
+    const ascCloudCover = ascCloud?.cloudCoverPercent
+    const cloudCover =
+      ascCloudCover != null && Number.isFinite(ascCloudCover) ? ascCloudCover : null
+    const rainDetected = ascCloud?.rain?.detected === true
+    const weatherAllowed = evaluateObservatoryReadyWeather({
+      cloudCoverPercent: cloudCover,
+      rainDetected,
+      windSpeedMs: windSpeed,
+    })
+    weatherCache = {
+      ts: now,
+      cloudCover: cloudCover ?? 100,
+      rainDetected,
+      precipitation: rainDetected ? 1 : 0,
+      windSpeed,
+      weatherAllowed,
+      ascAvailable: cloudCover != null,
+      ascFrameIso: ascCloud?.frameIso ?? null,
+      ascModelPhase: ascCloud?.modelPhase ?? null,
+      ascLastError: ascCloud?.lastError ?? null,
     }
-    const cloudCover = Number(data.current?.cloud_cover ?? 100)
-    const precipitation = Number(data.current?.precipitation ?? 999)
-    const windSpeedRaw = Number(data.current?.wind_speed_10m ?? 999)
-    const windSpeed = Number.isFinite(windSpeedRaw) ? windSpeedRaw * KMH_TO_MS : 999
-    const weatherAllowed = cloudCover < 20 && precipitation <= 0 && windSpeed < 10
-    weatherCache = { ts: now, cloudCover, precipitation, windSpeed, weatherAllowed }
     return weatherAllowed
   } catch {
-    weatherCache = { ts: now, cloudCover: 100, precipitation: 999, windSpeed: 999, weatherAllowed: false }
+    weatherCache = {
+      ts: now,
+      cloudCover: 100,
+      rainDetected: true,
+      precipitation: 1,
+      windSpeed: 999,
+      weatherAllowed: false,
+      ascAvailable: false,
+      ascFrameIso: null,
+      ascModelPhase: null,
+      ascLastError: null,
+    }
     return false
   }
 }
@@ -95,10 +135,17 @@ function weatherDetailForAudit(now: number): Record<string, unknown> | null {
   if (!weatherCache) return null
   return {
     cloudCoverPercent: weatherCache.cloudCover,
+    cloudSource: 'asc_ai',
+    rainDetected: weatherCache.rainDetected,
     precipitationMm: weatherCache.precipitation,
     windSpeedMs: weatherCache.windSpeed,
+    windSource: 'open_meteo',
     gateOk: weatherCache.weatherAllowed,
-    gateRule: 'cloud < 20% and precipitation <= 0 and wind_speed_10m < 10 m/s',
+    gateRule: OBSERVATORY_READY_GATE_RULE,
+    ascAvailable: weatherCache.ascAvailable,
+    ascFrameIso: weatherCache.ascFrameIso,
+    ascModelPhase: weatherCache.ascModelPhase,
+    ascLastError: weatherCache.ascLastError,
     cacheAgeSeconds: Math.round((now - weatherCache.ts) / 1000),
     observatoryLatDeg: OBS_LAT_DEG,
     observatoryLonDeg: OBS_LON_DEG,
@@ -202,7 +249,7 @@ async function maybeLogAutoComputedBaseChange(input: {
   } else if (leavingDaytime) {
     evidence = {
       kind: 'left_daytime_closed_window',
-      why: 'Computed base left Closed--Daytime: instant is after nautical dusk; next state uses Open-Meteo (values below are at transition time).',
+      why: 'Computed base left Closed--Daytime: instant is after nautical dusk; next state uses ASC AI cloud/rain + Open-Meteo wind (values below are at transition time).',
       nauticalDawnUtc: daytime.nauticalDawnUtc,
       nauticalDuskUtc: daytime.nauticalDuskUtc,
       weatherAtTransition: weather,
@@ -211,7 +258,7 @@ async function maybeLogAutoComputedBaseChange(input: {
   } else {
     evidence = {
       kind: 'night_weather_gate',
-      why: 'Outside daytime closed window at this instant; Ready vs Closed--Weather from cached Open-Meteo current conditions.',
+      why: 'Outside daytime closed window at this instant; Ready vs Closed--Weather from cached ASC AI cloud/rain + Open-Meteo wind.',
       weatherAtTransition: weather,
       withinClosedWindowNow: daytime.within,
       nauticalDawnUtc: daytime.nauticalDawnUtc,
@@ -468,6 +515,14 @@ export function isObservatoryBusyFromNinaReport(
   if (!ninaRunning) return false
   if (!Number.isFinite(ninaRunningReportedAt) || ninaRunningReportedAt <= 0) return false
   return nowMs - ninaRunningReportedAt <= NINA_RUNNING_STALE_MS
+}
+
+/** Agent pulse says NINA is actively running (fresh report within stale window). */
+export async function isNinaReportedRunningNow(nowMs = Date.now()): Promise<boolean> {
+  await mergeObservatorySnapshotFromKv()
+  const ninaRunning = memory().__pomfret_nina_running__ ?? false
+  const ninaRunningReportedAt = memory().__pomfret_nina_running_reported_at__ ?? 0
+  return isObservatoryBusyFromNinaReport(nowMs, ninaRunning, ninaRunningReportedAt)
 }
 
 export async function reportObservatoryAgentPulse(input: { ninaRunning: boolean }): Promise<void> {

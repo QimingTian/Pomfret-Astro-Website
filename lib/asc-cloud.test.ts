@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   allSkyCameraStatusUrl,
   defaultAllSkyStatusUrl,
+  evaluateObservatoryReadyWeather,
   parseAscCloudFromStatus,
 } from '@/lib/asc-cloud'
 
@@ -41,4 +42,47 @@ test('parseAscCloudFromStatus extracts ascCloud payload', () => {
 test('parseAscCloudFromStatus returns null when missing', () => {
   assert.equal(parseAscCloudFromStatus(null), null)
   assert.equal(parseAscCloudFromStatus({ sensors: {} }), null)
+})
+
+test('evaluateObservatoryReadyWeather uses ASC cloud and rain with Open-Meteo wind', () => {
+  assert.equal(
+    evaluateObservatoryReadyWeather({
+      cloudCoverPercent: 19,
+      rainDetected: false,
+      windSpeedMs: 9,
+    }),
+    true
+  )
+  assert.equal(
+    evaluateObservatoryReadyWeather({
+      cloudCoverPercent: 20,
+      rainDetected: false,
+      windSpeedMs: 5,
+    }),
+    false
+  )
+  assert.equal(
+    evaluateObservatoryReadyWeather({
+      cloudCoverPercent: 10,
+      rainDetected: true,
+      windSpeedMs: 5,
+    }),
+    false
+  )
+  assert.equal(
+    evaluateObservatoryReadyWeather({
+      cloudCoverPercent: null,
+      rainDetected: false,
+      windSpeedMs: 5,
+    }),
+    false
+  )
+  assert.equal(
+    evaluateObservatoryReadyWeather({
+      cloudCoverPercent: 10,
+      rainDetected: false,
+      windSpeedMs: 10,
+    }),
+    false
+  )
 })

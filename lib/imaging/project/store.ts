@@ -825,7 +825,7 @@ export function getDeliverableNight(
 ): ProjectNight | undefined {
   const matchesStrip = (n: ProjectNight) => !stripNightKey || n.nightKey === stripNightKey
 
-  // Like normal queue consume: once delivered (`in_progress`), do not offer JSON again from this endpoint.
+  // Prefer undelivered subs. Delivered (`in_progress`) rows are handled by getRedeliverableInProgressNight.
   const scheduled = project.nights
     .filter((n) => n.status === 'scheduled' && n.ninaSequenceJson && matchesStrip(n))
     .sort((a, b) => {
@@ -835,6 +835,31 @@ export function getDeliverableNight(
       return a.nightIndex - b.nightIndex
     })
   return scheduled[0]
+}
+
+/** Tonight sub-session marked in_progress after HTTP delivery but safe to offer JSON again (NINA not running). */
+export function getRedeliverableInProgressNight(
+  project: ImagingProject,
+  stripNightKey?: string
+): ProjectNight | undefined {
+  const matchesStrip = (n: ProjectNight) => !stripNightKey || n.nightKey === stripNightKey
+  const nights = project.nights
+    .filter((n) => n.status === 'in_progress' && n.ninaSequenceJson && matchesStrip(n))
+    .sort((a, b) => a.nightIndex - b.nightIndex)
+  return nights[0]
+}
+
+export function getNightForNinaDelivery(
+  project: ImagingProject,
+  stripNightKey: string | undefined,
+  options?: { allowRedeliverInProgress?: boolean }
+): ProjectNight | undefined {
+  return (
+    getDeliverableNight(project, stripNightKey) ??
+    (options?.allowRedeliverInProgress
+      ? getRedeliverableInProgressNight(project, stripNightKey)
+      : undefined)
+  )
 }
 
 export function tonightDurationSecondsFromPlans(plans: FilterPlanRow[]): number {

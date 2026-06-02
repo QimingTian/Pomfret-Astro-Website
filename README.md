@@ -415,7 +415,7 @@ Approve or reject member gallery submissions.
 
 ### All Members
 
-Promote to admin; delete members.
+Promote to admin; delete members. Accounts listed in **`BOOTSTRAP_ADMIN_EMAILS`** (env) may also **Set as Member** or **Remove** other admins (not bootstrap peers or themselves).
 
 ---
 

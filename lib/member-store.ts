@@ -100,6 +100,11 @@ function bootstrapAdminEmails(): Set<string> {
   )
 }
 
+/** Listed in `BOOTSTRAP_ADMIN_EMAILS` — may demote/remove other admins (not bootstrap peers). */
+export function isBootstrapAdminEmail(email: string): boolean {
+  return bootstrapAdminEmails().has(normalizeMemberEmail(email))
+}
+
 function roleForNewUser(email: string): MemberRole {
   return bootstrapAdminEmails().has(normalizeMemberEmail(email)) ? 'admin' : 'member'
 }
@@ -410,6 +415,8 @@ export type AdminMemberDirectoryEntry = {
   imagingApproved: boolean
   imagingPending: boolean
   imagingRejected: boolean
+  /** True when email is in `BOOTSTRAP_ADMIN_EMAILS`. */
+  bootstrapAdmin: boolean
 }
 
 export async function listMembersForAdminDirectory(): Promise<AdminMemberDirectoryEntry[]> {
@@ -429,6 +436,7 @@ export async function listMembersForAdminDirectory(): Promise<AdminMemberDirecto
         !u.imagingRejectedAt &&
         !isPomfretOrgEmail(u.email),
       imagingRejected: Boolean(u.imagingRejectedAt),
+      bootstrapAdmin: isBootstrapAdminEmail(u.email),
     }))
     .sort((a, b) => a.email.localeCompare(b.email))
 }
@@ -446,7 +454,13 @@ export async function deleteMemberById(
   const target = users.find((u) => u.id === targetUserId)
   if (!target) return { ok: false, error: 'Member not found.' }
   if (target.role === 'admin') {
-    return { ok: false, error: 'Administrator accounts cannot be removed here.' }
+    const actor = users.find((u) => u.id === actorUserId)
+    if (!actor || !isBootstrapAdminEmail(actor.email)) {
+      return { ok: false, error: 'Administrator accounts cannot be removed here.' }
+    }
+    if (isBootstrapAdminEmail(target.email)) {
+      return { ok: false, error: 'Bootstrap administrator accounts cannot be removed.' }
+    }
   }
 
   const nextUsers = users.filter((u) => u.id !== targetUserId)
@@ -480,6 +494,37 @@ export async function setMemberAsAdmin(
   }
 
   users[idx] = { ...target, role: 'admin', updatedAt: new Date().toISOString() }
+  await writeUsers(users)
+  return { ok: true }
+}
+
+/** Demote admin → member. Only `BOOTSTRAP_ADMIN_EMAILS` actors; cannot demote bootstrap peers or self. */
+export async function setMemberAsMember(
+  actorUserId: string,
+  targetUserId: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!targetUserId) return { ok: false, error: 'Member id is required.' }
+  if (actorUserId === targetUserId) {
+    return { ok: false, error: 'You cannot demote your own account.' }
+  }
+
+  const users = await readUsers()
+  const actor = users.find((u) => u.id === actorUserId)
+  if (!actor || !isBootstrapAdminEmail(actor.email)) {
+    return { ok: false, error: 'Only bootstrap administrators can demote admins.' }
+  }
+
+  const idx = users.findIndex((u) => u.id === targetUserId)
+  if (idx < 0) return { ok: false, error: 'Member not found.' }
+  const target = users[idx]!
+  if (target.role !== 'admin') {
+    return { ok: false, error: 'This account is already a member.' }
+  }
+  if (isBootstrapAdminEmail(target.email)) {
+    return { ok: false, error: 'Bootstrap administrator accounts cannot be demoted.' }
+  }
+
+  users[idx] = { ...target, role: 'member', updatedAt: new Date().toISOString() }
   await writeUsers(users)
   return { ok: true }
 }

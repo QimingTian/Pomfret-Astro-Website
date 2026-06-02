@@ -4,8 +4,10 @@ import { isSameSiteMutation } from '@/lib/csrf-origin'
 import { requireAdmin } from '@/lib/member-auth'
 import {
   deleteMemberById,
+  isBootstrapAdminEmail,
   listMembersForAdminDirectory,
   setMemberAsAdmin,
+  setMemberAsMember,
   setMemberImagingApproval,
 } from '@/lib/member-store'
 
@@ -22,6 +24,8 @@ export async function GET(request: NextRequest) {
     ok: true as const,
     total: members.length,
     members,
+    canManageAdmins: isBootstrapAdminEmail(auth.user.email),
+    currentUserId: auth.user.id,
   })
 }
 
@@ -55,7 +59,29 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ ok: false, error: result.error }, { status: 400 })
     }
     const members = await listMembersForAdminDirectory()
-    return NextResponse.json({ ok: true as const, total: members.length, members })
+    return NextResponse.json({
+      ok: true as const,
+      total: members.length,
+      members,
+      canManageAdmins: isBootstrapAdminEmail(auth.user.email),
+      currentUserId: auth.user.id,
+    })
+  }
+
+  const roleAction = rec.roleAction
+  if (roleAction === 'member') {
+    const result = await setMemberAsMember(auth.user.id, id)
+    if (!result.ok) {
+      return NextResponse.json({ ok: false, error: result.error }, { status: 400 })
+    }
+    const members = await listMembersForAdminDirectory()
+    return NextResponse.json({
+      ok: true as const,
+      total: members.length,
+      members,
+      canManageAdmins: isBootstrapAdminEmail(auth.user.email),
+      currentUserId: auth.user.id,
+    })
   }
 
   const result = await setMemberAsAdmin(id)
@@ -63,7 +89,13 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ ok: false, error: result.error }, { status: 400 })
   }
   const members = await listMembersForAdminDirectory()
-  return NextResponse.json({ ok: true as const, total: members.length, members })
+  return NextResponse.json({
+    ok: true as const,
+    total: members.length,
+    members,
+    canManageAdmins: isBootstrapAdminEmail(auth.user.email),
+    currentUserId: auth.user.id,
+  })
 }
 
 /** DELETE — remove a member account (not admins). Admin only. */
@@ -85,5 +117,11 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ ok: false, error: result.error }, { status: 400 })
   }
   const members = await listMembersForAdminDirectory()
-  return NextResponse.json({ ok: true as const, total: members.length, members })
+  return NextResponse.json({
+    ok: true as const,
+    total: members.length,
+    members,
+    canManageAdmins: isBootstrapAdminEmail(auth.user.email),
+    currentUserId: auth.user.id,
+  })
 }

@@ -14,28 +14,53 @@ type Row = {
   imagingApproved: boolean
   imagingPending: boolean
   imagingRejected: boolean
+  bootstrapAdmin?: boolean
+}
+
+type MembersPayload = {
+  ok?: boolean
+  members?: Row[]
+  total?: number
+  canManageAdmins?: boolean
+  currentUserId?: string
+  error?: string
+}
+
+function displayName(row: Row): string {
+  return [row.firstName, row.lastName].filter(Boolean).join(' ').trim() || row.email
 }
 
 export function AllMembersSection({ className = '' }: { className?: string }) {
   const [members, setMembers] = useState<Row[]>([])
   const [total, setTotal] = useState(0)
+  const [canManageAdmins, setCanManageAdmins] = useState(false)
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [removingId, setRemovingId] = useState<string | null>(null)
   const [promotingId, setPromotingId] = useState<string | null>(null)
+  const [demotingId, setDemotingId] = useState<string | null>(null)
+
+  const applyPayload = (data: MembersPayload) => {
+    if (Array.isArray(data.members)) {
+      setMembers(data.members)
+      setTotal(typeof data.total === 'number' ? data.total : data.members.length)
+    }
+    if (typeof data.canManageAdmins === 'boolean') setCanManageAdmins(data.canManageAdmins)
+    if (typeof data.currentUserId === 'string') setCurrentUserId(data.currentUserId)
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
       const res = await fetch('/api/admin/members', { credentials: 'include', cache: 'no-store' })
-      const data = await res.json().catch(() => ({}))
+      const data = (await res.json().catch(() => ({}))) as MembersPayload
       if (!res.ok || data?.ok !== true || !Array.isArray(data.members)) {
         setError(typeof data.error === 'string' ? data.error : 'Could not load members.')
         return
       }
-      setMembers(data.members as Row[])
-      setTotal(typeof data.total === 'number' ? data.total : (data.members as Row[]).length)
+      applyPayload(data)
     } catch {
       setError('Could not load members.')
     } finally {
@@ -48,7 +73,7 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
   }, [load])
 
   async function setAsAdmin(row: Row) {
-    const name = [row.firstName, row.lastName].filter(Boolean).join(' ').trim() || row.email
+    const name = displayName(row)
     if (!window.confirm(`Set “${name}” (${row.email}) as Admin?`)) return
     setPromotingId(row.id)
     setError(null)
@@ -59,17 +84,12 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: row.id }),
       })
-      const data = await res.json().catch(() => ({}))
+      const data = (await res.json().catch(() => ({}))) as MembersPayload
       if (!res.ok || data?.ok !== true) {
         setError(typeof data.error === 'string' ? data.error : 'Could not update member.')
         return
       }
-      if (Array.isArray(data.members)) {
-        setMembers(data.members as Row[])
-        setTotal(typeof data.total === 'number' ? data.total : (data.members as Row[]).length)
-      } else {
-        await load()
-      }
+      applyPayload(data)
     } catch {
       setError('Could not update member.')
     } finally {
@@ -77,9 +97,34 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
     }
   }
 
+  async function setAsMember(row: Row) {
+    const name = displayName(row)
+    if (!window.confirm(`Set “${name}” (${row.email}) as Member? They will lose admin access.`)) return
+    setDemotingId(row.id)
+    setError(null)
+    try {
+      const res = await fetch('/api/admin/members', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: row.id, roleAction: 'member' }),
+      })
+      const data = (await res.json().catch(() => ({}))) as MembersPayload
+      if (!res.ok || data?.ok !== true) {
+        setError(typeof data.error === 'string' ? data.error : 'Could not update member.')
+        return
+      }
+      applyPayload(data)
+    } catch {
+      setError('Could not update member.')
+    } finally {
+      setDemotingId(null)
+    }
+  }
+
   async function removeMember(row: Row) {
-    const name = [row.firstName, row.lastName].filter(Boolean).join(' ').trim() || row.email
-    if (!window.confirm(`Remove member “${name}” (${row.email})? This cannot be undone.`)) return
+    const name = displayName(row)
+    if (!window.confirm(`Remove “${name}” (${row.email})? This cannot be undone.`)) return
     setRemovingId(row.id)
     setError(null)
     try {
@@ -87,22 +132,24 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
         method: 'DELETE',
         credentials: 'include',
       })
-      const data = await res.json().catch(() => ({}))
+      const data = (await res.json().catch(() => ({}))) as MembersPayload
       if (!res.ok || data?.ok !== true) {
         setError(typeof data.error === 'string' ? data.error : 'Could not remove member.')
         return
       }
-      if (Array.isArray(data.members)) {
-        setMembers(data.members as Row[])
-        setTotal(typeof data.total === 'number' ? data.total : (data.members as Row[]).length)
-      } else {
-        await load()
-      }
+      applyPayload(data)
     } catch {
       setError('Could not remove member.')
     } finally {
       setRemovingId(null)
     }
+  }
+
+  function canManageRow(row: Row): boolean {
+    if (row.id === currentUserId) return false
+    if (row.bootstrapAdmin) return false
+    if (row.role === 'member') return true
+    return canManageAdmins && row.role === 'admin'
   }
 
   const refreshButton = (
@@ -128,10 +175,12 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
       ) : (
         <ul className="max-h-[22rem] space-y-2 overflow-y-auto">
           {members.map((m) => {
-            const name = [m.firstName, m.lastName].filter(Boolean).join(' ').trim() || '—'
+            const name = displayName(m)
             const busyRemove = removingId === m.id
             const busyPromote = promotingId === m.id
-            const busy = busyRemove || busyPromote
+            const busyDemote = demotingId === m.id
+            const busy = busyRemove || busyPromote || busyDemote
+            const manageable = canManageRow(m)
             return (
               <li
                 key={m.id}
@@ -143,17 +192,34 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
                   <span className="break-all">{m.email}</span>
                   <span className="mx-2">·</span>
                   <span>{memberLevelLabel(m.role)}</span>
+                  {m.bootstrapAdmin ? (
+                    <>
+                      <span className="mx-2">·</span>
+                      <span className="text-gray-400">Bootstrap admin</span>
+                    </>
+                  ) : null}
                 </p>
-                {m.role === 'member' ? (
+                {manageable ? (
                   <div className="flex shrink-0 flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      disabled={busy || loading}
-                      onClick={() => void setAsAdmin(m)}
-                      className="rounded-full border border-white/25 bg-[#151616] px-3 py-1 text-xs font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-40"
-                    >
-                      {busyPromote ? '…' : 'Set as Admin'}
-                    </button>
+                    {m.role === 'member' ? (
+                      <button
+                        type="button"
+                        disabled={busy || loading}
+                        onClick={() => void setAsAdmin(m)}
+                        className="rounded-full border border-white/25 bg-[#151616] px-3 py-1 text-xs font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-40"
+                      >
+                        {busyPromote ? '…' : 'Set as Admin'}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={busy || loading}
+                        onClick={() => void setAsMember(m)}
+                        className="rounded-full border border-white/25 bg-[#151616] px-3 py-1 text-xs font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-40"
+                      >
+                        {busyDemote ? '…' : 'Set as Member'}
+                      </button>
+                    )}
                     <button
                       type="button"
                       disabled={busy || loading}

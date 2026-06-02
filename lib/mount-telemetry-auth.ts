@@ -2,10 +2,13 @@ import { NextRequest } from 'next/server'
 import { logMissingProductionSecret, observatorySecretConfigured } from '@/lib/production-secrets'
 
 /**
- * When `NINA_MOUNT_TELEMETRY_SECRET` is set, POST/GET require one of:
+ * POST requires shared secret (NINA plugin → server).
+ * When `NINA_MOUNT_TELEMETRY_SECRET` is set, POST requires one of:
  * - `Authorization: Bearer <secret>`
  * - Header `x-nina-mount-telemetry-secret: <secret>`
  * - Optional Basic: set `NINA_MOUNT_TELEMETRY_BASIC_PASSWORD` (and optional `NINA_MOUNT_TELEMETRY_BASIC_USER`, default '')
+ *
+ * GET is intentionally open — the Remote dashboard polls without the plugin secret.
  */
 function bearerSecret(): string | undefined {
   const p = process.env.NINA_MOUNT_TELEMETRY_SECRET
@@ -33,7 +36,7 @@ function parseBasicCredentials(authorization: string | null): { user: string; pa
   }
 }
 
-export function mountTelemetryAuthorized(request: NextRequest): boolean {
+export function mountTelemetryPostAuthorized(request: NextRequest): boolean {
   const secret = bearerSecret()
   const basicPass = basicPassword()
 
@@ -57,4 +60,9 @@ export function mountTelemetryAuthorized(request: NextRequest): boolean {
   }
 
   return false
+}
+
+/** @deprecated Use mountTelemetryPostAuthorized — GET no longer requires plugin secret. */
+export function mountTelemetryAuthorized(request: NextRequest): boolean {
+  return mountTelemetryPostAuthorized(request)
 }

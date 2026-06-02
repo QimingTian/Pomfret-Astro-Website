@@ -7,7 +7,7 @@ import { PATCH as patchQueueItem } from '@/app/api/imaging/queue/[id]/route'
 import { cronAuthorized } from '@/lib/cron-auth'
 import { isSameSiteMutation } from '@/lib/csrf-origin'
 import { imagingQueueAuthorized } from '@/lib/imaging/queue/auth'
-import { mountTelemetryAuthorized } from '@/lib/mount-telemetry-auth'
+import { mountTelemetryPostAuthorized } from '@/lib/mount-telemetry-auth'
 
 const QUEUE_ID = '00000000-0000-0000-0000-000000000001'
 const TEST_SECRET = 'ci-test-imaging-queue-secret-32chars'
@@ -152,7 +152,7 @@ test('cronAuthorized accepts matching bearer', async () => {
   )
 })
 
-test('mountTelemetryAuthorized fails closed in production when telemetry secret is unset', async () => {
+test('mountTelemetryPostAuthorized fails closed in production when telemetry secret is unset', async () => {
   await withEnv(
     ['NODE_ENV', 'NINA_MOUNT_TELEMETRY_SECRET', 'NINA_MOUNT_TELEMETRY_BASIC_PASSWORD'],
     () => {
@@ -161,7 +161,7 @@ test('mountTelemetryAuthorized fails closed in production when telemetry secret 
       setEnvVar('NINA_MOUNT_TELEMETRY_BASIC_PASSWORD', undefined)
     },
     () => {
-      assert.equal(mountTelemetryAuthorized(mockRequest('/api/imaging/mount-pointing')), false)
+      assert.equal(mountTelemetryPostAuthorized(mockRequest('/api/imaging/mount-pointing')), false)
     }
   )
 })

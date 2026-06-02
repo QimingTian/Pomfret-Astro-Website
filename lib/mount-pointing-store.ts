@@ -1,4 +1,6 @@
-/** In-memory latest mount telemetry (single-node; use KV later for multi-instance). */
+/** Latest mount telemetry per station — memory + Upstash KV for Vercel multi-instance. */
+
+import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 
 export type MountPointingPayload = {
   source?: string
@@ -30,10 +32,14 @@ function stationKey(stationId: string | undefined | null): string {
   return t.length > 0 ? t : 'default'
 }
 
-export function setMountPointingSample(
+function kvKey(stationId: string | undefined | null): string {
+  return `mount-pointing:${stationKey(stationId)}`
+}
+
+export async function setMountPointingSample(
   stationId: string | undefined | null,
   payload: MountPointingPayload
-): StoredMountSample {
+): Promise<StoredMountSample> {
   const key = stationKey(stationId)
   const receivedAtUtc = new Date().toISOString()
   const stored: StoredMountSample = {
@@ -41,11 +47,24 @@ export function setMountPointingSample(
     receivedAtUtc,
   }
   latestByStation.set(key, stored)
+  if (kvEnabled()) {
+    await kvSetJson(kvKey(stationId), stored)
+  }
   return stored
 }
 
-export function getMountPointingSample(stationId: string | undefined | null): StoredMountSample | null {
-  return latestByStation.get(stationKey(stationId)) ?? null
+export async function getMountPointingSample(
+  stationId: string | undefined | null
+): Promise<StoredMountSample | null> {
+  const key = stationKey(stationId)
+  if (kvEnabled()) {
+    const remote = await kvGetJson<StoredMountSample>(kvKey(stationId))
+    if (remote && typeof remote === 'object') {
+      latestByStation.set(key, remote)
+      return remote
+    }
+  }
+  return latestByStation.get(key) ?? null
 }
 
 export function listMountPointingStationIds(): string[] {

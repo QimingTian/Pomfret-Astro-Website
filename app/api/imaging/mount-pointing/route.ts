@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server'
-import { mountTelemetryAuthorized } from '@/lib/mount-telemetry-auth'
+import { mountTelemetryPostAuthorized } from '@/lib/mount-telemetry-auth'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import { getMountPointingSample, setMountPointingSample, type MountPointingPayload } from '@/lib/mount-pointing-store'
 
@@ -68,10 +68,10 @@ export function OPTIONS() {
 /**
  * NINA plugin → HTTP POST. Stores latest sample per `stationId` (default bucket when omitted).
  *
- * Auth: optional — set `NINA_MOUNT_TELEMETRY_SECRET` and/or `NINA_MOUNT_TELEMETRY_BASIC_PASSWORD` on the server.
+ * Auth: POST requires `NINA_MOUNT_TELEMETRY_SECRET` (or basic password). GET is open for the dashboard.
  */
 export async function POST(request: NextRequest) {
-  if (!mountTelemetryAuthorized(request)) {
+  if (!mountTelemetryPostAuthorized(request)) {
     return withImagingCors({ ok: false as const, error: 'Unauthorized' }, 401, NO_STORE_HEADERS)
   }
 
@@ -91,20 +91,16 @@ export async function POST(request: NextRequest) {
     return withImagingCors({ ok: false as const, error: 'Missing boolean "connected"' }, 400, NO_STORE_HEADERS)
   }
 
-  const stored = setMountPointingSample(payload.stationId, payload)
+  const stored = await setMountPointingSample(payload.stationId, payload)
   return withImagingCors({ ok: true as const, receivedAtUtc: stored.receivedAtUtc }, 200, NO_STORE_HEADERS)
 }
 
 /**
- * Latest stored sample for optional `?stationId=`. Same auth as POST when secrets are set.
+ * Latest stored sample for optional `?stationId=`. No plugin secret required (Remote dashboard poll).
  */
 export async function GET(request: NextRequest) {
-  if (!mountTelemetryAuthorized(request)) {
-    return withImagingCors({ ok: false as const, error: 'Unauthorized' }, 401, NO_STORE_HEADERS)
-  }
-
   const stationId = request.nextUrl.searchParams.get('stationId') ?? undefined
-  const sample = getMountPointingSample(stationId)
+  const sample = await getMountPointingSample(stationId)
   const serverNowUtc = new Date().toISOString()
   if (!sample) {
     return withImagingCors({ ok: true as const, sample: null, serverNowUtc }, 200, NO_STORE_HEADERS)

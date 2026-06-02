@@ -4,6 +4,7 @@ import type { CSSProperties } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAppStore } from '@/lib/store'
 import MJPEGStream from '@/components/MJPEGStream'
+import { allSkyCameraStatusUrl } from '@/lib/asc-cloud'
 
 type ObservatoryApiStatus =
   | 'ready'
@@ -33,17 +34,8 @@ function formatOverlayDateTime(d: Date): string {
 }
 
 /** Same host as MJPEG: camera_service GET /status or GET /camera/status. */
-function allSkyCameraStatusUrl(streamUrl: string | null | undefined): string | null {
-  if (!streamUrl) return null
-  try {
-    const u = new URL(streamUrl)
-    if (/\/camera\//.test(u.pathname)) {
-      return new URL('status', streamUrl).href
-    }
-    return new URL('/status', streamUrl).href
-  } catch {
-    return null
-  }
+function resolveAllSkyStatusUrl(streamUrl: string | null | undefined): string | null {
+  return allSkyCameraStatusUrl(streamUrl)
 }
 
 const overlayTitleClass = 'text-white'
@@ -102,8 +94,9 @@ export default function AllSkyCameraView() {
   const [now, setNow] = useState<Date | null>(null)
   const [lastFrameAt, setLastFrameAt] = useState<Date | null>(null)
   const [obsStatus, setObsStatus] = useState<ObservatoryApiStatus | null>(null)
+  const [cloudPct, setCloudPct] = useState<number | null>(null)
+  const [raining, setRaining] = useState<boolean | null>(null)
 
-  const cloudPct = weather.cloudCoverPercent ?? null
   const windKmh = weather.windSpeed ?? null
   const tempC = weather.temperatureC ?? null
   const humidityPct = weather.humidityPercent ?? null
@@ -137,9 +130,11 @@ export default function AllSkyCameraView() {
   }, [loadObservatory])
 
   useEffect(() => {
-    const statusUrl = allSkyCameraStatusUrl(streamURL)
+    const statusUrl = resolveAllSkyStatusUrl(streamURL)
     if (!statusUrl) {
       setLastFrameAt(null)
+      setCloudPct(null)
+      setRaining(null)
       return
     }
     let cancelled = false
@@ -158,10 +153,28 @@ export default function AllSkyCameraView() {
               autoMode?: boolean
               lastStreamFrameIso?: string | null
               lastAutoFrameIso?: string | null
+              ascCloud?: {
+                cloudCoverPercent?: number | null
+                rain?: {
+                  detected?: boolean
+                } | null
+              }
             }
           }
         }
         const cam = data?.sensors?.allSkyCam
+        const ascCloud = cam?.ascCloud?.cloudCoverPercent
+        if (
+          typeof ascCloud === 'number' &&
+          Number.isFinite(ascCloud) &&
+          !cancelled
+        ) {
+          setCloudPct(ascCloud)
+        }
+        const rainDetected = cam?.ascCloud?.rain?.detected
+        if (!cancelled) {
+          setRaining(typeof rainDetected === 'boolean' ? rainDetected : null)
+        }
         const iso =
           cam?.mode === 'auto' ||
             cam?.mode === 'half_hour' ||
@@ -204,6 +217,8 @@ export default function AllSkyCameraView() {
     const humText =
       humidityPct != null && Number.isFinite(humidityPct) ? `${Math.round(humidityPct)}%` : '—'
     const humValueRed = humidityPct != null && Number.isFinite(humidityPct) && humidityPct > 90
+
+    const rainingText = raining === true ? 'True' : raining === false ? 'False' : '—'
 
     const dashClass = overlayValueGreen
 
@@ -254,9 +269,23 @@ export default function AllSkyCameraView() {
             {humText}
           </span>
         </p>
+        <p className="break-words">
+          <span className={overlayTitleClass}>Raining: </span>
+          <span
+            className={
+              rainingText === '—'
+                ? dashClass
+                : raining
+                  ? overlayValueRed
+                  : overlayValueGreen
+            }
+          >
+            {rainingText}
+          </span>
+        </p>
       </div>
     )
-  }, [now, lastFrameAt, obsStatus, cloudPct, windKmh, tempC, humidityPct])
+  }, [now, lastFrameAt, obsStatus, cloudPct, windKmh, tempC, humidityPct, raining])
 
   return (
     <div className="flex h-full flex-col">
@@ -270,15 +299,10 @@ export default function AllSkyCameraView() {
             <AscCompassRose />
           </div>
         ) : (
-          <div className="space-y-3">
-            <div className={streamAreaClass}>
-              {overlay}
-              <AscCompassRose />
-              <MJPEGStream url={streamURL || ''} minimal />
-            </div>
-            <p className="text-center text-[0.7rem] sm:text-xs text-gray-500 dark:text-gray-400">
-              Powered by the Pomfret Observatory All-Sky Camera System (ZWO ASI662MC &amp; Raspberry Pi).
-            </p>
+          <div className={streamAreaClass}>
+            {overlay}
+            <AscCompassRose />
+            <MJPEGStream url={streamURL || ''} minimal />
           </div>
         )}
       </div>

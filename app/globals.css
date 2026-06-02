@@ -28,13 +28,16 @@ body {
   color: rgb(var(--foreground-rgb));
   min-height: 100vh;
   transition: background-color 0.35s ease, color 0.35s ease;
-}
-
-body {
   font-family: 'SF Pro Text', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Helvetica', 'Arial', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   letter-spacing: 0.01em;
+}
+
+/* Weather dashboard: fixed LibreWXR radar — no zoom chrome */
+.librewxr-radar-map .leaflet-control-attribution,
+.librewxr-radar-map .leaflet-control-zoom {
+  display: none !important;
 }
 
 a {

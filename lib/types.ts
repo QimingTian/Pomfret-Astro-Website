@@ -35,6 +35,22 @@ export interface CameraStateResponse {
   streaming: boolean
   lastSnapshot?: string
   fault?: string
+  ascCloud?: AscCloudInference
+}
+
+export interface AscCloudRainInference {
+  detected?: boolean
+  confidence?: number
+  label?: string
+}
+
+export interface AscCloudInference {
+  cloudCoverPercent?: number | null
+  cloudConfidence?: number | null
+  modelPhase?: 'day' | 'night' | null
+  frameIso?: string | null
+  rain?: AscCloudRainInference | null
+  lastError?: string | null
 }
 
 export interface AlertResponse {
@@ -60,8 +76,10 @@ export interface WeatherModel {
   humidityPercent?: number
   precipitationMm?: number
   cloudCoverPercent?: number
+  cloudSource?: 'asc'
   windSpeed?: number
   windGust?: number
   observationTime?: Date
+  cloudObservationTime?: Date
 }
 

@@ -10,6 +10,19 @@ export type ScheduleInsightLike = {
   reasons: string[]
 }
 
+function hasScheduledSubTonight(
+  project: Pick<ImagingProject, 'nights'>,
+  nightKey: string
+): boolean {
+  return project.nights.some(
+    (n) =>
+      n.nightKey === nightKey &&
+      n.status === 'scheduled' &&
+      typeof n.plannedStartIso === 'string' &&
+      n.plannedStartIso.length > 0
+  )
+}
+
 /** Whether the queue row / project has a tonight deliverable plan (includes in_progress parent + scheduled sub). */
 export function deriveQueueScheduleState(
   row: Pick<ImagingRequest, 'status' | 'plannedStartIso' | 'projectMode'> | null | undefined,
@@ -17,16 +30,7 @@ export function deriveQueueScheduleState(
   nightKey?: string
 ): ScheduleDisplayState {
   if (row?.status === 'scheduled') return 'scheduled'
-  if (row?.projectMode && project && nightKey) {
-    const hasScheduledSubTonight = project.nights.some(
-      (n) =>
-        n.nightKey === nightKey &&
-        n.status === 'scheduled' &&
-        typeof n.plannedStartIso === 'string' &&
-        n.plannedStartIso.length > 0
-    )
-    if (hasScheduledSubTonight) return 'scheduled'
-  }
+  if (project && nightKey && hasScheduledSubTonight(project, nightKey)) return 'scheduled'
   return 'unscheduled'
 }
 
@@ -40,6 +44,15 @@ export async function logQueueScheduleInsightChange(input: {
 }): Promise<void> {
   const { row, previousState, next, previousPlannedStartIso = row.plannedStartIso ?? null } = input
   if (previousState === next.status) return
+  if (
+    previousState === 'scheduled' &&
+    next.status === 'scheduled' &&
+    previousPlannedStartIso != null &&
+    next.plannedStartIso != null &&
+    previousPlannedStartIso === next.plannedStartIso
+  ) {
+    return
+  }
 
   await appendAuditLog({
     kind: 'session.schedule_changed',

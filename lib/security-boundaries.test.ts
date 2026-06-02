@@ -166,6 +166,14 @@ test('mountTelemetryAuthorized fails closed in production when telemetry secret 
   )
 })
 
+test('GET /api/librewxr/tiles blocks disallowed paths', async () => {
+  const { GET } = await import('@/app/api/librewxr/tiles/[...path]/route')
+  const bad = await GET(mockRequest('/api/librewxr/tiles/evil.png') as never, {
+    params: Promise.resolve({ path: ['evil.png'] }),
+  })
+  assert.equal(bad.status, 400)
+})
+
 test('GET /api/noaa-goes blocks SSRF and off-allowlist hosts', async () => {
   const metadata = { status: 400 }
   const aws = await getNoaaGoes(

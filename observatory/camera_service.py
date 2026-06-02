@@ -28,6 +28,7 @@ import auto_exposure as auto_exp
 import auto_white_balance as auto_wb
 import imaging_drive
 import observatory_solar as obs_solar
+import asc_cloud_ai
 
 app = Flask(__name__)
 CORS(
@@ -443,6 +444,8 @@ def auto_capture_loop():
         img = _capture_photo_to_memory()
         if img is not None:
             _apply_auto_exposure_from_frame(img)
+            if camera_state.get('mode') in AUTO_LIKE_MODES:
+                asc_cloud_ai.analyze_and_store(img)
             imaging_drive.after_auto_capture(img, camera_state.get('mode', 'off'))
         if not auto_state['active']:
             break
@@ -1169,6 +1172,7 @@ def _status_payload():
                 'autoModeDaytime': auto_state.get('last_auto_daytime'),
                 'autoModeTargetGain': auto_state.get('last_auto_target_gain'),
                 'imagingDrive': imaging_drive.status_payload(),
+                'ascCloud': asc_cloud_ai.status_payload(),
             }
         }
         # No 'roof', 'safety', or 'alerts' - this controller doesn't handle those

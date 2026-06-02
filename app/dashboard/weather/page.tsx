@@ -1,10 +1,15 @@
 'use client'
 
+import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AllSkyCameraView from '@/components/AllSkyCameraView'
+import NOAAGoesCloudMap from '@/components/NOAAGoesCloudMap'
+import { fetchAscCloud } from '@/lib/asc-cloud'
 import { useAppStore } from '@/lib/store'
 import type { WeatherModel } from '@/lib/types'
 import { moonAltDeg, moonPhaseInfo } from '@/lib/moon-avoidance'
+
+const LibreWxrRadarMap = dynamic(() => import('@/components/LibreWxrRadarMap'), { ssr: false })
 
 /* ------------------------------------------------------------------ */
 /*  Moon display helpers (math lives in lib/moon-avoidance.ts)        */
@@ -42,47 +47,6 @@ function nasaMoonImageUrl(when: Date): string {
   const hourOfYear = Math.floor((when.getTime() - yearStartMs) / 3600000)
   const frame = Math.max(1, Math.min(8760, hourOfYear + 1))
   return `/api/moon-svs?year=${year}&frame=${frame}`
-}
-
-/* ------------------------------------------------------------------ */
-/*  Cloud Map component                                               */
-/* ------------------------------------------------------------------ */
-
-function NOAAGoesCloudMap() {
-  const store = useAppStore()
-  // Start at 0 so SSR and first client paint produce identical markup. After mount we
-  // bump to a real timestamp to bust cache.
-  const [refreshKey, setRefreshKey] = useState(0)
-
-  const handleImageLoad = () => {
-    store.addLog({ module: 'noaa-goes', level: 'info', message: 'NOAA GOES satellite image loaded successfully' })
-  }
-
-  useEffect(() => {
-    setRefreshKey(Date.now())
-    const interval = setInterval(() => {
-      store.addLog({ module: 'noaa-goes', level: 'info', message: 'Auto-refreshing NOAA GOES satellite image' })
-      setRefreshKey(Date.now())
-    }, 600000)
-    return () => clearInterval(interval)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  return (
-    <div>
-      <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-6">Cloud Map</h1>
-      <div className="relative w-full rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-800" style={{ aspectRatio: '4 / 3' }}>
-        <img
-          src={`/api/noaa-goes?t=${refreshKey}`}
-          alt="NOAA GOES-East Satellite Cloud Map Animation"
-          key={refreshKey}
-          className="absolute inset-0 h-full w-full object-cover"
-          style={{ transform: 'scale(2)', transformOrigin: '100% 0%' }}
-          onLoad={handleImageLoad}
-        />
-      </div>
-    </div>
-  )
 }
 
 /* ------------------------------------------------------------------ */
@@ -196,7 +160,7 @@ function MoonSection() {
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-6">Moon</h1>
+      <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-4">Moon</h1>
       <div className="flex flex-col items-center gap-2 justify-center">
         <div
           className="relative w-full isolate"
@@ -332,7 +296,7 @@ export default function WeatherPage() {
       try {
         setLoading(true)
         const response = await fetch(
-          'https://api.open-meteo.com/v1/forecast?latitude=41.9159&longitude=-71.9626&current=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,cloud_cover,wind_speed_10m,wind_gusts_10m&timezone=auto'
+          'https://api.open-meteo.com/v1/forecast?latitude=41.9159&longitude=-71.9626&current=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,wind_speed_10m,wind_gusts_10m&timezone=auto'
         )
         const data = await response.json()
         
@@ -342,13 +306,18 @@ export default function WeatherPage() {
             apparentTemperatureC: data.current.apparent_temperature,
             humidityPercent: data.current.relative_humidity_2m,
             precipitationMm: data.current.precipitation,
-            cloudCoverPercent: data.current.cloud_cover,
             windSpeed: data.current.wind_speed_10m,
             windGust: data.current.wind_gusts_10m,
             observationTime: new Date(data.current.time),
           }
-          setWeather(weatherData)
-          store.setWeather(weatherData)
+          setWeather((prev) => {
+            const merged = {
+              ...prev,
+              ...weatherData,
+            }
+            store.setWeather(merged)
+            return merged
+          })
           store.addLog({
             module: 'weather',
             level: 'info',
@@ -372,6 +341,35 @@ export default function WeatherPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  useEffect(() => {
+    const loadAscCloud = async () => {
+      const asc = await fetchAscCloud()
+      const pct = asc?.cloudCoverPercent
+      if (typeof pct !== 'number' || !Number.isFinite(pct)) return
+      const frameIso = asc?.frameIso
+      const cloudObservationTime =
+        typeof frameIso === 'string' && frameIso.length > 0 ? new Date(frameIso) : undefined
+      setWeather((prev) => {
+        const merged: WeatherModel = {
+          ...prev,
+          cloudCoverPercent: pct,
+          cloudSource: 'asc',
+          cloudObservationTime:
+            cloudObservationTime && !Number.isNaN(cloudObservationTime.getTime())
+              ? cloudObservationTime
+              : prev.cloudObservationTime,
+        }
+        store.setWeather(merged)
+        return merged
+      })
+    }
+
+    void loadAscCloud()
+    const interval = setInterval(() => void loadAscCloud(), 30_000)
+    return () => clearInterval(interval)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const formatValue = (value: number | undefined, suffix: string): string => {
     if (value === undefined) return '—'
     if (suffix.includes('%')) {
@@ -385,78 +383,64 @@ export default function WeatherPage() {
 
   return (
     <div className="pb-8 lg:-translate-x-3">
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-4">Weather</h1>
-        <p className="text-gray-600 dark:text-gray-400">Pomfret, CT</p>
-        <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">Powered by Open-Meteo</p>
-        {weather.observationTime && (
-          <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">
-            Last updated: {weather.observationTime.toLocaleTimeString()}
-          </p>
-        )}
-      </div>
-
-      {loading ? (
-        <div className="text-center py-12">
-          <p className="text-gray-600 dark:text-gray-400">Loading weather data...</p>
-        </div>
-      ) : (
-        <div className="space-y-6">
-          <div>
-            {(() => {
-              const metrics = [
-                { title: 'Temperature', value: formatValue(weather.temperatureC, '°C') },
-                { title: 'Apparent Temperature', value: formatValue(weather.apparentTemperatureC, '°C') },
-                { title: 'Humidity', value: formatValue(weather.humidityPercent, '%') },
-                { title: 'Cloud Cover', value: formatValue(weather.cloudCoverPercent, '%') },
-                { title: 'Wind Speed', value: formatValue(weather.windSpeed, ' km/h') },
-                { title: 'Wind Gust', value: formatValue(weather.windGust, ' km/h') },
-              ]
-
-              return (
-                <>
-                  <div className="grid grid-cols-1 md:grid-cols-3">
-                    {metrics.slice(0, 3).map((metric, index) => (
-                      <div
-                        key={metric.title}
-                        className={`p-6 text-center flex flex-col items-center justify-center ${index < 2 ? 'md:border-r md:border-white/35' : ''}`}
-                      >
-                        <div className="mb-3">
-                          <h3 className="text-lg font-medium text-white">{metric.title}</h3>
-                        </div>
-                        <p className="text-3xl font-semibold text-apple-dark dark:text-white">{metric.value}</p>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="border-t border-white/35" />
-                  <div className="grid grid-cols-1 md:grid-cols-3">
-                    {metrics.slice(3).map((metric, index) => (
-                      <div
-                        key={metric.title}
-                        className={`p-6 text-center flex flex-col items-center justify-center ${index < 2 ? 'md:border-r md:border-white/35' : ''}`}
-                      >
-                        <div className="mb-3">
-                          <h3 className="text-lg font-medium text-white">{metric.title}</h3>
-                        </div>
-                        <p className="text-3xl font-semibold text-apple-dark dark:text-white">{metric.value}</p>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )
-            })()}
-          </div>
-        </div>
-      )}
-
-      <div className="mt-8 border-t border-black/10 dark:border-white/10 pt-8 grid grid-cols-1 md:grid-cols-[1fr_1px_1fr] gap-6">
-        <NOAAGoesCloudMap />
-        <div className="hidden md:block bg-white/15 -my-8" />
-        <MoonSection />
-      </div>
-
-      <div className="mt-8 border-t border-black/10 dark:border-white/10 pt-8" id="all-sky-camera">
+      <div className="mb-8 border-b border-black/10 dark:border-white/10 pb-8" id="all-sky-camera">
         <AllSkyCameraView />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-6 items-start">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-4">Weather</h1>
+          {loading ? (
+            <div className="mt-6 text-center py-12">
+              <p className="text-gray-600 dark:text-gray-400">Loading weather data...</p>
+            </div>
+          ) : (
+            <div className="mt-6">
+              {(() => {
+                const metrics = [
+                  { title: 'Temperature', value: formatValue(weather.temperatureC, '°C') },
+                  { title: 'Apparent Temperature', value: formatValue(weather.apparentTemperatureC, '°C') },
+                  { title: 'Humidity', value: formatValue(weather.humidityPercent, '%') },
+                  { title: 'Cloud Cover', value: formatValue(weather.cloudCoverPercent, '%') },
+                  { title: 'Wind Speed', value: formatValue(weather.windSpeed, ' km/h') },
+                  { title: 'Wind Gust', value: formatValue(weather.windGust, ' km/h') },
+                ]
+
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-2">
+                    {metrics.map((metric, index) => (
+                      <div
+                        key={metric.title}
+                        className={`p-4 sm:p-6 text-center flex flex-col items-center justify-center ${
+                          index % 2 === 0 ? 'sm:border-r sm:border-white/35' : ''
+                        } ${index < metrics.length - 1 ? 'border-b border-white/35' : ''} ${
+                          index >= metrics.length - 2 ? 'sm:border-b-0' : ''
+                        }`}
+                      >
+                        <div className="mb-3">
+                          <h3 className="text-lg font-medium text-white">{metric.title}</h3>
+                        </div>
+                        <p className="text-3xl font-semibold text-apple-dark dark:text-white">{metric.value}</p>
+                      </div>
+                    ))}
+                  </div>
+                )
+              })()}
+            </div>
+          )}
+        </div>
+        <div className="min-w-0 lg:border-l lg:border-white/10 lg:pl-6">
+          <MoonSection />
+        </div>
+      </div>
+
+      <div className="mt-8 border-t border-black/10 dark:border-white/10 pt-8 grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-6 items-start">
+        <div className="min-w-0 lg:pr-6">
+          <NOAAGoesCloudMap />
+        </div>
+        <div className="min-w-0 lg:border-l lg:border-white/10 lg:pl-6">
+          <LibreWxrRadarMap />
+        </div>
       </div>
     </div>
   )

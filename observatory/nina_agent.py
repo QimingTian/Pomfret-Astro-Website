@@ -12,7 +12,8 @@ Usage:
   2) Edit the CONFIG section below (paths only — no secrets in git).
   3) Set Windows environment variables (same names as Vercel where noted):
        IMAGING_QUEUE_SECRET, POMFRET_CRON_SECRET (same as CRON_SECRET),
-       R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET.
+       R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET,
+       PDU_USER, PDU_PASSWORD (Digital Loggers PDU at 192.168.121.5).
   4) Run: python nina_agent.py
 """
 
@@ -174,6 +175,15 @@ SIRIL_STACK_OUTPUT_NORM = True
 # Most master-dark workflows already include the bias pedestal; keep this False to avoid double subtraction.
 SIRIL_LIGHT_INCLUDE_BIAS_WHEN_DARK = False
 
+# -------- Digital Loggers PDU (mount + camera power) --------
+# Credentials: Windows env PDU_USER, PDU_PASSWORD (never commit secrets).
+PDU_ENABLED = True
+PDU_BASE_URL = "http://192.168.121.5"
+# Outlet 1 = Scope (mount), 2 = Camera on Pomfret observatory PDU.
+PDU_OUTLETS = (1, 2)
+# Seconds to wait after turning outlets ON before starting NINA (cold boot).
+PDU_WARMUP_SECONDS = 60
+
 
 def log(message: str) -> None:
     now = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -191,6 +201,70 @@ def build_headers() -> Dict[str, str]:
     if bearer:
         headers["Authorization"] = f"Bearer {bearer}"
     return headers
+
+
+def pdu_credentials() -> tuple[str, str]:
+    user = os.environ.get("PDU_USER", "").strip()
+    password = os.environ.get("PDU_PASSWORD", "").strip()
+    return user, password
+
+
+def pdu_configured() -> bool:
+    if not PDU_ENABLED:
+        return False
+    user, password = pdu_credentials()
+    return bool(user and password and str(PDU_BASE_URL).strip())
+
+
+def pdu_request(path: str) -> None:
+    """GET a Digital Loggers PDU path (e.g. outlet?1=ON) with HTTP Basic auth."""
+    user, password = pdu_credentials()
+    base = str(PDU_BASE_URL).rstrip("/")
+    url = f"{base}/{path.lstrip('/')}"
+    cred = base64.b64encode(f"{user}:{password}".encode("ascii")).decode("ascii")
+    req = urllib.request.Request(url, headers={"Authorization": f"Basic {cred}"})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        resp.read()
+
+
+def pdu_set_outlets(state: str, outlets: tuple[int, ...] = PDU_OUTLETS) -> bool:
+    """Turn PDU outlets ON or OFF. Returns True if all requests succeeded."""
+    state = state.upper()
+    if state not in ("ON", "OFF"):
+        raise ValueError(f"invalid PDU state: {state}")
+    ok = True
+    for outlet in outlets:
+        try:
+            pdu_request(f"outlet?{outlet}={state}")
+            log(f"PDU outlet {outlet} -> {state}")
+        except Exception as ex:
+            ok = False
+            log(f"PDU outlet {outlet} {state} failed: {ex}")
+    return ok
+
+
+def power_on_observatory_equipment() -> bool:
+    """Turn on mount + camera outlets before NINA. Returns True if PDU control ran."""
+    if not pdu_configured():
+        if PDU_ENABLED:
+            log("PDU enabled but PDU_USER / PDU_PASSWORD not set; skipping power ON.")
+        return False
+    log(f"PDU: turning ON outlets {PDU_OUTLETS} at {PDU_BASE_URL}")
+    if not pdu_set_outlets("ON"):
+        log("PDU: one or more outlets failed to turn ON.")
+    warmup = max(0, int(PDU_WARMUP_SECONDS))
+    if warmup > 0:
+        log(f"PDU: waiting {warmup}s for equipment boot before NINA.")
+        time.sleep(warmup)
+    return True
+
+
+def power_off_observatory_equipment() -> None:
+    """Turn off mount + camera outlets after NINA exits."""
+    if not pdu_configured():
+        return
+    log(f"PDU: turning OFF outlets {PDU_OUTLETS} at {PDU_BASE_URL}")
+    pdu_set_outlets("OFF")
 
 
 def reconcile_queue_bearer_token() -> str:
@@ -349,6 +423,11 @@ def validate_config() -> None:
         )
     if SIRIL_ENABLED and not Path(SIRIL_CALIBRATION_DIR).exists():
         raise ValueError(f"SIRIL_CALIBRATION_DIR not found: {SIRIL_CALIBRATION_DIR}")
+    if PDU_ENABLED and not pdu_configured():
+        log(
+            "PDU_ENABLED is True but PDU_USER / PDU_PASSWORD are missing; "
+            "power control will be skipped until env vars are set."
+        )
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -1022,18 +1101,24 @@ def run_loop() -> None:
             else:
                 run_id = sanitize_for_key(current_fingerprint)
                 log("Session id not found in JSON, using fingerprint for R2 folder.")
-            nina_process = start_nina(sequence_path)
-            if report_agent_pulse(True):
-                last_pulsed_nina_running = True
-            wait_for_nina_and_stream_previews(
-                nina_process,
-                session_id=session_id,
-                output_mode=output_mode,
-                run_id=run_id,
-                output_root=output_root,
-                jobs_dir=jobs_dir,
-                baseline_snapshot=before_snapshot,
-            )
+            pdu_powered = False
+            try:
+                pdu_powered = power_on_observatory_equipment()
+                nina_process = start_nina(sequence_path)
+                if report_agent_pulse(True):
+                    last_pulsed_nina_running = True
+                wait_for_nina_and_stream_previews(
+                    nina_process,
+                    session_id=session_id,
+                    output_mode=output_mode,
+                    run_id=run_id,
+                    output_root=output_root,
+                    jobs_dir=jobs_dir,
+                    baseline_snapshot=before_snapshot,
+                )
+            finally:
+                if pdu_powered:
+                    power_off_observatory_equipment()
             if report_agent_pulse(False):
                 last_pulsed_nina_running = False
             new_files = find_new_or_updated_files(before_snapshot, output_root)

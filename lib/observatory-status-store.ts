@@ -1,7 +1,14 @@
 import { mkdir, readFile, rename, writeFile } from 'fs/promises'
 import path from 'path'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
-import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
+import {
+  kvCompareAndSet,
+  kvDel,
+  kvEnabled,
+  kvGetJson,
+  kvGetString,
+  kvSetJson,
+} from '@/lib/kv-rest'
 import { OBS_LAT_DEG, OBS_LON_DEG } from '@/lib/target-altitude'
 import { getDaytimeClosedWindowDetail, isWithinDaytimeClosedWindow } from '@/lib/sunrise-window'
 import { isWithinAdminClosedWindow } from '@/lib/admin-closed-window-store'
@@ -33,6 +40,7 @@ let loaded = false
 const NINA_RUNNING_STALE_MS = 90_000
 const AGENT_DISCONNECTED_MS = 90_000
 const WEATHER_CACHE_MS = 0
+const AUTO_BASE_CURSOR_KV_KEY = 'observatory-auto-audit-last-base'
 const KMH_TO_MS = 1 / 3.6
 let weatherCache:
   | {
@@ -97,18 +105,56 @@ function weatherDetailForAudit(now: number): Record<string, unknown> | null {
   }
 }
 
+function isObservatoryStatus(value: string): value is ObservatoryStatus {
+  return (
+    value === 'ready' ||
+    value === 'busy_in_use' ||
+    value === 'disconnected' ||
+    value === 'closed_weather_not_permitted' ||
+    value === 'closed_daytime' ||
+    value === 'closed_observatory_maintenance'
+  )
+}
+
 async function readAutoBaseCursor(): Promise<ObservatoryStatus | 'unset'> {
+  if (kvEnabled()) {
+    const raw = await kvGetString(AUTO_BASE_CURSOR_KV_KEY)
+    if (raw && isObservatoryStatus(raw)) {
+      memory().__pomfret_auto_audit_last_base__ = raw
+      return raw
+    }
+  }
   const m = memory().__pomfret_auto_audit_last_base__
   if (m === undefined) return 'unset'
   return m
 }
 
-async function writeAutoBaseCursor(base: ObservatoryStatus): Promise<void> {
-  memory().__pomfret_auto_audit_last_base__ = base
+/** One winner per base transition across serverless instances (KV CAS when available). */
+async function tryClaimAutoBaseCursor(
+  expected: ObservatoryStatus | 'unset',
+  next: ObservatoryStatus
+): Promise<boolean> {
+  const expectedStr = expected === 'unset' ? '' : expected
+  if (kvEnabled()) {
+    const claimed = await kvCompareAndSet(AUTO_BASE_CURSOR_KV_KEY, expectedStr, next)
+    if (claimed) {
+      memory().__pomfret_auto_audit_last_base__ = next
+      return true
+    }
+    return false
+  }
+  const current = memory().__pomfret_auto_audit_last_base__
+  const currentNorm = current === undefined ? 'unset' : current
+  if (currentNorm !== expected) return false
+  memory().__pomfret_auto_audit_last_base__ = next
+  return true
 }
 
 async function resetAutoBaseAuditCursor(): Promise<void> {
   memory().__pomfret_auto_audit_last_base__ = undefined
+  if (kvEnabled()) {
+    await kvDel(AUTO_BASE_CURSOR_KV_KEY)
+  }
 }
 
 function autoBaseLabel(s: ObservatoryStatus): string {
@@ -121,18 +167,21 @@ function autoBaseLabel(s: ObservatoryStatus): string {
 }
 
 async function maybeLogAutoComputedBaseChange(input: {
-  previousCursor: ObservatoryStatus | 'unset'
   base: ObservatoryStatus
   finalStatus: ObservatoryStatus
   nowMs: number
   pollTimeoutApplied: boolean
 }): Promise<void> {
-  const { previousCursor, base, finalStatus, nowMs, pollTimeoutApplied } = input
+  const { base, finalStatus, nowMs, pollTimeoutApplied } = input
+  const previousCursor = await readAutoBaseCursor()
   if (previousCursor === 'unset') {
-    await writeAutoBaseCursor(base)
+    await tryClaimAutoBaseCursor('unset', base)
     return
   }
   if (previousCursor === base) return
+
+  const claimed = await tryClaimAutoBaseCursor(previousCursor, base)
+  if (!claimed) return
 
   const daytime = getDaytimeClosedWindowDetail(new Date(nowMs))
   const weather = daytime.within ? null : weatherDetailForAudit(nowMs)
@@ -190,8 +239,6 @@ async function maybeLogAutoComputedBaseChange(input: {
       evidence,
     },
   })
-
-  await writeAutoBaseCursor(base)
 }
 
 export function isObservatoryReady(status: ObservatoryStatus): boolean {
@@ -362,9 +409,7 @@ export async function getObservatoryStatus(): Promise<ObservatoryStatus> {
   }
 
   if (mode === 'auto') {
-    const prev = await readAutoBaseCursor()
     await maybeLogAutoComputedBaseChange({
-      previousCursor: prev,
       base,
       finalStatus: final,
       nowMs: now,

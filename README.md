@@ -88,6 +88,7 @@ You **request** imaging on the website; the observatory computer and NINA **exec
 |---------|-------------|
 | **Metric cards** | Temperature, apparent temperature, humidity, cloud cover %, wind speed, wind gust (Open-Meteo, Pomfret CT) |
 | **Cloud Map** | NOAA GOES-East animated CONUS cloud imagery (auto-refreshes ~every 10 min) |
+| **Precipitation radar** | LibreWXR past radar + nowcast over Pomfret (proxied; optional self-host via `LIBREWXR_API_BASE_URL`) |
 | **Moon** | Phase photo (NASA), illumination %, altitude, rise/set; drag timeline to see other times |
 | **All-sky camera** | Live fisheye view of the observatory sky (same stream family as the mobile webapp) |
 
@@ -563,11 +564,14 @@ GET  /api/imaging/reconcile...   ← ~every 6 min
 observatory/
 ├── nina_agent.py          # Windows — queue poll, R2 upload, reconcile trigger
 ├── camera_service.py      # Pi — all-sky stream, auto exposure/WB, Drive upload
+├── asc_cloud_ai.py        # Pi — TM cloud/rain inference on auto captures
 ├── auto_exposure.py
 ├── auto_white_balance.py
-├── observatory_solar.py   # Gain schedule by nautical dawn/dusk
+├── observatory_solar.py   # Gain schedule by nautical dawn/dusk; same for ASC AI day/night
 ├── imaging_drive.py
-└── google_drive_upload.py
+├── google_drive_upload.py
+├── models/                # Day/Night Cloud & Rain TFJS models
+└── requirements-ai.txt    # tensorflow, tensorflowjs (optional on Pi)
 
 camera_service.py            # root launcher → observatory/
 nina_agent.py                # root launcher → observatory/
@@ -583,6 +587,8 @@ nina_agent.py                # root launcher → observatory/
 
 - **Stream:** Pi `camera_service.py` → MJPEG; shown on Weather page and admin panel.
 - **Auto modes:** `stream`, `auto`, `half_hour`, `hour`, `off` — gain scheduled by `observatory_solar.py` (0 day / 80 twilight / 150 night using **nautical** dawn/dusk).
+- **ASC cloud AI:** In `auto`, `half_hour`, and `hour` modes, each captured frame runs Teachable Machine cloud + rain models (`observatory/asc_cloud_ai.py`). **Nautical dawn → nautical dusk** uses `Day_*` models; otherwise `Night_*`. Results are exposed on camera `/status` as `sensors.allSkyCam.ascCloud`. Weather page **Cloud Cover** and the all-sky overlay read this field (not Open-Meteo). Rain is inferred and stored in status JSON but not shown in the UI yet.
+- **Models:** `observatory/models/{Day,Night}_{Cloud,Rain}_Model}/` (TFJS export). Pi install: `pip install -r observatory/requirements-ai.txt` (TensorFlow + tensorflowjs; optional — capture continues if AI deps are missing).
 - **Auto exposure / WB:** closed-loop on Pi; samples posted to `/api/camera/auto-tuning-history`; admin charts in **All Sky Camera Control**.
 - **Half Hour / Hour modes:** timed capture uploads to Google Drive via `imaging_drive.py`.
 
@@ -631,6 +637,8 @@ website/
 **Security:** See [SECURITY_SETUP.md](SECURITY_SETUP.md) for production secret checklist and post-deploy verification.
 
 **Imaging:** `IMAGING_QUEUE_SECRET`, `CRON_SECRET`, `IMAGING_R2_WRITE_SECRET`, R2 S3 vars, `NINA_SESSION_PROGRESS_BASIC_*`, `NINA_MOUNT_TELEMETRY_*`
+
+**Weather radar (optional):** `LIBREWXR_API_BASE_URL` — upstream LibreWXR API (default `https://api.librewxr.net`). For reliability, self-host [LibreWXR](https://librewxr.net/docs) on a VPS (e.g. Hetzner) and point this to your instance; the site proxies metadata and tiles through `/api/librewxr/*`.
 
 **Email:** `RESEND_API_KEY`, `IMAGING_MAIL_FROM`
 

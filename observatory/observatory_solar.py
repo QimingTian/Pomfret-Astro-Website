@@ -94,6 +94,35 @@ def nautical_dawn_and_astronomical_dark_utc(now: datetime) -> Tuple[datetime, da
     return nautical_dawn, astronomical_dark
 
 
+def nautical_dawn_and_dusk_utc(now: datetime) -> Tuple[datetime, datetime]:
+    """Nautical dawn and nautical dusk for observatory local day of `now` (−12° sun)."""
+    anchor = observatory_local_calendar_anchor_utc(now)
+    nautical_dawn = solar_event_utc_for_date(anchor, _ZENITH_NAUTICAL, is_sunrise=True)
+    nautical_dusk = solar_event_utc_for_date(anchor, _ZENITH_NAUTICAL, is_sunrise=False)
+    return nautical_dawn, nautical_dusk
+
+
+def civil_dawn_and_dusk_utc(now: datetime) -> Tuple[datetime, datetime]:
+    """Civil dawn and civil dusk for observatory local day of `now` (−6° sun)."""
+    anchor = observatory_local_calendar_anchor_utc(now)
+    civil_dawn = solar_event_utc_for_date(anchor, _ZENITH_CIVIL, is_sunrise=True)
+    civil_dusk = solar_event_utc_for_date(anchor, _ZENITH_CIVIL, is_sunrise=False)
+    return civil_dawn, civil_dusk
+
+
+def is_asc_model_daytime(now: datetime | None = None) -> bool:
+    """True during nautical dawn → nautical dusk (ASC cloud/rain day models)."""
+    if now is None:
+        now = datetime.now(timezone.utc)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    else:
+        now = now.astimezone(timezone.utc)
+
+    nautical_dawn, nautical_dusk = nautical_dawn_and_dusk_utc(now)
+    return nautical_dawn <= now < nautical_dusk
+
+
 def is_auto_mode_daytime(now: datetime | None = None) -> bool:
     """Sunrise through sunset (official, gain 0)."""
     return auto_mode_target_gain(now) == AUTO_MODE_GAIN_DAY

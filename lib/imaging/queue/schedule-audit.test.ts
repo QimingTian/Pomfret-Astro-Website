@@ -35,3 +35,21 @@ test('deriveQueueScheduleState uses queue scheduled status for single-night sess
   }
   assert.equal(deriveQueueScheduleState(row, null, '2026-05-30'), 'scheduled')
 })
+
+test('deriveQueueScheduleState uses project nights when queue row is missing (in_progress project)', () => {
+  const project: Pick<ImagingProject, 'nights'> = {
+    nights: [
+      {
+        id: 'p::night-3',
+        nightIndex: 3,
+        nightKey: '2026-06-01',
+        status: 'scheduled',
+        plannedStartIso: '2026-06-02T01:31:15.515Z',
+        filterPlansTonight: [{ filterName: 'H', exposureSeconds: 600, count: 26 }],
+        ninaSequenceJson: '{}',
+      },
+    ],
+  }
+  assert.equal(deriveQueueScheduleState(null, project, '2026-06-01'), 'scheduled')
+  assert.equal(deriveQueueScheduleState(undefined, project, '2026-05-30'), 'unscheduled')
+})

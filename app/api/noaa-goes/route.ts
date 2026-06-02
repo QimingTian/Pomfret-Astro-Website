@@ -1,23 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-
-const ALLOWED_HOST = 'cdn.star.nesdis.noaa.gov'
-const DEFAULT_GOES_PATH = '/GOES19/ABI/CONUS/GEOCOLOR/GOES19-CONUS-GEOCOLOR-625x375.gif'
-
-function resolveNoaaGoesUrl(raw: string | null): string | null {
-  const fallback = `https://${ALLOWED_HOST}${DEFAULT_GOES_PATH}`
-  if (!raw?.trim()) return fallback
-
-  let parsed: URL
-  try {
-    parsed = new URL(raw.trim())
-  } catch {
-    return null
-  }
-  if (parsed.protocol !== 'https:') return null
-  if (parsed.hostname.toLowerCase() !== ALLOWED_HOST) return null
-  if (!parsed.pathname.startsWith('/GOES')) return null
-  return parsed.toString()
-}
+import { resolveNoaaGoesUrl } from '@/lib/noaa-goes'
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams

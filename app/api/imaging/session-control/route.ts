@@ -7,6 +7,7 @@ import {
   adminMarkSessionFailed,
   listSessionControlEntries,
 } from '@/lib/imaging-session-control'
+import { runImagingScheduleMaintenance } from '@/lib/imaging-session-maintenance'
 
 export const runtime = 'nodejs'
 
@@ -19,6 +20,7 @@ export async function GET(request: NextRequest) {
   if (!admin.ok) {
     return withImagingCors({ ok: false as const, error: admin.error }, admin.status)
   }
+  await runImagingScheduleMaintenance()
   const sessions = await listSessionControlEntries()
   return withImagingCors({ ok: true as const, sessions })
 }

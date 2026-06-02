@@ -10,6 +10,7 @@ import {
   deleteProjectById,
   getProjectById,
   getProjectByNightSubId,
+  isProjectVisibleToOperators,
   listProjects,
   markNightCompleted,
   markNightFailed,
@@ -100,10 +101,11 @@ export async function listSessionControlEntries(): Promise<SessionControlEntry[]
   }
 
   for (const p of projects) {
-    if (!p.onBoard) continue
     if (queue.some((r) => r.id === p.id)) continue
+    if (!(await isProjectVisibleToOperators(p))) continue
     for (const night of p.nights) {
       const status = nightStatusLabel(night)
+      if (!p.onBoard && !ACTIVE_STATUSES.has(status) && !ACTIVE_STATUSES.has(night.status)) continue
       push({
         sessionId: night.id,
         label: `${p.target} — Session ${night.nightIndex}`,

@@ -29,11 +29,20 @@ async function redisCommand(command: string, ...args: (string | number)[]): Prom
   return body.result
 }
 
-export async function kvGetJson<T>(key: string): Promise<T | undefined> {
+export async function kvGetString(key: string): Promise<string | undefined> {
   if (!enabled()) return undefined
   try {
     const raw = await redisCommand('GET', key)
-    if (typeof raw !== 'string') return undefined
+    return typeof raw === 'string' ? raw : undefined
+  } catch {
+    return undefined
+  }
+}
+
+export async function kvGetJson<T>(key: string): Promise<T | undefined> {
+  const raw = await kvGetString(key)
+  if (raw === undefined) return undefined
+  try {
     return JSON.parse(raw) as T
   } catch {
     return undefined
@@ -56,6 +65,23 @@ export async function kvDel(key: string): Promise<boolean> {
   try {
     const result = await redisCommand('DEL', key)
     return result === 1 || result === '1'
+  } catch {
+    return false
+  }
+}
+
+/** SET key only when current value equals `expected` (use '' when key is missing). */
+export async function kvCompareAndSet(key: string, expected: string, next: string): Promise<boolean> {
+  if (!enabled()) return false
+  const script = `
+local cur = redis.call('GET', KEYS[1])
+if cur == false then cur = '' end
+if cur ~= ARGV[1] then return 0 end
+redis.call('SET', KEYS[1], ARGV[2])
+return 1`
+  try {
+    const result = await redisCommand('EVAL', script, 1, key, expected, next)
+    return result === 1
   } catch {
     return false
   }

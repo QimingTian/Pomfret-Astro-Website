@@ -21,6 +21,7 @@ import {
   setRequestAdminApprovalPending,
   toPublicImagingRequest,
   type CreateImagingInput,
+  type ImagingRequest,
 } from '@/lib/imaging-queue-store'
 import {
   collectTonightProjectSubSessionOccupancy,
@@ -39,6 +40,27 @@ import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import { getTonightWeatherPermittedIntervals } from '@/lib/tonight-weather-gate'
 
 export const runtime = 'nodejs'
+
+function queueCreatedAuditDetail(result: ImagingRequest): Record<string, unknown> {
+  const base: Record<string, unknown> = {
+    id: result.id,
+    target: result.target,
+    filter: result.sequenceTemplate === 'variable_star' ? 'G' : result.filter,
+    estimatedDurationSeconds: result.estimatedDurationSeconds ?? null,
+    outputMode: result.outputMode ?? 'raw_zip',
+    firstName: result.firstName ?? null,
+    lastName: result.lastName ?? null,
+    email: result.email ?? null,
+  }
+  if (result.sequenceTemplate === 'variable_star') {
+    return base
+  }
+  return {
+    ...base,
+    exposureSeconds: result.exposureSeconds,
+    count: result.count,
+  }
+}
 
 async function detectSunsetSunrisePrecipGate(): Promise<{ active: boolean | null; hitHours: number[] }> {
   const url =
@@ -378,18 +400,7 @@ export async function POST(request: NextRequest) {
   void appendAuditLog({
     kind: 'queue.created',
     message: `Imaging session queued: ${result.target} (${result.id}).`,
-    detail: {
-      id: result.id,
-      target: result.target,
-      filter: result.filter,
-      exposureSeconds: result.exposureSeconds,
-      count: result.count,
-      estimatedDurationSeconds: result.estimatedDurationSeconds ?? null,
-      outputMode: result.outputMode ?? 'raw_zip',
-      firstName: result.firstName ?? null,
-      lastName: result.lastName ?? null,
-      email: result.email ?? null,
-    },
+    detail: queueCreatedAuditDetail(result),
   })
 
   const scheduleMessage =

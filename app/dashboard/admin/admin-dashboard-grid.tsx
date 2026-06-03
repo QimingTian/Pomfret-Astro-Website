@@ -224,6 +224,10 @@ export function AdminDashboardGrid() {
               ) : (
                 t.sessionRows.map((row) => {
                   const busy = t.sessionActionId === row.sessionId
+                  const canRun =
+                    row.status === 'pending' ||
+                    row.status === 'scheduled' ||
+                    row.status === 'planned'
                   return (
                     <div key={row.sessionId} className="rounded-lg border border-gray-700 px-3 py-2 space-y-2">
                       <div>
@@ -231,6 +235,14 @@ export function AdminDashboardGrid() {
                         <p className="text-xs uppercase text-gray-400">{row.status}</p>
                       </div>
                       <div className="flex flex-wrap gap-1">
+                        <button
+                          type="button"
+                          disabled={busy || !canRun}
+                          onClick={() => void t.runSessionAction(row.sessionId, 'run')}
+                          className="rounded-full border border-sky-500/50 px-2 py-1 text-xs text-sky-200 disabled:opacity-40"
+                        >
+                          Run
+                        </button>
                         <button
                           type="button"
                           disabled={busy || row.status === 'completed'}

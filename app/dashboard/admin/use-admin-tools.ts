@@ -187,8 +187,19 @@ export function useAdminTools() {
     void loadSessionControl()
   }, [authorized, loadSessionControl])
 
-  async function runSessionAction(sessionId: string, action: 'complete' | 'fail' | 'delete') {
+  async function runSessionAction(
+    sessionId: string,
+    action: 'complete' | 'fail' | 'delete' | 'run'
+  ) {
     if (action === 'delete' && !window.confirm(`Delete session ${sessionId}? This cannot be undone.`)) {
+      return
+    }
+    if (
+      action === 'run' &&
+      !window.confirm(
+        `Force-run session ${sessionId} now? Requires observatory ready, target ≥30° for the full session, and weather over the window. NINA will pick it up on the next poll.`
+      )
+    ) {
       return
     }
     setSessionActionId(sessionId)

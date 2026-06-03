@@ -30,6 +30,7 @@ import {
 import { removePreviewImage } from '@/lib/imaging-preview-store'
 import { deleteR2ObjectForQueueId } from '@/lib/r2-session-download'
 import { deleteProjectCascade } from '@/lib/imaging-project-delete'
+import { adminRunSession } from '@/lib/imaging/admin-force-run'
 
 export type SessionControlEntry = {
   sessionId: string
@@ -311,4 +312,10 @@ export async function adminDeleteSession(sessionId: string): Promise<{ ok: true 
   })
   void reconcilePendingScheduleStatus()
   return { ok: true }
+}
+
+export async function adminRunSessionControl(
+  sessionId: string
+): Promise<{ ok: true } | { error: string }> {
+  return adminRunSession(sessionId)
 }

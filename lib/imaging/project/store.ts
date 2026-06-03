@@ -33,6 +33,8 @@ export type ProjectNight = {
   scheduleStripNightKey?: string | null
   scheduleBarStartMs?: number | null
   scheduleBarEndMs?: number | null
+  /** Admin force-run: do not replace/clear this sub-session until this instant (ISO). */
+  adminForceRunUntilIso?: string | null
 }
 
 export type ImagingProject = {
@@ -685,8 +687,19 @@ export async function replaceScheduledSubsForNightKey(
   const project = await getProjectById(projectId)
   if (!project) return undefined
   const deduped = dedupeProjectNights(project.nights)
-  const removed = deduped.filter((n) => n.nightKey === nightKey && n.status === 'scheduled')
-  const kept = deduped.filter((n) => n.nightKey !== nightKey || n.status !== 'scheduled')
+  const nowMs = Date.now()
+  const isForceRunScheduled = (n: ProjectNight) =>
+    n.nightKey === nightKey &&
+    n.status === 'scheduled' &&
+    n.adminForceRunUntilIso != null &&
+    Number.isFinite(Date.parse(n.adminForceRunUntilIso)) &&
+    Date.parse(n.adminForceRunUntilIso) > nowMs
+  const removed = deduped.filter(
+    (n) => n.nightKey === nightKey && n.status === 'scheduled' && !isForceRunScheduled(n)
+  )
+  const kept = deduped.filter(
+    (n) => n.nightKey !== nightKey || n.status !== 'scheduled' || isForceRunScheduled(n)
+  )
   const merged: ProjectNight[] = [
     ...kept,
     ...subs.map((s) => ({ ...s, nightKey, status: 'scheduled' as const })),

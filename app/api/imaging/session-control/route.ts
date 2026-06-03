@@ -5,6 +5,7 @@ import {
   adminDeleteSession,
   adminMarkSessionComplete,
   adminMarkSessionFailed,
+  adminRunSessionControl,
   listSessionControlEntries,
 } from '@/lib/imaging-session-control'
 import { runImagingScheduleMaintenance } from '@/lib/imaging-session-maintenance'
@@ -59,9 +60,12 @@ export async function POST(request: NextRequest) {
     case 'delete':
       result = await adminDeleteSession(sessionId)
       break
+    case 'run':
+      result = await adminRunSessionControl(sessionId)
+      break
     default:
       return withImagingCors(
-        { ok: false as const, error: 'action must be complete, fail, or delete' },
+        { ok: false as const, error: 'action must be complete, fail, delete, or run' },
         400
       )
   }

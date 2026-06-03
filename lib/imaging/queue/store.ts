@@ -61,6 +61,8 @@ export interface ImagingRequest {
   userId?: string
   /** Large project mode (>30h total) awaiting admin approval before scheduling. */
   adminApprovalPending?: boolean
+  /** Admin force-run: do not unschedule until this instant (ISO). */
+  adminForceRunUntilIso?: string | null
 }
 
 /** Strip large JSON from API list responses; expose download path instead. */
@@ -297,12 +299,48 @@ export async function patchRequestScheduleInsight(
   const idx = mem.findIndex((r) => r.id === id)
   if (idx === -1) return false
   const current = mem[idx]
+  const forceRunActive =
+    current.adminForceRunUntilIso != null &&
+    Number.isFinite(Date.parse(current.adminForceRunUntilIso)) &&
+    Date.parse(current.adminForceRunUntilIso) > Date.now()
+  if (forceRunActive && insight.status !== 'scheduled') {
+    return true
+  }
   const queueStatus: ImagingRequestStatus = insight.status === 'scheduled' ? 'scheduled' : 'pending'
-  const next: ImagingRequest = { ...current, status: queueStatus, plannedStartIso: insight.plannedStartIso, scheduleReasons: insight.reasons, updatedAt: nowIso() }
+  const next: ImagingRequest = {
+    ...current,
+    status: queueStatus,
+    plannedStartIso: insight.plannedStartIso,
+    scheduleReasons: insight.reasons,
+    updatedAt: nowIso(),
+  }
   delete (next as { scheduleStatus?: unknown }).scheduleStatus
   mem[idx] = next
   await persist()
   return true
+}
+
+export async function patchRequestAdminForceRun(
+  id: string,
+  input: { plannedStartIso: string; adminForceRunUntilIso: string }
+): Promise<ImagingRequest | undefined> {
+  await ensureLoadedFromDisk()
+  const mem = getMemory()
+  const idx = mem.findIndex((r) => r.id === id)
+  if (idx === -1) return undefined
+  const current = mem[idx]!
+  const next: ImagingRequest = {
+    ...current,
+    status: 'scheduled',
+    plannedStartIso: input.plannedStartIso,
+    adminForceRunUntilIso: input.adminForceRunUntilIso,
+    scheduleReasons: ['Admin force-run scheduled.'],
+    updatedAt: nowIso(),
+  }
+  delete (next as { scheduleStatus?: unknown }).scheduleStatus
+  mem[idx] = next
+  await persist()
+  return next
 }
 
 export interface CreateImagingInput {
@@ -394,7 +432,7 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
     sequenceTemplate === 'dso' && input.projectMode === true
   const filterRaw =
     sequenceTemplate === 'variable_star'
-      ? 'L'
+      ? 'G'
       : input.filter == null
         ? ''
         : input.filter === ''
@@ -641,7 +679,7 @@ export async function updatePendingRequestById(
     input.sequenceTemplate === 'variable_star' ? 'variable_star' : 'dso'
   const filterRaw =
     sequenceTemplate === 'variable_star'
-      ? 'L'
+      ? 'G'
       : input.filter == null
         ? ''
         : input.filter === ''

@@ -200,3 +200,71 @@ export async function getTonightWeatherPermittedIntervals(): Promise<TonightWeat
     return { status: 'unknown', permittedIntervals: [], reason: 'Weather forecast evaluation failed' }
   }
 }
+
+/** Every forecast hour overlapping [startMs, endMs) must have precipitation_probability < 10%. */
+export async function sessionWindowHourlyPrecipOk(
+  startMs: number,
+  endMs: number
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+    return { ok: false, reason: 'Invalid session window.' }
+  }
+  const url =
+    'https://api.open-meteo.com/v1/forecast' +
+    `?latitude=${LAT}&longitude=${LON}` +
+    '&hourly=precipitation_probability' +
+    '&forecast_days=2&timezone=America/New_York&timeformat=unixtime'
+  try {
+    const res = await fetch(url, { cache: 'no-store' })
+    if (!res.ok) {
+      return { ok: false, reason: 'Weather forecast unavailable.' }
+    }
+    const data = (await res.json()) as OpenMeteoResponse
+    const times = data.hourly?.time ?? []
+    const precip = data.hourly?.precipitation_probability ?? []
+    if (times.length === 0 || precip.length !== times.length) {
+      return { ok: false, reason: 'Weather forecast data incomplete.' }
+    }
+    for (let i = 0; i < times.length; i += 1) {
+      const hourStartMs = times[i]! * 1000
+      const hourEndMs = hourStartMs + 60 * 60 * 1000
+      const overlapStart = Math.max(startMs, hourStartMs)
+      const overlapEnd = Math.min(endMs, hourEndMs)
+      if (overlapEnd <= overlapStart) continue
+      const p = Number(precip[i])
+      if (!Number.isFinite(p) || p >= 10) {
+        return {
+          ok: false,
+          reason: 'At least one hour in the session window has precipitation probability >= 10%.',
+        }
+      }
+    }
+    return { ok: true }
+  } catch {
+    return { ok: false, reason: 'Weather forecast evaluation failed.' }
+  }
+}
+
+/** Admin force-run: >=80% weather-permitted coverage and hourly precip < 10% over the session window. */
+export async function validateAdminRunWeatherWindow(
+  startMs: number,
+  endMs: number
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const intervals = await getTonightWeatherPermittedIntervals()
+  if (intervals.status !== 'ok') {
+    return { ok: false, reason: intervals.reason ?? 'Weather forecast unavailable.' }
+  }
+  if (intervals.globalHardBlocked === true) {
+    return {
+      ok: false,
+      reason: intervals.globalHardBlockReason ?? 'Tonight blocked by global weather trigger.',
+    }
+  }
+  if (!weatherCoverageOk(intervals.permittedIntervals, startMs, endMs, 0.8)) {
+    return {
+      ok: false,
+      reason: 'Weather-permitted coverage is below 80% for this session window.',
+    }
+  }
+  return sessionWindowHourlyPrecipOk(startMs, endMs)
+}

@@ -26,6 +26,7 @@ import { projectAltitudeHoldIntervals } from '@/lib/imaging-project-altitude-hol
 import { DSO_SESSION_OVERHEAD_SEC } from '@/lib/imaging-session-overhead'
 import { patchRequestScheduleInsight } from '@/lib/imaging-queue-store'
 import { subtractOccupiedFromFree } from '@/lib/imaging-queue-free-intervals'
+import { isAdminForceRunActive } from '@/lib/imaging/admin-force-run'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import {
   altitudeAllowedCoverageMs,
@@ -664,6 +665,7 @@ export function computeProjectTonightPlan(
 function shouldRefreshTonightSubs(project: ImagingProject, nightKey: string): boolean {
   const tonight = project.nights.filter((n) => n.nightKey === nightKey)
   if (tonight.length === 0) return true
+  if (tonight.some((n) => isAdminForceRunActive(n))) return false
   // Do not reshuffle later `scheduled` subs while one is imaging — avoids Session 2 sliding on the strip.
   if (hasInProgressSessionTonight(project, nightKey)) return false
   // Re-plan or clear `scheduled` subs when weather changes. in_progress/completed are kept by replaceScheduledSubsForNightKey.

@@ -56,6 +56,7 @@ import {
   wasEndNightDawnSent,
 } from '@/lib/end-night-state'
 import { getAdminClosedWindowAt } from '@/lib/admin-closed-window-store'
+import { tryDeliverActiveAdminForceRun } from '@/lib/imaging/admin-force-run'
 import endNightTemplate from '@/End Night Session.json'
 
 export const runtime = 'nodejs'
@@ -319,6 +320,10 @@ export async function GET(request: NextRequest) {
   const now = new Date()
   const nowMs = now.getTime()
   await expireMissedScheduledProjectNights(now)
+  const status = await getObservatoryStatus()
+  const forceRunDelivered = await tryDeliverActiveAdminForceRun(status, nowMs)
+  if (forceRunDelivered) return forceRunDelivered
+
   const adminWindowNow = await getAdminClosedWindowAt(nowMs)
   if (adminWindowNow) {
     const msg =
@@ -327,7 +332,6 @@ export async function GET(request: NextRequest) {
         : 'Closed by admin schedule control'
     return NextResponse.json({ error: msg }, { status: 409, headers: imagingCorsHeadersResolved() })
   }
-  const status = await getObservatoryStatus()
   const allowRedeliverInProgress = !(await isNinaReportedRunningNow(nowMs))
   const pending = await listPending()
   const schedulingWindow = getTonightSchedulingWindow(now)

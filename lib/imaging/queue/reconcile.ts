@@ -25,6 +25,7 @@ import {
 } from '@/lib/imaging/queue/schedule-audit'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
+import { isAdminForceRunActive } from '@/lib/imaging/admin-force-run'
 import { getTonightWeatherPermittedIntervals, type TimeInterval } from '@/lib/tonight-weather-gate'
 
 /**
@@ -137,6 +138,26 @@ export async function reconcilePendingScheduleStatus(): Promise<void> {
           windowStartMs,
           deadlineMs
         )
+        continue
+      }
+
+      if (
+        isAdminForceRunActive(r, nowMs) &&
+        r.status === 'scheduled' &&
+        r.plannedStartIso != null &&
+        Number.isFinite(Date.parse(r.plannedStartIso))
+      ) {
+        nextById.set(r.id, {
+          status: 'scheduled',
+          plannedStartIso: r.plannedStartIso,
+          reasons: ['Admin force-run in progress.'],
+        })
+        const startMs = Date.parse(r.plannedStartIso)
+        const durationSeconds = estimateDurationSeconds(r)
+        fifoFree = subtractOccupiedFromFree(fifoFree, {
+          startMs,
+          endMs: startMs + durationSeconds * 1000,
+        })
         continue
       }
 

@@ -2,12 +2,17 @@
 
 import { useId, useState } from 'react'
 import type { MemberProfile } from '@/hooks/use-member'
-import {
-  authLabelClass,
-  authLineInputClass,
-  authPrimaryButtonClass,
-  authSecondaryButtonClass,
-} from '@/components/auth-ui'
+
+const lineInputClass =
+  'w-full bg-transparent border-0 border-b border-gray-600 px-0 py-2.5 text-base text-white placeholder:text-white/50 focus:outline-none focus:border-white/60'
+
+const labelClass = 'mb-1 block text-sm text-white'
+
+const primaryButtonClass =
+  'inline-flex w-full items-center justify-center rounded-full border border-white/25 bg-[#151616] px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#1b1c1c] disabled:cursor-not-allowed disabled:opacity-50'
+
+const secondaryButtonClass =
+  'inline-flex w-full items-center justify-center rounded-full border border-white/25 bg-transparent px-6 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-white/10'
 
 export function MemberAuthPanel({
   onSignedIn,
@@ -103,7 +108,7 @@ export function MemberAuthPanel({
       <form onSubmit={(e) => void handleSubmit(e)} className="space-y-6">
         {mode === 'login' ? (
           <div>
-            <label htmlFor={`${id}-login`} className={authLabelClass}>
+            <label htmlFor={`${id}-login`} className={labelClass}>
               Email or username
             </label>
             <input
@@ -113,13 +118,13 @@ export function MemberAuthPanel({
               onChange={(e) => setLogin(e.target.value)}
               autoComplete="username"
               required
-              className={authLineInputClass}
+              className={lineInputClass}
             />
           </div>
         ) : (
           <>
             <div>
-              <label htmlFor={`${id}-first`} className={authLabelClass}>
+              <label htmlFor={`${id}-first`} className={labelClass}>
                 First name
               </label>
               <input
@@ -129,11 +134,11 @@ export function MemberAuthPanel({
                 onChange={(e) => setFirstName(e.target.value)}
                 autoComplete="given-name"
                 required
-                className={authLineInputClass}
+                className={lineInputClass}
               />
             </div>
             <div>
-              <label htmlFor={`${id}-last`} className={authLabelClass}>
+              <label htmlFor={`${id}-last`} className={labelClass}>
                 Last name
               </label>
               <input
@@ -143,11 +148,11 @@ export function MemberAuthPanel({
                 onChange={(e) => setLastName(e.target.value)}
                 autoComplete="family-name"
                 required
-                className={authLineInputClass}
+                className={lineInputClass}
               />
             </div>
             <div>
-              <label htmlFor={`${id}-username`} className={authLabelClass}>
+              <label htmlFor={`${id}-username`} className={labelClass}>
                 Username
               </label>
               <input
@@ -157,11 +162,11 @@ export function MemberAuthPanel({
                 onChange={(e) => setUsername(e.target.value)}
                 autoComplete="username"
                 required
-                className={authLineInputClass}
+                className={lineInputClass}
               />
             </div>
             <div>
-              <label htmlFor={`${id}-email`} className={authLabelClass}>
+              <label htmlFor={`${id}-email`} className={labelClass}>
                 Email
               </label>
               <input
@@ -171,13 +176,13 @@ export function MemberAuthPanel({
                 onChange={(e) => setEmail(e.target.value)}
                 autoComplete="email"
                 required
-                className={authLineInputClass}
+                className={lineInputClass}
               />
             </div>
           </>
         )}
         <div>
-          <label htmlFor={`${id}-password`} className={authLabelClass}>
+          <label htmlFor={`${id}-password`} className={labelClass}>
             {mode === 'signup' ? 'Password (8+ characters)' : 'Password'}
           </label>
           <input
@@ -188,12 +193,12 @@ export function MemberAuthPanel({
             autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
             required
             minLength={mode === 'signup' ? 8 : undefined}
-            className={authLineInputClass}
+            className={lineInputClass}
           />
         </div>
         {mode === 'signup' ? (
           <div>
-            <label htmlFor={`${id}-confirm-password`} className={authLabelClass}>
+            <label htmlFor={`${id}-confirm-password`} className={labelClass}>
               Confirm password
             </label>
             <input
@@ -204,12 +209,12 @@ export function MemberAuthPanel({
               autoComplete="new-password"
               required
               minLength={8}
-              className={authLineInputClass}
+              className={lineInputClass}
             />
           </div>
         ) : null}
         {error ? <p className="text-center text-sm text-white">{error}</p> : null}
-        <button type="submit" disabled={submitting || !canSubmit} className={authPrimaryButtonClass}>
+        <button type="submit" disabled={submitting || !canSubmit} className={primaryButtonClass}>
           {submitting
             ? mode === 'signup'
               ? 'Creating account…'
@@ -227,7 +232,7 @@ export function MemberAuthPanel({
         <button
           type="button"
           onClick={() => switchMode(mode === 'login' ? 'signup' : 'login')}
-          className={authSecondaryButtonClass}
+          className={secondaryButtonClass}
         >
           {mode === 'login' ? 'Sign Up' : 'Log In'}
         </button>

@@ -78,7 +78,7 @@ function SignUpForm() {
     <div className={authPageClass}>
       <div className={authPanelClass}>
         <div className="mb-6 flex justify-center">
-          <SiteLogo variant="full" width={180} className="h-auto w-[min(180px,65vw)] invert" priority />
+          <SiteLogo width={180} className="h-auto w-[min(180px,65vw)] invert" priority />
         </div>
         <p className="mb-2 text-center text-lg font-semibold text-white">Pomfret Astro</p>
         <p className="mb-8 text-center text-xl font-semibold sm:text-2xl">Create An Account</p>

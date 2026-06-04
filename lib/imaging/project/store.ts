@@ -8,7 +8,7 @@ import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 import type { ScheduleBarPlacement } from '@/lib/imaging-schedule-bar'
 
 export type ProjectStatus = 'pending' | 'scheduled' | 'in_progress' | 'completed' | 'failed'
-export type ProjectNightStatus = 'planned' | 'scheduled' | 'in_progress' | 'completed' | 'failed'
+export type ProjectNightStatus = 'planned' | 'scheduled' | 'on_hold' | 'in_progress' | 'completed' | 'failed'
 
 export type FilterPlanRow = { filterName: string; exposureSeconds: number; count: number }
 export type FilterRemainingRow = {
@@ -35,6 +35,8 @@ export type ProjectNight = {
   scheduleBarEndMs?: number | null
   /** Admin force-run: do not replace/clear this sub-session until this instant (ISO). */
   adminForceRunUntilIso?: string | null
+  /** Night status before admin placed this sub-session on hold. */
+  onHoldFromStatus?: 'planned' | 'scheduled'
 }
 
 export type ImagingProject = {
@@ -598,6 +600,7 @@ export function dedupeProjectNights(nights: ProjectNight[]): ProjectNight[] {
   const rank: Record<ProjectNightStatus, number> = {
     in_progress: 5,
     scheduled: 4,
+    on_hold: 4,
     planned: 3,
     failed: 2,
     completed: 1,
@@ -695,10 +698,16 @@ export async function replaceScheduledSubsForNightKey(
     Number.isFinite(Date.parse(n.adminForceRunUntilIso)) &&
     Date.parse(n.adminForceRunUntilIso) > nowMs
   const removed = deduped.filter(
-    (n) => n.nightKey === nightKey && n.status === 'scheduled' && !isForceRunScheduled(n)
+    (n) =>
+      n.nightKey === nightKey &&
+      n.status === 'scheduled' &&
+      !isForceRunScheduled(n)
   )
   const kept = deduped.filter(
-    (n) => n.nightKey !== nightKey || n.status !== 'scheduled' || isForceRunScheduled(n)
+    (n) =>
+      n.nightKey !== nightKey ||
+      n.status !== 'scheduled' ||
+      isForceRunScheduled(n)
   )
   const merged: ProjectNight[] = [
     ...kept,

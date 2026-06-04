@@ -31,6 +31,7 @@ import { removePreviewImage } from '@/lib/imaging-preview-store'
 import { deleteR2ObjectForQueueId } from '@/lib/r2-session-download'
 import { deleteProjectCascade } from '@/lib/imaging-project-delete'
 import { adminRunSession } from '@/lib/imaging/admin-force-run'
+import { adminHoldSession, adminReleaseSessionHold } from '@/lib/imaging/session-hold'
 
 export type SessionControlEntry = {
   sessionId: string
@@ -47,6 +48,7 @@ export type SessionControlEntry = {
 const ACTIVE_STATUSES = new Set([
   'pending',
   'scheduled',
+  'on_hold',
   'in_progress',
   'completed',
   'failed',
@@ -54,6 +56,7 @@ const ACTIVE_STATUSES = new Set([
 ])
 
 function nightStatusLabel(n: ProjectNight): string {
+  if (n.status === 'on_hold') return 'on hold'
   return n.status === 'planned' ? 'scheduled' : n.status
 }
 
@@ -94,7 +97,7 @@ export async function listSessionControlEntries(): Promise<SessionControlEntry[]
       sessionId: r.id,
       label: r.target,
       target: r.target,
-      status: r.status,
+      status: r.status === 'on_hold' ? 'on hold' : r.status,
       kind: 'normal',
       plannedStartIso: r.plannedStartIso ?? null,
       updatedAt: r.updatedAt,
@@ -318,4 +321,16 @@ export async function adminRunSessionControl(
   sessionId: string
 ): Promise<{ ok: true } | { error: string }> {
   return adminRunSession(sessionId)
+}
+
+export async function adminHoldSessionControl(
+  sessionId: string
+): Promise<{ ok: true } | { error: string }> {
+  return adminHoldSession(sessionId)
+}
+
+export async function adminReleaseSessionHoldControl(
+  sessionId: string
+): Promise<{ ok: true } | { error: string }> {
+  return adminReleaseSessionHold(sessionId)
 }

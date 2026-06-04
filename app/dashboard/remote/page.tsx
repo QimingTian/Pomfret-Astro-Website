@@ -181,6 +181,8 @@ function queueStatusLabel(status: string): string {
       return 'Pending'
     case 'scheduled':
       return 'Scheduled'
+    case 'on_hold':
+      return 'On hold'
     case 'in_progress':
       return 'In progress'
     case 'completed':
@@ -199,6 +201,7 @@ function queueStatusLabel(status: string): string {
 function queueStatusBadgeClass(status: string): string {
   if (status === 'pending') return 'text-amber-700 dark:text-amber-400'
   if (status === 'scheduled') return 'text-cyan-700 dark:text-cyan-400'
+  if (status === 'on_hold') return 'text-violet-700 dark:text-violet-400'
   if (status === 'in_progress') return 'text-blue-700 dark:text-blue-400'
   if (status === 'completed') return 'text-green-700 dark:text-green-400'
   if (status === 'failed') return 'text-red-700 dark:text-red-400'
@@ -1302,6 +1305,7 @@ export default function RemotePage() {
               if (
                 s === 'pending' ||
                 s === 'scheduled' ||
+                s === 'on_hold' ||
                 s === 'in_progress' ||
                 s === 'completed' ||
                 s === 'failed' ||
@@ -1442,6 +1446,7 @@ export default function RemotePage() {
         (i) =>
           i.status === 'pending' ||
           i.status === 'scheduled' ||
+          i.status === 'on_hold' ||
           i.status === 'in_progress' ||
           (i.status === 'completed' && i.hasDownload !== true)
       ),
@@ -1645,6 +1650,23 @@ export default function RemotePage() {
       if (item.projectMode && item.nights && item.nights.length > 0) {
         for (const night of item.nights) {
           if (night.nightKey !== tonightNightKey) continue
+          if (night.status === 'on_hold') {
+            expanded.push({
+              ...item,
+              id: night.id,
+              nightKey: night.nightKey,
+              target: `${item.target} — Session ${night.nightIndex}`,
+              status: 'on_hold',
+              plannedStartIso: null,
+              estimatedDurationSeconds: night.estimatedDurationSeconds,
+              filterPlans: night.filterPlans,
+              failedAt: night.failedAt ?? null,
+              scheduleStripNightKey: null,
+              scheduleBarStartMs: null,
+              scheduleBarEndMs: null,
+            })
+            continue
+          }
           if (night.status === 'planned' && !night.plannedStartIso) continue
           expanded.push({
             ...item,

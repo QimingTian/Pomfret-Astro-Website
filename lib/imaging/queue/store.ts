@@ -22,6 +22,7 @@ import { allFiltersMoonOk } from '@/lib/moon-avoidance'
 export type ImagingRequestStatus =
   | 'pending'
   | 'scheduled'
+  | 'on_hold'
   | 'in_progress'
   | 'completed'
   | 'failed'
@@ -63,6 +64,8 @@ export interface ImagingRequest {
   adminApprovalPending?: boolean
   /** Admin force-run: do not unschedule until this instant (ISO). */
   adminForceRunUntilIso?: string | null
+  /** Status before admin placed this row on hold (restored on release). */
+  onHoldFromStatus?: 'pending' | 'scheduled'
 }
 
 /** Strip large JSON from API list responses; expose download path instead. */
@@ -299,6 +302,9 @@ export async function patchRequestScheduleInsight(
   const idx = mem.findIndex((r) => r.id === id)
   if (idx === -1) return false
   const current = mem[idx]
+  if (current.status === 'on_hold') {
+    return true
+  }
   const forceRunActive =
     current.adminForceRunUntilIso != null &&
     Number.isFinite(Date.parse(current.adminForceRunUntilIso)) &&
@@ -335,6 +341,54 @@ export async function patchRequestAdminForceRun(
     plannedStartIso: input.plannedStartIso,
     adminForceRunUntilIso: input.adminForceRunUntilIso,
     scheduleReasons: ['Admin force-run scheduled.'],
+    updatedAt: nowIso(),
+  }
+  delete (next as { scheduleStatus?: unknown }).scheduleStatus
+  mem[idx] = next
+  await persist()
+  return next
+}
+
+export async function patchRequestOnHold(
+  id: string,
+  input: { fromStatus: 'pending' | 'scheduled' }
+): Promise<ImagingRequest | undefined> {
+  await ensureLoadedFromDisk()
+  const mem = getMemory()
+  const idx = mem.findIndex((r) => r.id === id)
+  if (idx === -1) return undefined
+  const current = mem[idx]!
+  const next: ImagingRequest = {
+    ...current,
+    status: 'on_hold',
+    onHoldFromStatus: input.fromStatus,
+    plannedStartIso: null,
+    adminForceRunUntilIso: null,
+    scheduleReasons: ['On hold by admin.'],
+    updatedAt: nowIso(),
+  }
+  delete (next as { scheduleStatus?: unknown }).scheduleStatus
+  mem[idx] = next
+  await persist()
+  return next
+}
+
+export async function releaseRequestOnHold(id: string): Promise<ImagingRequest | undefined> {
+  await ensureLoadedFromDisk()
+  const mem = getMemory()
+  const idx = mem.findIndex((r) => r.id === id)
+  if (idx === -1) return undefined
+  const current = mem[idx]!
+  if (current.status !== 'on_hold') return undefined
+  const restore: ImagingRequestStatus =
+    current.onHoldFromStatus === 'scheduled' ? 'scheduled' : 'pending'
+  const next: ImagingRequest = {
+    ...current,
+    status: restore,
+    onHoldFromStatus: undefined,
+    plannedStartIso: null,
+    adminForceRunUntilIso: null,
+    scheduleReasons: undefined,
     updatedAt: nowIso(),
   }
   delete (next as { scheduleStatus?: unknown }).scheduleStatus

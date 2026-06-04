@@ -13,11 +13,13 @@ import {
   tonightDurationSecondsFromPlans,
   type ImagingProject,
   type ProjectNight,
+  type ProjectSubSessionOccupancy,
 } from '@/lib/imaging-project-store'
-import { reconcilePendingScheduleStatus } from '@/lib/imaging-queue-reconcile'
+import { subtractOccupiedFromFree } from '@/lib/imaging-queue-free-intervals'
 import {
   consumeRequestById,
   getRequestById,
+  listAll,
   listPending,
   patchRequestAdminForceRun,
   VARIABLE_STAR_SESSION_OVERHEAD_SEC,
@@ -82,6 +84,125 @@ export function validateAdminForceRunAltitude(
 
 function altitudeErrorResponse(reason: string): NextResponse {
   return NextResponse.json({ error: reason }, { status: 409, headers: imagingCorsHeadersResolved() })
+}
+
+export type AdminForceRunTimeWindow = { startMs: number; endMs: number }
+
+function clipTonightWindow(
+  startMs: number,
+  endMs: number,
+  windowStartMs: number,
+  deadlineMs: number
+): AdminForceRunTimeWindow | null {
+  const overlapStart = Math.max(startMs, windowStartMs)
+  const overlapEnd = Math.min(endMs, deadlineMs)
+  if (overlapEnd <= overlapStart) return null
+  return { startMs: overlapStart, endMs: overlapEnd }
+}
+
+/** Active admin force-run imaging window for a normal queue row (tonight clip). */
+export function queueRowAdminForceRunWindow(
+  row: Pick<
+    ImagingRequest,
+    | 'plannedStartIso'
+    | 'adminForceRunUntilIso'
+    | 'estimatedDurationSeconds'
+    | 'exposureSeconds'
+    | 'count'
+    | 'filterPlans'
+  >,
+  windowStartMs: number,
+  deadlineMs: number,
+  nowMs = Date.now()
+): AdminForceRunTimeWindow | null {
+  if (!isAdminForceRunActive(row, nowMs) || !row.plannedStartIso) return null
+  const startMs = Date.parse(row.plannedStartIso)
+  if (!Number.isFinite(startMs)) return null
+  const untilMs = row.adminForceRunUntilIso ? Date.parse(row.adminForceRunUntilIso) : NaN
+  const endMs =
+    Number.isFinite(untilMs) && untilMs > startMs
+      ? untilMs
+      : startMs + estimateDurationSeconds(row) * 1000
+  return clipTonightWindow(startMs, endMs, windowStartMs, deadlineMs)
+}
+
+/** Active admin force-run imaging window for a project sub-session (tonight clip). */
+export function projectNightAdminForceRunWindow(
+  night: ProjectNight,
+  windowStartMs: number,
+  deadlineMs: number,
+  nowMs = Date.now()
+): AdminForceRunTimeWindow | null {
+  if (!isAdminForceRunActive(night, nowMs) || !night.plannedStartIso) return null
+  if (night.status !== 'scheduled' && night.status !== 'in_progress') return null
+  const startMs = Date.parse(night.plannedStartIso)
+  if (!Number.isFinite(startMs)) return null
+  const untilMs = night.adminForceRunUntilIso ? Date.parse(night.adminForceRunUntilIso) : NaN
+  const endMs =
+    Number.isFinite(untilMs) && untilMs > startMs
+      ? untilMs
+      : startMs + tonightDurationSecondsFromPlans(night.filterPlansTonight) * 1000
+  return clipTonightWindow(startMs, endMs, windowStartMs, deadlineMs)
+}
+
+/** All active force-run windows tonight (normal queue rows + project subs). */
+export async function collectActiveAdminForceRunOccupancies(
+  nightKey: string,
+  windowStartMs: number,
+  deadlineMs: number,
+  nowMs = Date.now()
+): Promise<AdminForceRunTimeWindow[]> {
+  const out: AdminForceRunTimeWindow[] = []
+  for (const row of await listAll()) {
+    if (row.projectMode || row.status !== 'scheduled') continue
+    const window = queueRowAdminForceRunWindow(row, windowStartMs, deadlineMs, nowMs)
+    if (window) out.push(window)
+  }
+  for (const project of await listProjects()) {
+    for (const night of project.nights) {
+      if (night.nightKey !== nightKey) continue
+      const window = projectNightAdminForceRunWindow(night, windowStartMs, deadlineMs, nowMs)
+      if (window) out.push(window)
+    }
+  }
+  return out
+}
+
+export function subtractAdminForceRunsFromFree(
+  freeIntervals: AdminForceRunTimeWindow[],
+  forceRunOccupancy: AdminForceRunTimeWindow[]
+): AdminForceRunTimeWindow[] {
+  let free = freeIntervals
+  for (const occupied of forceRunOccupancy) {
+    free = subtractOccupiedFromFree(free, occupied)
+  }
+  return free
+}
+
+/** Normal-queue force-run rows as sub-session occupancy for schedule insight (project subs use collectTonight). */
+export async function collectActiveAdminForceRunSubSessionOccupancy(
+  windowStartMs: number,
+  deadlineMs: number,
+  nowMs = Date.now()
+): Promise<ProjectSubSessionOccupancy[]> {
+  const out: ProjectSubSessionOccupancy[] = []
+  for (const row of await listAll()) {
+    if (row.projectMode || row.status !== 'scheduled') continue
+    if (!isAdminForceRunActive(row, nowMs) || !row.plannedStartIso) continue
+    const startMs = Date.parse(row.plannedStartIso)
+    if (!Number.isFinite(startMs)) continue
+    const endMs = startMs + estimateDurationSeconds(row) * 1000
+    const clip = clipTonightWindow(startMs, endMs, windowStartMs, deadlineMs)
+    if (!clip) continue
+    out.push({
+      projectId: row.id,
+      target: row.target,
+      nightIndex: 0,
+      startMs: clip.startMs,
+      endMs: clip.endMs,
+    })
+  }
+  return out
 }
 
 function sequenceJsonFor(r: ImagingRequest): string | null {
@@ -356,7 +477,7 @@ const RUNNABLE_STATUSES = new Set(['pending', 'scheduled', 'planned'])
 export async function adminRunSession(sessionId: string): Promise<{ ok: true } | { error: string }> {
   const obsStatus = await getObservatoryStatus()
   if (!isObservatoryReady(obsStatus)) {
-    return { error: 'Observatory is not ready (mount, camera, or dome checks failed).' }
+    return { error: 'Observatory is not ready' }
   }
 
   const now = new Date()
@@ -427,6 +548,7 @@ export async function adminRunSession(sessionId: string): Promise<{ ok: true } |
       },
     })
 
+    const { reconcilePendingScheduleStatus } = await import('@/lib/imaging-queue-reconcile')
     await reconcilePendingScheduleStatus()
     return { ok: true }
   }
@@ -469,6 +591,7 @@ export async function adminRunSession(sessionId: string): Promise<{ ok: true } |
     },
   })
 
+  const { reconcilePendingScheduleStatus } = await import('@/lib/imaging-queue-reconcile')
   await reconcilePendingScheduleStatus()
   return { ok: true }
 }

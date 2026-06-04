@@ -148,7 +148,7 @@ export async function GET(request: NextRequest) {
         nightIndex: n.nightIndex,
         nightKey: n.nightKey,
         sessionLabel: `Session ${n.nightIndex}`,
-        status: n.status === 'planned' ? 'scheduled' : n.status,
+        status: n.status === 'planned' ? 'scheduled' : n.status === 'on_hold' ? 'on_hold' : n.status,
         plannedStartIso: n.plannedStartIso ?? null,
         scheduleStripNightKey: n.scheduleStripNightKey ?? null,
         scheduleBarStartMs: n.scheduleBarStartMs ?? null,

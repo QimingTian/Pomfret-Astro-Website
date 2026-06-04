@@ -1,5 +1,11 @@
 import { projectAltitudeHoldIntervals } from '@/lib/imaging-project-altitude-hold'
 import {
+  collectActiveAdminForceRunOccupancies,
+  collectActiveAdminForceRunSubSessionOccupancy,
+  isAdminForceRunActive,
+  subtractAdminForceRunsFromFree,
+} from '@/lib/imaging/admin-force-run'
+import {
   plannerFreeIntervalsBehindInProgressProject,
   reconcileActiveInProgressProjectTonight,
   reconcileOneProjectTonight,
@@ -25,12 +31,12 @@ import {
 } from '@/lib/imaging/queue/schedule-audit'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
-import { isAdminForceRunActive } from '@/lib/imaging/admin-force-run'
 import { getTonightWeatherPermittedIntervals, type TimeInterval } from '@/lib/tonight-weather-gate'
 
 /**
  * Recompute schedule for all pending queue rows (normal + project) in strict submission order.
- * The earliest in-progress project reserves its target's ≥30° windows; everyone else shares the rest FIFO.
+ * Active admin force-run windows are subtracted from free time before any replanning so all
+ * sessions (including in-progress project subs) schedule around them.
  */
 export async function reconcilePendingScheduleStatus(): Promise<void> {
   const pending = await listPending()
@@ -47,17 +53,8 @@ export async function reconcilePendingScheduleStatus(): Promise<void> {
     },
   ]
 
-  let activeProject: ImagingProject | undefined
   const strip = getTonightScheduleStrip(now)
   const nightKey = strip.nightKey
-
-  if (weatherIntervals.status === 'ok' && weatherIntervals.globalHardBlocked !== true) {
-    activeProject = await reconcileActiveInProgressProjectTonight(
-      fullNightFree,
-      weatherIntervals.permittedIntervals,
-      now
-    )
-  }
 
   const nextById = new Map<
     string,
@@ -99,19 +96,44 @@ export async function reconcilePendingScheduleStatus(): Promise<void> {
     )
   } else {
     const permitted = weatherIntervals.permittedIntervals as TimeInterval[]
+
+    const forceRunOccupancy = await collectActiveAdminForceRunOccupancies(
+      nightKey,
+      windowStartMs,
+      deadlineMs,
+      nowMs
+    )
+
+    const fifoMinusForceRun = subtractAdminForceRunsFromFree(fullNightFree, forceRunOccupancy)
+
+    const activeProject = await reconcileActiveInProgressProjectTonight(
+      fifoMinusForceRun,
+      permitted,
+      now
+    )
+
     const reservedIntervals = activeProject ? projectAltitudeHoldIntervals(activeProject, now) : []
 
     let fifoFree = fullNightFree
     if (activeProject && projectHasOpenSessionsForNightKey(activeProject, nightKey)) {
       fifoFree = plannerFreeIntervalsBehindInProgressProject(activeProject, fullNightFree, nightKey, now)
     }
+    fifoFree = subtractAdminForceRunsFromFree(fifoFree, forceRunOccupancy)
 
-    let projectSubSessions = collectTonightProjectSubSessionOccupancy(
-      await listProjects(),
-      nightKey,
+    const forceRunSubOccupancy = await collectActiveAdminForceRunSubSessionOccupancy(
       windowStartMs,
-      deadlineMs
+      deadlineMs,
+      nowMs
     )
+    let projectSubSessions = [
+      ...collectTonightProjectSubSessionOccupancy(
+        await listProjects(),
+        nightKey,
+        windowStartMs,
+        deadlineMs
+      ),
+      ...forceRunSubOccupancy,
+    ]
 
     const orderedBySubmission = [...pending].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
     let working: ImagingRequest[] = pending.map((p) => ({ ...p }))
@@ -132,12 +154,15 @@ export async function reconcilePendingScheduleStatus(): Promise<void> {
         nextById.set(r.id, insight)
 
         fifoFree = subtractProjectTonightPlansFromFree(fifoFree, plans)
-        projectSubSessions = collectTonightProjectSubSessionOccupancy(
-          await listProjects(),
-          nightKey,
-          windowStartMs,
-          deadlineMs
-        )
+        projectSubSessions = [
+          ...collectTonightProjectSubSessionOccupancy(
+            await listProjects(),
+            nightKey,
+            windowStartMs,
+            deadlineMs
+          ),
+          ...forceRunSubOccupancy,
+        ]
         continue
       }
 
@@ -151,12 +176,6 @@ export async function reconcilePendingScheduleStatus(): Promise<void> {
           status: 'scheduled',
           plannedStartIso: r.plannedStartIso,
           reasons: ['Admin force-run in progress.'],
-        })
-        const startMs = Date.parse(r.plannedStartIso)
-        const durationSeconds = estimateDurationSeconds(r)
-        fifoFree = subtractOccupiedFromFree(fifoFree, {
-          startMs,
-          endMs: startMs + durationSeconds * 1000,
         })
         continue
       }

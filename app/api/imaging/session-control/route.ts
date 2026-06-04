@@ -5,6 +5,8 @@ import {
   adminDeleteSession,
   adminMarkSessionComplete,
   adminMarkSessionFailed,
+  adminHoldSessionControl,
+  adminReleaseSessionHoldControl,
   adminRunSessionControl,
   listSessionControlEntries,
 } from '@/lib/imaging-session-control'
@@ -63,9 +65,15 @@ export async function POST(request: NextRequest) {
     case 'run':
       result = await adminRunSessionControl(sessionId)
       break
+    case 'hold':
+      result = await adminHoldSessionControl(sessionId)
+      break
+    case 'release_hold':
+      result = await adminReleaseSessionHoldControl(sessionId)
+      break
     default:
       return withImagingCors(
-        { ok: false as const, error: 'action must be complete, fail, delete, or run' },
+        { ok: false as const, error: 'action must be complete, fail, delete, run, hold, or release_hold' },
         400
       )
   }

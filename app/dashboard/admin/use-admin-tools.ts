@@ -189,7 +189,7 @@ export function useAdminTools() {
 
   async function runSessionAction(
     sessionId: string,
-    action: 'complete' | 'fail' | 'delete' | 'run'
+    action: 'complete' | 'fail' | 'delete' | 'run' | 'hold' | 'release_hold'
   ) {
     if (action === 'delete' && !window.confirm(`Delete session ${sessionId}? This cannot be undone.`)) {
       return

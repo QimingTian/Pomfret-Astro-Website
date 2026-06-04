@@ -228,11 +228,16 @@ export function AdminDashboardGrid() {
                     row.status === 'pending' ||
                     row.status === 'scheduled' ||
                     row.status === 'planned'
+                  const canHold =
+                    row.status === 'pending' ||
+                    row.status === 'scheduled' ||
+                    row.status === 'planned'
+                  const onHold = row.status === 'on hold' || row.status === 'on_hold'
                   return (
                     <div key={row.sessionId} className="rounded-lg border border-gray-700 px-3 py-2 space-y-2">
                       <div>
                         <p className="text-sm font-medium text-white break-words">{row.label}</p>
-                        <p className="text-xs uppercase text-gray-400">{row.status}</p>
+                        <p className="text-xs uppercase text-gray-400">{onHold ? 'on hold' : row.status}</p>
                       </div>
                       <div className="flex flex-wrap gap-1">
                         <button
@@ -242,6 +247,16 @@ export function AdminDashboardGrid() {
                           className="rounded-full border border-sky-500/50 px-2 py-1 text-xs text-sky-200 disabled:opacity-40"
                         >
                           Run
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy || (!onHold && !canHold)}
+                          onClick={() =>
+                            void t.runSessionAction(row.sessionId, onHold ? 'release_hold' : 'hold')
+                          }
+                          className="rounded-full border border-violet-500/50 px-2 py-1 text-xs text-violet-200 disabled:opacity-40"
+                        >
+                          {onHold ? 'Unhold' : 'Hold'}
                         </button>
                         <button
                           type="button"

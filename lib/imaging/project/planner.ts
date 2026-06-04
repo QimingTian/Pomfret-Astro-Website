@@ -666,6 +666,7 @@ function shouldRefreshTonightSubs(project: ImagingProject, nightKey: string): bo
   const tonight = project.nights.filter((n) => n.nightKey === nightKey)
   if (tonight.length === 0) return true
   if (tonight.some((n) => isAdminForceRunActive(n))) return false
+  if (tonight.some((n) => n.status === 'on_hold')) return false
   // Do not reshuffle later `scheduled` subs while one is imaging — avoids Session 2 sliding on the strip.
   if (hasInProgressSessionTonight(project, nightKey)) return false
   // Re-plan or clear `scheduled` subs when weather changes. in_progress/completed are kept by replaceScheduledSubsForNightKey.

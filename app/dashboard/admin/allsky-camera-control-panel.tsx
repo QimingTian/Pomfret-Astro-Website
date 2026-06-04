@@ -801,13 +801,13 @@ export function AllSkyCameraControlPanel() {
             autoTuning?: PiAutoTuning | null
           }
         }
-      }>(base, '/status')
+      }>(base, '/camera/status')
       let cam = data.sensors?.allSkyCam
 
       if (cam && !cam.connected) {
         try {
           await camJson(base, '/camera/connect', { method: 'POST' })
-          data = await camJson<typeof data>(base, '/status')
+          data = await camJson<typeof data>(base, '/camera/status')
           cam = data.sensors?.allSkyCam
         } catch {
           // Pi reachable but camera connect failed

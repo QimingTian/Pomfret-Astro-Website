@@ -1235,29 +1235,84 @@ def latest_frame():
     img_io.seek(0)
     return send_file(img_io, mimetype='image/jpeg')
 
+_mjpeg_lock = threading.Lock()
+_mjpeg_part = None
+_mjpeg_version = 0
+_mjpeg_thread = None
+_mjpeg_last_asc_at = 0.0
+ASC_STREAM_ANALYSIS_INTERVAL_S = 45.0
+
+
+def _run_asc_analysis_async(img) -> None:
+    """TensorFlow inference can take seconds — never block HTTP or MJPEG threads."""
+    threading.Thread(
+        target=asc_cloud_ai.analyze_and_store,
+        args=(img.copy(),),
+        daemon=True,
+    ).start()
+
+
+def _mjpeg_encoder_loop() -> None:
+    """Encode one MJPEG part per frame; clients only read shared bytes."""
+    global _mjpeg_part, _mjpeg_version, _mjpeg_last_asc_at
+    while True:
+        if not (camera_state['streaming'] or auto_state['active']):
+            time.sleep(0.2)
+            continue
+
+        frame = None
+        if camera_state['streaming']:
+            frame = camera.frame_buffer
+        elif auto_state['active']:
+            with frame_lock:
+                frame = camera_state.get('current_frame')
+
+        if frame is None:
+            time.sleep(0.05)
+            continue
+
+        if camera_state['streaming']:
+            now = time.time()
+            if now - _mjpeg_last_asc_at >= ASC_STREAM_ANALYSIS_INTERVAL_S:
+                _mjpeg_last_asc_at = now
+                _run_asc_analysis_async(frame)
+
+        img_io = io.BytesIO()
+        frame.save(img_io, 'JPEG', quality=75)
+        part = (
+            b'--frame\r\n'
+            b'Content-Type: image/jpeg\r\n\r\n' + img_io.getvalue() + b'\r\n'
+        )
+        with _mjpeg_lock:
+            _mjpeg_part = part
+            _mjpeg_version += 1
+
+        time.sleep(0.05 if camera_state['streaming'] else 1.0)
+
+
+def _ensure_mjpeg_encoder() -> None:
+    global _mjpeg_thread
+    if _mjpeg_thread and _mjpeg_thread.is_alive():
+        return
+    _mjpeg_thread = threading.Thread(target=_mjpeg_encoder_loop, daemon=True)
+    _mjpeg_thread.start()
+
+
 @app.route('/camera/stream', methods=['GET'])
 def video_stream():
-    """MJPEG stream — live video or latest auto frame (re-sent ~1 Hz in auto mode)."""
+    """MJPEG stream — shared encoder; one thread per client only waits on cached frames."""
+    _ensure_mjpeg_encoder()
+
     def generate():
+        last_version = -1
         while camera_state['streaming'] or auto_state['active']:
-            frame = None
-            if camera_state['streaming']:
-                frame = camera.frame_buffer
-            elif auto_state['active']:
-                with frame_lock:
-                    frame = camera_state.get('current_frame')
-            if frame:
-                img_io = io.BytesIO()
-                frame.save(img_io, 'JPEG', quality=75)
-                img_io.seek(0)
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + img_io.read() + b'\r\n')
-                if camera_state['streaming']:
-                    time.sleep(0.005)
-                else:
-                    time.sleep(1.0)
-            else:
-                time.sleep(0.1)
+            with _mjpeg_lock:
+                part = _mjpeg_part
+                version = _mjpeg_version
+            if part is not None and version != last_version:
+                yield part
+                last_version = version
+            time.sleep(0.05)
 
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
 

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Generate favicon assets from public/olmsted-mark-transparent.png.
+"""Generate all site icons from public/olmsted-mark-transparent.png.
 
-Why opaque backgrounds: browsers composite favicons on a solid plate. Transparent
-"rounded" corners become the same color as that plate, so the tab icon still
-looks square. We bake a contrasting opaque frame so rounding is visible.
+Browser behaviour (why icons looked different):
+- Chrome tabs use favicon.ico / favicon.png (32px).
+- Safari tabs prefer apple-touch-icon (180px) when linked — ours was stale.
+- A square dark *frame* around a rounded inner tile still reads as a square icon.
+- Fix: one rounded white tile on a dark toolbar-matched background; same asset at every size.
 """
 
 from __future__ import annotations
@@ -15,64 +17,102 @@ from PIL import Image, ImageDraw
 ROOT = Path(__file__).resolve().parents[1]
 MARK = ROOT / 'public/olmsted-mark-transparent.png'
 
-# Outer plate (shows in the corner crescents); inner tile holds the mark.
-FRAME = (45, 45, 48, 255)  # #2d2d30 — reads on light and dark tab bars
+# Dark toolbar chrome (Safari / Chrome dark tabs) shows in corner crescents.
+BG = (43, 43, 45, 255)
 TILE = (255, 255, 255, 255)
-RADII = {32: 10, 48: 14, 180: 36}
-INSET = {32: 1, 48: 2, 180: 4}
+SIZES = (32, 48, 180, 192, 512)
 
 
 def resize_square(im: Image.Image, size: int) -> Image.Image:
     return im.resize((size, size), Image.Resampling.LANCZOS)
 
 
-def rounded_rect(size: int, radius: int, color: tuple[int, int, int, int]) -> Image.Image:
-    img = Image.new('RGBA', (size, size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    draw.rounded_rectangle((0, 0, size - 1, size - 1), radius=radius, fill=color)
-    return img
+def build_icon(mark: Image.Image, size: int) -> Image.Image:
+    """Rounded-rect silhouette: dark crescents outside, white tile + mark inside."""
+    radius = max(4, round(size * 0.22))
+    pad = max(2, round(size * 0.16))
 
+    canvas = Image.new('RGBA', (size, size), BG)
 
-def build_favicon(mark: Image.Image, size: int, radius: int, inset: int) -> Image.Image:
-    """Opaque favicon: dark frame + white rounded tile + mark."""
-    canvas = Image.new('RGBA', (size, size), FRAME)
-    inner = size - inset * 2
-    inner_radius = max(2, radius - inset)
-    tile = rounded_rect(inner, inner_radius, TILE)
+    tile = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(tile)
+    draw.rounded_rectangle((0, 0, size - 1, size - 1), radius=radius, fill=TILE)
+
+    inner = size - pad * 2
     glyph = resize_square(mark, inner)
-    tile.alpha_composite(glyph, (0, 0))
-    canvas.alpha_composite(tile, (inset, inset))
+    tile.alpha_composite(glyph, (pad, pad))
+
+    mask = Image.new('L', (size, size), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, size - 1, size - 1), radius=radius, fill=255)
+    canvas.paste(tile, (0, 0), mask)
     return canvas
 
 
-def main() -> None:
-    if not MARK.exists():
-        raise SystemExit(f'Missing mark source: {MARK}')
+def build_maskable(mark: Image.Image, size: int) -> Image.Image:
+    """PWA maskable: extra padding inside the safe zone."""
+    radius = max(8, round(size * 0.18))
+    pad = max(12, round(size * 0.22))
 
-    mark = Image.open(MARK).convert('RGBA')
+    canvas = Image.new('RGBA', (size, size), BG)
+    tile = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(tile)
+    inset = round(size * 0.06)
+    draw.rounded_rectangle(
+        (inset, inset, size - 1 - inset, size - 1 - inset),
+        radius=radius,
+        fill=TILE,
+    )
 
-    for size, radius in RADII.items():
-        fav = build_favicon(mark, size, radius, INSET[size])
+    inner = size - pad * 2
+    glyph = resize_square(mark, inner)
+    tile.alpha_composite(glyph, (pad, pad))
+
+    mask = Image.new('L', (size, size), 0)
+    ImageDraw.Draw(mask).rounded_rectangle(
+        (inset, inset, size - 1 - inset, size - 1 - inset),
+        radius=radius,
+        fill=255,
+    )
+    canvas.paste(tile, (0, 0), mask)
+    return canvas
+
+
+def write_outputs(mark: Image.Image) -> None:
+    for size in SIZES:
+        icon = build_icon(mark, size)
         if size == 32:
-            fav.save(ROOT / 'public/favicon.png', optimize=True)
-            fav.save(ROOT / 'public/icons/favicon-32.png', optimize=True)
-            fav.save(ROOT / 'app/icon.png', optimize=True)
+            icon.save(ROOT / 'public/favicon.png', optimize=True)
+            icon.save(ROOT / 'public/icons/favicon-32.png', optimize=True)
+            icon.save(ROOT / 'app/icon.png', optimize=True)
         elif size == 48:
-            fav.save(ROOT / 'public/icons/favicon-48.png', optimize=True)
+            icon.save(ROOT / 'public/icons/favicon-48.png', optimize=True)
         elif size == 180:
-            fav.save(ROOT / 'app/apple-icon.png', optimize=True)
+            icon.save(ROOT / 'app/apple-icon.png', optimize=True)
+            icon.save(ROOT / 'public/icons/apple-touch-icon.png', optimize=True)
+            icon.save(ROOT / 'public/icon.png', optimize=True)
+            icon.save(ROOT / 'mobile-webapp/public/icons/apple-touch-icon.png', optimize=True)
+        elif size == 192:
+            icon.save(ROOT / 'public/icons/icon-192.png', optimize=True)
+            icon.save(ROOT / 'mobile-webapp/public/icons/icon-192.png', optimize=True)
+        elif size == 512:
+            icon.save(ROOT / 'public/icons/icon-512.png', optimize=True)
+            icon.save(ROOT / 'mobile-webapp/public/icons/icon-512.png', optimize=True)
 
-    ico_src = build_favicon(mark, 32, RADII[32], INSET[32])
-    ico_src.save(
+    build_maskable(mark, 512).save(ROOT / 'public/icons/icon-maskable-512.png', optimize=True)
+
+    build_icon(mark, 32).save(
         ROOT / 'app/favicon.ico',
         format='ICO',
         sizes=[(16, 16), (32, 32), (48, 48)],
     )
 
-    # Legacy path still referenced by some clients
-    build_favicon(mark, 180, RADII[180], INSET[180]).save(ROOT / 'public/icon.png', optimize=True)
 
-    print('Generated opaque framed favicons (public/, public/icons/, app/)')
+def main() -> None:
+    if not MARK.exists():
+        raise SystemExit(f'Missing mark source: {MARK}')
+    mark = Image.open(MARK).convert('RGBA')
+    write_outputs(mark)
+    print('Generated unified rounded icons for all sizes and platforms.')
 
 
 if __name__ == '__main__':

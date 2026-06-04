@@ -23,11 +23,9 @@ export const metadata: Metadata = {
     description: 'Pomfret School Observatory Control System',
   },
   icons: {
-    icon: [
-      { url: '/icon.png', type: 'image/png' },
-    ],
-    shortcut: '/favicon.png',
-    apple: '/icon.png',
+    icon: [{ url: '/favicon.png?v=1', type: 'image/png', sizes: '32x32' }],
+    shortcut: '/favicon.png?v=1',
+    apple: [{ url: '/icons/apple-touch-icon.png?v=1', type: 'image/png', sizes: '180x180' }],
   },
 }
 

@@ -920,12 +920,18 @@ function logProjectSubSessionScheduled(
   })
 }
 
-function plansToScheduledNights(
+function hasFailedSubTonight(project: ImagingProject, nightKey: string): boolean {
+  return project.nights.some((n) => n.nightKey === nightKey && n.status === 'failed')
+}
+
+/** Build persisted sub-session rows from tonight plans (exported for tests). */
+export function plansToScheduledNights(
   project: ImagingProject,
   plans: ProjectTonightPlan[]
 ): ProjectNight[] {
   const nightKey = plans[0]?.nightKey
   if (!nightKey) return []
+  const autoHoldAfterFailed = hasFailedSubTonight(project, nightKey)
   const existingScheduled = project.nights
     .filter((n) => n.nightKey === nightKey && n.status === 'scheduled')
     .sort((a, b) => {
@@ -957,6 +963,23 @@ function plansToScheduledNights(
     const reuseStartMs = reuse?.plannedStartIso ? Date.parse(reuse.plannedStartIso) : NaN
     const plannedStartIso =
       sameFrames && Number.isFinite(reuseStartMs) ? reuse.plannedStartIso! : plan.plannedStartIso
+    const forceRunReuse = reuse != null && isAdminForceRunActive(reuse)
+    if (autoHoldAfterFailed && !forceRunReuse) {
+      return {
+        id: nightId,
+        nightKey: plan.nightKey,
+        nightIndex,
+        status: 'on_hold' as const,
+        onHoldFromStatus: 'scheduled' as const,
+        filterPlansTonight: plan.filterPlansTonight,
+        ninaSequenceJson: buildNightNinaJson(project, nightId, plan.filterPlansTonight),
+        plannedStartIso: null,
+        adminForceRunUntilIso: null,
+        scheduleStripNightKey: null,
+        scheduleBarStartMs: null,
+        scheduleBarEndMs: null,
+      }
+    }
     return {
       id: nightId,
       nightKey: plan.nightKey,
@@ -1014,7 +1037,10 @@ export async function applyProjectTonightPlans(
   const subs = plansToScheduledNights(project, plans)
 
   const existingSorted = project.nights
-    .filter((n) => n.nightKey === nightKey && n.status === 'scheduled')
+    .filter(
+      (n) =>
+        n.nightKey === nightKey && (n.status === 'scheduled' || n.status === 'on_hold')
+    )
     .sort((a, b) => a.nightIndex - b.nightIndex)
   const unchanged =
     subs.length === existingSorted.length &&
@@ -1022,6 +1048,7 @@ export async function applyProjectTonightPlans(
       const e = existingSorted[i]!
       return (
         s.id === e.id &&
+        s.status === e.status &&
         s.plannedStartIso === e.plannedStartIso &&
         filterPlansFingerprint(s.filterPlansTonight) === filterPlansFingerprint(e.filterPlansTonight)
       )
@@ -1035,6 +1062,22 @@ export async function applyProjectTonightPlans(
       const plan = plans[i]!
       const sub = subs[i]
       if (!sub) continue
+      if (sub.status === 'on_hold') {
+        if (!prevScheduled.has(sub.id)) {
+          void appendAuditLog({
+            kind: 'queue.on_hold',
+            message: `Project sub-session placed on hold: ${project.target} Session ${sub.nightIndex} (${sub.id}). Auto-held after failed sub-session tonight.`,
+            detail: {
+              sessionId: sub.id,
+              projectId,
+              nightIndex: sub.nightIndex,
+              previousStatus: 'scheduled',
+              reason: 'failed_sub_tonight',
+            },
+          })
+        }
+        continue
+      }
       const nextFp = subSessionScheduleFingerprint({ filterPlansTonight: plan.filterPlansTonight })
       if (prevScheduled.get(sub.id) === nextFp) continue
       logProjectSubSessionScheduled(project, { ...plan, nightIndex: sub.nightIndex }, sub.id)

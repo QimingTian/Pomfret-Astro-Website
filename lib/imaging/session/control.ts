@@ -40,7 +40,6 @@ import { deleteR2ObjectForQueueId } from '@/lib/r2-session-download'
 import { deleteProjectCascade } from '@/lib/imaging-project-delete'
 import { adminRunSession } from '@/lib/imaging/admin-force-run'
 import { adminHoldSession, adminReleaseSessionHold } from '@/lib/imaging/session-hold'
-import { restoreProjectNightSubFromAudit } from '@/lib/imaging/project/restore-night-sub'
 
 export type SessionControlEntry = {
   sessionId: string
@@ -67,6 +66,43 @@ const ACTIVE_STATUSES = new Set([
 function nightStatusLabel(n: ProjectNight): string {
   if (n.status === 'on_hold') return 'on hold'
   return n.status === 'planned' ? 'scheduled' : n.status
+}
+
+/** Another observatory run already in progress (not `exceptSessionId`). */
+async function findOtherInProgressSession(exceptSessionId: string): Promise<string | null> {
+  const exceptParsed = parseProjectNightSubId(exceptSessionId)
+
+  for (const project of await listProjects()) {
+    for (const night of project.nights) {
+      if (night.status === 'in_progress' && night.id !== exceptSessionId) {
+        return night.id
+      }
+    }
+  }
+
+  for (const b of await listBoardEntries()) {
+    if (b.status !== 'in_progress' || b.id === exceptSessionId) continue
+    if (exceptParsed && b.projectMode && b.id === exceptParsed.projectId) continue
+    return b.id
+  }
+
+  for (const r of await listAll()) {
+    if (r.status !== 'in_progress' || r.id === exceptSessionId) continue
+    if (exceptParsed && r.id === exceptParsed.projectId) continue
+    return r.id
+  }
+
+  return null
+}
+
+async function assertNoOtherInProgress(
+  exceptSessionId: string
+): Promise<{ error: string } | null> {
+  const blocking = await findOtherInProgressSession(exceptSessionId)
+  if (!blocking) return null
+  return {
+    error: `Another session is already in progress (${blocking}). Complete or fail it before restoring this session.`,
+  }
 }
 
 export async function listSessionControlEntries(): Promise<SessionControlEntry[]> {
@@ -218,22 +254,9 @@ export async function adminMarkSessionInProgress(
 ): Promise<{ ok: true } | { error: string }> {
   const nightSub = parseProjectNightSubId(sessionId)
   if (nightSub) {
-    let match = await getProjectByNightSubId(sessionId)
+    const match = await getProjectByNightSubId(sessionId)
     if (!match) {
-      const restored = await restoreProjectNightSubFromAudit(sessionId)
-      if (!restored) {
-        return {
-          error:
-            'Sub-session not found. No audit snapshot with filter plans — cannot restore automatically.',
-        }
-      }
-      match = await getProjectByNightSubId(sessionId)
-      if (!match) return { error: 'Restore failed' }
-      void appendAuditLog({
-        kind: 'queue.status',
-        message: `Admin restored missing project sub-session ${sessionId} from audit log.`,
-        detail: { sessionId, projectId: match.project.id, nightIndex: match.night.nightIndex },
-      })
+      return { error: 'Sub-session not found' }
     }
     if (match.night.status === 'in_progress') {
       return { ok: true }
@@ -246,6 +269,8 @@ export async function adminMarkSessionInProgress(
         error: `Only failed sub-sessions (or scheduled subs already delivered to NINA) can be set in progress (current: ${match.night.status}).`,
       }
     }
+    const blocked = await assertNoOtherInProgress(sessionId)
+    if (blocked) return blocked
     await markNightInProgress(match.project.id, sessionId)
     publishProgress(sessionId, { type: 'status', queueStatus: 'in_progress' })
     void appendAuditLog({
@@ -259,6 +284,8 @@ export async function adminMarkSessionInProgress(
 
   const board = await getBoardEntry(sessionId)
   if (board?.status === 'failed') {
+    const blocked = await assertNoOtherInProgress(sessionId)
+    if (blocked) return blocked
     const ok = await boardReviveInProgress(sessionId)
     if (!ok) return { error: 'Could not restore board session to in progress' }
     publishProgress(sessionId, { type: 'status', queueStatus: 'in_progress' })
@@ -272,6 +299,8 @@ export async function adminMarkSessionInProgress(
 
   const inQueue = await getRequestById(sessionId)
   if (inQueue?.status === 'failed') {
+    const blocked = await assertNoOtherInProgress(sessionId)
+    if (blocked) return blocked
     const restored = await adminRestoreQueueFromFailed(sessionId)
     if ('error' in restored) return restored
     publishProgress(sessionId, { type: 'status', queueStatus: 'in_progress' })

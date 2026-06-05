@@ -115,7 +115,6 @@ async function writeProjects(projects: ImagingProject[]): Promise<void> {
 
 /** Remove duplicate strip-night rows left by older reconcile bugs. */
 export async function compactStaleProjectNights(): Promise<void> {
-  await expireMissedScheduledProjectNights()
   const all = await readProjects()
   let changed = false
   const next = all.map((p) => {
@@ -138,32 +137,6 @@ export function projectSubSessionWindowEndMs(night: ProjectNight): number | null
     return night.scheduleBarEndMs
   }
   return null
-}
-
-/**
- * Mark `scheduled` / stuck `in_progress` sub-sessions failed once their imaging window has ended.
- */
-export async function expireMissedScheduledProjectNights(now = new Date()): Promise<void> {
-  const nowMs = now.getTime()
-  const all = await readProjects()
-  let changed = false
-  const next = all.map((project) => {
-    let nightsChanged = false
-    const nights = project.nights.map((n) => {
-      if (n.status !== 'scheduled' && n.status !== 'in_progress') return n
-      const endMs = projectSubSessionWindowEndMs(n)
-      if (endMs == null || endMs > nowMs) return n
-      nightsChanged = true
-      changed = true
-      return {
-        ...n,
-        status: 'failed' as const,
-        failedAt: new Date(endMs).toISOString(),
-      }
-    })
-    return nightsChanged ? { ...project, nights, updatedAt: new Date().toISOString() } : project
-  })
-  if (changed) await writeProjects(next)
 }
 
 /** Drop on-board hold when tonight has no active or still-scheduled sub-session left. */
@@ -711,7 +684,11 @@ export async function replaceScheduledSubsForNightKey(
   )
   const merged: ProjectNight[] = [
     ...kept,
-    ...subs.map((s) => ({ ...s, nightKey, status: 'scheduled' as const })),
+    ...subs.map((s) => ({
+      ...s,
+      nightKey,
+      status: s.status === 'on_hold' ? ('on_hold' as const) : ('scheduled' as const),
+    })),
   ]
   const nights = dedupeProjectNights(merged).sort((a, b) => a.nightIndex - b.nightIndex)
   const updated = await patchProject(projectId, { nights })

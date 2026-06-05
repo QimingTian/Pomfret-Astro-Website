@@ -1,8 +1,5 @@
 import { appendAuditLog } from '@/lib/imaging-audit-log'
-import {
-  compactStaleProjectBoardRows,
-  expireMissedScheduledProjectNights,
-} from '@/lib/imaging-project-store'
+import { compactStaleProjectBoardRows } from '@/lib/imaging-project-store'
 import { purgeExpiredProjectAssets } from '@/lib/imaging-project-retention'
 import { boardEnsureScheduleBarForTerminal, boardPurgeCompletedOlderThan, listBoardEntries } from '@/lib/imaging-session-board'
 import { reconcilePendingScheduleStatus } from '@/lib/imaging-queue-reconcile'
@@ -11,10 +8,9 @@ import { deleteR2ObjectForQueueId } from '@/lib/r2-session-download'
 
 const RETENTION_MS = 48 * 60 * 60 * 1000
 
-/** Reconcile schedules, expire missed nights, compact stale board rows, backfill schedule bars. */
+/** Reconcile schedules, compact stale board rows, backfill schedule bars. */
 export async function runImagingScheduleMaintenance(): Promise<void> {
   await reconcilePendingScheduleStatus()
-  await expireMissedScheduledProjectNights()
   const prunedBoardIds = await compactStaleProjectBoardRows()
   for (const id of prunedBoardIds) {
     void appendAuditLog({

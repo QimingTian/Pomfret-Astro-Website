@@ -11,7 +11,6 @@ import { reconcilePendingScheduleStatus } from '@/lib/imaging-queue-reconcile'
 import { hasRemainingTonightImagingWork } from '@/lib/imaging-tonight-complete'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import {
-  expireMissedScheduledProjectNights,
   getProjectByNightSubId,
   markNightCompleted,
 } from '@/lib/imaging-project-store'
@@ -139,10 +138,6 @@ export async function POST(request: NextRequest) {
       : { payload: body }
 
   const completionSignal = isSessionCompletedSignal(detail)
-  // Resolve before expire: overdue-window cleanup can flip `in_progress` → `failed` and break routing.
-  if (!completionSignal) {
-    await expireMissedScheduledProjectNights()
-  }
 
   const queueId = await resolveSessionProgressQueueId(detail)
 
@@ -261,8 +256,6 @@ export async function POST(request: NextRequest) {
       }
     }
   }
-
-  await expireMissedScheduledProjectNights()
 
   return withImagingCors({ ok: true as const })
 }

@@ -10,7 +10,6 @@ import {
 import { buildNinaSequenceJson } from '@/lib/build-nina-sequence-json'
 import {
   getActiveOnBoardProject,
-  expireMissedScheduledProjectNights,
   getDeliverableNight,
   getNightForNinaDelivery,
   getProjectAwaitingSubSessionDelivery,
@@ -312,6 +311,7 @@ function endNightSequenceJson(queueId: string): string {
  * `computeScheduleInsight`; this endpoint enforces observatory readiness (for user sessions only), admin
  * closed windows, and current target altitude ≥ 30° before handing JSON to NINA. End-night shutdown JSON
  * bypasses observatory readiness; empty nights are offered at nautical dawn only.
+ * While agent pulse reports NINA running, polls deliver Emergency STOP only (409 for all other work).
  */
 export async function GET(request: NextRequest) {
   if (!imagingQueueAuthorized(request)) {
@@ -321,7 +321,6 @@ export async function GET(request: NextRequest) {
   await touchObservatoryPoll()
   const now = new Date()
   const nowMs = now.getTime()
-  await expireMissedScheduledProjectNights(now)
   const status = await getObservatoryStatus({ trackSessionFailure: false })
   const emergencyDelivered = await tryDeliverEmergencyStop()
   if (emergencyDelivered) return emergencyDelivered
@@ -331,6 +330,14 @@ export async function GET(request: NextRequest) {
       { status: 409, headers: imagingCorsHeadersResolved() }
     )
   }
+  // Agent polls while NINA is imaging (ESTOP only). Do not deliver queue/project/end-night JSON.
+  if (await isNinaReportedRunningNow(nowMs)) {
+    return NextResponse.json(
+      { error: 'NINA is running; poll for Emergency STOP only until imaging stops.' },
+      { status: 409, headers: imagingCorsHeadersResolved() }
+    )
+  }
+
   const forceRunDelivered = await tryDeliverActiveAdminForceRun(status, nowMs)
   if (forceRunDelivered) return forceRunDelivered
 
@@ -342,7 +349,7 @@ export async function GET(request: NextRequest) {
         : 'Closed by admin schedule control'
     return NextResponse.json({ error: msg }, { status: 409, headers: imagingCorsHeadersResolved() })
   }
-  const allowRedeliverInProgress = !(await isNinaReportedRunningNow(nowMs))
+  const allowRedeliverInProgress = true
   const pending = await listPending()
   const schedulingWindow = getTonightSchedulingWindow(now)
   const strip = getTonightScheduleStrip(now)

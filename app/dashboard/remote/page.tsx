@@ -401,11 +401,19 @@ type ScheduledStripItem = TerminalSessionLike & { target: string }
 function listScheduledPendingPlacements(
   scheduleStripItems: ScheduledStripItem[],
   imagingStartMs: number,
-  schedulingDeadlineMs: number
+  schedulingDeadlineMs: number,
+  tonightNightKey: string
 ): Array<{ item: ScheduledStripItem; startMs: number; endMs: number }> {
   return scheduleStripItems
     .filter((item) => item.status === 'scheduled')
     .map((item) => {
+      const serverBar = serverScheduleBarForNight(item, tonightNightKey)
+      if (serverBar) {
+        const startMs = Math.max(serverBar.startMs, imagingStartMs)
+        const endMs = Math.min(serverBar.endMs, schedulingDeadlineMs)
+        if (endMs <= startMs) return null
+        return { item, startMs, endMs }
+      }
       const startMsRaw = item.plannedStartIso ? Date.parse(item.plannedStartIso) : Number.NaN
       if (!Number.isFinite(startMsRaw)) return null
       if (startMsRaw < imagingStartMs - 60_000) return null
@@ -489,6 +497,39 @@ function fallbackPlacementForTerminalSession(
   }
   if (e <= s) return null
   return { startMs: s, endMs: e }
+}
+
+/**
+ * in_progress sessions must stay on one full-duration bar for tonight — never re-pack to weather windows.
+ * Start: frozen lock → planned → created → now. End: start + estimated duration (cap at dawn only).
+ */
+function inProgressSchedulePlacement(
+  item: TerminalSessionLike,
+  locked: Record<string, { startMs: number; endMs: number }>,
+  imagingStartMs: number,
+  schedulingDeadlineMs: number,
+  nowMs: number
+): { startMs: number; endMs: number } | null {
+  const durationMs = sessionDurationMsFromItem(item)
+  const existing = locked[item.id]
+
+  let startMs: number | null = null
+  if (existing && Number.isFinite(existing.startMs)) {
+    startMs = existing.startMs
+  } else if (item.plannedStartIso) {
+    const t = Date.parse(item.plannedStartIso)
+    if (Number.isFinite(t)) startMs = t
+  }
+  if (startMs == null) {
+    const c = Date.parse(item.createdAt)
+    if (Number.isFinite(c)) startMs = c
+  }
+  if (startMs == null) startMs = nowMs
+
+  const start = Math.max(startMs, imagingStartMs)
+  const end = Math.min(start + durationMs, schedulingDeadlineMs)
+  if (end <= start) return null
+  return { startMs: start, endMs: end }
 }
 
 /** Completed rows only belong on the current 4pm→8am strip if their time range overlaps that window. */
@@ -2027,14 +2068,29 @@ export default function RemotePage() {
           continue
         }
         const placed =
-          serverScheduleBarForNight(item, tonightNightKey) ??
-          fallbackPlacementForTerminalSession(
-            item,
-            effectiveLocks,
-            imagingStartMs,
-            schedulingDeadlineMs,
-            nowMs
-          )
+          item.status === 'in_progress'
+            ? inProgressSchedulePlacement(
+                item,
+                effectiveLocks,
+                imagingStartMs,
+                schedulingDeadlineMs,
+                nowMs
+              ) ??
+              fallbackPlacementForTerminalSession(
+                item,
+                effectiveLocks,
+                imagingStartMs,
+                schedulingDeadlineMs,
+                nowMs
+              )
+            : serverScheduleBarForNight(item, tonightNightKey) ??
+              fallbackPlacementForTerminalSession(
+                item,
+                effectiveLocks,
+                imagingStartMs,
+                schedulingDeadlineMs,
+                nowMs
+              )
         if (!placed) continue
         const startMs = Math.max(placed.startMs, imagingStartMs)
         const endMs = Math.min(placed.endMs, schedulingDeadlineMs)
@@ -2042,7 +2098,12 @@ export default function RemotePage() {
         const topPct = ((startMs - windowStartMs) / (windowEndMs - windowStartMs)) * 100
         const heightPct = ((endMs - startMs) / (windowEndMs - windowStartMs)) * 100
         blocks.push({ id: item.id, startMs, endMs, topPct, heightPct, label: item.target })
-        if (!effectiveLocks[item.id]) {
+        if (item.status === 'in_progress') {
+          const prev = effectiveLocks[item.id]
+          if (!prev || prev.startMs !== startMs || prev.endMs !== endMs) {
+            newlyLocked[item.id] = { startMs, endMs }
+          }
+        } else if (!effectiveLocks[item.id]) {
           newlyLocked[item.id] = { startMs, endMs }
         }
       }
@@ -2050,7 +2111,8 @@ export default function RemotePage() {
       for (const scheduled of listScheduledPendingPlacements(
         scheduleStripItems,
         imagingStartMs,
-        schedulingDeadlineMs
+        schedulingDeadlineMs,
+        tonightNightKey
       )) {
         blocks.push(placementToTimelineBlock(scheduled, windowStartMs, windowEndMs))
       }
@@ -2206,8 +2268,22 @@ export default function RemotePage() {
       })
 
     for (const item of lockable) {
-      let placed = effectiveLocks[item.id]
-      if (!placed) {
+      let placed: { startMs: number; endMs: number } | undefined = effectiveLocks[item.id]
+      if (item.status === 'in_progress') {
+        const locked = inProgressSchedulePlacement(
+          item,
+          effectiveLocks,
+          imagingStartMs,
+          schedulingDeadlineMs,
+          Date.now()
+        )
+        if (!locked) continue
+        placed = locked
+        const prev = effectiveLocks[item.id]
+        if (!prev || prev.startMs !== locked.startMs || prev.endMs !== locked.endMs) {
+          newlyLocked[item.id] = locked
+        }
+      } else if (!placed) {
         const computed = placeInFreeIntervals(item, imagingStartMs)
         if (computed) {
           placed = computed
@@ -2226,6 +2302,8 @@ export default function RemotePage() {
         }
       }
 
+      if (!placed) continue
+
       const startMs = Math.max(placed.startMs, imagingStartMs)
       const endMs = Math.min(placed.endMs, schedulingDeadlineMs)
       if (endMs <= startMs) continue
@@ -2240,7 +2318,8 @@ export default function RemotePage() {
     const scheduledPending = listScheduledPendingPlacements(
       scheduleStripItems,
       imagingStartMs,
-      schedulingDeadlineMs
+      schedulingDeadlineMs,
+      tonightNightKey
     )
 
     for (const scheduled of scheduledPending) {
@@ -2294,7 +2373,8 @@ export default function RemotePage() {
       }
 
       for (const [id, placement] of Object.entries(sessionSchedulePlan.newlyLocked)) {
-        if (!next[id]) {
+        const prev = next[id]
+        if (!prev || prev.startMs !== placement.startMs || prev.endMs !== placement.endMs) {
           next[id] = placement
           changed = true
         }
@@ -2305,7 +2385,15 @@ export default function RemotePage() {
         if (!item) continue
         if (item.status !== 'in_progress' && item.status !== 'completed') continue
         const frozen = serverScheduleBarForNight(item, tonightNightKey)
-        if (frozen) continue
+        if (frozen && item.status !== 'in_progress') continue
+        if (
+          frozen &&
+          item.status === 'in_progress' &&
+          frozen.startMs === placement.startMs &&
+          frozen.endMs === placement.endMs
+        ) {
+          continue
+        }
         void persistScheduleBarPlacement(id, tonightNightKey, placement.startMs, placement.endMs)
       }
 
@@ -4271,7 +4359,8 @@ export default function RemotePage() {
                   n.status === 'scheduled' ||
                   n.status === 'in_progress' ||
                   n.status === 'completed' ||
-                  n.status === 'failed'
+                  n.status === 'failed' ||
+                  n.status === 'on_hold'
                 )
               })
               if (pickerNights.length === 0 && !showProjectProgress) {

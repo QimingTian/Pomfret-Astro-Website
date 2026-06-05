@@ -40,6 +40,7 @@ import { deleteR2ObjectForQueueId } from '@/lib/r2-session-download'
 import { deleteProjectCascade } from '@/lib/imaging-project-delete'
 import { adminRunSession } from '@/lib/imaging/admin-force-run'
 import { adminHoldSession, adminReleaseSessionHold } from '@/lib/imaging/session-hold'
+import { restoreProjectNightSubFromAudit } from '@/lib/imaging/project/restore-night-sub'
 
 export type SessionControlEntry = {
   sessionId: string
@@ -217,10 +218,33 @@ export async function adminMarkSessionInProgress(
 ): Promise<{ ok: true } | { error: string }> {
   const nightSub = parseProjectNightSubId(sessionId)
   if (nightSub) {
-    const match = await getProjectByNightSubId(sessionId)
-    if (!match) return { error: 'Sub-session not found' }
-    if (match.night.status !== 'failed') {
-      return { error: 'Only failed sub-sessions can be restored to in progress' }
+    let match = await getProjectByNightSubId(sessionId)
+    if (!match) {
+      const restored = await restoreProjectNightSubFromAudit(sessionId)
+      if (!restored) {
+        return {
+          error:
+            'Sub-session not found. No audit snapshot with filter plans — cannot restore automatically.',
+        }
+      }
+      match = await getProjectByNightSubId(sessionId)
+      if (!match) return { error: 'Restore failed' }
+      void appendAuditLog({
+        kind: 'queue.status',
+        message: `Admin restored missing project sub-session ${sessionId} from audit log.`,
+        detail: { sessionId, projectId: match.project.id, nightIndex: match.night.nightIndex },
+      })
+    }
+    if (match.night.status === 'in_progress') {
+      return { ok: true }
+    }
+    const canRestore =
+      match.night.status === 'failed' ||
+      (match.night.status === 'scheduled' && Boolean(match.night.ninaDeliveredAt))
+    if (!canRestore) {
+      return {
+        error: `Only failed sub-sessions (or scheduled subs already delivered to NINA) can be set in progress (current: ${match.night.status}).`,
+      }
     }
     await markNightInProgress(match.project.id, sessionId)
     publishProgress(sessionId, { type: 'status', queueStatus: 'in_progress' })

@@ -15,6 +15,35 @@ export function totalFramesFromFilterPlans(plans: FilterPlanLike[] | undefined |
   return sum > 0 ? sum : null
 }
 
+export type FilterFrameProgress = {
+  filterName: string
+  total: number
+  captured: number
+}
+
+/** Per-filter light frame progress for project mode UI. */
+export function projectFilterFrameProgress(project: {
+  filterPlansTotal: FilterPlanLike[]
+  remainingByFilter: Array<{ filterName: string; countRemaining: number }>
+}): FilterFrameProgress[] {
+  const remainingByName = new Map<string, number>()
+  for (const row of project.remainingByFilter) {
+    remainingByName.set(
+      row.filterName,
+      Math.max(0, Math.round(Number(row.countRemaining) || 0))
+    )
+  }
+  return project.filterPlansTotal
+    .map((plan) => {
+      const total = Math.max(0, Math.round(Number(plan.count) || 0))
+      if (total <= 0) return null
+      const remaining = remainingByName.get(plan.filterName) ?? total
+      const captured = Math.max(0, Math.min(total, total - remaining))
+      return { filterName: plan.filterName, total, captured }
+    })
+    .filter((row): row is FilterFrameProgress => row != null)
+}
+
 /** Project-wide light frames: total at submission vs remaining in store. */
 export function projectFrameCounts(project: {
   filterPlansTotal: FilterPlanLike[]

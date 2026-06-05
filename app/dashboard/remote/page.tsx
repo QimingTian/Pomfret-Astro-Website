@@ -31,12 +31,15 @@ import {
   type RemoteSavedSessionFormV1,
 } from '@/lib/remote-saved-session'
 import { canSubmitImagingPublic } from '@/lib/member-access'
-import { DSO_SESSION_OVERHEAD_SEC } from '@/lib/imaging-session-overhead'
+import {
+  DSO_SESSION_OVERHEAD_SEC,
+  VARIABLE_STAR_SESSION_OVERHEAD_SEC,
+} from '@/lib/imaging-session-overhead'
 import { parseProjectNightSubId } from '@/lib/imaging-project-ids'
 
 const jsonHeaders: HeadersInit = { 'Content-Type': 'application/json' }
 const STACKED_MASTER_REQUIRED_EXPOSURE_SECONDS = 600
-const VARIABLE_STAR_SESSION_OVERHEAD_HOURS = 15 / 60
+const VARIABLE_STAR_SESSION_OVERHEAD_HOURS = VARIABLE_STAR_SESSION_OVERHEAD_SEC / 3600
 /** Pomfret Astro calibration library (Google Drive). */
 const POMFRET_CALIBRATION_LIBRARY_DRIVE_URL =
   'https://drive.google.com/drive/folders/1nWZly4-op0yazXUoyr8sAAB9Rm8Jl2D4'
@@ -706,6 +709,7 @@ export default function RemotePage() {
       userId?: string | null
       projectFramesTotal?: number
       projectFramesCaptured?: number
+      projectFilterProgress?: Array<{ filterName: string; total: number; captured: number }>
       nights?: Array<{
         id: string
         nightIndex: number
@@ -1289,6 +1293,7 @@ export default function RemotePage() {
         projectMode?: unknown
         projectFramesTotal?: unknown
         projectFramesCaptured?: unknown
+        projectFilterProgress?: unknown
         nights?: unknown
       }>
       const normalized = items
@@ -1377,6 +1382,21 @@ export default function RemotePage() {
               typeof x.projectFramesCaptured === 'number' && Number.isFinite(x.projectFramesCaptured)
                 ? x.projectFramesCaptured
                 : undefined,
+            projectFilterProgress: Array.isArray(x.projectFilterProgress)
+              ? x.projectFilterProgress
+                  .map((row) => {
+                    if (!row || typeof row !== 'object') return null
+                    const rec = row as Record<string, unknown>
+                    if (typeof rec.filterName !== 'string') return null
+                    const total =
+                      typeof rec.total === 'number' && Number.isFinite(rec.total) ? rec.total : null
+                    const captured =
+                      typeof rec.captured === 'number' && Number.isFinite(rec.captured) ? rec.captured : null
+                    if (total == null || captured == null) return null
+                    return { filterName: rec.filterName, total, captured }
+                  })
+                  .filter((row): row is { filterName: string; total: number; captured: number } => row != null)
+              : undefined,
             nights: Array.isArray(x.nights)
               ? x.nights
                   .map((n) => {
@@ -1667,6 +1687,7 @@ export default function RemotePage() {
             })
             continue
           }
+          if (night.status === 'failed') continue
           if (night.status === 'planned' && !night.plannedStartIso) continue
           expanded.push({
             ...item,
@@ -1678,9 +1699,7 @@ export default function RemotePage() {
                 ? 'in_progress'
                 : night.status === 'completed'
                   ? 'completed'
-                  : night.status === 'failed'
-                    ? 'failed'
-                    : night.status === 'scheduled'
+                  : night.status === 'scheduled'
                       ? 'scheduled'
                       : 'pending',
             plannedStartIso: night.plannedStartIso ?? null,
@@ -1693,6 +1712,7 @@ export default function RemotePage() {
           })
         }
       } else if (!item.projectMode) {
+        if (item.status === 'failed') continue
         expanded.push(item)
       }
     }
@@ -1993,9 +2013,9 @@ export default function RemotePage() {
       const newlyLocked: Record<string, { startMs: number; endMs: number }> = {}
 
       for (const item of scheduleStripItems) {
-        if (item.status !== 'in_progress' && item.status !== 'completed' && item.status !== 'failed') continue
+        if (item.status !== 'in_progress' && item.status !== 'completed') continue
         if (
-          (item.status === 'completed' || item.status === 'failed') &&
+          item.status === 'completed' &&
           !completedSessionOverlapsTonightStripWindow(
             item,
             tonightNightKey,
@@ -2017,11 +2037,7 @@ export default function RemotePage() {
           )
         if (!placed) continue
         const startMs = Math.max(placed.startMs, imagingStartMs)
-        let endMs = Math.min(placed.endMs, schedulingDeadlineMs)
-        if (item.status === 'failed' && item.failedAt && !serverScheduleBarForNight(item, tonightNightKey)) {
-          const failMs = Date.parse(item.failedAt)
-          if (Number.isFinite(failMs)) endMs = Math.min(endMs, failMs)
-        }
+        const endMs = Math.min(placed.endMs, schedulingDeadlineMs)
         if (endMs <= startMs) continue
         const topPct = ((startMs - windowStartMs) / (windowEndMs - windowStartMs)) * 100
         const heightPct = ((endMs - startMs) / (windowEndMs - windowStartMs)) * 100
@@ -2172,7 +2188,7 @@ export default function RemotePage() {
 
     const newlyLocked: Record<string, { startMs: number; endMs: number }> = {}
     const lockable = scheduleStripItems
-      .filter((item) => item.status === 'in_progress' || item.status === 'completed' || item.status === 'failed')
+      .filter((item) => item.status === 'in_progress' || item.status === 'completed')
       .filter((item) => {
         if (item.status === 'in_progress') return true
         return completedSessionOverlapsTonightStripWindow(
@@ -2210,12 +2226,8 @@ export default function RemotePage() {
         }
       }
 
-      let startMs = Math.max(placed.startMs, imagingStartMs)
-      let endMs = Math.min(placed.endMs, schedulingDeadlineMs)
-      if (item.status === 'failed' && item.failedAt && !serverScheduleBarForNight(item, tonightNightKey)) {
-        const failMs = Date.parse(item.failedAt)
-        if (Number.isFinite(failMs)) endMs = Math.min(endMs, failMs)
-      }
+      const startMs = Math.max(placed.startMs, imagingStartMs)
+      const endMs = Math.min(placed.endMs, schedulingDeadlineMs)
       if (endMs <= startMs) continue
 
       freeIntervals = subtractInterval(freeIntervals, { startMs, endMs })
@@ -2258,7 +2270,7 @@ export default function RemotePage() {
     setLockedSessionSchedule((prev) => {
       const activeLockableIds = new Set(
         scheduleStripItems
-          .filter((x) => x.status === 'in_progress' || x.status === 'completed' || x.status === 'failed')
+          .filter((x) => x.status === 'in_progress' || x.status === 'completed')
           .map((x) => x.id)
       )
 
@@ -2272,19 +2284,11 @@ export default function RemotePage() {
         }
         const item = scheduleStripItems.find((x) => x.id === id)
         if (
-          (item?.status === 'completed' || item?.status === 'failed') &&
+          item?.status === 'completed' &&
           !completedSessionOverlapsTonightStripWindow(item, tonightNightKey, windowStartMs, windowEndMs, prev)
         ) {
           changed = true
           continue
-        }
-        if (item?.status === 'failed' && item.failedAt) {
-          const failMs = Date.parse(item.failedAt)
-          if (Number.isFinite(failMs) && failMs > placement.startMs && failMs < placement.endMs) {
-            next[id] = { startMs: placement.startMs, endMs: failMs }
-            changed = true
-            continue
-          }
         }
         next[id] = placement
       }
@@ -2299,7 +2303,7 @@ export default function RemotePage() {
       for (const [id, placement] of Object.entries(next)) {
         const item = scheduleStripItems.find((x) => x.id === id)
         if (!item) continue
-        if (item.status !== 'in_progress' && item.status !== 'completed' && item.status !== 'failed') continue
+        if (item.status !== 'in_progress' && item.status !== 'completed') continue
         const frozen = serverScheduleBarForNight(item, tonightNightKey)
         if (frozen) continue
         void persistScheduleBarPlacement(id, tonightNightKey, placement.startMs, placement.endMs)
@@ -2967,7 +2971,7 @@ export default function RemotePage() {
     }
     if (item.sessionType === 'variable_star') {
       const est = item.estimatedDurationSeconds
-      if (typeof est === 'number' && Number.isFinite(est) && est > 15 * 60) {
+      if (typeof est === 'number' && Number.isFinite(est) && est > VARIABLE_STAR_SESSION_OVERHEAD_SEC) {
         const blockH = est / 3600 - VARIABLE_STAR_SESSION_OVERHEAD_HOURS
         const snapped = Math.round(blockH * 2) / 2
         setVariableStarBlockHours(Number.isFinite(snapped) && snapped >= 0.5 ? snapped : 1)
@@ -3989,15 +3993,10 @@ export default function RemotePage() {
                   <p className="text-center text-[10px] leading-4 text-white">{marker.label}</p>
                 </div>
               ))}
-              {sessionScheduleBlocks.map((block, idx) => {
-                const blockSession = scheduleStripItems.find((x) => x.id === block.id)
-                const isFailed = blockSession?.status === 'failed'
-                return (
+              {sessionScheduleBlocks.map((block, idx) => (
                   <div
                     key={`session-${idx}`}
-                    className={`absolute left-[66.666%] right-0 rounded-md border px-2 py-0.5 flex items-center justify-center overflow-hidden ${
-                      isFailed ? 'border-red-300/60 bg-[#3a1c1c]' : 'border-white/25 bg-[#151616]'
-                    }`}
+                    className="absolute left-[66.666%] right-0 rounded-md border border-white/25 bg-[#151616] px-2 py-0.5 flex items-center justify-center overflow-hidden"
                     style={{
                       top: `${block.topPct}%`,
                       height: `${block.heightPct}%`,
@@ -4005,8 +4004,7 @@ export default function RemotePage() {
                   >
                     <p className="text-center text-[10px] leading-4 text-white">{block.label}</p>
                   </div>
-                )
-              })}
+              ))}
               {tonightSchedule.adminClosedBlocks.map((block) => (
                 <div
                   key={`admin-closed-${block.id}`}
@@ -4166,7 +4164,7 @@ export default function RemotePage() {
                           : terminalQueueStatus === 'completed'
                             ? 'Session completed. No further live updates.'
                             : terminalQueueStatus === 'failed'
-                              ? 'Session failed. No further live updates.'
+                              ? 'Session marked failed. Waiting for observatory POSTs…'
                               : 'Waiting for observatory POSTs…'}
                       </p>
                     </div>
@@ -4260,15 +4258,11 @@ export default function RemotePage() {
             {(() => {
               const projectItem = queueItems.find((x) => x.id === nightPickerProjectId)
               const projectOwned = projectItem ? sessionOwnedByMe(projectItem) : false
-              const projectFramesTotal = projectItem?.projectFramesTotal ?? 0
-              const projectFramesCaptured = projectItem?.projectFramesCaptured ?? 0
+              const projectFilterProgress = projectItem?.projectFilterProgress ?? []
               const showProjectProgress =
                 nightPickerPurpose === 'progress' &&
                 projectItem?.projectMode === true &&
-                projectFramesTotal > 0
-              const projectProgressPct = showProjectProgress
-                ? Math.min(100, Math.round((projectFramesCaptured / projectFramesTotal) * 100))
-                : 0
+                projectFilterProgress.length > 0
               const pickerNights = (projectItem?.nights ?? []).filter((n) => {
                 if (nightPickerPurpose === 'download') {
                   return n.status === 'completed' && n.hasDownload === true
@@ -4360,27 +4354,39 @@ export default function RemotePage() {
                 {showProjectProgress && (
                   <>
                     <h2 className="text-lg font-semibold text-white">Project progress</h2>
-                    <div className="space-y-2">
-                      <div
-                        className="flex h-2.5 w-full overflow-hidden rounded-full"
-                        role="progressbar"
-                        aria-valuenow={projectFramesCaptured}
-                        aria-valuemin={0}
-                        aria-valuemax={projectFramesTotal}
-                        aria-label="Project frames captured"
-                      >
-                        <div
-                          className="h-full shrink-0 bg-emerald-500 transition-[width] duration-300"
-                          style={{ width: `${projectProgressPct}%` }}
-                        />
-                        <div className="h-full min-w-0 flex-1 bg-gray-600" aria-hidden />
-                      </div>
-                      <p className="text-xs text-gray-400">
-                        <span className="text-white font-medium">{projectFramesCaptured}</span>
-                        {' / '}
-                        {projectFramesTotal} frames captured
-                        {projectFramesCaptured >= projectFramesTotal ? ' · project complete' : ''}
-                      </p>
+                    <div className="space-y-3">
+                      {projectFilterProgress.map((filter) => {
+                        const pct =
+                          filter.total > 0
+                            ? Math.min(100, Math.round((filter.captured / filter.total) * 100))
+                            : 0
+                        const complete = filter.captured >= filter.total
+                        return (
+                          <div key={filter.filterName} className="space-y-1">
+                            <div className="flex items-baseline justify-between gap-2 text-xs">
+                              <span className="font-medium text-white">{filter.filterName}</span>
+                              <span className="text-gray-400">
+                                {filter.captured} / {filter.total}
+                                {complete ? ' · complete' : ''}
+                              </span>
+                            </div>
+                            <div
+                              className="flex h-2.5 w-full overflow-hidden rounded-full"
+                              role="progressbar"
+                              aria-valuenow={filter.captured}
+                              aria-valuemin={0}
+                              aria-valuemax={filter.total}
+                              aria-label={`${filter.filterName} frames captured`}
+                            >
+                              <div
+                                className="h-full shrink-0 bg-emerald-500 transition-[width] duration-300"
+                                style={{ width: `${pct}%` }}
+                              />
+                              <div className="h-full min-w-0 flex-1 bg-gray-600" aria-hidden />
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
                   </>
                 )}

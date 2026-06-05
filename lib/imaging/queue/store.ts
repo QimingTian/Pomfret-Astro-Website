@@ -414,7 +414,7 @@ export interface CreateImagingInput {
   lastName?: string | null
   email?: string | null
   sequenceTemplate?: 'dso' | 'variable_star'
-  /** Variable star: total seconds = (N×0.5 h block) + 15 min overhead; validated when `sequenceTemplate` is `variable_star`. */
+  /** Variable star: total seconds = (N×0.5 h block) + variable-star session overhead; validated when `sequenceTemplate` is `variable_star`. */
   estimatedDurationSeconds?: number
   /** DSO multi-night project: skip single-night duration / ideal-night feasibility checks. */
   projectMode?: boolean
@@ -944,6 +944,24 @@ export async function updateStatus(
     status,
     updatedAt: nowIso(),
   }
+  mem[idx] = next
+  await persist()
+  return next
+}
+
+/** Admin Session Control: restore a failed queue row to in_progress. */
+export async function adminRestoreQueueFromFailed(
+  id: string
+): Promise<ImagingRequest | { error: string }> {
+  await ensureLoadedFromDisk()
+  const mem = getMemory()
+  const idx = mem.findIndex((r) => r.id === id)
+  if (idx === -1) return { error: 'Not found' }
+  const current = mem[idx]
+  if (current.status !== 'failed') {
+    return { error: 'Only failed requests can be restored to in progress' }
+  }
+  const next: ImagingRequest = { ...current, status: 'in_progress', updatedAt: nowIso() }
   mem[idx] = next
   await persist()
   return next

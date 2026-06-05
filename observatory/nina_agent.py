@@ -105,6 +105,8 @@ SKIP_WHEN_NINA_RUNNING = True
 # Poll interval while waiting for started NINA process to exit.
 RUNNING_CHECK_SECONDS = 15
 RUNNING_PULSE_INTERVAL_SECONDS = 30
+# While NINA is running, poll for Emergency STOP sequence at this interval.
+ESTOP_POLL_SECONDS = 5
 
 # NINA image output root folder (scan recursively after each run).
 NINA_OUTPUT_DIR = r"C:\Users\Observatory\Documents\N.I.N.A"
@@ -381,6 +383,52 @@ def start_nina(sequence_path: Path) -> subprocess.Popen[bytes]:
     return subprocess.Popen(args, cwd=str(Path(NINA_INSTALL_DIR)))
 
 
+def is_estop_sequence_content(content: bytes) -> bool:
+    try:
+        payload = json.loads(content.decode("utf-8"))
+    except Exception:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    pomfret = payload.get("PomfretAstro")
+    return isinstance(pomfret, dict) and pomfret.get("SessionType") == "estop"
+
+
+def poll_emergency_stop_sequence() -> Optional[bytes]:
+    try:
+        content = download_bytes(SEQUENCE_JSON_URL)
+    except urllib.error.HTTPError:
+        return None
+    except Exception as ex:
+        log(f"Emergency STOP poll failed: {ex}")
+        return None
+    if is_estop_sequence_content(content):
+        return content
+    return None
+
+
+def kill_nina_process(process: Optional[subprocess.Popen[bytes]] = None) -> None:
+    if process is not None and process.poll() is None:
+        log("Terminating tracked NINA process for Emergency STOP…")
+        process.terminate()
+        try:
+            process.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+    if is_nina_running():
+        log("Force-killing NINA.exe via taskkill for Emergency STOP…")
+        subprocess.run(
+            ["taskkill", "/F", "/IM", "NINA.exe"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+
 def wait_for_nina_exit(process: subprocess.Popen[bytes]) -> None:
     log("NINA started; agent will pause URL polling until NINA exits.")
     while True:
@@ -458,6 +506,12 @@ def sequence_fingerprint(content: bytes) -> str:
     try:
         payload = json.loads(content.decode("utf-8"))
         if isinstance(payload, dict):
+            pomfret = payload.get("PomfretAstro")
+            if isinstance(pomfret, dict):
+                session_type = pomfret.get("SessionType")
+                queue_id = pomfret.get("QueueId")
+                if session_type == "estop" and queue_id not in (None, ""):
+                    return f"estop:{queue_id}"
             for key in ("jobId", "requestId", "sequenceId", "id", "version"):
                 value = payload.get(key)
                 if value not in (None, ""):
@@ -995,20 +1049,32 @@ def wait_for_nina_and_stream_previews(
     output_root: Path,
     jobs_dir: Path,
     baseline_snapshot: Dict[str, int],
-) -> None:
+) -> Optional[bytes]:
+    """
+    Block until NINA exits. Poll for Emergency STOP every ESTOP_POLL_SECONDS.
+    Returns ESTOP sequence bytes when imaging must be interrupted; otherwise None.
+    """
     log("NINA started; agent will pause URL polling until NINA exits.")
     rolling_snapshot = dict(baseline_snapshot)
     last_running_pulse_at = 0.0
+    last_estop_poll_at = 0.0
     while True:
         code = process.poll()
         if code is not None:
             log(f"NINA exited with code {code}. Resuming URL polling.")
-            return
+            return None
         now_monotonic = time.monotonic()
+        if now_monotonic - last_estop_poll_at >= ESTOP_POLL_SECONDS:
+            estop_content = poll_emergency_stop_sequence()
+            last_estop_poll_at = now_monotonic
+            if estop_content is not None:
+                log("Emergency STOP sequence received — killing NINA to run ESTOP.")
+                kill_nina_process(process)
+                return estop_content
         if now_monotonic - last_running_pulse_at >= RUNNING_PULSE_INTERVAL_SECONDS:
             report_agent_pulse(True)
             last_running_pulse_at = now_monotonic
-        if PREVIEW_ENABLED and session_id:
+        if PREVIEW_ENABLED and session_id and output_mode != OUTPUT_MODE_NONE:
             changed = find_new_or_updated_files(rolling_snapshot, output_root)
             if changed:
                 try_push_live_preview(session_id, run_id, changed, jobs_dir)
@@ -1018,6 +1084,77 @@ def wait_for_nina_and_stream_previews(
                     except OSError:
                         pass
         time.sleep(RUNNING_CHECK_SECONDS)
+
+
+def handle_sequence_launch(
+    content: bytes,
+    jobs_dir: Path,
+    sequence_path: Path,
+    output_root: Path,
+    postprocess_queue: "queue.Queue[dict]",
+) -> Optional[bytes]:
+    """
+    Write sequence JSON, launch NINA, wait for exit.
+    Returns ESTOP bytes when interrupted; otherwise queues post-process and returns None.
+    """
+    sequence_path.write_bytes(content)
+    write_last_fingerprint(jobs_dir, sequence_fingerprint(content))
+    is_estop = is_estop_sequence_content(content)
+    session_id, output_mode, session_filter = extract_sequence_metadata(content)
+    if session_id:
+        run_id = sanitize_for_key(session_id)
+        if is_estop:
+            log(f"Emergency STOP sequence ({session_id}); skipping PDU and post-process.")
+        else:
+            log(f"Using session id for R2 folder: {run_id}")
+    else:
+        run_id = sanitize_for_key(sequence_fingerprint(content))
+        if not is_estop:
+            log("Session id not found in JSON, using fingerprint for R2 folder.")
+    before_snapshot = snapshot_output_files(output_root)
+    pdu_powered = False
+    estop_content: Optional[bytes] = None
+    try:
+        if not is_estop:
+            pdu_powered = power_on_observatory_equipment()
+        nina_process = start_nina(sequence_path)
+        report_agent_pulse(True)
+        if is_estop:
+            wait_for_nina_exit(nina_process)
+        else:
+            estop_content = wait_for_nina_and_stream_previews(
+                nina_process,
+                session_id=session_id,
+                output_mode=output_mode,
+                run_id=run_id,
+                output_root=output_root,
+                jobs_dir=jobs_dir,
+                baseline_snapshot=before_snapshot,
+            )
+    finally:
+        if pdu_powered:
+            power_off_observatory_equipment()
+    report_agent_pulse(False)
+    if estop_content is not None:
+        return estop_content
+    if is_estop:
+        return None
+    new_files = find_new_or_updated_files(before_snapshot, output_root)
+    postprocess_queue.put(
+        {
+            "session_id": session_id,
+            "run_id": run_id,
+            "output_mode": output_mode,
+            "session_filter": session_filter,
+            "new_files": new_files,
+            "jobs_dir": str(jobs_dir),
+            "output_root": str(output_root),
+        }
+    )
+    log(
+        f"Queued post-processing for {run_id} ({output_mode}); pending jobs: {postprocess_queue.qsize()}."
+    )
+    return None
 
 
 def run_loop() -> None:
@@ -1056,6 +1193,26 @@ def run_loop() -> None:
     while True:
         try:
             if SKIP_WHEN_NINA_RUNNING and is_nina_running():
+                estop_content = poll_emergency_stop_sequence()
+                if estop_content is not None:
+                    log("Emergency STOP armed while NINA is running — killing NINA and launching ESTOP.")
+                    kill_nina_process()
+                    launch_content = estop_content
+                    while launch_content is not None:
+                        log(
+                            "Launching Emergency STOP sequence."
+                            if is_estop_sequence_content(launch_content)
+                            else "Relaunching after Emergency STOP interrupt."
+                        )
+                        launch_content = handle_sequence_launch(
+                            launch_content,
+                            jobs_dir,
+                            sequence_path,
+                            output_root,
+                            postprocess_queue,
+                        )
+                    sleep_between_polls()
+                    continue
                 if report_agent_pulse(True):
                     last_pulsed_nina_running = True
                 log("NINA is already running. Skipping this poll.")
@@ -1102,48 +1259,19 @@ def run_loop() -> None:
                 log("New sequence content detected, downloading and launching.")
                 sequence_path.write_bytes(content)
                 write_last_fingerprint(jobs_dir, current_fingerprint)
-            before_snapshot = snapshot_output_files(output_root)
-            if session_id:
-                run_id = sanitize_for_key(session_id)
-                log(f"Using session id for R2 folder: {run_id}")
-            else:
-                run_id = sanitize_for_key(current_fingerprint)
-                log("Session id not found in JSON, using fingerprint for R2 folder.")
-            pdu_powered = False
-            try:
-                pdu_powered = power_on_observatory_equipment()
-                nina_process = start_nina(sequence_path)
-                if report_agent_pulse(True):
-                    last_pulsed_nina_running = True
-                wait_for_nina_and_stream_previews(
-                    nina_process,
-                    session_id=session_id,
-                    output_mode=output_mode,
-                    run_id=run_id,
-                    output_root=output_root,
-                    jobs_dir=jobs_dir,
-                    baseline_snapshot=before_snapshot,
+            launch_content: bytes = content
+            while launch_content is not None:
+                if is_estop_sequence_content(launch_content):
+                    log("Launching Emergency STOP sequence.")
+                launch_content = handle_sequence_launch(
+                    launch_content,
+                    jobs_dir,
+                    sequence_path,
+                    output_root,
+                    postprocess_queue,
                 )
-            finally:
-                if pdu_powered:
-                    power_off_observatory_equipment()
-            if report_agent_pulse(False):
-                last_pulsed_nina_running = False
-            new_files = find_new_or_updated_files(before_snapshot, output_root)
-            postprocess_queue.put(
-                {
-                    "session_id": session_id,
-                    "run_id": run_id,
-                    "output_mode": output_mode,
-                    "session_filter": session_filter,
-                    "new_files": new_files,
-                    "jobs_dir": str(jobs_dir),
-                    "output_root": str(output_root),
-                }
-            )
-            log(
-                f"Queued post-processing for {run_id} ({output_mode}); pending jobs: {postprocess_queue.qsize()}."
-            )
+                if launch_content is not None and not is_estop_sequence_content(launch_content):
+                    log("Imaging interrupted for Emergency STOP; launching ESTOP sequence immediately.")
 
         except Exception as ex:
             log(f"Error: {ex}")

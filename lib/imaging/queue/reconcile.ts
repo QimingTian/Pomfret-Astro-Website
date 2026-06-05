@@ -31,6 +31,7 @@ import {
 } from '@/lib/imaging/queue/schedule-audit'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
+import { isEmergencyStopBlocking } from '@/lib/imaging-emergency-stop'
 import { getTonightWeatherPermittedIntervals, type TimeInterval } from '@/lib/tonight-weather-gate'
 
 /**
@@ -39,6 +40,7 @@ import { getTonightWeatherPermittedIntervals, type TimeInterval } from '@/lib/to
  * sessions (including in-progress project subs) schedule around them.
  */
 export async function reconcilePendingScheduleStatus(): Promise<void> {
+  if (await isEmergencyStopBlocking()) return
   const pending = await listPending()
   const weatherIntervals = await getTonightWeatherPermittedIntervals()
   const now = new Date()

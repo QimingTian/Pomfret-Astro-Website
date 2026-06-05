@@ -242,9 +242,9 @@ export function AdminDashboardGrid() {
                       <div className="flex flex-wrap gap-1">
                         <button
                           type="button"
-                          disabled={busy || !canRun}
+                          disabled={busy || !canRun || t.emergencyStopBlocking}
                           onClick={() => void t.runSessionAction(row.sessionId, 'run')}
-                          className="rounded-full border border-sky-500/50 px-2 py-1 text-xs text-sky-200 disabled:opacity-40"
+                          className="rounded-full border border-sky-500/50 px-2 py-1 text-xs text-sky-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:border-gray-600 disabled:text-gray-500"
                         >
                           Run
                         </button>
@@ -273,6 +273,14 @@ export function AdminDashboardGrid() {
                           className="rounded-full border border-amber-500/50 px-2 py-1 text-xs text-amber-200 disabled:opacity-40"
                         >
                           Fail
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy || row.status !== 'failed'}
+                          onClick={() => void t.runSessionAction(row.sessionId, 'in_progress')}
+                          className="rounded-full border border-blue-500/50 px-2 py-1 text-xs text-blue-200 disabled:opacity-40"
+                        >
+                          In progress
                         </button>
                         <button
                           type="button"

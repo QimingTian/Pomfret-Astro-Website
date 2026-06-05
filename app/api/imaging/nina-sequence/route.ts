@@ -57,6 +57,8 @@ import {
 } from '@/lib/end-night-state'
 import { getAdminClosedWindowAt } from '@/lib/admin-closed-window-store'
 import { tryDeliverActiveAdminForceRun } from '@/lib/imaging/admin-force-run'
+import { isEmergencyStopBlocking } from '@/lib/imaging-emergency-stop'
+import { tryDeliverEmergencyStop } from '@/lib/imaging/session/estop-delivery'
 import endNightTemplate from '@/End Night Session.json'
 
 export const runtime = 'nodejs'
@@ -320,7 +322,15 @@ export async function GET(request: NextRequest) {
   const now = new Date()
   const nowMs = now.getTime()
   await expireMissedScheduledProjectNights(now)
-  const status = await getObservatoryStatus()
+  const status = await getObservatoryStatus({ trackSessionFailure: false })
+  const emergencyDelivered = await tryDeliverEmergencyStop()
+  if (emergencyDelivered) return emergencyDelivered
+  if (await isEmergencyStopBlocking()) {
+    return NextResponse.json(
+      { error: 'Emergency STOP active; no imaging sequences are available.' },
+      { status: 409, headers: imagingCorsHeadersResolved() }
+    )
+  }
   const forceRunDelivered = await tryDeliverActiveAdminForceRun(status, nowMs)
   if (forceRunDelivered) return forceRunDelivered
 

@@ -18,6 +18,14 @@ import {
 import { boardMarkCompleted, getBoardEntry } from '@/lib/imaging-session-board'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import { resolveSessionProgressQueueId } from '@/lib/imaging-session-progress-queue'
+import {
+  isEmergencyStopQueueId,
+  markEmergencyStopCompleted,
+} from '@/lib/imaging-emergency-stop'
+import {
+  setObservatoryMode,
+  setObservatoryStatus,
+} from '@/lib/observatory-status-store'
 import { isSessionCompletedSignal, progressLineText } from '@/lib/session-progress-signal'
 
 export const runtime = 'nodejs'
@@ -166,6 +174,20 @@ export async function POST(request: NextRequest) {
       at: new Date().toISOString(),
       text: progressLineText(auditDetail),
     })
+  }
+
+  if (queueId && isEmergencyStopQueueId(queueId)) {
+    const line = progressLineText(auditDetail).toLowerCase()
+    if (line.includes('dome closed')) {
+      await markEmergencyStopCompleted(queueId)
+      await setObservatoryMode('manual')
+      await setObservatoryStatus('closed_observatory_maintenance')
+      void appendAuditLog({
+        kind: 'emergency_stop',
+        message: `Emergency STOP completed (${queueId}); observatory locked to manual Closed — Maintenance.`,
+        detail: { queueId },
+      })
+    }
   }
 
   if (queueId && completionSignal) {

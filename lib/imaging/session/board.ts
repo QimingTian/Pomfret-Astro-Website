@@ -296,6 +296,18 @@ export async function boardMarkFailed(id: string, failedAtIso?: string): Promise
   return true
 }
 
+/** NINA kept imaging after a false failure — restore board row to in_progress. */
+export async function boardReviveInProgress(id: string): Promise<boolean> {
+  const prev = await readEntries()
+  const idx = prev.findIndex((e) => e.id === id && e.status === 'failed')
+  if (idx === -1) return false
+  const ts = new Date().toISOString()
+  const next = [...prev]
+  next[idx] = { ...next[idx], status: 'in_progress', failedAt: undefined, updatedAt: ts }
+  await writeEntries(next)
+  return true
+}
+
 export type FailedBoardSnapshot = {
   id: string
   target: string

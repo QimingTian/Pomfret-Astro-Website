@@ -535,15 +535,17 @@ export function buildNinaSequenceJson(params: NinaSequenceParams): string {
     dsoItems['$values'] = rebuilt
   }
 
-  if (params.pomfretQueueId && params.pomfretQueueId.trim()) {
+  const pomfretQueueId = params.pomfretQueueId?.trim() ?? ''
+  if (pomfretQueueId) {
     root['PomfretAstro'] = {
-      QueueId: params.pomfretQueueId.trim(),
+      QueueId: pomfretQueueId,
       OutputMode: params.outputMode ?? 'raw_zip',
       FilterName: normalizedPlans[0]?.filterName ?? params.filterName,
       FilterPlans: normalizedPlans,
       SessionProgressHint:
         'POST JSON to /api/imaging/session-progress with { "queueId": "<QueueId>", ... }',
     }
+    applySessionProgressQueueIdInHttpPosts(root, pomfretQueueId)
   }
 
   if (params.cameraCoolingTempC != null) {
@@ -569,6 +571,30 @@ function applyCameraCoolingTemp(node: unknown, tempC: number): void {
       'Temperature' in rec
     ) {
       rec['Temperature'] = tempC + 0.0
+    }
+    for (const child of Object.values(rec)) walk(child)
+  }
+  walk(node)
+}
+
+/** Embed queueId in every session-progress HTTP POST so routing survives failed→still-imaging. */
+function applySessionProgressQueueIdInHttpPosts(node: unknown, queueId: string): void {
+  const walk = (value: unknown): void => {
+    if (!value || typeof value !== 'object') return
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item)
+      return
+    }
+    const rec = value as Record<string, unknown>
+    const typeName = typeof rec['$type'] === 'string' ? rec['$type'] : ''
+    if (typeName.includes('GroundStation.HTTP.HttpClient')) {
+      const uri = rec['HttpUri']
+      if (typeof uri === 'string' && uri.includes('/api/imaging/session-progress')) {
+        const rawBody = typeof rec['HttpPostBody'] === 'string' ? rec['HttpPostBody'] : ''
+        const text = rawBody.replace(/\r\n/g, '\n').trim()
+        rec['HttpPostContentType'] = 'application/json'
+        rec['HttpPostBody'] = JSON.stringify({ queueId, text })
+      }
     }
     for (const child of Object.values(rec)) walk(child)
   }

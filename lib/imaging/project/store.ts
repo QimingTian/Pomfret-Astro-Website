@@ -757,7 +757,12 @@ export async function markNightInProgress(projectId: string, nightSubId: string)
   const deliveredAt = new Date().toISOString()
   const nights = project.nights.map((n) =>
     n.id === nightSubId
-      ? { ...n, status: 'in_progress' as const, ninaDeliveredAt: n.ninaDeliveredAt ?? deliveredAt }
+      ? {
+          ...n,
+          status: 'in_progress' as const,
+          failedAt: undefined,
+          ninaDeliveredAt: n.ninaDeliveredAt ?? deliveredAt,
+        }
       : n.status === 'in_progress'
         ? { ...n, status: 'scheduled' as const }
         : n

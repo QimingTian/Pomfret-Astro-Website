@@ -47,6 +47,7 @@ const nextConfig = {
       './Classic DSO Imaging Sequence Multi Filter.json',
       './Variable Star Sequence.json',
       './End Night Session.json',
+      './EStop.json',
     ],
   },
 }

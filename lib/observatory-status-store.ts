@@ -422,7 +422,15 @@ async function persist() {
   await rename(tmp, statusFile)
 }
 
-export async function getObservatoryStatus(): Promise<ObservatoryStatus> {
+export type GetObservatoryStatusOptions = {
+  /**
+   * When false, skip observatory_left_busy failure side effects.
+   * Agent nina-sequence polls (e.g. ESTOP every 5s while NINA runs) must not fail in-progress sessions.
+   */
+  trackSessionFailure?: boolean
+}
+
+export async function getObservatoryStatus(options?: GetObservatoryStatusOptions): Promise<ObservatoryStatus> {
   await ensureLoaded()
   await mergeObservatorySnapshotFromKv()
   await refreshLastPollTsFromKv()
@@ -464,10 +472,13 @@ export async function getObservatoryStatus(): Promise<ObservatoryStatus> {
     })
   }
 
-  try {
-    await onObservatoryFinalStatusChanged(final)
-  } catch {
-    // never block status reads
+  if (options?.trackSessionFailure !== false) {
+    const ninaReportedBusy = isObservatoryBusyFromNinaReport(now, ninaRunning, ninaRunningReportedAt)
+    try {
+      await onObservatoryFinalStatusChanged(final, { ninaReportedBusy })
+    } catch {
+      // never block status reads
+    }
   }
 
   return final
@@ -497,13 +508,15 @@ export async function getObservatoryMode(): Promise<ObservatoryMode> {
   return currentMode()
 }
 
+/** Agent heartbeat from nina-sequence GET (including ESTOP polls while NINA runs). */
 export async function touchObservatoryPoll(): Promise<void> {
   await ensureLoaded()
+  await mergeObservatorySnapshotFromKv()
   const now = Date.now()
   memory().__pomfret_last_poll_ts__ = now
   memory().__pomfret_last_agent_seen_ts__ = now
-  memory().__pomfret_nina_running__ = false
-  memory().__pomfret_nina_running_reported_at__ = now
+  // Heartbeat only — ninaRunning is owned by agent-pulse POST. Merge KV before persist so a
+  // cold lambda cannot overwrite a fresh ninaRunning=true with undefined/false.
   await persist()
 }
 
@@ -527,6 +540,7 @@ export async function isNinaReportedRunningNow(nowMs = Date.now()): Promise<bool
 
 export async function reportObservatoryAgentPulse(input: { ninaRunning: boolean }): Promise<void> {
   await ensureLoaded()
+  await mergeObservatorySnapshotFromKv()
   const now = Date.now()
   memory().__pomfret_nina_running__ = input.ninaRunning
   memory().__pomfret_nina_running_reported_at__ = now
@@ -537,4 +551,11 @@ export async function reportObservatoryAgentPulse(input: { ninaRunning: boolean 
 export function isObservatoryAgentDisconnected(nowMs: number, lastAgentSeenTs: number): boolean {
   if (!Number.isFinite(lastAgentSeenTs) || lastAgentSeenTs <= 0) return true
   return nowMs - lastAgentSeenTs > AGENT_DISCONNECTED_MS
+}
+
+/** True when the NINA agent heartbeat (pulse or nina-sequence poll) was seen within the stale window. */
+export async function isObservatoryAgentConnected(nowMs = Date.now()): Promise<boolean> {
+  await mergeObservatorySnapshotFromKv()
+  const lastAgentSeenTs = memory().__pomfret_last_agent_seen_ts__ ?? 0
+  return !isObservatoryAgentDisconnected(nowMs, lastAgentSeenTs)
 }

@@ -87,8 +87,20 @@ export function useAdminTools() {
   const [sessionLoading, setSessionLoading] = useState(false)
   const [sessionError, setSessionError] = useState<string | null>(null)
   const [sessionActionId, setSessionActionId] = useState<string | null>(null)
+  const [emergencyStopBlocking, setEmergencyStopBlocking] = useState(false)
 
   const adminHeaders = useMemo((): HeadersInit => ({}), [])
+
+  const loadEmergencyStopStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/imaging/emergency-stop', { credentials: 'include', cache: 'no-store' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || data?.ok !== true) return
+      setEmergencyStopBlocking(Boolean(data.blocking))
+    } catch {
+      // ignore poll errors
+    }
+  }, [])
 
   const loadLog = useCallback(async () => {
     setLogLoading(true)
@@ -187,9 +199,16 @@ export function useAdminTools() {
     void loadSessionControl()
   }, [authorized, loadSessionControl])
 
+  useEffect(() => {
+    if (!authorized) return
+    void loadEmergencyStopStatus()
+    const id = window.setInterval(() => void loadEmergencyStopStatus(), 5000)
+    return () => window.clearInterval(id)
+  }, [authorized, loadEmergencyStopStatus])
+
   async function runSessionAction(
     sessionId: string,
-    action: 'complete' | 'fail' | 'delete' | 'run' | 'hold' | 'release_hold'
+    action: 'complete' | 'fail' | 'in_progress' | 'delete' | 'run' | 'hold' | 'release_hold'
   ) {
     if (action === 'delete' && !window.confirm(`Delete session ${sessionId}? This cannot be undone.`)) {
       return
@@ -242,6 +261,7 @@ export function useAdminTools() {
       setStatus(data.status as ObservatoryStatus)
       if (data.mode === 'manual' || data.mode === 'auto') setMode(data.mode)
       await loadLog()
+      await loadEmergencyStopStatus()
     } catch {
       setScheduleError('Failed to update status.')
     } finally {
@@ -263,6 +283,7 @@ export function useAdminTools() {
       setMode(data.mode as ObservatoryMode)
       setStatus(data.status as ObservatoryStatus)
       await loadLog()
+      await loadEmergencyStopStatus()
     } catch {
       setScheduleError('Failed to update mode.')
     } finally {
@@ -348,6 +369,7 @@ export function useAdminTools() {
     sessionLoading,
     sessionError,
     sessionActionId,
+    emergencyStopBlocking,
     adminHeaders,
     loadLog,
     loadClosedWindows,

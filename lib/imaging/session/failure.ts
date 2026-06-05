@@ -1,6 +1,6 @@
 import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { sendSessionFailedEmail } from '@/lib/imaging-completion-email'
-import { sendObservatoryDisconnectedAlertEmail } from '@/lib/observatory-alert-email'
+// import { sendObservatoryDisconnectedAlertEmail } from '@/lib/observatory-alert-email'
 import { publishProgress } from '@/lib/imaging-progress-live'
 import { listProjects, markNightFailed } from '@/lib/imaging-project-store'
 import { notifyProjectNightFailedEmail } from '@/lib/imaging-project-night-email'
@@ -15,6 +15,10 @@ import type { ObservatoryStatus } from '@/lib/observatory-status-store'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 
 export const SESSION_FAILED_TERMINAL_MESSAGE = 'Session failed -- contact support.'
+
+export function isSessionFailedTerminalLine(text: string): boolean {
+  return text.trim() === SESSION_FAILED_TERMINAL_MESSAGE
+}
 
 const LAST_STATUS_KEY = 'observatory-status-last-final'
 
@@ -107,7 +111,7 @@ export async function inactiveProjectBoardSkipIds(): Promise<Set<string>> {
   return skip
 }
 
-/** Same rule as normal board `in_progress` on busy→ready, applied per project sub-session id. */
+/** Same rule as leaving busy without completion, applied per project sub-session id. */
 export async function failInProgressProjectSubSessions(reason: string): Promise<string[]> {
   const failed: string[] = []
   for (const project of await listProjects()) {
@@ -149,30 +153,38 @@ export async function failInProgressBoardSessions(
 }
 
 /**
- * When the observatory leaves Busy for Ready while a session is still `in_progress` on the board
- * (no Session Completed POST), treat it as an abort / NINA exit.
+ * When the observatory leaves Busy (to any non-busy state) while a session is still `in_progress`
+ * (no Session Completed POST), treat it as an abort / NINA exit — e.g. ready, weather closed, disconnected.
  */
-export async function onObservatoryFinalStatusChanged(final: ObservatoryStatus): Promise<void> {
+export async function onObservatoryFinalStatusChanged(
+  final: ObservatoryStatus,
+  context?: { ninaReportedBusy?: boolean }
+): Promise<void> {
   const previous = await readLastFinalStatus()
-  if (previous !== 'disconnected' && final === 'disconnected') {
-    void sendObservatoryDisconnectedAlertEmail().then((result) => {
-      if (!result.sent) {
-        return appendAuditLog({
-          kind: 'observatory.alert_email',
-          message: `Disconnected alert email skipped/failed: ${result.reason ?? 'unknown reason'}`,
-          detail: { sent: false, reason: result.reason ?? null, recipients: result.recipients ?? [] },
-        })
-      }
-      return appendAuditLog({
-        kind: 'observatory.alert_email',
-        message: 'Disconnected alert email sent to observatory administrators.',
-        detail: { sent: true, recipients: result.recipients ?? [] },
-      })
-    })
-  }
-  if (previous === 'busy_in_use' && final === 'ready') {
-    await failInProgressProjectSubSessions('observatory_busy_to_ready')
-    await failInProgressBoardSessions(undefined, 'observatory_busy_to_ready')
+  // Temporarily disabled: admin email when observatory transitions to disconnected.
+  // if (previous !== 'disconnected' && final === 'disconnected') {
+  //   void sendObservatoryDisconnectedAlertEmail().then((result) => {
+  //     if (!result.sent) {
+  //       return appendAuditLog({
+  //         kind: 'observatory.alert_email',
+  //         message: `Disconnected alert email skipped/failed: ${result.reason ?? 'unknown reason'}`,
+  //         detail: { sent: false, reason: result.reason ?? null, recipients: result.recipients ?? [] },
+  //       })
+  //     }
+  //     return appendAuditLog({
+  //       kind: 'observatory.alert_email',
+  //       message: 'Disconnected alert email sent to observatory administrators.',
+  //       detail: { sent: true, recipients: result.recipients ?? [] },
+  //     })
+  //   })
+  // }
+  if (previous === 'busy_in_use' && final !== 'busy_in_use') {
+    if (context?.ninaReportedBusy === true) {
+      await writeLastFinalStatus('busy_in_use')
+      return
+    }
+    await failInProgressProjectSubSessions('observatory_left_busy')
+    await failInProgressBoardSessions(undefined, 'observatory_left_busy')
   }
   await writeLastFinalStatus(final)
 }

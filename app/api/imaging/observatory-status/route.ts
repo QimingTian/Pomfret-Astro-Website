@@ -1,6 +1,14 @@
 import { NextRequest } from 'next/server'
 import { requireImagingAdmin } from '@/lib/imaging-admin-auth'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
+import {
+  clearEmergencyStopAfterManualUnlock,
+  isEmergencyStopBlocking,
+  isEmergencyStopStopped,
+  isEmergencyStopStopping,
+  shouldClearEmergencyStopOnObservatoryPatch,
+} from '@/lib/imaging-emergency-stop'
+import { releaseEmergencyStopHolds } from '@/lib/imaging-emergency-stop-holds'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import {
   getObservatoryMode,
@@ -70,6 +78,37 @@ export async function PATCH(request: NextRequest) {
 
   const nextMode = await getObservatoryMode()
   const nextStatus = await getObservatoryStatus()
+
+  const patchTouchesObservatory = mode !== undefined || status !== undefined
+  const shouldClearStopped =
+    (await isEmergencyStopStopped()) &&
+    shouldClearEmergencyStopOnObservatoryPatch({
+      mode: typeof mode === 'string' ? (mode as ObservatoryMode) : undefined,
+      status: typeof status === 'string' ? (status as ObservatoryStatus) : undefined,
+      currentMode: nextMode,
+      currentStatus: nextStatus,
+    })
+  const shouldClearStopping =
+    (await isEmergencyStopStopping()) && patchTouchesObservatory
+
+  if ((shouldClearStopped || shouldClearStopping) && (await isEmergencyStopBlocking())) {
+    const cleared = await clearEmergencyStopAfterManualUnlock()
+    if (cleared?.heldSessionIds.length) {
+      await releaseEmergencyStopHolds(cleared.heldSessionIds)
+    }
+    void appendAuditLog({
+      kind: 'emergency_stop',
+      message: shouldClearStopping
+        ? 'Emergency STOP aborted (was STOPPING) after admin observatory update.'
+        : 'Emergency STOP cleared after manual observatory mode/status change.',
+      detail: {
+        mode: nextMode,
+        status: nextStatus,
+        releasedHolds: cleared?.heldSessionIds ?? [],
+        previousPhase: cleared?.phase ?? null,
+      },
+    })
+  }
 
   const parts: string[] = []
   if (mode !== undefined) parts.push(`mode → ${nextMode}`)

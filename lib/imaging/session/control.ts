@@ -14,16 +14,24 @@ import {
   listProjects,
   markNightCompleted,
   markNightFailed,
+  markNightInProgress,
   removeProjectNight,
   type ImagingProject,
   type ProjectNight,
 } from '@/lib/imaging-project-store'
 import { reconcilePendingScheduleStatus } from '@/lib/imaging-queue-reconcile'
-import { adminForceQueueStatus, deleteRequestById, getRequestById, listAll } from '@/lib/imaging-queue-store'
+import {
+  adminForceQueueStatus,
+  adminRestoreQueueFromFailed,
+  deleteRequestById,
+  getRequestById,
+  listAll,
+} from '@/lib/imaging-queue-store'
 import {
   boardMarkCompleted,
   boardMarkFailed,
   boardRemove,
+  boardReviveInProgress,
   getBoardEntry,
   listBoardEntries,
 } from '@/lib/imaging-session-board'
@@ -202,6 +210,56 @@ export async function adminMarkSessionComplete(sessionId: string): Promise<{ ok:
     detail: { id: sessionId, target: forced.target },
   })
   return { ok: true }
+}
+
+export async function adminMarkSessionInProgress(
+  sessionId: string
+): Promise<{ ok: true } | { error: string }> {
+  const nightSub = parseProjectNightSubId(sessionId)
+  if (nightSub) {
+    const match = await getProjectByNightSubId(sessionId)
+    if (!match) return { error: 'Sub-session not found' }
+    if (match.night.status !== 'failed') {
+      return { error: 'Only failed sub-sessions can be restored to in progress' }
+    }
+    await markNightInProgress(match.project.id, sessionId)
+    publishProgress(sessionId, { type: 'status', queueStatus: 'in_progress' })
+    void appendAuditLog({
+      kind: 'queue.status',
+      message: `Admin restored project sub-session ${sessionId} to in_progress.`,
+      detail: { sessionId, projectId: match.project.id, nightIndex: match.night.nightIndex },
+    })
+    void reconcilePendingScheduleStatus()
+    return { ok: true }
+  }
+
+  const board = await getBoardEntry(sessionId)
+  if (board?.status === 'failed') {
+    const ok = await boardReviveInProgress(sessionId)
+    if (!ok) return { error: 'Could not restore board session to in progress' }
+    publishProgress(sessionId, { type: 'status', queueStatus: 'in_progress' })
+    void appendAuditLog({
+      kind: 'queue.status',
+      message: `Admin restored session ${sessionId} to in_progress.`,
+      detail: { id: sessionId, target: board.target },
+    })
+    return { ok: true }
+  }
+
+  const inQueue = await getRequestById(sessionId)
+  if (inQueue?.status === 'failed') {
+    const restored = await adminRestoreQueueFromFailed(sessionId)
+    if ('error' in restored) return restored
+    publishProgress(sessionId, { type: 'status', queueStatus: 'in_progress' })
+    void appendAuditLog({
+      kind: 'queue.status',
+      message: `Admin restored session ${sessionId} to in_progress.`,
+      detail: { id: sessionId, target: restored.target },
+    })
+    return { ok: true }
+  }
+
+  return { error: 'Session is not failed' }
 }
 
 export async function adminMarkSessionFailed(sessionId: string): Promise<{ ok: true } | { error: string }> {

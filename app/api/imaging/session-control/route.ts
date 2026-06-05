@@ -5,6 +5,7 @@ import {
   adminDeleteSession,
   adminMarkSessionComplete,
   adminMarkSessionFailed,
+  adminMarkSessionInProgress,
   adminHoldSessionControl,
   adminReleaseSessionHoldControl,
   adminRunSessionControl,
@@ -59,6 +60,9 @@ export async function POST(request: NextRequest) {
     case 'fail':
       result = await adminMarkSessionFailed(sessionId)
       break
+    case 'in_progress':
+      result = await adminMarkSessionInProgress(sessionId)
+      break
     case 'delete':
       result = await adminDeleteSession(sessionId)
       break
@@ -73,7 +77,7 @@ export async function POST(request: NextRequest) {
       break
     default:
       return withImagingCors(
-        { ok: false as const, error: 'action must be complete, fail, delete, run, hold, or release_hold' },
+        { ok: false as const, error: 'action must be complete, fail, in_progress, delete, run, hold, or release_hold' },
         400
       )
   }

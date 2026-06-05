@@ -1,4 +1,4 @@
-import { kvDel, kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
+import { kvDel, kvEnabled, kvGetJson, kvIncrFromSeed, kvSetJson } from '@/lib/kv-rest'
 
 /** Legacy monolithic map (pre per-queueId keys). Read-only fallback. */
 const LEGACY_KEY = 'imaging-preview-latest'
@@ -19,10 +19,15 @@ type PreviewIndexRow = { queueId: string; updatedAt: string }
 
 type GlobalWithPreview = typeof globalThis & {
   __pomfret_imaging_preview_by_queue__?: Record<string, PreviewEntry>
+  __pomfret_imaging_preview_frame_by_queue__?: Record<string, number>
 }
 
 function previewKvKey(queueId: string): string {
   return `imaging-preview:${queueId}`
+}
+
+function previewFrameKvKey(queueId: string): string {
+  return `imaging-preview-frame:${queueId}`
 }
 
 function memoryMap(): Record<string, PreviewEntry> {
@@ -31,10 +36,46 @@ function memoryMap(): Record<string, PreviewEntry> {
   return g.__pomfret_imaging_preview_by_queue__
 }
 
+function memoryFrameMap(): Record<string, number> {
+  const g = globalThis as GlobalWithPreview
+  if (!g.__pomfret_imaging_preview_frame_by_queue__) g.__pomfret_imaging_preview_frame_by_queue__ = {}
+  return g.__pomfret_imaging_preview_frame_by_queue__
+}
+
 async function readLegacyEntry(queueId: string): Promise<PreviewEntry | null> {
   const legacy = await kvGetJson<{ byQueueId?: Record<string, PreviewEntry> }>(LEGACY_KEY)
   const e = legacy?.byQueueId?.[queueId]
   return e && e.dataBase64 ? e : null
+}
+
+async function readPreviewEntryFromKv(queueId: string): Promise<PreviewEntry | null> {
+  const fromKv = await kvGetJson<PreviewEntry>(previewKvKey(queueId))
+  if (fromKv?.dataBase64) return fromKv
+  return readLegacyEntry(queueId)
+}
+
+/** Seed for first atomic INCR when migrating from frameNumber stored on the preview blob. */
+async function legacyFrameSeed(queueId: string): Promise<number> {
+  const mem = memoryMap()[queueId]
+  if (mem?.frameNumber != null && mem.frameNumber > 0) return mem.frameNumber
+  const fromKv = await readPreviewEntryFromKv(queueId)
+  return fromKv?.frameNumber ?? 0
+}
+
+async function nextPreviewFrameNumber(queueId: string): Promise<number> {
+  if (kvEnabled()) {
+    const seed = await legacyFrameSeed(queueId)
+    const fromKv = await kvIncrFromSeed(previewFrameKvKey(queueId), seed)
+    if (fromKv != null) {
+      memoryFrameMap()[queueId] = fromKv
+      return fromKv
+    }
+  }
+
+  const prev = memoryFrameMap()[queueId] ?? (await legacyFrameSeed(queueId))
+  const frameNumber = prev + 1
+  memoryFrameMap()[queueId] = frameNumber
+  return frameNumber
 }
 
 async function trimPreviewIndex(keepQueueId: string, updatedAt: string): Promise<void> {
@@ -50,6 +91,7 @@ async function trimPreviewIndex(keepQueueId: string, updatedAt: string): Promise
   await kvSetJson(INDEX_KEY, next)
   for (const row of dropped) {
     await kvDel(previewKvKey(row.queueId))
+    await kvDel(previewFrameKvKey(row.queueId))
   }
 }
 
@@ -59,9 +101,7 @@ export async function upsertPreviewImage(
   contentType: string,
   dataBase64: string
 ): Promise<number> {
-  const existing =
-    memoryMap()[queueId] ?? (await getPreviewImage(queueId))
-  const frameNumber = (existing?.frameNumber ?? 0) + 1
+  const frameNumber = await nextPreviewFrameNumber(queueId)
   const entry: PreviewEntry = {
     imageId,
     queueId,
@@ -87,16 +127,10 @@ export async function getPreviewImage(queueId: string): Promise<PreviewEntry | n
   const mem = memoryMap()[queueId]
   if (mem?.dataBase64) return mem
 
-  const fromKv = await kvGetJson<PreviewEntry>(previewKvKey(queueId))
-  if (fromKv?.dataBase64) {
+  const fromKv = await readPreviewEntryFromKv(queueId)
+  if (fromKv) {
     memoryMap()[queueId] = fromKv
     return fromKv
-  }
-
-  const legacy = await readLegacyEntry(queueId)
-  if (legacy) {
-    memoryMap()[queueId] = legacy
-    return legacy
   }
 
   return null
@@ -110,8 +144,11 @@ export async function hasPreviewImage(queueId: string): Promise<boolean> {
 export async function removePreviewImage(queueId: string): Promise<void> {
   const mem = memoryMap()
   if (queueId in mem) delete mem[queueId]
+  const frameMem = memoryFrameMap()
+  if (queueId in frameMem) delete frameMem[queueId]
 
   await kvDel(previewKvKey(queueId))
+  await kvDel(previewFrameKvKey(queueId))
 
   if (kvEnabled()) {
     const prev = (await kvGetJson<PreviewIndexRow[]>(INDEX_KEY)) ?? []

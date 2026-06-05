@@ -91,6 +91,47 @@ export function kvEnabled(): boolean {
   return enabled()
 }
 
+function parseIncrResult(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') {
+    const n = Number.parseInt(value, 10)
+    return Number.isFinite(n) ? n : undefined
+  }
+  return undefined
+}
+
+/** Atomic INCR. Returns new count. */
+export async function kvIncr(key: string): Promise<number | undefined> {
+  if (!enabled()) return undefined
+  try {
+    return parseIncrResult(await redisCommand('INCR', key))
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Atomic INCR; when key is missing, initializes to seedIfMissing + 1.
+ * Used for preview frame counters so a failed preview blob write cannot roll back the count.
+ */
+export async function kvIncrFromSeed(key: string, seedIfMissing: number): Promise<number | undefined> {
+  if (!enabled()) return undefined
+  const seed = Number.isFinite(seedIfMissing) && seedIfMissing >= 0 ? Math.floor(seedIfMissing) : 0
+  const script = `
+local cur = redis.call('GET', KEYS[1])
+if cur then
+  return redis.call('INCR', KEYS[1])
+end
+local next = tonumber(ARGV[1]) + 1
+redis.call('SET', KEYS[1], next)
+return next`
+  try {
+    return parseIncrResult(await redisCommand('EVAL', script, 1, key, seed))
+  } catch {
+    return undefined
+  }
+}
+
 /** Increment a counter with TTL (sliding window rate limit). Returns new count. */
 export async function kvIncrWithExpire(key: string, windowSec: number): Promise<number | undefined> {
   if (!enabled()) return undefined
@@ -99,9 +140,7 @@ export async function kvIncrWithExpire(key: string, windowSec: number): Promise<
     if (count === 1) {
       await redisCommand('EXPIRE', key, windowSec)
     }
-    if (typeof count === 'number') return count
-    if (typeof count === 'string') return Number.parseInt(count, 10)
-    return undefined
+    return parseIncrResult(count)
   } catch {
     return undefined
   }

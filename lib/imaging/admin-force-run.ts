@@ -27,6 +27,7 @@ import {
 } from '@/lib/imaging-queue-store'
 import { estimateDurationSeconds } from '@/lib/imaging-queue-schedule-insight'
 import { publishProgress } from '@/lib/imaging-progress-live'
+import { isEmergencyStopBlocking } from '@/lib/imaging-emergency-stop'
 import { failInProgressBoardSessions } from '@/lib/imaging-session-failure'
 import { boardMarkDownloaded, boardUpsertInProgress } from '@/lib/imaging-session-board'
 import { imagingCorsHeadersResolved } from '@/lib/imaging-queue-auth'
@@ -447,6 +448,7 @@ export async function tryDeliverActiveAdminForceRun(
   status: ObservatoryStatus,
   nowMs = Date.now()
 ): Promise<NextResponse | null> {
+  if (await isEmergencyStopBlocking()) return null
   const candidates: Array<{ id: string; startMs: number }> = []
 
   for (const r of await listPending()) {
@@ -475,6 +477,9 @@ export async function tryDeliverActiveAdminForceRun(
 const RUNNABLE_STATUSES = new Set(['pending', 'scheduled', 'planned'])
 
 export async function adminRunSession(sessionId: string): Promise<{ ok: true } | { error: string }> {
+  if (await isEmergencyStopBlocking()) {
+    return { error: 'Emergency STOP is active; force-run is disabled.' }
+  }
   const obsStatus = await getObservatoryStatus()
   if (!isObservatoryReady(obsStatus)) {
     return { error: 'Observatory is not ready' }

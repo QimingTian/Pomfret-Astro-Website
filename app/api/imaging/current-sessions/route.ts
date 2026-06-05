@@ -8,7 +8,7 @@ import {
   type ImagingProject,
   type ProjectNight,
 } from '@/lib/imaging-project-store'
-import { projectFrameCounts } from '@/lib/imaging-total-frames'
+import { projectFilterFrameProgress, projectFrameCounts } from '@/lib/imaging-total-frames'
 import { listBoardEntries } from '@/lib/imaging-session-board'
 import { listAll, toPublicImagingRequest } from '@/lib/imaging-queue-store'
 import { hasR2ObjectForQueueId } from '@/lib/r2-session-download'
@@ -71,6 +71,7 @@ export async function GET(request: NextRequest) {
     userId?: string | null
     projectFramesTotal?: number
     projectFramesCaptured?: number
+    projectFilterProgress?: Array<{ filterName: string; total: number; captured: number }>
     nights?: Array<{
       id: string
       nightIndex: number
@@ -120,6 +121,7 @@ export async function GET(request: NextRequest) {
     const boardEntry = board.find((b) => b.id === p.id)
     const status = effectiveProjectStatus(p)
     const { total: projectFramesTotal, captured: projectFramesCaptured } = projectFrameCounts(p)
+    const projectFilterProgress = projectFilterFrameProgress(p)
     return {
       id: p.id,
       target: p.target,
@@ -143,6 +145,7 @@ export async function GET(request: NextRequest) {
       userId: p.userId ?? null,
       projectFramesTotal,
       projectFramesCaptured,
+      projectFilterProgress,
       nights: p.nights.map((n: ProjectNight) => ({
         id: n.id,
         nightIndex: n.nightIndex,

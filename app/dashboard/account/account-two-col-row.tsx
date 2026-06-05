@@ -25,9 +25,9 @@ export function AccountTwoColRow({
         <AccountFullBleedRule />
         {right}
       </div>
-      <div className={`hidden lg:grid ${desktopGrid}`}>
-        <div className={accountTwoColLeft}>{left}</div>
-        <div className={accountTwoColRight}>{right}</div>
+      <div className={`hidden lg:grid ${desktopGrid} items-stretch`}>
+        <div className={`${accountTwoColLeft} h-full min-h-0`}>{left}</div>
+        <div className={`${accountTwoColRight} h-full min-h-0`}>{right}</div>
       </div>
     </>
   )

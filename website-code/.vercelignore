@@ -1,0 +1,7 @@
+node_modules
+.next
+.vercel
+*.log
+.DS_Store
+public/DJI_0149.MP4
+

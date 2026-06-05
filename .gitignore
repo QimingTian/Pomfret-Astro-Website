@@ -1,66 +1,39 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# dependencies
-/node_modules
-/.pnp
-.pnp.js
+# --- website-code (Next.js app) ---
+website-code/node_modules/
+website-code/.pnp
+website-code/.pnp.js
+website-code/.next/
+website-code/out/
+website-code/build/
+website-code/coverage/
+website-code/.data/
+website-code/*.tsbuildinfo
+website-code/next-env.d.ts
+website-code/.vercel
+website-code/.env*.local
+website-code/.env.vercel.check
+website-code/audit-log-*.csv
+website-code/pomfret-astro*.json
+website-code/*-service-account*.json
+website-code/.local-private/
+website-code/observatory/SSH-ACCESS.local.md
+website-code/public/DJI_0149.MP4
 
-# testing
-/coverage
+# --- third-party (local upstream clones — not deployed) ---
+third-party/nina/
+third-party/siril-1.4.2/
+third-party/ExoPlanets/
+third-party/emsdk/
+third-party/stellarium-web-engine/
+third-party/Pomfret Astro Special Event/
 
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
+# --- shared ---
 .DS_Store
 *.pem
-
-# debug
+__pycache__/
+*.py[cod]
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-
-# local env files
-.env*.local
-
-# GCP service account keys (never commit)
-pomfret-astro*.json
-*-service-account*.json
-
-# vercel
-.vercel
-
-# typescript
-*.tsbuildinfo
-next-env.d.ts
-
-# optional local imaging queue file (see IMAGING_QUEUE_FILE)
-.data/
-
-# Local reference trees (NINA / Siril / ExoPlanets upstream clones — not shipped with the site)
-ExoPlanets/
-nina/
-siril-1.4.2/
-
-# Stellarium Web Engine build toolchain (emsdk) and upstream source clone — build artifacts
-# are committed under public/stellarium/js/.
-emsdk/
-stellarium-web-engine/
-
-# Python bytecode
-__pycache__/
-*.py[cod]
-
-# Exceeds GitHub 100 MB single-file limit; replace with hosted asset URL if needed
-public/DJI_0149.MP4
-
-# Local private backups (never commit)
-.local-private/
-
-# Separate local Next app (not part of pomfretastro.org deploy)
-Pomfret Astro Special Event/
-

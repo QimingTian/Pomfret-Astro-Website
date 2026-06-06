@@ -28,8 +28,6 @@ const POLAR_ALIGNMENT_X_DEG = 40
 const WEBSITE_Y_OFFSET_DEG = -90
 const WORLD_COMPASS_ROTATION_DEG = 0
 const TELEMETRY_STALE_MS = 15_000
-const POLL_CONNECTED_MS = 5_000
-const POLL_DISCONNECTED_MS = 2_000
 const DISCONNECTED_POINTING = {
   // North celestial pole for Pomfret: due North at local latitude altitude.
   altDeg: POMFRET_SITE.latitudeDeg,
@@ -177,70 +175,75 @@ export function TelescopeStatusPanel() {
 
   useEffect(() => {
     let mounted = true
-    let timer: ReturnType<typeof setTimeout> | null = null
 
-    const schedule = (delayMs: number) => {
+    const applySample = (
+      sample: MountSample | null | undefined,
+      serverNowUtc: string | undefined
+    ) => {
       if (!mounted) return
-      timer = setTimeout(poll, delayMs)
+      if (!sample) {
+        setConnected(false)
+        setTrackingEnabled(null)
+        opticalTargetRef.current = { alt: DISCONNECTED_POINTING.altDeg, az: DISCONNECTED_POINTING.azDeg }
+        pierRollRef.current = Math.PI
+        return
+      }
+      const receivedAtMs = sample.receivedAtUtc ? Date.parse(sample.receivedAtUtc) : NaN
+      const serverNowMs = serverNowUtc ? Date.parse(serverNowUtc) : NaN
+      const nowMs = Number.isFinite(serverNowMs) ? serverNowMs : Date.now()
+      const stale = !Number.isFinite(receivedAtMs) || nowMs - receivedAtMs > TELEMETRY_STALE_MS
+      const nowConnected = !stale && sample.connected === true
+      setConnected(nowConnected)
+      setTrackingEnabled(
+        nowConnected ? (typeof sample.trackingEnabled === 'boolean' ? sample.trackingEnabled : null) : null
+      )
+      const alt = finiteOrNull(sample.altitudeDeg)
+      const az = finiteOrNull(sample.azimuthDeg)
+      if (nowConnected && alt != null && az != null) {
+        opticalTargetRef.current = { alt: clampAltitude(alt), az: normalize360(az) }
+        const sop = (sample.sideOfPier ?? '').toLowerCase()
+        pierRollRef.current = sop === 'piereast' ? 0 : Math.PI
+      } else {
+        opticalTargetRef.current = { alt: DISCONNECTED_POINTING.altDeg, az: DISCONNECTED_POINTING.azDeg }
+        pierRollRef.current = Math.PI
+      }
+      targetEulerRef.current = {
+        x: POLAR_ALIGNMENT_X_DEG,
+        y: WEBSITE_Y_OFFSET_DEG,
+        z: 0,
+      }
     }
 
-    const poll = async () => {
-      let nowConnected = false
+    const source = new EventSource('/api/imaging/mount-pointing/stream')
+
+    source.onmessage = (evt) => {
+      let payload: {
+        type?: string
+        sample?: MountSample | null
+        serverNowUtc?: string
+      } | null = null
       try {
-        const res = await fetch(`/api/imaging/mount-pointing?_=${Date.now()}`, { cache: 'no-store' })
-        const data = (await res.json().catch(() => null)) as {
-          ok?: boolean
+        payload = JSON.parse(evt.data) as {
+          type?: string
           sample?: MountSample | null
           serverNowUtc?: string
-        } | null
-        if (!mounted) return
-        if (!data?.ok || !data.sample) {
-          setConnected(false)
-          setTrackingEnabled(null)
-          opticalTargetRef.current = { alt: DISCONNECTED_POINTING.altDeg, az: DISCONNECTED_POINTING.azDeg }
-          pierRollRef.current = Math.PI
-          schedule(POLL_DISCONNECTED_MS)
-          return
-        }
-        const sample = data.sample
-        const receivedAtMs = sample.receivedAtUtc ? Date.parse(sample.receivedAtUtc) : NaN
-        const serverNowMs = data.serverNowUtc ? Date.parse(data.serverNowUtc) : NaN
-        const nowMs = Number.isFinite(serverNowMs) ? serverNowMs : Date.now()
-        const stale = !Number.isFinite(receivedAtMs) || nowMs - receivedAtMs > TELEMETRY_STALE_MS
-        nowConnected = !stale && sample.connected === true
-        setConnected(nowConnected)
-        setTrackingEnabled(nowConnected ? (typeof sample.trackingEnabled === 'boolean' ? sample.trackingEnabled : null) : null)
-        const alt = finiteOrNull(sample.altitudeDeg)
-        const az = finiteOrNull(sample.azimuthDeg)
-        if (nowConnected && alt != null && az != null) {
-          opticalTargetRef.current = { alt: clampAltitude(alt), az: normalize360(az) }
-          const sop = (sample.sideOfPier ?? '').toLowerCase()
-          pierRollRef.current = sop === 'piereast' ? 0 : Math.PI
-        } else {
-          opticalTargetRef.current = { alt: DISCONNECTED_POINTING.altDeg, az: DISCONNECTED_POINTING.azDeg }
-          pierRollRef.current = Math.PI
-        }
-
-        targetEulerRef.current = {
-          x: POLAR_ALIGNMENT_X_DEG,
-          y: WEBSITE_Y_OFFSET_DEG,
-          z: 0,
         }
       } catch {
-        if (mounted) {
-          setConnected(false)
-          setTrackingEnabled(null)
-          opticalTargetRef.current = { alt: DISCONNECTED_POINTING.altDeg, az: DISCONNECTED_POINTING.azDeg }
-          pierRollRef.current = Math.PI
-        }
+        return
       }
-      schedule(nowConnected ? POLL_CONNECTED_MS : POLL_DISCONNECTED_MS)
+      if (!payload || payload.type === 'ping') return
+      if (payload.type === 'snapshot' || payload.type === 'sample') {
+        applySample(payload.sample, payload.serverNowUtc)
+      }
     }
 
-    poll()
+    source.onerror = () => {
+      if (mounted) applySample(null, undefined)
+    }
+
     return () => {
       mounted = false
-      if (timer) clearTimeout(timer)
+      source.close()
     }
   }, [])
 

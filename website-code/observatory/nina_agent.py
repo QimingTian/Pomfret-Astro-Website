@@ -81,9 +81,19 @@ AGENT_PULSE_URL = (
     if _nina_seq.scheme and _nina_seq.netloc
     else ""
 )
-# Vercel Hobby cannot run sub-daily crons; 24/7 agent triggers reconcile instead.
-# N idle poll cycles × POLL_SECONDS ≈ interval (e.g. 8×45s ≈ 6 minutes).
-RECONCILE_EVERY_N_POLLS = 8
+ESTOP_DELIVERY_URL = (
+    f"{_nina_seq.scheme}://{_nina_seq.netloc}/api/imaging/emergency-stop/delivery"
+    if _nina_seq.scheme and _nina_seq.netloc
+    else ""
+)
+AGENT_EVENTS_URL = (
+    f"{_nina_seq.scheme}://{_nina_seq.netloc}/api/imaging/agent-events"
+    if _nina_seq.scheme and _nina_seq.netloc
+    else ""
+)
+# Vercel Hobby cannot run sub-daily crons; agent used to trigger reconcile on poll cadence.
+# Reconcile is now pushed via agent-events SSE (or fallback poll below).
+RECONCILE_EVERY_N_POLLS = 0
 # Optional override. Otherwise: env POMFRET_CRON_SECRET (same as Vercel CRON_SECRET), then TOKEN.
 RECONCILE_BEARER = ""
 
@@ -91,6 +101,8 @@ RECONCILE_BEARER = ""
 TOKEN = ""
 
 POLL_SECONDS = 45
+FALLBACK_POLL_SECONDS = 300
+SSE_CONNECTED_WAIT_SECONDS = 60
 JOBS_DIR = r"C:\Users\Observatory\Downloads\NinaJobs"
 LOCAL_SEQUENCE_FILENAME = "latest_sequence.json"
 NINA_INSTALL_DIR = r"C:\Program Files\N.I.N.A. - Nighttime Imaging 'N' Astronomy"
@@ -395,9 +407,14 @@ def is_estop_sequence_content(content: bytes) -> bool:
 
 
 def poll_emergency_stop_sequence() -> Optional[bytes]:
+    url = str(ESTOP_DELIVERY_URL or SEQUENCE_JSON_URL).strip()
+    if not url:
+        return None
     try:
-        content = download_bytes(SEQUENCE_JSON_URL)
-    except urllib.error.HTTPError:
+        content = download_bytes(url)
+    except urllib.error.HTTPError as ex:
+        if ex.code in (204, 404, 409):
+            return None
         return None
     except Exception as ex:
         log(f"Emergency STOP poll failed: {ex}")
@@ -405,6 +422,104 @@ def poll_emergency_stop_sequence() -> Optional[bytes]:
     if is_estop_sequence_content(content):
         return content
     return None
+
+
+_sse_lock = threading.Lock()
+_sse_last_connected_at: float = 0.0
+_wake_estop = threading.Event()
+_wake_sequence = threading.Event()
+_wake_reconcile = threading.Event()
+
+
+def _agent_sse_connected_recently() -> bool:
+    with _sse_lock:
+        if _sse_last_connected_at <= 0:
+            return False
+        return (time.monotonic() - _sse_last_connected_at) <= SSE_CONNECTED_WAIT_SECONDS
+
+
+def _mark_agent_sse_connected() -> None:
+    global _sse_last_connected_at
+    with _sse_lock:
+        _sse_last_connected_at = time.monotonic()
+
+
+def _handle_agent_sse_payload(raw: str) -> None:
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return
+    if not isinstance(payload, dict):
+        return
+    event_type = payload.get("type")
+    if event_type == "estop":
+        _wake_estop.set()
+    elif event_type == "poll_sequence":
+        _wake_sequence.set()
+    elif event_type == "reconcile":
+        _wake_reconcile.set()
+    if event_type in ("connected", "estop", "poll_sequence", "reconcile", "ping"):
+        _mark_agent_sse_connected()
+
+
+def agent_events_reader_loop() -> None:
+    url = str(AGENT_EVENTS_URL).strip()
+    if not url:
+        log("AGENT_EVENTS_URL not configured; using fallback polling only.")
+        return
+    while True:
+        try:
+            req = urllib.request.Request(url, headers=build_headers(), method="GET")
+            with urllib.request.urlopen(req, timeout=330) as resp:
+                _mark_agent_sse_connected()
+                log("Agent events SSE connected.")
+                for raw_line in resp:
+                    line = raw_line.decode("utf-8", errors="replace").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data:
+                        _handle_agent_sse_payload(data)
+        except Exception as ex:
+            log(f"Agent events SSE disconnected: {ex}")
+        time.sleep(5)
+
+
+def _wait_agent_wake(timeout_sec: float) -> Optional[str]:
+    deadline = time.monotonic() + max(0.1, timeout_sec)
+    while time.monotonic() < deadline:
+        if _wake_estop.is_set():
+            _wake_estop.clear()
+            return "estop"
+        if _wake_sequence.is_set():
+            _wake_sequence.clear()
+            return "poll_sequence"
+        if _wake_reconcile.is_set():
+            _wake_reconcile.clear()
+            return "reconcile"
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        _wake_estop.wait(timeout=min(1.0, remaining))
+    return None
+
+
+def sleep_between_polls() -> None:
+    if _agent_sse_connected_recently():
+        timeout = float(SSE_CONNECTED_WAIT_SECONDS)
+    else:
+        timeout = float(FALLBACK_POLL_SECONDS)
+    wake = _wait_agent_wake(timeout)
+    if wake == "reconcile":
+        try_reconcile_queue_schedule()
+        return
+    if wake is None and not _agent_sse_connected_recently():
+        try_reconcile_queue_schedule()
+        return
+    n = int(RECONCILE_EVERY_N_POLLS)
+    if n > 0 and str(RECONCILE_QUEUE_URL).strip():
+        # Legacy reconcile-on-poll (disabled when RECONCILE_EVERY_N_POLLS = 0).
+        pass
 
 
 def kill_nina_process(process: Optional[subprocess.Popen[bytes]] = None) -> None:
@@ -1176,19 +1291,10 @@ def run_loop() -> None:
                 postprocess_queue.task_done()
 
     threading.Thread(target=postprocess_worker, name="postprocess-worker", daemon=True).start()
+    threading.Thread(target=agent_events_reader_loop, name="agent-events-sse", daemon=True).start()
 
     log("Agent started.")
-    poll_tick = 0
     last_pulsed_nina_running: Optional[bool] = None
-
-    def sleep_between_polls() -> None:
-        nonlocal poll_tick
-        n = int(RECONCILE_EVERY_N_POLLS)
-        if n > 0 and str(RECONCILE_QUEUE_URL).strip():
-            poll_tick += 1
-            if poll_tick % n == 0:
-                try_reconcile_queue_schedule()
-        time.sleep(POLL_SECONDS)
 
     while True:
         try:
@@ -1220,6 +1326,12 @@ def run_loop() -> None:
                 continue
             if last_pulsed_nina_running is not False and report_agent_pulse(False):
                 last_pulsed_nina_running = False
+
+            if _agent_sse_connected_recently() and not (
+                _wake_sequence.is_set() or _wake_estop.is_set() or _wake_reconcile.is_set()
+            ):
+                sleep_between_polls()
+                continue
 
             try:
                 content = download_bytes(SEQUENCE_JSON_URL)

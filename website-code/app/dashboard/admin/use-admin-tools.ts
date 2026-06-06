@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useMember } from '@/hooks/use-member'
+import { useSiteStream } from '@/lib/use-site-stream'
 
 export type AuditLogRow = {
   id: string
@@ -202,9 +203,16 @@ export function useAdminTools() {
   useEffect(() => {
     if (!authorized) return
     void loadEmergencyStopStatus()
-    const id = window.setInterval(() => void loadEmergencyStopStatus(), 5000)
-    return () => window.clearInterval(id)
   }, [authorized, loadEmergencyStopStatus])
+
+  useSiteStream(
+    {
+      onEstop: (event) => {
+        setEmergencyStopBlocking(Boolean(event.blocking))
+      },
+    },
+    authorized
+  )
 
   async function runSessionAction(
     sessionId: string,

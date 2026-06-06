@@ -2,6 +2,7 @@ import { authorizeImagingSession, resolveImagingSessionContext } from '@/lib/ima
 import type { NextRequest } from 'next/server'
 import { getPreviewImage } from '@/lib/imaging-preview-store'
 import { subscribePreview } from '@/lib/imaging-preview-live'
+import { livePreviewChannel, subscribeLiveEvents } from '@/lib/imaging/live-bus'
 
 export const runtime = 'nodejs'
 
@@ -34,9 +35,16 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       const current = await getPreviewImage(id)
       enqueue({ type: 'snapshot', updatedAt: current?.updatedAt ?? null })
 
-      const unsubscribe = subscribePreview(id, (updatedAt) => {
+      const onUpdated = (updatedAt: string) => {
         enqueue({ type: 'updated', updatedAt })
-      })
+      }
+
+      const unsubscribeLocal = subscribePreview(id, onUpdated)
+      const unsubscribeBus = subscribeLiveEvents(livePreviewChannel(id), (payload) => {
+        if (!payload || typeof payload !== 'object') return
+        const p = payload as { type?: string; updatedAt?: string }
+        if (p.type === 'updated' && typeof p.updatedAt === 'string') onUpdated(p.updatedAt)
+      }, request.signal)
 
       const keepAlive = setInterval(() => {
         enqueue({ type: 'ping' })
@@ -44,7 +52,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 
       request.signal.addEventListener('abort', () => {
         clearInterval(keepAlive)
-        unsubscribe()
+        unsubscribeLocal()
+        unsubscribeBus()
         controller.close()
       })
     },

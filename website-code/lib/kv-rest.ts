@@ -145,3 +145,42 @@ export async function kvIncrWithExpire(key: string, windowSec: number): Promise<
     return undefined
   }
 }
+
+function parseStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is string => typeof item === 'string')
+}
+
+/** LPUSH + LTRIM for bounded live-event buffers. Returns new list length. */
+export async function kvListPush(key: string, value: string, maxLen: number): Promise<number | undefined> {
+  if (!enabled()) return undefined
+  const cap = Number.isFinite(maxLen) && maxLen > 0 ? Math.floor(maxLen) : 100
+  try {
+    const len = await redisCommand('LPUSH', key, value)
+    await redisCommand('LTRIM', key, 0, cap - 1)
+    return parseIncrResult(len)
+  } catch {
+    return undefined
+  }
+}
+
+/** LRANGE start stop (inclusive). */
+export async function kvListRange(key: string, start: number, stop: number): Promise<string[]> {
+  if (!enabled()) return []
+  try {
+    return parseStringArray(await redisCommand('LRANGE', key, start, stop))
+  } catch {
+    return []
+  }
+}
+
+/** EXPIRE key seconds. */
+export async function kvExpire(key: string, seconds: number): Promise<boolean> {
+  if (!enabled()) return false
+  try {
+    const result = await redisCommand('EXPIRE', key, seconds)
+    return result === 1 || result === '1'
+  } catch {
+    return false
+  }
+}

@@ -1,4 +1,6 @@
 import type { ImagingAdminActor } from '@/lib/imaging/core/admin-auth'
+import { emergencyStopActorLabel } from '@/lib/imaging/session/emergency-stop-display'
+import { emitAgentWake } from '@/lib/imaging/site-events'
 import { kvCompareAndSet, kvEnabled, kvGetJson, kvGetString, kvSetJson } from '@/lib/kv-rest'
 
 const KV_KEY = 'imaging-emergency-stop'
@@ -79,6 +81,12 @@ function normalizeState(raw: unknown): EmergencyStopState | null {
     clearedAt: typeof r.clearedAt === 'string' ? r.clearedAt : null,
     heldSessionIds,
   }
+}
+
+async function notifyEstopChanged(armAgent = false): Promise<void> {
+  const { emitSiteEstop } = await import('@/lib/imaging/site-events-server')
+  await emitSiteEstop()
+  if (armAgent) emitAgentWake('estop')
 }
 
 async function readState(): Promise<EmergencyStopState | null> {
@@ -164,42 +172,13 @@ export async function clearStaleUndeliveredEmergencyStop(
   return result === 'ok'
 }
 
+export {
+  emergencyStopActorLabel,
+  emergencyStopTriggeredBySuffix,
+} from '@/lib/imaging/session/emergency-stop-display'
+
 export function isEmergencyStopQueueId(queueId: string): boolean {
   return queueId.startsWith('estop-')
-}
-
-export function emergencyStopActorLabel(input: {
-  requestedBy?: string | null
-  requestedByEmail?: string | null
-  requestedByUsername?: string | null
-}): string {
-  const by = typeof input.requestedBy === 'string' ? input.requestedBy.trim() : ''
-  if (by && by.toLowerCase() !== 'admin') return by
-  const email = typeof input.requestedByEmail === 'string' ? input.requestedByEmail.trim() : ''
-  if (email) return email
-  const username =
-    typeof input.requestedByUsername === 'string' ? input.requestedByUsername.trim() : ''
-  if (username && username.toLowerCase() !== 'admin') return username
-  return by || 'unknown operator'
-}
-
-/** Appended to ESTOP audit messages so the list view shows who armed it. */
-export function emergencyStopTriggeredBySuffix(
-  input:
-    | string
-    | null
-    | undefined
-    | {
-        requestedBy?: string | null
-        requestedByEmail?: string | null
-        requestedByUsername?: string | null
-      }
-): string {
-  const who =
-    typeof input === 'string' || input == null
-      ? emergencyStopActorLabel({ requestedBy: input ?? null })
-      : emergencyStopActorLabel(input)
-  return ` (triggered by ${who})`
 }
 
 export function emergencyStopAuditDetail(
@@ -334,6 +313,7 @@ export async function armEmergencyStop(
     heldSessionIds: [...heldSessionIds],
   }
   await compareAndWriteState(() => state)
+  await notifyEstopChanged(true)
   return state
 }
 
@@ -357,6 +337,7 @@ export async function markEmergencyStopDelivered(queueId: string): Promise<boole
     marked = true
     return { ...current, deliveredAt: new Date().toISOString() }
   })
+  if (marked && result === 'ok') void notifyEstopChanged()
   return marked && result === 'ok'
 }
 
@@ -374,6 +355,7 @@ export async function markEmergencyStopCompleted(queueId: string): Promise<boole
       completedAt: new Date().toISOString(),
     }
   })
+  if (completed && result === 'ok') void notifyEstopChanged()
   return completed && result === 'ok'
 }
 
@@ -387,6 +369,7 @@ export async function clearEmergencyStopAfterManualUnlock(): Promise<EmergencySt
   })
   if (result !== 'ok') return null
   setMemoryState(null)
+  void notifyEstopChanged()
   return { ...before, heldSessionIds }
 }
 

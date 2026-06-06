@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { MemberAuthPanel } from '@/components/member-auth-panel'
 import { useMember } from '@/hooks/use-member'
+import { useSiteStream } from '@/lib/use-site-stream'
 import type { VariableStarRow } from '@/lib/variable-star-catalog'
 import {
   MIN_ALTITUDE_DEG,
@@ -55,8 +56,6 @@ type PreviewStreamEvent =
   | { type: 'updated'; updatedAt: string }
   | { type: 'ping' }
 
-const TERMINAL_POLL_MS = 10_000
-const STATUS_POLL_MS = 10 * 60 * 1000
 const FILTER_OPTIONS = [
   { value: 'L', label: 'Luminance' },
   { value: 'R', label: 'Red' },
@@ -1081,19 +1080,15 @@ export default function RemotePage() {
           data.status === 'closed_observatory_maintenance')
       ) {
         setStatus(data.status)
+        setStatusLoadError(null)
       } else {
         setStatusLoadError('Unable to load observatory status.')
       }
     }
 
     void loadStatus()
-    const intervalId = window.setInterval(() => {
-      void loadStatus()
-    }, STATUS_POLL_MS)
-
     return () => {
       mounted = false
-      window.clearInterval(intervalId)
     }
   }, [])
 
@@ -1501,17 +1496,30 @@ export default function RemotePage() {
     void refreshQueue()
   }, [refreshQueue])
 
-  const sessionListNeedsLivePoll = useMemo(
-    () =>
-      queueItems.some(
-        (i) =>
-          i.status === 'pending' ||
-          i.status === 'scheduled' ||
-          i.status === 'on_hold' ||
-          i.status === 'in_progress' ||
-          (i.status === 'completed' && i.hasDownload !== true)
-      ),
-    [queueItems]
+  const refreshQueueRef = useRef(refreshQueue)
+  refreshQueueRef.current = refreshQueue
+
+  useSiteStream(
+    {
+      onObservatoryStatus: (event) => {
+        const next = event.status
+        if (
+          next === 'ready' ||
+          next === 'busy_in_use' ||
+          next === 'disconnected' ||
+          next === 'closed_weather_not_permitted' ||
+          next === 'closed_daytime' ||
+          next === 'closed_observatory_maintenance'
+        ) {
+          setStatus(next)
+          setStatusLoadError(null)
+        }
+      },
+      onSessionsChanged: () => {
+        void refreshQueueRef.current()
+      },
+    },
+    member.status === 'authenticated'
   )
 
   const tonightSchedule = useMemo(() => {
@@ -2465,14 +2473,6 @@ export default function RemotePage() {
     return null
   }, [queueItems, terminalSessionId])
 
-  useEffect(() => {
-    if (!sessionListNeedsLivePoll) return
-    const id = window.setInterval(() => {
-      void refreshQueue()
-    }, TERMINAL_POLL_MS)
-    return () => window.clearInterval(id)
-  }, [sessionListNeedsLivePoll, refreshQueue])
-
   const resolveSessionPassword = useCallback(
     (sessionId: string): string => {
       const direct = sessionPasswords[sessionId]
@@ -2483,9 +2483,6 @@ export default function RemotePage() {
     },
     [sessionPasswords]
   )
-
-  const refreshQueueRef = useRef(refreshQueue)
-  refreshQueueRef.current = refreshQueue
 
   const loadTerminalProgress = useCallback(
     async (id: string, passwordOverride?: string, options?: { showLoading?: boolean }) => {
@@ -2657,11 +2654,6 @@ export default function RemotePage() {
     const password = resolveSessionPasswordRef.current(sessionId)
     if (!password && !isAdmin && !canAccessSessionIdRef.current(sessionId)) return
 
-    const pollProgress = () => {
-      void loadTerminalProgressRef.current(sessionId, password, { showLoading: false })
-    }
-    const pollId = window.setInterval(pollProgress, 3000)
-
     const params = password ? new URLSearchParams({ password }) : new URLSearchParams()
     const streamUrl = `/api/imaging/queue/${encodeURIComponent(sessionId)}/progress-stream?${params.toString()}`
     const source = new EventSource(streamUrl)
@@ -2700,7 +2692,6 @@ export default function RemotePage() {
     source.onerror = () => {}
 
     return () => {
-      window.clearInterval(pollId)
       source.close()
     }
   }, [terminalSessionId, isAdmin])

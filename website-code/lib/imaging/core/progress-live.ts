@@ -1,3 +1,5 @@
+import { emitLiveEvent, liveProgressChannel } from '@/lib/imaging/live-bus'
+
 export type LiveProgressEvent =
   | { type: 'line'; at: string; text: string }
   | { type: 'status'; queueStatus: string }
@@ -32,12 +34,14 @@ export function subscribeProgress(queueId: string, listener: Listener): () => vo
 
 export function publishProgress(queueId: string, event: LiveProgressEvent): void {
   const listeners = listenersMap().get(queueId)
-  if (!listeners || listeners.size === 0) return
-  for (const listener of Array.from(listeners)) {
-    try {
-      listener(event)
-    } catch {
-      // ignore listener failures
+  if (listeners && listeners.size > 0) {
+    for (const listener of Array.from(listeners)) {
+      try {
+        listener(event)
+      } catch {
+        // ignore listener failures
+      }
     }
   }
+  void emitLiveEvent(liveProgressChannel(queueId), event)
 }

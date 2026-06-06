@@ -2,6 +2,8 @@
 
 import type { CSSProperties } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useMember } from '@/hooks/use-member'
+import { useSiteStream } from '@/lib/use-site-stream'
 import { useAppStore } from '@/lib/store'
 import MJPEGStream from '@/components/MJPEGStream'
 import { allSkyCameraStatusUrl } from '@/lib/asc-cloud'
@@ -86,6 +88,7 @@ function AscCompassRose({ className = '' }: { className?: string }) {
 const streamAreaClass = 'relative w-full overflow-hidden rounded-lg bg-black'
 
 export default function AllSkyCameraView() {
+  const member = useMember()
   const controller = useAppStore((s) => s.controllers.find((c) => c.roles.includes('cameras')))
   const streamURL = controller?.apiClient?.getStreamURL()
   const weather = useAppStore((s) => s.weather)
@@ -123,11 +126,26 @@ export default function AllSkyCameraView() {
 
   useEffect(() => {
     void loadObservatory()
-    const obsId = window.setInterval(() => void loadObservatory(), 60_000)
-    return () => {
-      window.clearInterval(obsId)
-    }
   }, [loadObservatory])
+
+  useSiteStream(
+    {
+      onObservatoryStatus: (event) => {
+        const next = event.status
+        if (
+          next === 'ready' ||
+          next === 'busy_in_use' ||
+          next === 'disconnected' ||
+          next === 'closed_weather_not_permitted' ||
+          next === 'closed_daytime' ||
+          next === 'closed_observatory_maintenance'
+        ) {
+          setObsStatus(next)
+        }
+      },
+    },
+    member.status === 'authenticated'
+  )
 
   useEffect(() => {
     const statusUrl = resolveAllSkyStatusUrl(streamURL)

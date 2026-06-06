@@ -1,3 +1,5 @@
+import { emitLiveEvent, livePreviewChannel } from '@/lib/imaging/live-bus'
+
 type Listener = (updatedAt: string) => void
 
 type GlobalWithPreviewLive = typeof globalThis & {
@@ -25,12 +27,14 @@ export function subscribePreview(queueId: string, listener: Listener): () => voi
 
 export function publishPreview(queueId: string, updatedAt: string): void {
   const set = listenersMap().get(queueId)
-  if (!set || set.size === 0) return
-  for (const listener of Array.from(set)) {
-    try {
-      listener(updatedAt)
-    } catch {
-      // ignore listener failures
+  if (set && set.size > 0) {
+    for (const listener of Array.from(set)) {
+      try {
+        listener(updatedAt)
+      } catch {
+        // ignore listener failures
+      }
     }
   }
+  void emitLiveEvent(livePreviewChannel(queueId), { type: 'updated', updatedAt })
 }

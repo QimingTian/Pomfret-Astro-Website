@@ -1,18 +1,13 @@
 import { listSessionProgressLinesFromAudit } from '@/lib/imaging-audit-log'
+import { liveProgressChannel, subscribeLiveEvents } from '@/lib/imaging/live-bus'
 import { subscribeProgress, type LiveProgressEvent } from '@/lib/imaging-progress-live'
 import { authorizeImagingSession, resolveImagingSessionContext } from '@/lib/imaging-session-access'
 import type { NextRequest } from 'next/server'
 
 export const runtime = 'nodejs'
 
-const AUDIT_POLL_MS = 2000
-
 function sseData(payload: unknown): string {
   return `data: ${JSON.stringify(payload)}\n\n`
-}
-
-function linesFingerprint(lines: Array<{ at: string; text: string }>): string {
-  return lines.map((l) => `${l.at}\t${l.text}`).join('\n')
 }
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
@@ -38,8 +33,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       const enqueue = (payload: unknown) => controller.enqueue(encoder.encode(sseData(payload)))
 
       let queueStatus = session.queueStatus
-      let lines = await listSessionProgressLinesFromAudit(id)
-      let fingerprint = linesFingerprint(lines)
+      const lines = await listSessionProgressLinesFromAudit(id)
       enqueue({ type: 'snapshot', queueStatus, lines })
 
       const onLiveEvent = (event: LiveProgressEvent) => {
@@ -49,28 +43,18 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
           return
         }
         if (event.type === 'line') {
-          lines = [...lines, { at: event.at, text: event.text }]
-          fingerprint = linesFingerprint(lines)
           enqueue(event)
         }
       }
 
-      const unsubscribe = subscribeProgress(id, onLiveEvent)
+      const handleBusPayload = (payload: unknown) => {
+        if (!payload || typeof payload !== 'object') return
+        const event = payload as LiveProgressEvent
+        if (event.type === 'line' || event.type === 'status') onLiveEvent(event)
+      }
 
-      const pollAudit = setInterval(async () => {
-        try {
-          const fresh = await listSessionProgressLinesFromAudit(id)
-          const nextFp = linesFingerprint(fresh)
-          if (nextFp === fingerprint) return
-          fingerprint = nextFp
-          lines = fresh
-          const ctx = await resolveImagingSessionContext(id)
-          if (ctx) queueStatus = ctx.queueStatus
-          enqueue({ type: 'snapshot', queueStatus, lines: fresh })
-        } catch {
-          // ignore poll errors
-        }
-      }, AUDIT_POLL_MS)
+      const unsubscribeLocal = subscribeProgress(id, onLiveEvent)
+      const unsubscribeBus = subscribeLiveEvents(liveProgressChannel(id), handleBusPayload, request.signal)
 
       const keepAlive = setInterval(() => {
         enqueue({ type: 'ping' })
@@ -78,8 +62,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 
       request.signal.addEventListener('abort', () => {
         clearInterval(keepAlive)
-        clearInterval(pollAudit)
-        unsubscribe()
+        unsubscribeLocal()
+        unsubscribeBus()
         controller.close()
       })
     },

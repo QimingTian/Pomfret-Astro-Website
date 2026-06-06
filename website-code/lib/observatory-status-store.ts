@@ -13,6 +13,7 @@ import { OBS_LAT_DEG, OBS_LON_DEG } from '@/lib/target-altitude'
 import { getDaytimeClosedWindowDetail, isWithinDaytimeClosedWindow } from '@/lib/sunrise-window'
 import { isWithinAdminClosedWindow } from '@/lib/admin-closed-window-store'
 import { onObservatoryFinalStatusChanged } from '@/lib/imaging-session-failure'
+import { emitSiteObservatoryStatus } from '@/lib/imaging/site-events-server'
 import {
   evaluateObservatoryReadyWeather,
   fetchAscCloud,
@@ -409,7 +410,10 @@ async function persist() {
   }
   if (kvEnabled()) {
     const ok = await kvSetJson('observatory-status', payload)
-    if (ok) return
+    if (ok) {
+      void emitSiteObservatoryStatus()
+      return
+    }
   }
   if (!statusFile) return
   await mkdir(path.dirname(statusFile), { recursive: true })
@@ -420,6 +424,7 @@ async function persist() {
     'utf-8'
   )
   await rename(tmp, statusFile)
+  void emitSiteObservatoryStatus()
 }
 
 export type GetObservatoryStatusOptions = {

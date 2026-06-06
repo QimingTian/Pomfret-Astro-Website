@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { useSiteStream } from '@/lib/use-site-stream'
 import { AdminDashboardGrid } from '@/app/dashboard/admin/admin-dashboard-grid'
 import { AccountFullBleedRule } from '@/app/dashboard/account/account-full-bleed-rule'
 import { accountTwoColGridAccountEmergency } from '@/app/dashboard/account/account-two-col-layout'
@@ -69,10 +70,27 @@ function EmergencyStopButton() {
 
   useEffect(() => {
     void refreshStatus()
-    const intervalMs = status.phase === 'stopping' ? 2000 : 5000
-    const id = window.setInterval(() => void refreshStatus(), intervalMs)
-    return () => window.clearInterval(id)
-  }, [refreshStatus, status.phase])
+  }, [refreshStatus])
+
+  useSiteStream(
+    {
+      onEstop: (event) => {
+        setStatusLoaded(true)
+        setError(null)
+        setStatus({
+          phase:
+            event.phase === 'stopping' || event.phase === 'stopped' || event.phase === 'idle'
+              ? event.phase
+              : 'idle',
+          progress: typeof event.progress === 'number' ? event.progress : 0,
+          label: typeof event.label === 'string' ? event.label : 'ESTOP',
+          agentConnected: Boolean(event.agentConnected),
+          canArm: Boolean(event.canArm),
+        })
+      },
+    },
+    true
+  )
 
   async function confirmEmergencyStop() {
     setShowConfirm(false)

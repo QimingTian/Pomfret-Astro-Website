@@ -1,4 +1,4 @@
-import { emergencyStopActorLabel } from '@/lib/imaging-emergency-stop'
+import { emergencyStopActorLabel } from '@/lib/imaging/session/emergency-stop-display'
 import { normalizeLegacyAuditStatus } from '@/lib/imaging/session/status-audit'
 
 export type AuditLogRowLike = {

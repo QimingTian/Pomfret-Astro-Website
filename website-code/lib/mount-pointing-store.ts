@@ -1,5 +1,6 @@
 /** Latest mount telemetry per station — memory + Upstash KV for Vercel multi-instance. */
 
+import { emitLiveEvent, liveMountChannel } from '@/lib/imaging/live-bus'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 
 export type MountPointingPayload = {
@@ -50,6 +51,7 @@ export async function setMountPointingSample(
   if (kvEnabled()) {
     await kvSetJson(kvKey(stationId), stored)
   }
+  void emitLiveEvent(liveMountChannel(stationId), { type: 'sample', sample: stored })
   return stored
 }
 

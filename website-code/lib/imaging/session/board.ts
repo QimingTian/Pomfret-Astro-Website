@@ -4,6 +4,7 @@ import {
 } from '@/lib/imaging-schedule-bar'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
+import { emitSiteSessionsChanged } from '@/lib/imaging/site-events'
 
 /** Sessions removed from the API queue after NINA download, still shown on Remote. */
 export type SessionBoardStatus = 'in_progress' | 'completed' | 'failed'
@@ -199,10 +200,14 @@ async function writeEntries(entries: SessionBoardEntry[]): Promise<void> {
   const trimmed = entries.length > MAX_ENTRIES ? entries.slice(-MAX_ENTRIES) : entries
   if (kvEnabled()) {
     const ok = await kvSetJson(KEY, { entries: trimmed })
-    if (ok) return
+    if (ok) {
+      emitSiteSessionsChanged('board')
+      return
+    }
   }
   const g = globalThis as GlobalWithBoard
   g.__pomfret_imaging_session_board__ = trimmed
+  emitSiteSessionsChanged('board')
 }
 
 export async function listBoardEntries(): Promise<SessionBoardEntry[]> {

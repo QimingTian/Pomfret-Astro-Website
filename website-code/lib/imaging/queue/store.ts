@@ -8,6 +8,11 @@ import {
 } from '@/lib/imaging-session-overhead'
 import { hashSessionPassword } from '@/lib/session-password'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
+import {
+  emitAgentWakePollSequenceDebounced,
+  emitSiteSessionsChanged,
+  queueStatusSignature,
+} from '@/lib/imaging/site-events'
 import { getTonightAstronomicalNightWindow, getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import {
   altitudeAllowedCoverageMs,
@@ -123,6 +128,7 @@ const queueFile = process.env.IMAGING_QUEUE_FILE
 const KV_QUEUE_KEY = 'imaging-queue-requests'
 
 let diskLoaded = false
+let lastQueueStatusSignature = ''
 
 type QueueFilePayload = { requests?: ImagingRequest[] }
 
@@ -160,8 +166,15 @@ async function ensureLoadedFromDisk(): Promise<void> {
 async function persist(): Promise<void> {
   const mem = getMemory()
   const snapshot = [...mem]
+  const nextSig = queueStatusSignature(snapshot)
+  const statusChanged = nextSig !== lastQueueStatusSignature
   if (kvEnabled()) {
     await kvSetJson(KV_QUEUE_KEY, { requests: snapshot })
+    if (statusChanged) {
+      lastQueueStatusSignature = nextSig
+      emitSiteSessionsChanged('queue')
+      emitAgentWakePollSequenceDebounced()
+    }
     return
   }
   if (!queueFile) return
@@ -170,6 +183,11 @@ async function persist(): Promise<void> {
   const payload = JSON.stringify({ requests: snapshot }, null, 2)
   await writeFile(tmp, payload, 'utf-8')
   await rename(tmp, queueFile)
+  if (statusChanged) {
+    lastQueueStatusSignature = nextSig
+    emitSiteSessionsChanged('queue')
+    emitAgentWakePollSequenceDebounced()
+  }
 }
 
 function nowIso() {

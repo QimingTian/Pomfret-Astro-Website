@@ -1,4 +1,5 @@
 import { emergencyStopActorLabel } from '@/lib/imaging-emergency-stop'
+import { normalizeLegacyAuditStatus } from '@/lib/imaging/session/status-audit'
 
 export type AuditLogRowLike = {
   id: string
@@ -14,9 +15,37 @@ const FAILED_KINDS = new Set([
 ])
 const FAILED_MESSAGE_RE = /fail|rejected|unauthorized|error/i
 
+function sessionDetailParts(d: Record<string, unknown> | undefined): {
+  target: string
+  nightIndex: number | null
+  id: string
+} {
+  const target = typeof d?.target === 'string' ? d.target.trim() : ''
+  const nightIndex = typeof d?.nightIndex === 'number' ? d.nightIndex : null
+  const id =
+    typeof d?.nightSubId === 'string'
+      ? d.nightSubId
+      : typeof d?.id === 'string'
+        ? d.id
+        : ''
+  return { target, nightIndex, id }
+}
+
+function formatStatusTransition(previousStatus: unknown, nextStatus: unknown): string {
+  const previous = normalizeLegacyAuditStatus(previousStatus) ?? String(previousStatus ?? '?')
+  const next = normalizeLegacyAuditStatus(nextStatus) ?? String(nextStatus ?? '?')
+  return `${previous} → ${next}`
+}
+
 /** Hide reconcile spam; full history remains in CSV export. */
 export function auditLogRowVisible(row: AuditLogRowLike): boolean {
-  if (row.kind !== 'session.schedule_changed') return true
+  if (
+    row.kind !== 'session.schedule_changed' &&
+    row.kind !== 'session.status_changed' &&
+    row.kind !== 'session.imaging_plan_changed'
+  ) {
+    return true
+  }
   const d = row.detail
   // Parent project queue row mirrors sub-sessions — only sub-session lines are useful.
   if (d?.projectMode === true && typeof d?.nightSubId !== 'string') return false
@@ -26,28 +55,34 @@ export function auditLogRowVisible(row: AuditLogRowLike): boolean {
 export function auditLogLineFailed(row: AuditLogRowLike): boolean {
   if (FAILED_KINDS.has(row.kind)) return true
   if (row.kind === 'queue.status' && FAILED_MESSAGE_RE.test(row.message)) return true
-  if (row.kind === 'project.sub_session_unscheduled' || row.kind === 'session.schedule_changed') return false
+  if (
+    row.kind === 'project.sub_session_unscheduled' ||
+    row.kind === 'session.schedule_changed' ||
+    row.kind === 'session.status_changed' ||
+    row.kind === 'session.imaging_plan_changed'
+  ) {
+    return false
+  }
   return FAILED_MESSAGE_RE.test(row.message) && !/completed|scheduled/i.test(row.message)
 }
 
 /** One-line headline for the log list (Check Progress terminal style). */
 export function auditLogHeadline(row: AuditLogRowLike): string {
-  if (row.kind === 'session.schedule_changed') {
+  if (row.kind === 'session.imaging_plan_changed') {
+    const { target, id } = sessionDetailParts(row.detail)
+    const targetPart = target ? ` — ${target}` : ''
+    const idPart = id ? ` (${id})` : ''
+    return `Imaging plan changed${targetPart}${idPart}`
+  }
+
+  if (row.kind === 'session.status_changed' || row.kind === 'session.schedule_changed') {
     const d = row.detail
-    const target = typeof d?.target === 'string' ? d.target.trim() : ''
-    const nightIndex = typeof d?.nightIndex === 'number' ? d.nightIndex : null
-    const id =
-      typeof d?.nightSubId === 'string'
-        ? d.nightSubId
-        : typeof d?.id === 'string'
-          ? d.id
-          : ''
-    const previousStatus = d?.previousStatus === 'scheduled' ? 'scheduled' : 'unscheduled'
-    const nextStatus = d?.nextStatus === 'scheduled' ? 'scheduled' : 'unscheduled'
+    const { target, nightIndex, id } = sessionDetailParts(d)
+    const transition = formatStatusTransition(d?.previousStatus, d?.nextStatus)
     const label = nightIndex != null ? `Session ${nightIndex}` : 'Session'
     const targetPart = target ? ` — ${target}` : ''
     const idPart = id ? ` (${id})` : ''
-    return `${label}${targetPart}${idPart}: ${previousStatus} -> ${nextStatus}`
+    return `${label}${targetPart}${idPart}: ${transition}`
   }
 
   const scheduled = row.message.match(

@@ -1,4 +1,4 @@
-import { appendAuditLog } from '@/lib/imaging-audit-log'
+import { logSessionStatusChange } from '@/lib/imaging/session/status-audit'
 import { buildNinaSequenceJson } from '@/lib/build-nina-sequence-json'
 import { projectNightSubId } from '@/lib/imaging-project-ids'
 import { DSO_SESSION_OVERHEAD_SEC } from '@/lib/imaging-session-overhead'
@@ -702,22 +702,21 @@ export async function replaceScheduledSubsForNightKey(
     for (const night of removed) {
       // Replacing a sub with an updated plan reuses the same id — skip noisy unscheduled lines.
       if (rescheduledIds.has(night.id)) continue
-      await appendAuditLog({
-        kind: 'session.schedule_changed',
-        message: `Session schedule changed: ${project.target} Session ${night.nightIndex} (${night.id}) scheduled -> unscheduled.`,
-        detail: {
+      await logSessionStatusChange({
+        subject: {
           id: night.id,
+          target: project.target,
+          projectMode: true,
           projectId,
           nightSubId: night.id,
           nightIndex: night.nightIndex,
           nightKey,
-          target: project.target,
-          projectMode: true,
-          previousStatus: 'scheduled',
-          nextStatus: 'unscheduled',
-          previousPlannedStartIso: night.plannedStartIso ?? null,
-          reason,
         },
+        previousStatus: 'scheduled',
+        nextStatus: 'pending',
+        reason,
+        previousPlannedStartIso: night.plannedStartIso ?? null,
+        source: 'replaceScheduledSubsForNightKey',
       })
     }
   }

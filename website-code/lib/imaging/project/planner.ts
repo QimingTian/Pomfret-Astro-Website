@@ -1,4 +1,9 @@
 import { appendAuditLog } from '@/lib/imaging-audit-log'
+import {
+  logSessionImagingPlanChanged,
+  logSessionStatusChange,
+  projectNightStatusToAuditStatus,
+} from '@/lib/imaging/session/status-audit'
 import { projectNightSubId } from '@/lib/imaging-project-ids'
 import {
   buildNightNinaJson,
@@ -894,30 +899,53 @@ function subSessionScheduleFingerprint(input: { filterPlansTonight: FilterPlanRo
   return filterPlansFingerprint(input.filterPlansTonight)
 }
 
-function logProjectSubSessionScheduled(
+async function logProjectSubSessionScheduleAudit(
   project: ImagingProject,
   plan: ProjectTonightPlan,
-  nightSubId: string
-): void {
-  void appendAuditLog({
-    kind: 'session.schedule_changed',
-    message: `Session schedule changed: ${project.target} Session ${plan.nightIndex} (${nightSubId}) unscheduled -> scheduled.`,
-    detail: {
-      projectId: project.id,
-      id: nightSubId,
-      nightSubId,
-      nightIndex: plan.nightIndex,
-      nightKey: plan.nightKey,
-      target: project.target,
-      projectMode: true,
-      previousStatus: 'unscheduled',
+  nightSubId: string,
+  prevNight: ProjectNight | undefined
+): Promise<void> {
+  const subject = {
+    id: nightSubId,
+    target: project.target,
+    projectMode: true as const,
+    projectId: project.id,
+    nightSubId,
+    nightIndex: plan.nightIndex,
+    nightKey: plan.nightKey,
+  }
+  const previousStatus = projectNightStatusToAuditStatus(prevNight?.status ?? 'planned')
+  const wasScheduled = prevNight?.status === 'scheduled'
+  const previousPlannedStartIso = prevNight?.plannedStartIso ?? null
+  const prevFp = prevNight
+    ? subSessionScheduleFingerprint({ filterPlansTonight: prevNight.filterPlansTonight })
+    : null
+  const nextFp = subSessionScheduleFingerprint({ filterPlansTonight: plan.filterPlansTonight })
+
+  if (!wasScheduled) {
+    await logSessionStatusChange({
+      subject,
+      previousStatus,
       nextStatus: 'scheduled',
+      reasons: plan.scheduleReasons,
+      previousPlannedStartIso,
+      plannedStartIso: plan.plannedStartIso,
+      source: 'applyProjectTonightPlans',
+    })
+    return
+  }
+
+  if (prevFp !== nextFp || previousPlannedStartIso !== plan.plannedStartIso) {
+    await logSessionImagingPlanChanged({
+      subject,
+      previousPlannedStartIso,
       plannedStartIso: plan.plannedStartIso,
       plannedEndIso: plan.plannedEndIso,
       filterPlansTonight: plan.filterPlansTonight,
       reasons: plan.scheduleReasons,
-    },
-  })
+      source: 'applyProjectTonightPlans',
+    })
+  }
 }
 
 function hasFailedSubTonight(project: ImagingProject, nightKey: string): boolean {
@@ -1029,10 +1057,11 @@ export async function applyProjectTonightPlans(
   const project = await getProjectById(projectId)
   if (!project) return
   const nightKey = plans[0]!.nightKey
-  const prevScheduled = new Map(
-    project.nights
-      .filter((n) => n.nightKey === nightKey && n.status === 'scheduled')
-      .map((n) => [n.id, subSessionScheduleFingerprint({ filterPlansTonight: n.filterPlansTonight })])
+  const prevNightById = new Map(
+    project.nights.filter((n) => n.nightKey === nightKey).map((n) => [n.id, n] as const)
+  )
+  const prevScheduledIds = new Set(
+    project.nights.filter((n) => n.nightKey === nightKey && n.status === 'scheduled').map((n) => n.id)
   )
   const subs = plansToScheduledNights(project, plans)
 
@@ -1063,7 +1092,7 @@ export async function applyProjectTonightPlans(
       const sub = subs[i]
       if (!sub) continue
       if (sub.status === 'on_hold') {
-        if (!prevScheduled.has(sub.id)) {
+        if (!prevScheduledIds.has(sub.id)) {
           void appendAuditLog({
             kind: 'queue.on_hold',
             message: `Project sub-session placed on hold: ${project.target} Session ${sub.nightIndex} (${sub.id}). Auto-held after failed sub-session tonight.`,
@@ -1078,9 +1107,12 @@ export async function applyProjectTonightPlans(
         }
         continue
       }
-      const nextFp = subSessionScheduleFingerprint({ filterPlansTonight: plan.filterPlansTonight })
-      if (prevScheduled.get(sub.id) === nextFp) continue
-      logProjectSubSessionScheduled(project, { ...plan, nightIndex: sub.nightIndex }, sub.id)
+      await logProjectSubSessionScheduleAudit(
+        project,
+        { ...plan, nightIndex: sub.nightIndex },
+        sub.id,
+        prevNightById.get(sub.id)
+      )
     }
   }
 

@@ -25,10 +25,7 @@ import {
 } from '@/lib/imaging-queue-schedule-insight'
 import { subtractOccupiedFromFree } from '@/lib/imaging-queue-free-intervals'
 import { listPending, patchRequestScheduleInsight, type ImagingRequest } from '@/lib/imaging-queue-store'
-import {
-  deriveQueueScheduleState,
-  logQueueScheduleInsightChange,
-} from '@/lib/imaging/queue/schedule-audit'
+import { logQueueScheduleInsightChange } from '@/lib/imaging/queue/schedule-audit'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import { isEmergencyStopBlocking } from '@/lib/imaging-emergency-stop'
@@ -224,16 +221,12 @@ export async function reconcilePendingScheduleStatus(): Promise<void> {
     const prevPlanned = r.plannedStartIso ?? null
     const nextQueueStatus = next.status === 'scheduled' ? 'scheduled' : 'pending'
     if (prevQueueStatus === nextQueueStatus && prevPlanned === next.plannedStartIso) continue
-    const project = r.projectMode ? await getProjectById(r.id) : null
-    const previousScheduleState = deriveQueueScheduleState(r, project ?? undefined, nightKey)
     await patchRequestScheduleInsight(r.id, next)
-    if (previousScheduleState !== next.status) {
-      await logQueueScheduleInsightChange({
-        row: r,
-        previousState: previousScheduleState,
-        next,
-        previousPlannedStartIso: prevPlanned,
-      })
-    }
+    await logQueueScheduleInsightChange({
+      row: r,
+      previousQueueStatus: prevQueueStatus,
+      next,
+      previousPlannedStartIso: prevPlanned,
+    })
   }
 }

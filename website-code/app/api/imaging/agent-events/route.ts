@@ -5,6 +5,7 @@ import {
   imagingQueueAuthorized,
   imagingUnauthorized,
 } from '@/lib/imaging-queue-auth'
+import { touchObservatoryPoll } from '@/lib/observatory-status-store'
 import type { NextRequest } from 'next/server'
 
 export const runtime = 'nodejs'
@@ -30,6 +31,7 @@ export async function GET(request: NextRequest) {
       const encoder = new TextEncoder()
       const enqueue = (payload: unknown) => controller.enqueue(encoder.encode(sseData(payload)))
 
+      await touchObservatoryPoll()
       enqueue({ type: 'connected' })
 
       const unsubscribe = subscribeLiveEvents(
@@ -45,6 +47,7 @@ export async function GET(request: NextRequest) {
       )
 
       const keepAlive = setInterval(() => {
+        void touchObservatoryPoll()
         enqueue({ type: 'ping' })
       }, 15000)
 

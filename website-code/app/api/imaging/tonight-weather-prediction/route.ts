@@ -1,4 +1,8 @@
 import { NextResponse } from 'next/server'
+import {
+  maybeReconcileQueueWhenScheduleWeatherColumnChanged,
+  type ScheduleWeatherColumnPayload,
+} from '@/lib/imaging-queue-weather-column-reconcile'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import {
   evaluateGlobalTonightWeatherPermitted,
@@ -28,6 +32,22 @@ type OpenMeteoResponse = {
 const LAT = 41.9159
 const LON = -71.9626
 const KMH_TO_MS = 1 / 3.6
+
+async function reconcileIfScheduleWeatherColumnChanged(
+  windowStartSec: number,
+  windowEndSec: number,
+  payload: ScheduleWeatherColumnPayload
+): Promise<void> {
+  try {
+    await maybeReconcileQueueWhenScheduleWeatherColumnChanged(
+      windowStartSec,
+      windowEndSec,
+      payload
+    )
+  } catch (error) {
+    console.error('[tonight-weather-prediction] weather reconcile failed', error)
+  }
+}
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url)
@@ -165,7 +185,17 @@ export async function GET(request: Request) {
         nowSec < todaySunrise ||
         (nowSec >= windowStartSec && nowSec < windowEndSec)
     }
+    const precipitationHitHourStartsSec = precipitationHits.map((hit) => hit.hourStartSec)
+
     if (isNighttimeNow) {
+      await reconcileIfScheduleWeatherColumnChanged(windowStartSec, windowEndSec, {
+        prediction: 'unavailable',
+        hasAnyPrecipitationTonight,
+        readyHourStartsSec,
+        nightHourStartsSec,
+        notPermittedHourReasons,
+        precipitationHitHourStartsSec,
+      })
       return NextResponse.json({
         ok: true as const,
         prediction: 'unavailable',
@@ -194,9 +224,19 @@ export async function GET(request: Request) {
       nowSec,
     })
 
+    const prediction = permitted ? 'permitted' : 'not_permitted'
+    await reconcileIfScheduleWeatherColumnChanged(windowStartSec, windowEndSec, {
+      prediction,
+      hasAnyPrecipitationTonight,
+      readyHourStartsSec,
+      nightHourStartsSec,
+      notPermittedHourReasons,
+      precipitationHitHourStartsSec,
+    })
+
     return NextResponse.json({
       ok: true as const,
-      prediction: permitted ? 'permitted' : 'not_permitted',
+      prediction,
       permitted,
       readyHourStartsSec,
       nightHourStartsSec,

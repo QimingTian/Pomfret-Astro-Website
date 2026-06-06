@@ -1,4 +1,8 @@
 import { reconcilePendingScheduleStatus } from '@/lib/imaging-queue-reconcile'
+import {
+  emitAgentWakePollSequenceDebounced,
+  emitSiteSessionsChanged,
+} from '@/lib/imaging/site-events'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 
 const KV_KEY = 'imaging-queue-schedule-weather-fingerprint'
@@ -42,6 +46,10 @@ function fingerprintForScheduleWeatherColumn(payload: ScheduleWeatherColumnPaylo
 /** In-process fallback when KV is not configured (dev); resets on cold start. */
 let memoryStore: Stored | null = null
 
+export function scheduleWeatherColumnFingerprint(payload: ScheduleWeatherColumnPayload): string {
+  return fingerprintForScheduleWeatherColumn(payload)
+}
+
 /**
  * When the Remote “tonight schedule” weather column inputs change (same 4pm–8am window),
  * re-run queue schedule reconciliation. Skips if fingerprint matches last run for this window.
@@ -70,6 +78,8 @@ export async function maybeReconcileQueueWhenScheduleWeatherColumnChanged(
   }
 
   await reconcilePendingScheduleStatus()
+  emitSiteSessionsChanged('weather')
+  emitAgentWakePollSequenceDebounced()
 
   const next: Stored = { windowStartSec, windowEndSec, fingerprint }
   if (kvEnabled()) {

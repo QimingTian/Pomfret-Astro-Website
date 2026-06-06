@@ -47,7 +47,7 @@ export function projectFilterFrameProgress(project: {
 /** Project-wide light frames: total at submission vs remaining in store. */
 export function projectFrameCounts(project: {
   filterPlansTotal: FilterPlanLike[]
-  remainingByFilter: Array<{ countRemaining: number }>
+  remainingByFilter: Array<{ filterName: string; countRemaining: number }>
 }): { total: number; captured: number } {
   const total = totalFramesFromFilterPlans(project.filterPlansTotal) ?? 0
   const remaining = project.remainingByFilter.reduce(

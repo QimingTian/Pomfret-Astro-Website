@@ -1,0 +1,45 @@
+:root {
+  color-scheme: dark;
+  font-family: 'SF Pro Text', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  line-height: 1.45;
+  font-weight: 400;
+  color: #dbeafe;
+  background-color: #04070c;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+
+  --console-bg: #04070c;
+  --console-panel: rgba(8, 14, 24, 0.92);
+  --console-border: rgba(52, 211, 153, 0.22);
+  --console-border-dim: rgba(100, 116, 139, 0.35);
+  --console-accent: #34d399;
+  --console-accent-dim: #065f46;
+  --console-warn: #fbbf24;
+  --console-danger: #f87171;
+  --console-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Monaco, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+code {
+  font-family: var(--console-mono);
+  font-size: 0.88em;
+}

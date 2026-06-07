@@ -29,6 +29,11 @@ third-party/emsdk/
 third-party/stellarium-web-engine/
 third-party/Pomfret Astro Special Event/
 
+# --- general-platforms (Tauri / GP apps) ---
+general-platforms/**/node_modules/
+general-platforms/**/dist/
+general-platforms/**/src-tauri/target/
+
 # --- shared ---
 .DS_Store
 *.pem

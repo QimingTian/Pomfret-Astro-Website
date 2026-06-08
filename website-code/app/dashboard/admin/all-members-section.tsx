@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { DashboardPanel } from '@/app/dashboard/account/dashboard-panel'
+import { memberVerificationStatusLabel } from '@/lib/member-access'
 import { memberLevelLabel, type MemberRole } from '@/lib/member-store'
 
 type Row = {
@@ -192,6 +193,13 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
                   <span className="break-all">{m.email}</span>
                   <span className="mx-2">·</span>
                   <span>{memberLevelLabel(m.role)}</span>
+                  <span className="mx-2">·</span>
+                  <span>
+                    {memberVerificationStatusLabel({
+                      emailVerified: m.emailVerified,
+                      imagingApproved: m.imagingApproved,
+                    })}
+                  </span>
                 </p>
                 {manageable ? (
                   <div className="flex shrink-0 flex-wrap items-center gap-2">

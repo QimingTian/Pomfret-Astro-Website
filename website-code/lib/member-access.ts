@@ -73,6 +73,21 @@ export type MemberAccessFlags = {
   imagingRejected: boolean
 }
 
+export type MemberVerificationStatusLabel =
+  | 'All Verified'
+  | 'Email Not Verified'
+  | 'Imaging Not Verified'
+
+/** Admin All members line: email first, then imaging (rejected counts as imaging not verified). */
+export function memberVerificationStatusLabel(input: {
+  emailVerified: boolean
+  imagingApproved: boolean
+}): MemberVerificationStatusLabel {
+  if (!input.emailVerified) return 'Email Not Verified'
+  if (!input.imagingApproved) return 'Imaging Not Verified'
+  return 'All Verified'
+}
+
 export function memberAccessFlags(user: MemberUser): MemberAccessFlags {
   return {
     emailVerified: isEmailVerified(user),

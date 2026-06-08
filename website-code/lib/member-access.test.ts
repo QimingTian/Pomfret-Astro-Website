@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { canSubmitImagingFromFlags, canSubmitImagingPublic } from '@/lib/member-access'
+import { canSubmitImagingFromFlags, canSubmitImagingPublic, memberVerificationStatusLabel } from '@/lib/member-access'
 import type { PublicMemberUser } from '@/lib/member-store'
 
 function publicUser(overrides: Partial<PublicMemberUser> = {}): PublicMemberUser {
@@ -55,4 +55,19 @@ test('canSubmitImagingFromFlags allows verified and approved', () => {
 test('canSubmitImagingPublic mirrors public member flags', () => {
   assert.equal(canSubmitImagingPublic(publicUser({ emailVerified: true, imagingApproved: true })).ok, true)
   assert.equal(canSubmitImagingPublic(publicUser({ emailVerified: true, imagingPending: true })).ok, false)
+})
+
+test('memberVerificationStatusLabel prioritizes email then imaging', () => {
+  assert.equal(
+    memberVerificationStatusLabel({ emailVerified: false, imagingApproved: false }),
+    'Email Not Verified'
+  )
+  assert.equal(
+    memberVerificationStatusLabel({ emailVerified: true, imagingApproved: false }),
+    'Imaging Not Verified'
+  )
+  assert.equal(
+    memberVerificationStatusLabel({ emailVerified: true, imagingApproved: true }),
+    'All Verified'
+  )
 })

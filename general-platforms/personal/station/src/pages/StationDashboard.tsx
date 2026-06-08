@@ -31,24 +31,38 @@ export function StationDashboard() {
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
   const logRef = useRef<HTMLPreElement>(null)
 
-  const refresh = useCallback(async () => {
-    const [c, d, l, r] = await Promise.all([
-      loadConfig(),
-      runDiagnostics(),
-      readAgentLogs(),
-      agentIsRunning(),
-    ])
-    setConfig(c)
-    setChecks(d)
-    setLogs(l)
-    setRunning(r)
+  const [checksLoading, setChecksLoading] = useState(true)
+  const refreshInFlight = useRef(false)
+
+  const refreshChecks = useCallback(async () => {
+    if (refreshInFlight.current) return
+    refreshInFlight.current = true
+    try {
+      const [d, l, r] = await Promise.all([runDiagnostics(), readAgentLogs(), agentIsRunning()])
+      setChecks(d)
+      setLogs(l)
+      setRunning(r)
+    } finally {
+      setChecksLoading(false)
+      refreshInFlight.current = false
+    }
   }, [])
 
+  const refresh = useCallback(async () => {
+    const c = await loadConfig()
+    setConfig(c)
+    await refreshChecks()
+  }, [refreshChecks])
+
   useEffect(() => {
-    void refresh()
-    const id = window.setInterval(() => void refresh(), 4000)
+    void (async () => {
+      const c = await loadConfig()
+      setConfig(c)
+      await refreshChecks()
+    })()
+    const id = window.setInterval(() => void refreshChecks(), 8000)
     return () => window.clearInterval(id)
-  }, [refresh])
+  }, [refreshChecks])
 
   useEffect(() => {
     if (logRef.current) {
@@ -117,9 +131,13 @@ export function StationDashboard() {
         <section className="panel panel-checks">
           <h2>System checks</h2>
           <ul className="check-list">
-            {checks.map((item) => (
-              <ChecklistRow key={item.id} label={item.label} status={item.status} detail={item.detail} />
-            ))}
+            {checksLoading && checks.length === 0 ? (
+              <li className="check-row check-row-loading">Running system checks…</li>
+            ) : (
+              checks.map((item) => (
+                <ChecklistRow key={item.id} label={item.label} status={item.status} detail={item.detail} />
+              ))
+            )}
           </ul>
         </section>
 

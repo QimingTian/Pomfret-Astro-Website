@@ -2,8 +2,12 @@ use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::mpsc;
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
@@ -102,16 +106,44 @@ fn agent_script_path(app: &AppHandle) -> PathBuf {
     PathBuf::from("agent/nina_agent.py")
 }
 
+fn python_probe(cmd: &str) -> bool {
+    let mut command = Command::new(cmd);
+    #[cfg(windows)]
+    {
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        if cmd == "py" {
+            command.args(["-3", "--version"]);
+        } else {
+            command.arg("--version");
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        command.arg("--version");
+    }
+    command
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 fn resolve_python(config: &StationConfig) -> String {
     if !config.python_path.trim().is_empty() {
         return config.python_path.trim().to_string();
     }
-    for cmd in ["python3", "python", "py"] {
-        if Command::new(cmd).arg("--version").output().is_ok() {
+    #[cfg(windows)]
+    let candidates = ["py", "python", "python3"];
+    #[cfg(not(windows))]
+    let candidates = ["python3", "python", "py"];
+    for cmd in candidates {
+        if python_probe(cmd) {
             return cmd.to_string();
         }
     }
-    "python3".to_string()
+    #[cfg(windows)]
+    return "py".to_string();
+    #[cfg(not(windows))]
+    return "python3".to_string();
 }
 
 fn append_log(line: &str) {
@@ -146,7 +178,7 @@ fn hub_health_url(base: &str) -> String {
 }
 
 fn probe_url(url: &str) -> Result<String, String> {
-    let agent = ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(8)).build();
+    let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(2)).build();
     match agent.get(url).call() {
         Ok(resp) => {
             if resp.status() >= 400 {
@@ -159,27 +191,38 @@ fn probe_url(url: &str) -> Result<String, String> {
 }
 
 fn local_ipv4_addresses() -> Vec<String> {
-    let mut out = Vec::new();
-    if let Ok(addrs) = get_if_addrs::get_if_addrs() {
-        for iface in addrs {
-            if iface.is_loopback() {
-                continue;
-            }
-            if let get_if_addrs::IfAddr::V4(v4) = iface.addr {
-                out.push(v4.ip.to_string());
+    fn collect() -> Vec<String> {
+        let mut out = Vec::new();
+        if let Ok(addrs) = get_if_addrs::get_if_addrs() {
+            for iface in addrs {
+                if iface.is_loopback() {
+                    continue;
+                }
+                if let get_if_addrs::IfAddr::V4(v4) = iface.addr {
+                    out.push(v4.ip.to_string());
+                }
             }
         }
+        out.sort();
+        out.dedup();
+        out
     }
-    out.sort();
-    out.dedup();
-    out
+
+    let (tx, rx) = mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let _ = tx.send(collect());
+    });
+    rx.recv_timeout(Duration::from_millis(1500)).unwrap_or_default()
 }
 
 fn nina_process_running() -> bool {
     #[cfg(target_os = "windows")]
     {
-        Command::new("tasklist")
-            .args(["/FI", "IMAGENAME eq NINA.exe"])
+        let mut command = Command::new("tasklist");
+        command
+            .args(["/FI", "IMAGENAME eq NINA.exe", "/NH"])
+            .creation_flags(0x08000000);
+        command
             .output()
             .map(|o| String::from_utf8_lossy(&o.stdout).contains("NINA.exe"))
             .unwrap_or(false)
@@ -273,7 +316,7 @@ fn build_checks(config: &StationConfig, agent_running: bool, script: &Path) -> V
     }
 
     let py = resolve_python(config);
-    let py_ok = Command::new(&py).arg("--version").output().is_ok();
+    let py_ok = python_probe(&py);
     checks.push(CheckItem {
         id: "python".into(),
         label: "Python runtime".into(),
@@ -340,27 +383,7 @@ fn station_save_config(config: StationConfig) -> Result<(), String> {
     write_config_file(config)
 }
 
-#[tauri::command]
-fn station_run_diagnostics(state: State<AgentState>, app: AppHandle) -> Result<Vec<CheckItem>, String> {
-    let cfg = read_config_file()?;
-    let running = state
-        .child
-        .lock()
-        .map_err(|e| e.to_string())?
-        .as_mut()
-        .map(|c| c.try_wait().ok().flatten().is_none())
-        .unwrap_or(false);
-    let script = agent_script_path(&app);
-    Ok(build_checks(&cfg, running, &script))
-}
-
-#[tauri::command]
-fn station_read_agent_logs() -> Result<String, String> {
-    Ok(read_log_tail(128_000))
-}
-
-#[tauri::command]
-fn station_agent_is_running(state: State<AgentState>) -> Result<bool, String> {
+fn agent_is_running_locked(state: &AgentState) -> Result<bool, String> {
     let mut guard = state.child.lock().map_err(|e| e.to_string())?;
     if let Some(child) = guard.as_mut() {
         if let Ok(Some(_code)) = child.try_wait() {
@@ -373,13 +396,32 @@ fn station_agent_is_running(state: State<AgentState>) -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn station_start_agent(state: State<AgentState>, app: AppHandle) -> Result<(), String> {
-    let mut guard = state.child.lock().map_err(|e| e.to_string())?;
-    if let Some(child) = guard.as_mut() {
-        if child.try_wait().ok().flatten().is_none() {
-            return Err("Agent is already running".into());
-        }
-        *guard = None;
+async fn station_run_diagnostics(
+    state: State<'_, AgentState>,
+    app: AppHandle,
+) -> Result<Vec<CheckItem>, String> {
+    let cfg = read_config_file()?;
+    let running = agent_is_running_locked(&state)?;
+    let script = agent_script_path(&app);
+    tauri::async_runtime::spawn_blocking(move || build_checks(&cfg, running, &script))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn station_read_agent_logs() -> Result<String, String> {
+    Ok(read_log_tail(128_000))
+}
+
+#[tauri::command]
+fn station_agent_is_running(state: State<AgentState>) -> Result<bool, String> {
+    agent_is_running_locked(&state)
+}
+
+#[tauri::command]
+async fn station_start_agent(state: State<'_, AgentState>, app: AppHandle) -> Result<(), String> {
+    if agent_is_running_locked(&state)? {
+        return Err("Agent is already running".into());
     }
 
     let cfg = read_config_file()?;
@@ -388,53 +430,66 @@ fn station_start_agent(state: State<AgentState>, app: AppHandle) -> Result<(), S
         return Err(format!("Agent script not found: {}", script.display()));
     }
 
-    let python = resolve_python(&cfg);
-    let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    append_log(&format!("[station-ui {ts}] Starting agent via {python} {script:?}"));
+    tauri::async_runtime::spawn_blocking(move || {
+        let python = resolve_python(&cfg);
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        append_log(&format!("[station-ui {ts}] Starting agent via {python} {script:?}"));
 
-    let mut cmd = Command::new(&python);
-    cmd.arg(&script)
-        .env("POMFRET_HUB_BASE_URL", &cfg.hub_base_url)
-        .env(
-            "PERSONAL_R2_ENABLED",
-            if cfg.r2_enabled { "1" } else { "0" },
-        )
-        .env("POMFRET_NINA_INSTALL_DIR", &cfg.nina_install_dir)
-        .env("POMFRET_JOBS_DIR", &cfg.jobs_dir)
-        .env("POMFRET_NINA_OUTPUT_DIR", &cfg.nina_output_dir)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        let mut cmd = Command::new(&python);
+        #[cfg(windows)]
+        cmd.creation_flags(0x08000000);
+        if python == "py" {
+            cmd.arg("-3");
+        }
+        cmd.arg(&script)
+            .env("POMFRET_HUB_BASE_URL", &cfg.hub_base_url)
+            .env(
+                "PERSONAL_R2_ENABLED",
+                if cfg.r2_enabled { "1" } else { "0" },
+            )
+            .env("POMFRET_NINA_INSTALL_DIR", &cfg.nina_install_dir)
+            .env("POMFRET_JOBS_DIR", &cfg.jobs_dir)
+            .env("POMFRET_NINA_OUTPUT_DIR", &cfg.nina_output_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
 
-    if !cfg.imaging_queue_secret.trim().is_empty() {
-        cmd.env("IMAGING_QUEUE_SECRET", cfg.imaging_queue_secret.trim());
-    }
+        if !cfg.imaging_queue_secret.trim().is_empty() {
+            cmd.env("IMAGING_QUEUE_SECRET", cfg.imaging_queue_secret.trim());
+        }
 
-    let mut child = cmd.spawn().map_err(|e| e.to_string())?;
+        let mut child = cmd.spawn().map_err(|e| e.to_string())?;
 
-    if let Some(stdout) = child.stdout.take() {
-        std::thread::spawn(move || {
-            use std::io::{BufRead, BufReader};
-            let reader = BufReader::new(stdout);
-            for line in reader.lines().map_while(Result::ok) {
-                append_log(&line);
-            }
-        });
-    }
-    if let Some(stderr) = child.stderr.take() {
-        std::thread::spawn(move || {
-            use std::io::{BufRead, BufReader};
-            let reader = BufReader::new(stderr);
-            for line in reader.lines().map_while(Result::ok) {
-                append_log(&format!("[stderr] {line}"));
-            }
-        });
-    }
+        if let Some(stdout) = child.stdout.take() {
+            std::thread::spawn(move || {
+                use std::io::{BufRead, BufReader};
+                let reader = BufReader::new(stdout);
+                for line in reader.lines().map_while(Result::ok) {
+                    append_log(&line);
+                }
+            });
+        }
+        if let Some(stderr) = child.stderr.take() {
+            std::thread::spawn(move || {
+                use std::io::{BufRead, BufReader};
+                let reader = BufReader::new(stderr);
+                for line in reader.lines().map_while(Result::ok) {
+                    append_log(&format!("[stderr] {line}"));
+                }
+            });
+        }
 
-    *guard = Some(child);
-    Ok(())
+        Ok::<Child, String>(child)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map(|child| {
+        let mut guard = state.child.lock().map_err(|e| e.to_string())?;
+        *guard = Some(child);
+        Ok(())
+    })?
 }
 
 #[tauri::command]

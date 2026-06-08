@@ -146,6 +146,12 @@ input {
   overflow: auto;
 }
 
+.check-row-loading {
+  color: var(--fg-muted);
+  font-size: 0.85rem;
+  justify-content: center;
+}
+
 .check-row {
   display: flex;
   gap: 0.85rem;

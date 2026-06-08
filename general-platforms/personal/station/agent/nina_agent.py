@@ -13,7 +13,6 @@ import hashlib
 import base64
 import json
 import queue
-import shutil
 import subprocess
 import threading
 import time
@@ -129,7 +128,6 @@ UPLOAD_EXTENSIONS = {
 # Candidate keys used to map files to one observing session.
 SESSION_ID_KEYS = ("sessionId", "session_id", "sessionID")
 OUTPUT_MODE_RAW_ZIP = "raw_zip"
-OUTPUT_MODE_STACKED_MASTER = "stacked_master"
 OUTPUT_MODE_NONE = "none"
 
 # -------- R2 upload config (optional, but recommended) --------
@@ -157,29 +155,6 @@ PREVIEW_JPEG_QUALITY = 72
 PREVIEW_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".fit", ".fits"}
 # API receives latest preview and keeps it until replaced.
 PREVIEW_UPLOAD_URL = _api_url("/api/imaging/preview")
-
-# -------- Siril stacking config --------
-# Set to True to enable stacked master output when output mode is "stacked_master".
-SIRIL_ENABLED = True
-# Use siril-cli path on observatory PC.
-SIRIL_CLI_PATH = r"C:\Program Files\Siril\bin\siril-cli.exe"
-# Directory containing masters named like:
-#   Master_Dark.fit, Master_Bias.fit, Master_L_Flat.fit, Master_H_Flat.fit, ...
-SIRIL_CALIBRATION_DIR = r"C:\Users\Observatory\Documents\SirilCalibration"
-# Temporary working root used for per-session stacking jobs.
-SIRIL_WORK_ROOT = r"C:\Users\Observatory\Downloads\SirilWork"
-# Max time for one stack run.
-SIRIL_TIMEOUT_SECONDS = 60 * 60
-# Stacking defaults for light frames. Tuned for robust outlier rejection and level matching.
-# - Rejection: winsorized sigma clipping (low=4 high=3)
-# - Normalization: additive + scaling (recommended for light frames)
-# - Output normalization: map stacked output into normalized range for easier downstream preview/stretch.
-SIRIL_STACK_REJ = "winsorized 4 3"
-SIRIL_STACK_NORM = "addscale"
-SIRIL_STACK_OUTPUT_NORM = True
-# If True, still pass -bias during light calibration even when -dark is provided.
-# Most master-dark workflows already include the bias pedestal; keep this False to avoid double subtraction.
-SIRIL_LIGHT_INCLUDE_BIAS_WHEN_DARK = False
 
 # -------- Digital Loggers PDU (mount + camera power) --------
 # Credentials: Windows env PDU_USER, PDU_PASSWORD (never commit secrets).
@@ -578,8 +553,6 @@ def validate_config() -> None:
             "R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and R2_BUCKET "
             "(same values as Vercel) — do not commit secrets into this file."
         )
-    if SIRIL_ENABLED and not Path(SIRIL_CALIBRATION_DIR).exists():
-        raise ValueError(f"SIRIL_CALIBRATION_DIR not found: {SIRIL_CALIBRATION_DIR}")
     if PDU_ENABLED and not pdu_configured():
         log(
             "PDU_ENABLED is True but PDU_USER / PDU_PASSWORD are missing; "
@@ -649,10 +622,10 @@ def extract_sequence_metadata(content: bytes) -> tuple[Optional[str], str, Optio
     pomfret = payload.get("PomfretAstro")
     if isinstance(pomfret, dict):
         mode = pomfret.get("OutputMode")
-        if mode == OUTPUT_MODE_STACKED_MASTER:
-            output_mode = OUTPUT_MODE_STACKED_MASTER
-        elif mode == OUTPUT_MODE_NONE:
+        if mode == OUTPUT_MODE_NONE:
             output_mode = OUTPUT_MODE_NONE
+        elif mode not in (None, "", OUTPUT_MODE_RAW_ZIP):
+            log(f"Ignoring unsupported output mode '{mode}'; using raw_zip.")
         raw_filter = pomfret.get("FilterName")
         if isinstance(raw_filter, str) and raw_filter.strip():
             filter_name = raw_filter.strip()
@@ -914,201 +887,10 @@ def make_zip_for_session(files: list[Path], run_id: str, jobs_dir: Path, output_
     return zip_path
 
 
-def _normalize_filter_name(value: Optional[str]) -> Optional[str]:
-    if not value:
-        return None
-    token = "".join(ch for ch in value.upper() if ch.isalnum())
-    return token or None
-
-
-def _pick_master_by_stem(calib_dir: Path, stem: str) -> Optional[Path]:
-    if not calib_dir.exists():
-        return None
-    candidates = [p for p in calib_dir.iterdir() if p.is_file() and p.stem.upper() == stem.upper()]
-    if not candidates:
-        return None
-    preferred_ext = {".fit": 0, ".fits": 1, ".xisf": 2}
-    candidates.sort(key=lambda p: preferred_ext.get(p.suffix.lower(), 99))
-    return candidates[0]
-
-
-def _resolve_calibration_masters(session_filter: Optional[str]) -> tuple[Optional[Path], Optional[Path], Optional[Path]]:
-    calib_dir = Path(SIRIL_CALIBRATION_DIR)
-    bias = _pick_master_by_stem(calib_dir, "Master_Bias")
-    dark = _pick_master_by_stem(calib_dir, "Master_Dark")
-    flat: Optional[Path] = None
-    filter_token = _normalize_filter_name(session_filter)
-    if filter_token:
-        flat = _pick_master_by_stem(calib_dir, f"Master_{filter_token}_Flat")
-    if flat is None:
-        # Optional generic fallback for a shared flat file.
-        flat = _pick_master_by_stem(calib_dir, "Master_Flat")
-    return bias, dark, flat
-
-
-def _stage_calibration_master_in_lights(
-    lights_dir: Path, master: Optional[Path], label: str
-) -> tuple[Optional[Path], Optional[str]]:
-    """
-    Copy calibration master into lights_dir and return Siril token without extension.
-    Siril's calibrate options are more reliable with local basenames (e.g. Master_Bias).
-    """
-    if master is None:
-        return None, None
-    try:
-        staged = lights_dir / master.name
-        if staged.resolve() != master.resolve():
-            shutil.copy2(master, staged)
-        return staged, staged.stem
-    except Exception as ex:
-        log(f"Could not stage {label} master '{master}': {ex}")
-        return None, None
-
-
-def _siril_cli_path_str(path: Path) -> str:
-    """Siril accepts forward slashes on Windows."""
-    return path.resolve().as_posix()
-
-
-def _find_siril_stack_output_master(lights_dir: Path, work_dir: Path, run_id: str) -> Optional[Path]:
-    """Resolve stacked FITS: explicit -out name, then Siril default ``<sequence>_stacked.fit``."""
-    for name in (f"{run_id}_master.fit", f"{run_id}_master.fits"):
-        p = lights_dir / name
-        if p.is_file():
-            return p
-    for name in ("r_pp_light_stacked.fit", "r_pp_light_stacked.fits"):
-        p = lights_dir / name
-        if p.is_file():
-            return p
-    for root in (lights_dir, work_dir):
-        try:
-            for pat in ("*_stacked.fit", "*_stacked.fits"):
-                matches = [p for p in root.glob(pat) if p.is_file()]
-                if matches:
-                    matches.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-                    return matches[0]
-        except OSError:
-            pass
-    return None
-
-
-def stack_master_with_siril(files: list[Path], run_id: str, jobs_dir: Path, session_filter: Optional[str]) -> Optional[Path]:
-    if not SIRIL_ENABLED:
-        log("Siril is disabled; cannot build stacked master.")
-        return None
-    siril_cli = Path(SIRIL_CLI_PATH)
-    if not siril_cli.exists():
-        log(f"Siril CLI not found: {siril_cli}")
-        return None
-    if not files:
-        return None
-
-    accepted = [p for p in files if p.suffix.lower() in {".fit", ".fits", ".xisf"}]
-    if not accepted:
-        log("No FIT/FITS/XISF files found for Siril stacking; skipping stack.")
-        return None
-
-    work_root = Path(SIRIL_WORK_ROOT)
-    work_dir = work_root / f"stack_{run_id}_{int(time.time())}"
-    lights_dir = work_dir / "lights"
-    work_dir.mkdir(parents=True, exist_ok=True)
-    lights_dir.mkdir(parents=True, exist_ok=True)
-
-    for src in accepted:
-        dst = lights_dir / src.name
-        if dst.exists():
-            dst = lights_dir / f"{src.stem}_{hashlib.md5(str(src).encode('utf-8')).hexdigest()[:8]}{src.suffix}"
-        shutil.copy2(src, dst)
-
-    script_lines = ["requires 1.4.0", f'cd "{lights_dir}"', "convert light", "calibrate light -prefix=pp_"]
-    bias_master, dark_master, flat_master = _resolve_calibration_masters(session_filter)
-    _bias_staged, bias_token = _stage_calibration_master_in_lights(lights_dir, bias_master, "bias")
-    _dark_staged, dark_token = _stage_calibration_master_in_lights(lights_dir, dark_master, "dark")
-    _flat_staged, flat_token = _stage_calibration_master_in_lights(lights_dir, flat_master, "flat")
-    if dark_token:
-        script_lines[-1] += f" -dark={dark_token}"
-    else:
-        log("No Master_Dark found; Siril calibration will skip dark.")
-    include_bias = bias_token is not None and (dark_token is None or SIRIL_LIGHT_INCLUDE_BIAS_WHEN_DARK)
-    if include_bias:
-        script_lines[-1] += f" -bias={bias_token}"
-    elif bias_token is None:
-        log("No Master_Bias found; Siril calibration will skip bias.")
-    else:
-        log("Skipping Master_Bias in light calibration because Master_Dark is present (avoid double subtraction).")
-    if flat_token:
-        script_lines[-1] += f" -flat={flat_token}"
-    else:
-        if session_filter:
-            log(f"No flat master found for filter '{session_filter}'; calibration will skip flat.")
-        else:
-            log("No session filter metadata present; calibration will skip flat.")
-    out_master = lights_dir / f"{run_id}_master.fit"
-    out_arg = _siril_cli_path_str(out_master)
-    rej = (SIRIL_STACK_REJ or "winsorized 4 3").strip()
-    norm = (SIRIL_STACK_NORM or "addscale").strip().lower()
-    if norm not in {"add", "mul", "addscale", "mulscale", "none"}:
-        log(f"Unknown SIRIL_STACK_NORM '{SIRIL_STACK_NORM}', falling back to addscale.")
-        norm = "addscale"
-    stack_cmd = f"stack r_pp_light rej {rej}"
-    if norm != "none":
-        stack_cmd += f" -norm={norm}"
-    if SIRIL_STACK_OUTPUT_NORM:
-        stack_cmd += " -output_norm"
-    stack_cmd += f" -out={out_arg}"
-    script_lines.extend(
-        [
-            "register pp_light",
-            # `stack seq rej` must include a rejection type (e.g. winsorized 4 3 / none).
-            stack_cmd,
-            "close",
-        ]
-    )
-
-    script_path = work_dir / "stack.ssf"
-    script_path.write_text("\n".join(script_lines) + "\n", encoding="utf-8")
-    log(f"Running Siril stacking script: {script_path}")
-    result = subprocess.run(
-        [str(siril_cli), "-s", str(script_path)],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=SIRIL_TIMEOUT_SECONDS,
-    )
-    if result.returncode != 0:
-        log(f"Siril stack failed (code {result.returncode}).")
-        if result.stdout:
-            log(f"Siril stdout:\n{result.stdout[-2000:]}")
-        if result.stderr:
-            log(f"Siril stderr:\n{result.stderr[-2000:]}")
-        return None
-
-    output_master = _find_siril_stack_output_master(lights_dir, work_dir, run_id)
-    if output_master is None:
-        log("Siril completed but master file was not produced.")
-        try:
-            names = sorted(p.name for p in lights_dir.iterdir() if p.is_file())
-            log(f"Siril lights_dir files ({len(names)}): {names[:40]}{'…' if len(names) > 40 else ''}")
-        except OSError as ex:
-            log(f"Could not list lights_dir: {ex}")
-        if result.stdout:
-            log(f"Siril stdout:\n{result.stdout[-4000:]}")
-        if result.stderr:
-            log(f"Siril stderr:\n{result.stderr[-4000:]}")
-        return None
-    if output_master.name != f"{run_id}_master.fit":
-        log(f"Using Siril stack output {output_master.name} (expected {run_id}_master.fit).")
-    final_master = jobs_dir / f"{run_id}_master.fit"
-    shutil.copy2(output_master, final_master)
-    log(f"Siril master created: {final_master}")
-    return final_master
-
-
 def process_finished_session(job: dict) -> None:
     session_id = job["session_id"]
     run_id = job["run_id"]
     output_mode = job["output_mode"]
-    session_filter = job.get("session_filter")
     new_files = job["new_files"]
     jobs_dir = Path(job["jobs_dir"])
     output_root = Path(job["output_root"])
@@ -1126,19 +908,10 @@ def process_finished_session(job: dict) -> None:
             log("R2 upload disabled; skipping post-processing upload.")
             return
 
-        if output_mode == OUTPUT_MODE_STACKED_MASTER:
-            master = stack_master_with_siril(new_files, run_id, jobs_dir, session_filter)
-            if master:
-                temp_outputs.append(master)
-                uploaded_files = upload_files_to_r2([master], run_id, jobs_dir)
-            else:
-                log("Falling back to raw zip upload because Siril stack was unavailable/failed.")
-
-        if not uploaded_files:
-            zip_path = make_zip_for_session(new_files, run_id, jobs_dir, output_root)
-            if zip_path:
-                temp_outputs.append(zip_path)
-                uploaded_files = upload_files_to_r2([zip_path], run_id, jobs_dir)
+        zip_path = make_zip_for_session(new_files, run_id, jobs_dir, output_root)
+        if zip_path:
+            temp_outputs.append(zip_path)
+            uploaded_files = upload_files_to_r2([zip_path], run_id, jobs_dir)
 
         if session_id and uploaded_files:
             report_uploaded_files(session_id, uploaded_files)

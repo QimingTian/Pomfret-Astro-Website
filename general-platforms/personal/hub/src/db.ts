@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { dbPath, ensureDataDir } from './config.js'
 
-export type SessionOutputMode = 'none' | 'raw_zip' | 'stacked_master'
+export type SessionOutputMode = 'none' | 'raw_zip'
 
 export type SessionStatus =
   | 'pending'

@@ -52,8 +52,7 @@ app.post('/api/imaging/queue', (req, res) => {
     return
   }
   const outputModeRaw = typeof body.outputMode === 'string' ? body.outputMode : 'none'
-  const outputMode: SessionOutputMode =
-    outputModeRaw === 'raw_zip' || outputModeRaw === 'stacked_master' ? outputModeRaw : 'none'
+  const outputMode: SessionOutputMode = outputModeRaw === 'raw_zip' ? 'raw_zip' : 'none'
 
   const session = insertSession({
     id: uuidv4(),

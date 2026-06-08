@@ -28,17 +28,68 @@ pub struct StationConfig {
 
 impl Default for StationConfig {
     fn default() -> Self {
-        Self {
+        default_station_config()
+    }
+}
+
+fn windows_profile_dir() -> Option<PathBuf> {
+    std::env::var("USERPROFILE").ok().map(PathBuf::from)
+}
+
+fn default_station_config() -> StationConfig {
+    #[cfg(windows)]
+    if let Some(home) = windows_profile_dir() {
+        return StationConfig {
             hub_base_url: "http://127.0.0.1:7841".into(),
             nina_install_dir: r"C:\Program Files\N.I.N.A. - Nighttime Imaging 'N' Astronomy".into(),
-            jobs_dir: r"C:\Users\Observatory\Downloads\NinaJobs".into(),
-            nina_output_dir: r"C:\Users\Observatory\Documents\N.I.N.A".into(),
+            jobs_dir: home.join("Downloads").join("NinaJobs").to_string_lossy().into_owned(),
+            nina_output_dir: home.join("Documents").join("N.I.N.A").to_string_lossy().into_owned(),
             imaging_queue_secret: String::new(),
             r2_enabled: false,
             autostart_enabled: false,
             python_path: String::new(),
-        }
+        };
     }
+    StationConfig {
+        hub_base_url: "http://127.0.0.1:7841".into(),
+        nina_install_dir: r"C:\Program Files\N.I.N.A. - Nighttime Imaging 'N' Astronomy".into(),
+        jobs_dir: "Downloads/NinaJobs".into(),
+        nina_output_dir: "Documents/N.I.N.A".into(),
+        imaging_queue_secret: String::new(),
+        r2_enabled: false,
+        autostart_enabled: false,
+        python_path: String::new(),
+    }
+}
+
+fn repair_personal_paths(config: &mut StationConfig) {
+    let Some(home) = windows_profile_dir() else {
+        return;
+    };
+    if config.jobs_dir.contains("\\Observatory\\") {
+        config.jobs_dir = home.join("Downloads").join("NinaJobs").to_string_lossy().into_owned();
+    }
+    if config.nina_output_dir.contains("\\Observatory\\") {
+        config.nina_output_dir = home
+            .join("Documents")
+            .join("N.I.N.A")
+            .to_string_lossy()
+            .into_owned();
+    }
+}
+
+fn ensure_agent_dirs(config: &StationConfig) -> Result<(), String> {
+    for label_dir in [
+        ("Jobs directory", config.jobs_dir.as_str()),
+        ("NINA output directory", config.nina_output_dir.as_str()),
+    ] {
+        let (label, dir) = label_dir;
+        if dir.trim().is_empty() {
+            return Err(format!("{label} is empty — set it in Settings"));
+        }
+        fs::create_dir_all(dir).map_err(|e| format!("Cannot create {label} ({dir}): {e}"))?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -328,6 +379,33 @@ fn build_checks(config: &StationConfig, agent_running: bool, script: &Path) -> V
         },
     });
 
+    let jobs = Path::new(&config.jobs_dir);
+    checks.push(CheckItem {
+        id: "jobs_dir".into(),
+        label: "Jobs directory".into(),
+        status: if jobs.exists() { "ok" } else { "error" }.into(),
+        detail: if jobs.exists() {
+            jobs.display().to_string()
+        } else {
+            format!("Not found: {} — fix in Settings or click Start to create", jobs.display())
+        },
+    });
+
+    let output = Path::new(&config.nina_output_dir);
+    checks.push(CheckItem {
+        id: "nina_output".into(),
+        label: "NINA output directory".into(),
+        status: if output.exists() { "ok" } else { "error" }.into(),
+        detail: if output.exists() {
+            output.display().to_string()
+        } else {
+            format!(
+                "Not found: {} — fix in Settings or click Start to create",
+                output.display()
+            )
+        },
+    });
+
     checks.push(CheckItem {
         id: "nina_running".into(),
         label: "NINA process".into(),
@@ -355,12 +433,18 @@ fn read_config_file() -> Result<StationConfig, String> {
     ensure_data_dir()?;
     let path = config_path();
     if !path.exists() {
-        let cfg = StationConfig::default();
+        let cfg = default_station_config();
         write_config_file(cfg.clone())?;
         return Ok(cfg);
     }
     let raw = fs::read_to_string(path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&raw).map_err(|e| e.to_string())
+    let mut cfg: StationConfig = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    let before = (cfg.jobs_dir.clone(), cfg.nina_output_dir.clone());
+    repair_personal_paths(&mut cfg);
+    if before != (cfg.jobs_dir.clone(), cfg.nina_output_dir.clone()) {
+        let _ = write_config_file(cfg.clone());
+    }
+    Ok(cfg)
 }
 
 fn write_config_file(config: StationConfig) -> Result<(), String> {
@@ -425,6 +509,7 @@ async fn station_start_agent(state: State<'_, AgentState>, app: AppHandle) -> Re
     }
 
     let cfg = read_config_file()?;
+    ensure_agent_dirs(&cfg)?;
     let script = agent_script_path(&app);
     if !script.exists() {
         return Err(format!("Agent script not found: {}", script.display()));

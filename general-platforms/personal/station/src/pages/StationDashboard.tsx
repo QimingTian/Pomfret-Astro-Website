@@ -91,7 +91,8 @@ export function StationDashboard() {
       await startAgent()
       await refresh()
     } catch (ex) {
-      setLogs((prev) => `${prev}\n[ui] ${ex instanceof Error ? ex.message : 'Start failed'}`.trim())
+      const msg = ex instanceof Error ? ex.message : 'Start failed'
+      setLogs((prev) => `${prev}\n[ui] ${msg}`.trim())
     } finally {
       setBusy(false)
     }

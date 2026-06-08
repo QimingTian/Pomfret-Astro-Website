@@ -85,7 +85,10 @@ TOKEN = ""
 POLL_SECONDS = 45
 FALLBACK_POLL_SECONDS = 300
 SSE_CONNECTED_WAIT_SECONDS = 60
-JOBS_DIR = os.environ.get("POMFRET_JOBS_DIR", r"C:\Users\Observatory\Downloads\NinaJobs")
+JOBS_DIR = os.environ.get(
+    "POMFRET_JOBS_DIR",
+    str(Path.home() / "Downloads" / "NinaJobs"),
+)
 LOCAL_SEQUENCE_FILENAME = "latest_sequence.json"
 NINA_INSTALL_DIR = os.environ.get(
     "POMFRET_NINA_INSTALL_DIR",
@@ -108,7 +111,7 @@ ESTOP_POLL_SECONDS = 5
 # NINA image output root folder (scan recursively after each run).
 NINA_OUTPUT_DIR = os.environ.get(
     "POMFRET_NINA_OUTPUT_DIR",
-    r"C:\Users\Observatory\Documents\N.I.N.A",
+    str(Path.home() / "Documents" / "N.I.N.A"),
 )
 
 # Upload image and common processing outputs.
@@ -563,6 +566,8 @@ def validate_config() -> None:
     nina_exe = Path(NINA_INSTALL_DIR) / "NINA.exe"
     if not nina_exe.exists():
         raise ValueError(f"NINA.exe not found: {nina_exe}")
+    Path(JOBS_DIR).mkdir(parents=True, exist_ok=True)
+    Path(NINA_OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
     if not Path(NINA_OUTPUT_DIR).exists():
         raise ValueError(f"NINA_OUTPUT_DIR not found: {NINA_OUTPUT_DIR}")
     if R2_ENABLED and boto3 is None:

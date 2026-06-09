@@ -2484,40 +2484,26 @@ export default function RemotePage() {
     [sessionPasswords]
   )
 
-  const loadTerminalProgress = useCallback(
-    async (id: string, passwordOverride?: string, options?: { showLoading?: boolean }) => {
-      const password = passwordOverride ?? resolveSessionPassword(id)
-      if (!password && !isAdmin && !canAccessSessionId(id)) {
-        setTerminalError('Session password required.')
-        setTerminalLoading(false)
-        return
-      }
-      const showLoading = options?.showLoading !== false
-      if (showLoading) setTerminalLoading(true)
+  useEffect(() => {
+    if (!terminalSessionId) {
+      terminalOpenedSessionRef.current = null
+      return
+    }
+    const isNewSession = terminalOpenedSessionRef.current !== terminalSessionId
+    terminalOpenedSessionRef.current = terminalSessionId
+    if (isNewSession) {
+      setTerminalLines([])
+      setTerminalQueueStatus(null)
       setTerminalError(null)
-      try {
-        const res = await fetch(`/api/imaging/queue/${encodeURIComponent(id)}/progress`, {
-          credentials: 'include',
-          headers: password ? { 'x-session-password': password } : {},
-        })
-        const data = await res.json().catch(() => ({}))
-        if (!res.ok || data?.ok !== true) {
-          setTerminalError(typeof data.error === 'string' ? data.error : 'Could not load progress.')
-          return
-        }
-        setTerminalLines(Array.isArray(data.lines) ? (data.lines as SessionProgressLine[]) : [])
-        const qs = typeof data.queueStatus === 'string' ? data.queueStatus : null
-        setTerminalQueueStatus(qs)
-        if (qs === 'completed') void refreshQueueRef.current()
-      } finally {
-        if (showLoading) setTerminalLoading(false)
-      }
-    },
-    [resolveSessionPassword, isAdmin, canAccessSessionId]
-  )
-
-  const loadTerminalProgressRef = useRef(loadTerminalProgress)
-  loadTerminalProgressRef.current = loadTerminalProgress
+      setTerminalLoading(true)
+      setTerminalPreviewUrl(null)
+      setTerminalPreviewError(null)
+      setTerminalPreviewUpdatedAt(null)
+      terminalPreviewLastFingerprintRef.current = null
+    }
+    const password = resolveSessionPasswordRef.current(terminalSessionId)
+    if (isNewSession) void loadTerminalPreviewRef.current(terminalSessionId, password)
+  }, [terminalSessionId])
 
   const downloadSessionFile = useCallback(
     async (queueId: string, password: string): Promise<string | null> => {
@@ -2597,27 +2583,6 @@ export default function RemotePage() {
   canAccessSessionIdRef.current = canAccessSessionId
 
   useEffect(() => {
-    if (!terminalSessionId) {
-      terminalOpenedSessionRef.current = null
-      return
-    }
-    const isNewSession = terminalOpenedSessionRef.current !== terminalSessionId
-    terminalOpenedSessionRef.current = terminalSessionId
-    if (isNewSession) {
-      setTerminalLines([])
-      setTerminalQueueStatus(null)
-      setTerminalError(null)
-      setTerminalPreviewUrl(null)
-      setTerminalPreviewError(null)
-      setTerminalPreviewUpdatedAt(null)
-      terminalPreviewLastFingerprintRef.current = null
-    }
-    const password = resolveSessionPasswordRef.current(terminalSessionId)
-    void loadTerminalProgressRef.current(terminalSessionId, password, { showLoading: isNewSession })
-    if (isNewSession) void loadTerminalPreviewRef.current(terminalSessionId, password)
-  }, [terminalSessionId])
-
-  useEffect(() => {
     if (!terminalSessionId) return
     const sessionId = terminalSessionId
     const password = resolveSessionPasswordRef.current(sessionId)
@@ -2652,7 +2617,11 @@ export default function RemotePage() {
     if (!terminalSessionId) return
     const sessionId = terminalSessionId
     const password = resolveSessionPasswordRef.current(sessionId)
-    if (!password && !isAdmin && !canAccessSessionIdRef.current(sessionId)) return
+    if (!password && !isAdmin && !canAccessSessionIdRef.current(sessionId)) {
+      setTerminalError('Session password required.')
+      setTerminalLoading(false)
+      return
+    }
 
     const params = password ? new URLSearchParams({ password }) : new URLSearchParams()
     const streamUrl = `/api/imaging/queue/${encodeURIComponent(sessionId)}/progress-stream?${params.toString()}`
@@ -2674,6 +2643,7 @@ export default function RemotePage() {
       if (payload.type === 'snapshot') {
         setTerminalLines(Array.isArray(payload.lines) ? payload.lines : [])
         setTerminalQueueStatus(typeof payload.queueStatus === 'string' ? payload.queueStatus : null)
+        setTerminalLoading(false)
         return
       }
       if (payload.type === 'status') {
@@ -2689,7 +2659,9 @@ export default function RemotePage() {
       }
     }
 
-    source.onerror = () => {}
+    source.onerror = () => {
+      setTerminalLoading(false)
+    }
 
     return () => {
       source.close()
@@ -2905,7 +2877,6 @@ export default function RemotePage() {
       }
       if (isAdmin || sessionOwnedByMe(item)) {
         setTerminalSessionId(item.id)
-        await loadTerminalProgress(item.id, '')
         return
       }
       setAuthModalSessionId(item.id)
@@ -2916,7 +2887,6 @@ export default function RemotePage() {
     [
       canInteractWithSession,
       isAdmin,
-      loadTerminalProgress,
       openProjectPickerAfterAccess,
       sessionOwnedByMe,
       sessionPasswords,
@@ -4539,7 +4509,6 @@ export default function RemotePage() {
                 }
                 if (authModalAction === 'progress') {
                   setTerminalSessionId(authModalSessionId)
-                  await loadTerminalProgress(authModalSessionId, password)
                   setAuthModalSessionId(null)
                   setAuthModalAction(null)
                   setAuthPassword('')

@@ -161,15 +161,17 @@ export async function POST(request: NextRequest) {
             'Session progress update'
           : 'Session progress update'
 
+  const at = new Date().toISOString()
   await appendAuditLog({
     kind: 'session.progress',
     message: msg,
     detail: auditDetail,
+    at,
   })
   if (queueId) {
     publishProgress(queueId, {
       type: 'line',
-      at: new Date().toISOString(),
+      at,
       text: progressLineText(auditDetail),
     })
   }

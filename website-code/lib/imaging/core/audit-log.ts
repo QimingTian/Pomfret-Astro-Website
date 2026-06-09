@@ -97,11 +97,13 @@ export async function appendAuditLog(input: {
   kind: string
   message: string
   detail?: Record<string, unknown>
+  at?: string
 }): Promise<void> {
   try {
+    const at = input.at ?? new Date().toISOString()
     const entry: AuditLogEntry = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-      at: new Date().toISOString(),
+      at,
       kind: input.kind,
       message: input.message,
       ...(input.detail && Object.keys(input.detail).length > 0 ? { detail: input.detail } : {}),

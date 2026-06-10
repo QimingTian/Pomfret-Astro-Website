@@ -6,6 +6,7 @@ const GALLERY_IMAGES: Array<{ file: string; description: string }> = [
   { file: 'photo1.png', description: 'M31 | 14.08h | LRGB' },
   { file: 'photo2.png', description: 'IC1805 | 35h | SHO' },
   { file: 'photo3.png', description: 'Markarians Chain | 14.16h RGB + 11h Ha | HaRGB' },
+  { file: 'photo4.png', description: 'M101 | 12.5h LRGB + 5h Ha | HaLRGB' },
 ]
 
 export default function GalleryPage() {

@@ -79,6 +79,7 @@ function sequenceJsonFor(r: ImagingRequest): string | null {
       pomfretQueueId: r.id,
       templateKind: r.sequenceTemplate === 'variable_star' ? 'variable_star' : 'dso',
       outputMode: r.outputMode,
+      cameraCoolingTempC: r.cameraCoolingTempC,
       targetName: r.target ?? undefined,
       variableStarObservingSeconds:
         r.sequenceTemplate === 'variable_star' &&

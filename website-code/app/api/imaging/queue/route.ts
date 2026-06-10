@@ -248,6 +248,7 @@ export async function POST(request: NextRequest) {
       raHours: result.raHours,
       decDeg: result.decDeg,
       outputMode: result.outputMode ?? 'raw_zip',
+      ...(result.cameraCoolingTempC != null ? { cameraCoolingTempC: result.cameraCoolingTempC } : {}),
       filterPlans: result.filterPlans ?? [],
       estimatedDurationSeconds: result.estimatedDurationSeconds ?? 0,
       firstName: result.firstName,

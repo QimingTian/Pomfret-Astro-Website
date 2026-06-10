@@ -49,6 +49,8 @@ export type ImagingProject = {
   raHours: number
   decDeg: number
   outputMode: 'raw_zip' | 'stacked_master' | 'none'
+  /** Camera cooling setpoint chosen at submit time; applied to every sub-session's NINA JSON. */
+  cameraCoolingTempC?: number
   filterPlansTotal: FilterPlanRow[]
   remainingByFilter: FilterRemainingRow[]
   nights: ProjectNight[]
@@ -398,6 +400,7 @@ export type CreateImagingProjectInput = {
   raHours: number
   decDeg: number
   outputMode: 'raw_zip' | 'stacked_master' | 'none'
+  cameraCoolingTempC?: number
   filterPlans: FilterPlanRow[]
   estimatedDurationSeconds: number
   firstName?: string | null
@@ -424,6 +427,7 @@ export async function createImagingProject(input: CreateImagingProjectInput): Pr
     raHours: input.raHours,
     decDeg: input.decDeg,
     outputMode: input.outputMode,
+    ...(input.cameraCoolingTempC != null ? { cameraCoolingTempC: input.cameraCoolingTempC } : {}),
     filterPlansTotal: input.filterPlans.map((p) => ({ ...p })),
     remainingByFilter,
     nights: [],
@@ -449,6 +453,7 @@ export async function applyPendingProjectQueueEdit(
     raHours: number
     decDeg: number
     outputMode: 'raw_zip' | 'stacked_master' | 'none'
+    cameraCoolingTempC?: number
     filterPlans: FilterPlanRow[]
     estimatedDurationSeconds: number
     firstName: string | null
@@ -486,6 +491,7 @@ export async function applyPendingProjectQueueEdit(
     raHours: input.raHours,
     decDeg: input.decDeg,
     outputMode: input.outputMode,
+    ...(input.cameraCoolingTempC != null ? { cameraCoolingTempC: input.cameraCoolingTempC } : {}),
     filterPlansTotal: input.filterPlans.map((p) => ({ ...p })),
     remainingByFilter,
     estimatedDurationSeconds: input.estimatedDurationSeconds,
@@ -558,6 +564,7 @@ export function buildNightNinaJson(
     exposureCount: first.count,
     pomfretQueueId: nightId,
     outputMode: project.outputMode,
+    cameraCoolingTempC: project.cameraCoolingTempC,
     templateKind: 'dso',
     targetName: project.target,
     filterPlans: filterPlansTonight.map((p) => ({

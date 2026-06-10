@@ -143,6 +143,8 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
         : b.outputMode === 'none'
           ? 'none'
           : 'raw_zip',
+    cameraCoolingTempC:
+      b.cameraCoolingTempC === -10 || b.cameraCoolingTempC === 0 ? b.cameraCoolingTempC : undefined,
     filterPlans: parsedFilterPlans,
     firstName: user
       ? user.firstName.trim() || null
@@ -184,6 +186,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       raHours: updated.raHours!,
       decDeg: updated.decDeg!,
       outputMode: updated.outputMode ?? 'raw_zip',
+      ...(updated.cameraCoolingTempC != null ? { cameraCoolingTempC: updated.cameraCoolingTempC } : {}),
       filterPlans: updated.filterPlans,
       estimatedDurationSeconds: updated.estimatedDurationSeconds ?? 0,
       firstName: updated.firstName ?? null,

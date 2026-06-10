@@ -45,6 +45,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
         pomfretQueueId: row.id,
         templateKind: row.sequenceTemplate === 'variable_star' ? 'variable_star' : 'dso',
         outputMode: row.outputMode,
+        cameraCoolingTempC: row.cameraCoolingTempC,
         targetName: row.target ?? undefined,
         variableStarObservingSeconds:
           row.sequenceTemplate === 'variable_star' &&

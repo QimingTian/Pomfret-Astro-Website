@@ -878,6 +878,8 @@ export async function updatePendingRequestById(
     return { error: 'Session password is required' }
   }
 
+  const cameraCoolingTempC = input.cameraCoolingTempC ?? current.cameraCoolingTempC
+
   let ninaSequenceJson: string
   try {
     ninaSequenceJson = buildNinaSequenceJson({
@@ -888,7 +890,7 @@ export async function updatePendingRequestById(
       exposureCount: normalizedFilterPlans[0].count,
       pomfretQueueId: id,
       outputMode,
-      cameraCoolingTempC: input.cameraCoolingTempC,
+      cameraCoolingTempC,
       templateKind: sequenceTemplate,
       targetName: target,
       filterPlans: normalizedFilterPlans.map((p) => ({
@@ -919,6 +921,7 @@ export async function updatePendingRequestById(
     exposureSeconds: normalizedFilterPlans[0].exposureSeconds,
     count: normalizedFilterPlans[0].count,
     outputMode,
+    cameraCoolingTempC,
     filterPlans: normalizedFilterPlans,
     estimatedDurationSeconds,
     firstName,

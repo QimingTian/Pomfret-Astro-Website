@@ -4,4 +4,8 @@ node_modules
 *.log
 .DS_Store
 public/DJI_0149.MP4
+public/DJI_0149 frames
+mobile-webapp
+Variables
+observatory
 

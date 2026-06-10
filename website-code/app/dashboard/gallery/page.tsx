@@ -7,6 +7,7 @@ const GALLERY_IMAGES: Array<{ file: string; description: string }> = [
   { file: 'photo2.png', description: 'IC1805 | 35h | SHO' },
   { file: 'photo3.png', description: 'Markarians Chain | 14.16h RGB + 11h Ha | HaRGB' },
   { file: 'photo4.png', description: 'M101 | 12.5h LRGB + 5h Ha | HaLRGB' },
+  { file: 'photo5.png', description: 'V2563_Cyg_12.45-12.77:_Period_0.530922' },
 ]
 
 export default function GalleryPage() {

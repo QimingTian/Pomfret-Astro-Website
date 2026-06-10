@@ -755,11 +755,28 @@ class ASICamera:
         
         print(f"[start_stream] Starting video capture")
         
+        # A leftover still exposure (e.g. a long auto-mode frame that outlived
+        # stop_auto_mode's 5s join) makes ASIStartVideoCapture fail with
+        # 15 (ASI_ERROR_EXPOSURE_IN_PROGRESS); cancel it first.
+        exp_status = ctypes.c_int(0)
+        asi_lib.ASIGetExpStatus(self.camera_id, ctypes.byref(exp_status))
+        if exp_status.value != 0:
+            print(f"[start_stream] Still exposure in progress (status {exp_status.value}); stopping it")
+            asi_lib.ASIStopExposure(self.camera_id)
+            time.sleep(0.5)
+        
         result = asi_lib.ASIStartVideoCapture(self.camera_id)
+        if result == 15:  # ASI_ERROR_EXPOSURE_IN_PROGRESS — cancel and retry once
+            print("[start_stream] Video capture blocked by in-progress exposure; retrying after stop")
+            asi_lib.ASIStopExposure(self.camera_id)
+            time.sleep(0.5)
+            result = asi_lib.ASIStartVideoCapture(self.camera_id)
         if result != ASI_SUCCESS:
             camera_state['error'] = f"Failed to start video capture: {result}"
             return False
         
+        # Stream is running; drop any stale fault from earlier failed attempts.
+        camera_state['error'] = None
         self.streaming = True
         camera_state['streaming'] = True
         camera_state['stream_last_frame_iso'] = None

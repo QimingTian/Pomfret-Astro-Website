@@ -255,8 +255,11 @@ const PHOTO_EXP_LOG_MIN_S = 0.000032
 const PHOTO_EXP_MAX_S = 300
 const PHOTO_EXP_SLIDER_STEPS = 1000
 
-const VIDEO_EXP_MIN_MS = 0
-const VIDEO_EXP_MAX_MS = 2000
+const VIDEO_EXP_MIN_S = 0
+/** Log-scale floor when video exp > 0 (1 ms). */
+const VIDEO_EXP_LOG_MIN_S = 0.001
+const VIDEO_EXP_MAX_S = 100
+const VIDEO_EXP_SLIDER_STEPS = 1000
 
 const SEQ_COUNT_MIN = 1
 const SEQ_COUNT_MAX = 10000
@@ -293,6 +296,37 @@ function sliderToPhotoExposure(pos: number): number {
   const maxL = Math.log(PHOTO_EXP_MAX_S)
   const t = (Math.max(1, Math.min(PHOTO_EXP_SLIDER_STEPS, pos)) - 1) / (PHOTO_EXP_SLIDER_STEPS - 1)
   return roundPhotoExposureS(Math.exp(minL + t * (maxL - minL)))
+}
+
+function roundVideoExposureS(s: number): number {
+  if (s <= 0) return 0
+  const clamped = Math.min(VIDEO_EXP_MAX_S, s)
+  if (clamped < 0.01) return Math.round(clamped * 1000) / 1000
+  if (clamped < 1) return Math.round(clamped * 100) / 100
+  return Math.round(clamped * 10) / 10
+}
+
+function videoExposureToSlider(s: number): number {
+  if (s <= 0) return 0
+  const minL = Math.log(VIDEO_EXP_LOG_MIN_S)
+  const maxL = Math.log(VIDEO_EXP_MAX_S)
+  const logS = Math.log(Math.min(VIDEO_EXP_MAX_S, Math.max(VIDEO_EXP_LOG_MIN_S, s)))
+  const t = (logS - minL) / (maxL - minL)
+  return Math.max(
+    1,
+    Math.min(
+      VIDEO_EXP_SLIDER_STEPS,
+      1 + Math.round(t * (VIDEO_EXP_SLIDER_STEPS - 1)),
+    ),
+  )
+}
+
+function sliderToVideoExposure(pos: number): number {
+  if (pos <= 0) return 0
+  const minL = Math.log(VIDEO_EXP_LOG_MIN_S)
+  const maxL = Math.log(VIDEO_EXP_MAX_S)
+  const t = (Math.max(1, Math.min(VIDEO_EXP_SLIDER_STEPS, pos)) - 1) / (VIDEO_EXP_SLIDER_STEPS - 1)
+  return roundVideoExposureS(Math.exp(minL + t * (maxL - minL)))
 }
 
 function validateNumericDraft(
@@ -668,7 +702,7 @@ export function AllSkyCameraControlPanel() {
   const [gain, setGain] = useState(50)
   const [gainMax, setGainMax] = useState(DEFAULT_GAIN_MAX)
   const [gamma, setGamma] = useState(50)
-  const [videoExposureMs, setVideoExposureMs] = useState(100)
+  const [videoExposureS, setVideoExposureS] = useState(0.1)
   const [photoExposureS, setPhotoExposureS] = useState(1)
   const [wbR, setWbR] = useState(50)
   const [wbB, setWbB] = useState(50)
@@ -845,7 +879,7 @@ export function AllSkyCameraControlPanel() {
         setPhotoExposureS(Math.round(sec * 1000) / 1000)
       }
       if (typeof s.video_exposure === 'number') {
-        setVideoExposureMs(Math.max(VIDEO_EXP_MIN_MS, Math.round(s.video_exposure / 1000)))
+        setVideoExposureS(roundVideoExposureS(s.video_exposure / 1_000_000))
       }
       if (typeof s.gain_max === 'number') setGainMax(s.gain_max)
     } catch {
@@ -1316,21 +1350,22 @@ export function AllSkyCameraControlPanel() {
 
             {/* Video Exposure */}
             <div className={camCtrlGrid}>
-              <span className={labelClass}>Video Exp (ms)</span>
+              <span className={labelClass}>Video Exp (s)</span>
               <StyledSlider
-                min={VIDEO_EXP_MIN_MS}
-                max={VIDEO_EXP_MAX_MS}
+                min={0}
+                max={VIDEO_EXP_SLIDER_STEPS}
                 step={1}
-                value={videoExposureMs}
-                onChange={setVideoExposureMs}
+                value={videoExposureToSlider(videoExposureS)}
+                onChange={(pos) => setVideoExposureS(sliderToVideoExposure(pos))}
                 disabled={settingsAutoManaged}
               />
               <NumericInput
                 ref={videoExpInputRef}
-                value={videoExposureMs}
-                onChange={setVideoExposureMs}
-                min={VIDEO_EXP_MIN_MS}
-                max={VIDEO_EXP_MAX_MS}
+                value={videoExposureS}
+                onChange={setVideoExposureS}
+                min={VIDEO_EXP_MIN_S}
+                max={VIDEO_EXP_MAX_S}
+                decimal
                 onValidityChange={setVideoExpInputValid}
                 disabled={settingsAutoManaged}
                 className={fieldInputCompact}
@@ -1340,8 +1375,9 @@ export function AllSkyCameraControlPanel() {
                 className={btnSet}
                 disabled={settingsAutoManaged || settingsBusy || !videoExpInputValid}
                 onClick={() => {
-                  const ms = videoExpInputRef.current?.commit() ?? videoExposureMs
-                  void applySettings({ videoExposure: ms / 1000 })
+                  void applySettings({
+                    videoExposure: videoExpInputRef.current?.commit() ?? videoExposureS,
+                  })
                 }}
               >
                 Set

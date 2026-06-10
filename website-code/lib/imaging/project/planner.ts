@@ -1048,7 +1048,13 @@ export function subtractProjectTonightPlansFromFree(
   return free
 }
 
-/** Persist all tonight sub-session plans; promote project to in_progress when any are written. */
+/**
+ * Persist all tonight sub-session plans. The project parent stays pending here;
+ * it is promoted to in_progress only when NINA actually receives a sub-session
+ * (markNightInProgress / markProjectOnBoard on delivery), so a freshly submitted
+ * project cannot preempt earlier-submitted sessions via altitude holds before it
+ * has started imaging.
+ */
 export async function applyProjectTonightPlans(
   projectId: string,
   plans: ProjectTonightPlan[]
@@ -1115,11 +1121,6 @@ export async function applyProjectTonightPlans(
       )
     }
   }
-
-  const refreshed = await getProjectById(projectId)
-  if (refreshed && (refreshed.status === 'pending' || refreshed.status === 'scheduled')) {
-    await patchProject(projectId, { status: 'in_progress' })
-  }
 }
 
 /** @deprecated Use applyProjectTonightPlans */
@@ -1130,7 +1131,7 @@ export async function applyProjectTonightPlan(
   await applyProjectTonightPlans(projectId, [plan])
 }
 
-/** Compute insight, persist tonight's sub-sessions, and promote project to in_progress when schedulable. */
+/** Compute insight and persist tonight's sub-sessions when schedulable (parent stays pending until delivery). */
 export async function planAndScheduleProjectTonight(
   projectId: string,
   freeIntervals: Array<{ startMs: number; endMs: number }>,

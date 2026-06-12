@@ -1,0 +1,14 @@
+{
+  "channel": "stable",
+  "station": {
+    "latestVersion": "0.1.0",
+    "downloadUrlWindows": "https://www.boreanastro.com/releases/borean-station-0.1.0-windows-setup.exe",
+    "releaseNotes": "Initial release."
+  },
+  "control": {
+    "latestVersion": "0.1.1",
+    "downloadUrlWindows": null,
+    "downloadUrlMac": "https://www.boreanastro.com/releases/borean-control-0.1.1-macos.dmg",
+    "releaseNotes": "New Borean Astro app icon; macOS installer now uses proper ad-hoc code signing (fixes \"app is damaged\" error)."
+  }
+}

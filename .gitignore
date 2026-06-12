@@ -20,6 +20,8 @@ website-code/*-service-account*.json
 website-code/.local-private/
 website-code/observatory/SSH-ACCESS.local.md
 website-code/public/DJI_0149.MP4
+website-code/public/DJI_0149 frames/
+website-code/public/gallery/Thumbs.db
 
 # --- third-party (local upstream clones — not deployed) ---
 third-party/nina/
@@ -32,7 +34,12 @@ third-party/Pomfret Astro Special Event/
 # --- general-platforms (Tauri / GP apps) ---
 general-platforms/**/node_modules/
 general-platforms/**/dist/
+general-platforms/**/.next/
 general-platforms/**/src-tauri/target/
+general-platforms/standard/build-config/tenant.json
+general-platforms/**/dist-ci/
+general-platforms/standard/website/public/releases/*.dmg
+general-platforms/standard/website/public/releases/*.exe
 
 # --- shared ---
 .DS_Store

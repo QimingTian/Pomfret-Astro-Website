@@ -160,6 +160,9 @@ ASI_IMG_RGB24 = 1
 ASI_IMG_RAW16 = 2
 ASI_IMG_Y8 = 3
 
+# Error codes
+ASI_ERROR_TIMEOUT = 11
+
 # Control types (IMPORTANT: Order from header file)
 ASI_GAIN = 0
 ASI_EXPOSURE = 1
@@ -814,10 +817,12 @@ class ASICamera:
         
         while self.streaming and self.is_open:
             # Calculate timeout based on video exposure time
-            # SDK recommends: exposure*2+500ms
+            # SDK recommends: exposure*2+500ms. Block in short slices so other SDK
+            # calls (status/settings control reads) are not starved while a
+            # multi-second exposure accumulates.
             video_exposure_ms = camera_state['video_exposure'] / 1000.0  # Convert to ms
             timeout_ms = int(video_exposure_ms * 2 + 500)
-            timeout_ms = max(100, min(timeout_ms, 5000))  # Clamp between 100ms and 5s (was 1s minimum)
+            timeout_ms = max(100, min(timeout_ms, 2000))
             
             drop_frames = ctypes.c_int(0)
             result = asi_lib.ASIGetVideoData(
@@ -840,15 +845,15 @@ class ASICamera:
                 self.frame_buffer = img
                 camera_state['current_frame'] = img
                 camera_state['stream_last_frame_iso'] = datetime.now(timezone.utc).isoformat()
-            elif result != 2:  # 2 = timeout, which is normal
+            elif result != ASI_ERROR_TIMEOUT:  # timeout is normal while an exposure accumulates
                 consecutive_errors += 1
                 # Only print error if it persists
                 if consecutive_errors == 1 or consecutive_errors % 10 == 0:
                     print(f"Error getting video data: {result} (consecutive: {consecutive_errors})")
             
-            # Minimal sleep - let camera exposure time control the actual frame rate
-            # If exposure is short, we'll get frames faster; if long, we'll wait longer
-            time.sleep(0.001)  # 1ms sleep - much shorter to allow FPS to vary with exposure
+            # Pace polling: tight for video-rate exposures, relaxed for long ones so
+            # HTTP handlers can use the SDK between our blocking reads.
+            time.sleep(0.001 if video_exposure_ms <= 2000 else 0.25)
     
     def capture_snapshot(self):
         """Capture a single snapshot"""

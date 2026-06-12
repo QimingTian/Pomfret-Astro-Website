@@ -1,0 +1,98 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: 238, 233, 220;
+  --background-rgb: 8, 9, 10;
+  --muted-rgb: 157, 160, 167;
+  --surface-rgb: 21, 22, 22;
+  --line: rgba(255, 255, 255, 0.14);
+  --glass-bg: rgba(255, 255, 255, 0.04);
+  --glass-bg-hover: rgba(255, 255, 255, 0.07);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: rgb(var(--background-rgb));
+    color: rgb(var(--foreground-rgb));
+    font-family: 'SF Pro Text', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Helvetica Neue',
+      Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    letter-spacing: 0.01em;
+  }
+}
+
+@layer components {
+  .glass-panel,
+  .glass-card {
+    @apply rounded-2xl border-0 backdrop-blur-md transition-colors duration-300;
+    background-color: var(--glass-bg);
+  }
+
+  .glass-card:hover {
+    background-color: var(--glass-bg-hover);
+  }
+
+  .section-heading {
+    @apply font-display text-3xl font-semibold tracking-tight text-fg md:text-4xl;
+  }
+
+  .panel-placeholder {
+    @apply rounded-2xl border border-white/15 bg-surface;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center rounded-full border border-white/25 bg-surface px-8 py-3 text-sm font-semibold text-fg transition hover:bg-[#1b1c1c];
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center rounded-full border border-white/25 bg-transparent px-8 py-3 text-sm font-medium text-fg transition hover:bg-surface;
+  }
+
+  .text-link {
+    @apply text-fg underline-offset-4 transition hover:text-white hover:underline;
+  }
+
+  .label-caps {
+    @apply text-sm font-medium uppercase tracking-[0.18em] text-muted;
+  }
+
+  .page-shell {
+    @apply mx-auto w-full max-w-[1360px] px-5 sm:px-8 lg:px-10;
+  }
+
+  .page-shell-narrow {
+    @apply mx-auto w-full max-w-3xl px-5 sm:px-8;
+  }
+
+  .page-shell-form {
+    @apply mx-auto w-full max-w-lg px-5 sm:px-8;
+  }
+
+  .client-marquee-track {
+    animation: client-marquee 42s linear infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .client-marquee-track {
+      animation: none;
+      flex-wrap: wrap;
+      width: auto;
+      justify-content: center;
+    }
+  }
+}
+
+@keyframes client-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}

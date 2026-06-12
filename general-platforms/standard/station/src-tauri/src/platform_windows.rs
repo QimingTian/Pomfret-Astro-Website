@@ -27,7 +27,7 @@ fn find_nina_exe_in_dir(dir: &Path, depth: u32) -> Option<PathBuf> {
     if direct.is_file() {
         return nina_install_dir_from_exe(&direct);
     }
-    let entries = fs_read_dir(dir)?;
+    let entries = fs_read_dir(dir).ok()?;
     for entry in entries {
         let path = entry.path();
         if path.is_dir() {
@@ -165,8 +165,9 @@ fn append_install_log(line: &str) {
 }
 
 pub fn autostart_is_active() -> bool {
-    hidden_cmd("reg")
-        .args(["query", AUTOSTART_REG_KEY, "/v", AUTOSTART_VALUE])
+    let mut command = hidden_cmd("reg");
+    command.args(["query", AUTOSTART_REG_KEY, "/v", AUTOSTART_VALUE]);
+    command
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
@@ -177,19 +178,19 @@ pub fn enable_autostart(exe_path: &Path) -> Result<(), String> {
         return Err(format!("Station executable not found: {}", exe_path.display()));
     }
     let quoted = format!("\"{}\"", exe_path.display());
-    let output = hidden_cmd("reg")
-        .args([
-            "add",
-            AUTOSTART_REG_KEY,
-            "/v",
-            AUTOSTART_VALUE,
-            "/t",
-            "REG_SZ",
-            "/d",
-            &quoted,
-            "/f",
-        ])
-        .output()
+    let mut command = hidden_cmd("reg");
+    command.args([
+        "add",
+        AUTOSTART_REG_KEY,
+        "/v",
+        AUTOSTART_VALUE,
+        "/t",
+        "REG_SZ",
+        "/d",
+        &quoted,
+        "/f",
+    ]);
+    let output = command
         .map_err(|e| format!("Could not update registry: {e}"))?;
 
     if !output.status.success() {

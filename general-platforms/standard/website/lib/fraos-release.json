@@ -1,14 +1,14 @@
 {
   "channel": "stable",
   "station": {
-    "latestVersion": "0.1.0",
-    "downloadUrlWindows": "https://www.boreanastro.com/releases/borean-station-0.1.0-windows-setup.exe",
-    "releaseNotes": "Initial release."
+    "latestVersion": "0.1.1",
+    "downloadUrlWindows": "https://www.boreanastro.com/releases/borean-station-0.1.1-windows-setup.exe",
+    "releaseNotes": "New Borean Astro app icon; sign in with your Borean Astro account to activate license automatically."
   },
   "control": {
     "latestVersion": "0.1.1",
-    "downloadUrlWindows": null,
+    "downloadUrlWindows": "https://www.boreanastro.com/releases/borean-control-0.1.1-windows-setup.exe",
     "downloadUrlMac": "https://www.boreanastro.com/releases/borean-control-0.1.1-macos.dmg",
-    "releaseNotes": "New Borean Astro app icon; macOS installer now uses proper ad-hoc code signing (fixes \"app is damaged\" error)."
+    "releaseNotes": "New Borean Astro app icon; macOS ad-hoc signing fix; sign in to activate license (no tenant.json required)."
   }
 }

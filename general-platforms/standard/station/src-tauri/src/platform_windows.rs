@@ -109,7 +109,8 @@ pub fn install_python() -> Result<(), String> {
     }
 
     append_install_log("Installing Python 3.12 via winget…");
-    let winget = hidden_cmd("winget").args([
+    let mut winget = hidden_cmd("winget");
+    winget.args([
         "install",
         "-e",
         "--id",

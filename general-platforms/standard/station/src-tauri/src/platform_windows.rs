@@ -191,6 +191,7 @@ pub fn enable_autostart(exe_path: &Path) -> Result<(), String> {
         "/f",
     ]);
     let output = command
+        .output()
         .map_err(|e| format!("Could not update registry: {e}"))?;
 
     if !output.status.success() {

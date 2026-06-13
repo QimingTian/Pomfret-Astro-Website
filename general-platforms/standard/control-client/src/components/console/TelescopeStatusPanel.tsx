@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { personalTenantApiUrl } from '@shared/tenant-config'
+import { personalTenantApiUrl, personalAuthHeaders } from '@shared/tenant-config'
 import { contentApiPath } from '../../lib/content-base'
 import { loadRuntimeTenant } from '../../lib/tenant'
 import { getObservatoryLocation } from '../../lib/settings'
@@ -25,6 +25,7 @@ const POLAR_ALIGNMENT_X_DEG = 40
 const WEBSITE_Y_OFFSET_DEG = -90
 const WORLD_COMPASS_ROTATION_DEG = 0
 const TELEMETRY_STALE_MS = 15_000
+const MOUNT_POLL_MS = 2_000
 
 function disconnectedPointing(): { alt: number; az: number } {
   return { alt: getObservatoryLocation().lat, az: 0 }
@@ -164,6 +165,7 @@ export function TelescopeStatusPanel() {
   useEffect(() => {
     let mounted = true
     let source: EventSource | null = null
+    let pollTimer: ReturnType<typeof setInterval> | null = null
 
     const applySample = (
       sample: MountSample | null | undefined,
@@ -205,6 +207,26 @@ export function TelescopeStatusPanel() {
 
     void (async () => {
       const tenant = await loadRuntimeTenant()
+
+      const pollMount = async () => {
+        const url = personalTenantApiUrl(tenant, '/imaging/mount-pointing')
+        try {
+          const res = await fetch(url, { headers: personalAuthHeaders(tenant) })
+          const data = (await res.json()) as {
+            ok?: boolean
+            sample?: MountSample | null
+            serverNowUtc?: string
+          }
+          if (!mounted || !res.ok || !data.ok) return
+          applySample(data.sample ?? null, data.serverNowUtc)
+        } catch {
+          // polling continues; SSE may still deliver
+        }
+      }
+
+      await pollMount()
+      pollTimer = setInterval(() => void pollMount(), MOUNT_POLL_MS)
+
       const streamUrl = `${personalTenantApiUrl(tenant, '/imaging/mount-pointing/stream')}?access_token=${encodeURIComponent(tenant.apiSecret)}`
       source = new EventSource(streamUrl)
 
@@ -228,14 +250,11 @@ export function TelescopeStatusPanel() {
           applySample(payload.sample, payload.serverNowUtc)
         }
       }
-
-      source.onerror = () => {
-        if (mounted) applySample(null, undefined)
-      }
     })()
 
     return () => {
       mounted = false
+      pollTimer && clearInterval(pollTimer)
       source?.close()
     }
   }, [])

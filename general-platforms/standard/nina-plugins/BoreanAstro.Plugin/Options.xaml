@@ -7,6 +7,7 @@
             <Label Content="Borean Astro" FontWeight="Bold" Margin="0,4,0,0" />
             <TextBlock Text="Reads license from %LOCALAPPDATA%\BoreanAstro\tenant.json on startup." TextWrapping="Wrap" Margin="0,4,0,0" Opacity="0.85" />
             <CheckBox Content="Enable mount pointing telemetry" IsChecked="{Binding TelemetryEnabled}" Margin="0,8,0,0" />
+            <Button Content="Reload license from tenant.json" Margin="0,8,0,0" HorizontalAlignment="Left" Click="OnReloadLicenseClick" />
             <Label Content="POST URL (your hub /api/personal/…/imaging/mount-pointing)" Margin="0,8,0,0" />
             <TextBox Text="{Binding ApiEndpoint, UpdateSourceTrigger=PropertyChanged}" MinWidth="400" />
             <Label Content="Minimum interval between POSTs (ms)" Margin="0,8,0,0" />

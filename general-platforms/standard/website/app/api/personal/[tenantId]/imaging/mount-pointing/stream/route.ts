@@ -5,6 +5,9 @@ import type { NextRequest } from 'next/server'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+export const maxDuration = 300
+
+const POLL_MS = 2_000
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -57,12 +60,27 @@ export async function GET(
 
       const unsubscribe = subscribeLiveEvents(channel, onPayload, request.signal)
 
+      let lastFingerprint = sample ? JSON.stringify(sample) : ''
+      const pollKv = setInterval(() => {
+        void getMountPointingSample(stationId, tenantId).then((latest) => {
+          const fp = latest ? JSON.stringify(latest) : ''
+          if (fp === lastFingerprint) return
+          lastFingerprint = fp
+          enqueue({
+            type: 'sample',
+            sample: latest,
+            serverNowUtc: new Date().toISOString(),
+          })
+        })
+      }, POLL_MS)
+
       const keepAlive = setInterval(() => {
         enqueue({ type: 'ping' })
       }, 15000)
 
       request.signal.addEventListener('abort', () => {
         clearInterval(keepAlive)
+        clearInterval(pollKv)
         unsubscribe()
         controller.close()
       })

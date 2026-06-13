@@ -44,6 +44,16 @@ namespace BoreanAstro.Plugin {
             if (!Settings.Default.TelemetryEnabled) return;
 
             var url = (Settings.Default.ApiEndpoint ?? string.Empty).Trim();
+            var secret = (Settings.Default.SharedSecret ?? string.Empty).Trim();
+            if (url.Length == 0 || secret.Length == 0) {
+                if (TenantConfigLoader.TryLoad(out var license)) {
+                    Settings.Default.ApiEndpoint = license.MountPointingUrl;
+                    Settings.Default.SharedSecret = license.ApiSecret;
+                    CoreUtil.SaveSettings(Settings.Default);
+                    url = license.MountPointingUrl;
+                    secret = license.ApiSecret;
+                }
+            }
             if (url.Length == 0) return;
 
             var interval = Math.Max(250, Settings.Default.PostIntervalMilliseconds);

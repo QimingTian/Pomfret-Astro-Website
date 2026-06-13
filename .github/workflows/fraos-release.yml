@@ -126,6 +126,8 @@ jobs:
   publish-manifest:
     needs: [control-mac, control-windows, station-windows]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 

@@ -37,6 +37,11 @@ const sources = [
         standardRoot,
         `control-client/src-tauri/target/release/bundle/dmg/Borean Astro Control_${CONTROL_VERSION}_x64.dmg`
       ),
+      path.join(
+        standardRoot,
+        `control-client/dist-ci/Borean Astro Control_${CONTROL_VERSION}_aarch64.dmg`
+      ),
+      path.join(standardRoot, 'control-client/dist-ci/borean-control-macos.dmg'),
     ],
     dest: `borean-control-${CONTROL_VERSION}-macos.dmg`,
   },

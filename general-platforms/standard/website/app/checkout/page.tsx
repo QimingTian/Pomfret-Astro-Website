@@ -199,9 +199,6 @@ function CheckoutMain({
 
         <div className="glass-card mt-6 border border-white/10 bg-white/[0.02] p-6 md:p-8">
           <h3 className="font-display text-lg font-semibold text-fg">Promotion code</h3>
-          <p className="mt-1 text-sm text-muted">
-            Have a code? Apply it for a complimentary license and instant download.
-          </p>
           <label className="mt-5 block">
             <span className="sr-only">Promotion code</span>
             <div className="flex flex-col gap-2 sm:flex-row">
@@ -233,11 +230,7 @@ function CheckoutMain({
               {promoPreview.label ? `${promoPreview.label} · ` : ''}
               {promoPreview.code} applied — {promoPreview.finalPriceLabel}
             </p>
-          ) : (
-            <p className="mt-3 text-xs text-muted/80">
-              100% promotion codes provision your cloud hub immediately.
-            </p>
-          )}
+          ) : null}
         </div>
 
         <div className="mt-8 flex flex-col gap-6 border-t border-white/10 pt-8 sm:flex-row sm:items-end sm:justify-between">
@@ -264,11 +257,6 @@ function CheckoutMain({
           </button>
         </div>
 
-        {!promoActive && stripeEnabled ? (
-          <p className="mt-4 text-center text-xs text-muted/80 sm:text-right">
-            Secure payment by Stripe. You can also enter a promotion code above.
-          </p>
-        ) : null}
         {!promoActive && !stripeEnabled ? (
           <p className="mt-4 text-center text-xs text-muted/80 sm:text-right">
             Card checkout is not configured on this server yet — use a 100% promotion code to activate
@@ -277,12 +265,6 @@ function CheckoutMain({
         ) : null}
         {error ? <p className="mt-4 text-center text-sm text-red-300 sm:text-right">{error}</p> : null}
       </div>
-
-      <p className="mt-6 text-center text-xs leading-relaxed text-muted/80">
-        Your order provisions a dedicated cloud hub on www.boreanastro.com. Download Control Client and
-        Station, plus a personal <code className="text-fg/90">tenant.json</code> that connects your install
-        to your hub.
-      </p>
     </>
   )
 }

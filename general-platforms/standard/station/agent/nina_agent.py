@@ -92,6 +92,11 @@ TOKEN = ""
 POLL_SECONDS = 45
 FALLBACK_POLL_SECONDS = 300
 SSE_CONNECTED_WAIT_SECONDS = 60
+AGENT_USER_AGENT = os.environ.get(
+    "BOREAN_AGENT_USER_AGENT",
+    "Borean Astro Station Agent/1.0 (Windows; NINA)",
+)
+LOCAL_HUB_URL = "http://127.0.0.1:7841"
 JOBS_DIR = os.environ.get(
     "BOREAN_JOBS_DIR",
     str(Path.home() / "Downloads" / "NinaJobs"),
@@ -141,7 +146,7 @@ OUTPUT_MODE_NONE = "none"
 # -------- R2 upload config (optional, but recommended) --------
 # Install dependency on observatory PC once: pip install boto3
 # Credentials: Windows env R2_* (same values as Vercel). Never commit secrets here.
-# Personal: R2/PDU off unless explicitly enabled in env.
+# Personal: R2/PDU off unless explicitly enabled in Station settings / env.
 R2_ENABLED = os.environ.get("PERSONAL_R2_ENABLED", "0").strip() in ("1", "true", "yes")
 R2_ACCOUNT_ID = ""
 R2_ACCESS_KEY_ID = ""
@@ -153,7 +158,7 @@ R2_PREFIX = "imaging"
 # Notify backend after each upload batch so website can map queueId -> objectKey.
 # Backend endpoint: POST /api/imaging/session-files
 # Uses Authorization header from TOKEN (Bearer) if TOKEN is set.
-UPLOAD_REPORT_URL = _api_url("/api/imaging/session-files")
+UPLOAD_REPORT_URL = _api_url("/imaging/session-files")
 
 # -------- Live preview config (scheme A) --------
 # Generate/upload one latest JPEG preview for each session when possible.
@@ -162,12 +167,12 @@ PREVIEW_MAX_WIDTH = 1280
 PREVIEW_JPEG_QUALITY = 72
 PREVIEW_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".fit", ".fits"}
 # API receives latest preview and keeps it until replaced.
-PREVIEW_UPLOAD_URL = _api_url("/api/imaging/preview")
+PREVIEW_UPLOAD_URL = _api_url("/imaging/preview")
 
 # -------- Digital Loggers PDU (mount + camera power) --------
 # Credentials: Windows env PDU_USER, PDU_PASSWORD (never commit secrets).
 PDU_ENABLED = os.environ.get("PERSONAL_PDU_ENABLED", "0").strip() in ("1", "true", "yes")
-PDU_BASE_URL = "http://192.168.121.5"
+PDU_BASE_URL = os.environ.get("PDU_BASE_URL", "").strip()
 # Outlet 1 = Scope (mount), 2 = Camera on Borean observatory PDU.
 PDU_OUTLETS = (1, 2)
 # Seconds to wait after turning outlets ON before starting NINA (cold boot).
@@ -184,12 +189,32 @@ def queue_bearer_token() -> str:
     return (TOKEN.strip() or os.environ.get("IMAGING_QUEUE_SECRET", "").strip())
 
 
+def client_request_headers() -> Dict[str, str]:
+    return {
+        "Accept": "application/json",
+        "User-Agent": AGENT_USER_AGENT,
+        "X-Borean-Client": "station-agent",
+    }
+
+
 def build_headers() -> Dict[str, str]:
-    headers: Dict[str, str] = {"Accept": "application/json"}
+    headers = client_request_headers()
     bearer = queue_bearer_token()
     if bearer:
         headers["Authorization"] = f"Bearer {bearer}"
     return headers
+
+
+def reconcile_queue_headers() -> Dict[str, str]:
+    headers = client_request_headers()
+    bearer = reconcile_queue_bearer_token()
+    if bearer:
+        headers["Authorization"] = f"Bearer {bearer}"
+    return headers
+
+
+def reconcile_queue_bearer_token() -> str:
+    return (RECONCILE_BEARER or os.environ.get("BOREAN_CRON_SECRET") or TOKEN or "").strip()
 
 
 def pdu_credentials() -> tuple[str, str]:
@@ -256,16 +281,19 @@ def power_off_observatory_equipment() -> None:
     pdu_set_outlets("OFF")
 
 
-def reconcile_queue_bearer_token() -> str:
-    return (RECONCILE_BEARER or os.environ.get("BOREAN_CRON_SECRET") or TOKEN or "").strip()
-
-
-def reconcile_queue_headers() -> Dict[str, str]:
-    headers: Dict[str, str] = {"Accept": "application/json"}
-    bearer = reconcile_queue_bearer_token()
-    if bearer:
-        headers["Authorization"] = f"Bearer {bearer}"
-    return headers
+def http_error_detail(ex: urllib.error.HTTPError) -> str:
+    try:
+        body = ex.read().decode("utf-8", errors="replace").strip()
+    except Exception:
+        body = ""
+    if "error 1010" in body.lower() or "access denied" in body.lower():
+        return (
+            f"HTTP {ex.code} blocked by Cloudflare (browser signature). "
+            f"Update Station to the latest release or run Personal Hub at {LOCAL_HUB_URL}."
+        )
+    if body:
+        return f"HTTP {ex.code}: {body[:300]}"
+    return f"HTTP {ex.code}: {ex.reason}"
 
 
 def _r2_env(name: str, inline: str) -> str:
@@ -341,8 +369,7 @@ def report_agent_pulse(nina_running: bool) -> bool:
         post_json(url, {"ninaRunning": nina_running})
         return True
     except urllib.error.HTTPError as ex:
-        body = ex.read().decode("utf-8", errors="replace").strip() if ex.fp else ""
-        log(f"Agent pulse HTTP {ex.code}: {body[:300]}")
+        log(f"Agent pulse {http_error_detail(ex)}")
     except Exception as ex:
         log(f"Agent pulse failed: {ex}")
     return False
@@ -563,8 +590,8 @@ def validate_config() -> None:
         )
     if PDU_ENABLED and not pdu_configured():
         log(
-            "PDU_ENABLED is True but PDU_USER / PDU_PASSWORD are missing; "
-            "power control will be skipped until env vars are set."
+            "PDU is enabled but URL or credentials are missing; "
+            "power control will be skipped until Settings are saved in Station."
         )
 
 
@@ -1124,6 +1151,10 @@ def run_loop() -> None:
             except urllib.error.HTTPError as ex:
                 if ex.code == 404:
                     log("No sequence available yet (HTTP 404).")
+                    sleep_between_polls()
+                    continue
+                if ex.code == 403:
+                    log(f"Sequence fetch blocked: {http_error_detail(ex)}")
                     sleep_between_polls()
                     continue
                 if ex.code == 409:

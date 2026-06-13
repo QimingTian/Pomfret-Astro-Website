@@ -10,6 +10,8 @@ pub struct PersonalTenantInfo {
     pub tenant_id: String,
     pub api_base_url: String,
     pub display_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -19,6 +21,9 @@ struct TenantFile {
     api_base_url: String,
     api_secret: String,
     display_name: Option<String>,
+    plan: Option<String>,
+    #[serde(default)]
+    valid_until: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -78,6 +83,11 @@ fn tenant_info_from(raw: &TenantFile) -> PersonalTenantInfo {
             .filter(|s| !s.trim().is_empty())
             .cloned()
             .unwrap_or_else(|| raw.tenant_id.clone()),
+        plan: raw
+            .plan
+            .as_ref()
+            .filter(|s| !s.trim().is_empty())
+            .cloned(),
     }
 }
 
@@ -103,6 +113,128 @@ fn fetch_control_version_manifest() -> Result<ControlVersionResponse, String> {
         .into_string()
         .map_err(|e| e.to_string())
         .and_then(|body| serde_json::from_str(&body).map_err(|e| e.to_string()))
+}
+
+const PLATE_SOLVE_API: &str = "https://www.boreanastro.com/api/astrometry/solve";
+
+fn plate_solve_agent() -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .timeout(Duration::from_secs(120))
+        .build()
+}
+
+fn mime_for_filename(name: &str) -> &'static str {
+    let lower = name.to_ascii_lowercase();
+    if lower.ends_with(".png") {
+        return "image/png";
+    }
+    if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
+        return "image/jpeg";
+    }
+    if lower.ends_with(".fits") || lower.ends_with(".fit") {
+        return "application/fits";
+    }
+    "application/octet-stream"
+}
+
+fn multipart_file_body(file_bytes: &[u8], file_name: &str, mime: &str) -> (String, Vec<u8>) {
+    let boundary = format!(
+        "----BoreanBoundary{:x}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    );
+    let mut body = Vec::new();
+    body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+    body.extend_from_slice(
+        format!("Content-Disposition: form-data; name=\"file\"; filename=\"{file_name}\"\r\n").as_bytes(),
+    );
+    body.extend_from_slice(format!("Content-Type: {mime}\r\n\r\n").as_bytes());
+    body.extend_from_slice(file_bytes);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    (boundary, body)
+}
+
+fn plate_solve_upload(file_bytes: &[u8], file_name: &str) -> Result<u64, String> {
+    let name = if file_name.trim().is_empty() {
+        "upload.png".to_string()
+    } else {
+        file_name.to_string()
+    };
+    let mime = mime_for_filename(&name);
+    let (boundary, body) = multipart_file_body(file_bytes, &name, mime);
+    let agent = plate_solve_agent();
+    let response = agent
+        .post(PLATE_SOLVE_API)
+        .set(
+            "Content-Type",
+            &format!("multipart/form-data; boundary={boundary}"),
+        )
+        .send_bytes(&body)
+        .map_err(|e| e.to_string())?;
+    let status = response.status();
+    let response_body = response.into_string().map_err(|e| e.to_string())?;
+    if status >= 400 {
+        let msg = if status == 413 {
+            "Image is too large for upload (max ~4 MB). The app compresses large PNGs automatically — restart and try again.".into()
+        } else {
+            parse_api_error(status, &response_body)
+        };
+        return Err(msg);
+    }
+    let json: serde_json::Value =
+        serde_json::from_str(&response_body).map_err(|e| format!("Invalid upload response: {e}"))?;
+    json.get("subid")
+        .and_then(|value| value.as_u64())
+        .ok_or_else(|| {
+            json.get("error")
+                .and_then(|value| value.as_str())
+                .unwrap_or("Upload failed.")
+                .to_string()
+        })
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlateSolvePollResult {
+    status: String,
+    error: Option<String>,
+    arcsec_per_pixel: Option<f64>,
+    orientation_deg: Option<f64>,
+    parity: Option<i32>,
+}
+
+fn plate_solve_poll(subid: u64) -> Result<PlateSolvePollResult, String> {
+    let url = format!("{PLATE_SOLVE_API}?subid={subid}");
+    let agent = plate_solve_agent();
+    let response = agent.get(&url).call().map_err(|e| e.to_string())?;
+    let response_body = response.into_string().map_err(|e| e.to_string())?;
+    let json: serde_json::Value =
+        serde_json::from_str(&response_body).map_err(|e| format!("Invalid poll response: {e}"))?;
+    let status = json
+        .get("status")
+        .and_then(|value| value.as_str())
+        .unwrap_or("processing")
+        .to_string();
+    let calibration = json.get("calibration");
+    Ok(PlateSolvePollResult {
+        status,
+        error: json
+            .get("error")
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string()),
+        arcsec_per_pixel: calibration
+            .and_then(|value| value.get("arcsecPerPixel"))
+            .and_then(|value| value.as_f64()),
+        orientation_deg: calibration
+            .and_then(|value| value.get("orientationDeg"))
+            .and_then(|value| value.as_f64()),
+        parity: calibration
+            .and_then(|value| value.get("parity"))
+            .and_then(|value| value.as_i64())
+            .map(|value| value as i32),
+    })
 }
 
 fn parse_version_parts(version: &str) -> Vec<u64> {
@@ -171,10 +303,35 @@ struct UpdateStatus {
     download_url: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TenantConfigPublic {
+    tenant_id: String,
+    api_base_url: String,
+    api_secret: String,
+    display_name: String,
+}
+
 #[tauri::command]
 fn control_get_tenant() -> Result<PersonalTenantInfo, String> {
     let raw = resolve_tenant_raw()?;
     Ok(tenant_info_from(&raw))
+}
+
+#[tauri::command]
+fn control_get_tenant_config() -> Result<TenantConfigPublic, String> {
+    let raw = resolve_tenant_raw()?;
+    Ok(TenantConfigPublic {
+        tenant_id: raw.tenant_id.trim().to_string(),
+        api_base_url: raw.api_base_url.trim().trim_end_matches('/').to_string(),
+        api_secret: raw.api_secret.trim().to_string(),
+        display_name: raw
+            .display_name
+            .as_ref()
+            .filter(|s| !s.trim().is_empty())
+            .cloned()
+            .unwrap_or_else(|| raw.tenant_id.clone()),
+    })
 }
 
 #[tauri::command]
@@ -271,9 +428,55 @@ fn activate_account(api_base_url: String, login: String, password: String) -> Re
         .map_err(|e| format!("Invalid tenant license payload: {e}"))
 }
 
+fn tenant_is_expired(raw: &TenantFile) -> bool {
+    let Some(until) = raw.valid_until.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) else {
+        return false;
+    };
+    let Ok(expires_ms) = chrono::DateTime::parse_from_rfc3339(until).map(|dt| dt.timestamp_millis()) else {
+        return false;
+    };
+    expires_ms <= chrono::Utc::now().timestamp_millis()
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalLicenseStatus {
+    installed: bool,
+    valid: bool,
+    expired: bool,
+    valid_until: Option<String>,
+    plan: Option<String>,
+}
+
+fn local_license_status() -> LocalLicenseStatus {
+    let user_installed = read_user_tenant_raw().is_some();
+    let Ok(raw) = resolve_tenant_raw() else {
+        return LocalLicenseStatus {
+            installed: false,
+            valid: false,
+            expired: false,
+            valid_until: None,
+            plan: None,
+        };
+    };
+    let expired = tenant_is_expired(&raw);
+    LocalLicenseStatus {
+        installed: user_installed,
+        valid: user_installed && !expired,
+        expired: user_installed && expired,
+        valid_until: raw.valid_until.clone(),
+        plan: raw.plan.clone(),
+    }
+}
+
+#[tauri::command]
+fn control_local_license_status() -> Result<LocalLicenseStatus, String> {
+    Ok(local_license_status())
+}
+
 #[tauri::command]
 fn control_has_user_license() -> Result<bool, String> {
-    Ok(read_user_tenant_raw().is_some())
+    Ok(local_license_status().valid)
 }
 
 #[tauri::command]
@@ -341,6 +544,20 @@ async fn control_apply_update() -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
+#[tauri::command]
+async fn control_plate_solve_upload(file_bytes: Vec<u8>, file_name: String) -> Result<u64, String> {
+    tauri::async_runtime::spawn_blocking(move || plate_solve_upload(&file_bytes, &file_name))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn control_plate_solve_poll(subid: u64) -> Result<PlateSolvePollResult, String> {
+    tauri::async_runtime::spawn_blocking(move || plate_solve_poll(subid))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -348,13 +565,17 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             control_get_tenant,
+            control_get_tenant_config,
             control_get_license_path,
+            control_local_license_status,
             control_has_user_license,
             control_activate_account,
             control_import_tenant,
             control_app_version,
             control_check_update,
             control_apply_update,
+            control_plate_solve_upload,
+            control_plate_solve_poll,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

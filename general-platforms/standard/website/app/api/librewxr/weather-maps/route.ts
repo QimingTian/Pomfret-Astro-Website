@@ -1,7 +1,12 @@
 import { NextResponse } from 'next/server'
+import { contentJson, contentOptions } from '@/lib/content/cors'
 import { librewxrApiBaseUrl, type LibrewxrWeatherMaps } from '@/lib/content/librewxr'
 
 export const runtime = 'nodejs'
+
+export function OPTIONS() {
+  return contentOptions()
+}
 
 export async function GET() {
   const base = librewxrApiBaseUrl()
@@ -11,14 +16,14 @@ export async function GET() {
       headers: { 'User-Agent': 'Borean Astro/1.0 (Web)' },
     })
     if (!res.ok) {
-      return NextResponse.json({ error: `LibreWXR metadata HTTP ${res.status}` }, { status: 502 })
+      return contentJson({ error: `LibreWXR metadata HTTP ${res.status}` }, 502)
     }
     const data = (await res.json()) as LibrewxrWeatherMaps
-    return NextResponse.json({ ...data, host: base, proxied: true as const })
+    return contentJson({ ...data, host: base, proxied: true as const })
   } catch (e) {
-    return NextResponse.json(
+    return contentJson(
       { error: e instanceof Error ? e.message : 'LibreWXR metadata fetch failed' },
-      { status: 502 }
+      502
     )
   }
 }

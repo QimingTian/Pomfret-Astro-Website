@@ -13,42 +13,58 @@ const releasesDir = path.join(standardRoot, 'website/public/releases')
 const releaseJsonPath = path.join(standardRoot, 'shared/fraos-release.json')
 const websiteReleaseJsonPath = path.join(standardRoot, 'website/lib/fraos-release.json')
 
-const VERSION = '0.1.1'
+const controlPkg = JSON.parse(
+  fs.readFileSync(path.join(standardRoot, 'control-client/package.json'), 'utf8')
+)
+const stationPkg = JSON.parse(
+  fs.readFileSync(path.join(standardRoot, 'station/package.json'), 'utf8')
+)
+const CONTROL_VERSION = controlPkg.version
+const STATION_VERSION = stationPkg.version
 const SITE = 'https://www.boreanastro.com'
 
 const sources = [
   {
     key: 'controlMac',
+    product: 'control',
+    version: CONTROL_VERSION,
     candidates: [
       path.join(
         standardRoot,
-        'control-client/src-tauri/target/release/bundle/dmg/Borean Astro Control_0.1.1_aarch64.dmg'
+        `control-client/src-tauri/target/release/bundle/dmg/Borean Astro Control_${CONTROL_VERSION}_aarch64.dmg`
       ),
       path.join(
         standardRoot,
-        'control-client/src-tauri/target/release/bundle/dmg/Borean Astro Control_0.1.1_x64.dmg'
+        `control-client/src-tauri/target/release/bundle/dmg/Borean Astro Control_${CONTROL_VERSION}_x64.dmg`
       ),
     ],
-    dest: `borean-control-${VERSION}-macos.dmg`,
+    dest: `borean-control-${CONTROL_VERSION}-macos.dmg`,
   },
   {
     key: 'controlWindows',
+    product: 'control',
+    version: CONTROL_VERSION,
     candidates: [
       path.join(
         standardRoot,
-        'control-client/src-tauri/target/release/bundle/nsis/Borean Astro Control_0.1.1_x64-setup.exe'
+        `control-client/src-tauri/target/release/bundle/nsis/Borean Astro Control_${CONTROL_VERSION}_x64-setup.exe`
       ),
-      path.join(standardRoot, 'control-client/dist-ci/Borean Astro Control_0.1.1_x64-setup.exe'),
+      path.join(standardRoot, `control-client/dist-ci/Borean Astro Control_${CONTROL_VERSION}_x64-setup.exe`),
     ],
-    dest: `borean-control-${VERSION}-windows-setup.exe`,
+    dest: `borean-control-${CONTROL_VERSION}-windows-setup.exe`,
   },
   {
     key: 'stationWindows',
+    product: 'station',
+    version: STATION_VERSION,
     candidates: [
-      path.join(standardRoot, 'station/src-tauri/target/release/bundle/nsis/Borean Astro Station_0.1.1_x64-setup.exe'),
-      path.join(standardRoot, 'station/dist-ci/Borean Astro Station_0.1.1_x64-setup.exe'),
+      path.join(
+        standardRoot,
+        `station/src-tauri/target/release/bundle/nsis/Borean Astro Station_${STATION_VERSION}_x64-setup.exe`
+      ),
+      path.join(standardRoot, `station/dist-ci/Borean Astro Station_${STATION_VERSION}_x64-setup.exe`),
     ],
-    dest: `borean-station-${VERSION}-windows-setup.exe`,
+    dest: `borean-station-${STATION_VERSION}-windows-setup.exe`,
   },
 ]
 
@@ -71,11 +87,20 @@ for (const item of sources) {
 const release = JSON.parse(fs.readFileSync(releaseJsonPath, 'utf8'))
 release.station = release.station ?? {}
 release.control = release.control ?? {}
-release.station.latestVersion = VERSION
-release.control.latestVersion = VERSION
-if (staged.stationWindows) release.station.downloadUrlWindows = staged.stationWindows
-if (staged.controlMac) release.control.downloadUrlMac = staged.controlMac
-if (staged.controlWindows) release.control.downloadUrlWindows = staged.controlWindows
+
+if (staged.stationWindows) {
+  release.station.latestVersion = STATION_VERSION
+  release.station.downloadUrlWindows = staged.stationWindows
+}
+if (staged.controlMac) {
+  release.control.latestVersion = CONTROL_VERSION
+  release.control.downloadUrlMac = staged.controlMac
+}
+if (staged.controlWindows) {
+  release.control.latestVersion = CONTROL_VERSION
+  release.control.downloadUrlWindows = staged.controlWindows
+}
+
 const releaseJson = `${JSON.stringify(release, null, 2)}\n`
 fs.writeFileSync(releaseJsonPath, releaseJson)
 fs.writeFileSync(websiteReleaseJsonPath, releaseJson)

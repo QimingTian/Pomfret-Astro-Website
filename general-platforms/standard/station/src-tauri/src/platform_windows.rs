@@ -1,5 +1,6 @@
 //! Windows-only platform helpers (Station ships on Windows only — NINA has no Mac build).
 
+use std::fs;
 use std::io::Write;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -171,6 +172,214 @@ pub fn autostart_is_active() -> bool {
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
+}
+
+const NINA_PLUGIN_FOLDER: &str = "BoreanAstro.Plugin";
+const NINA_PLUGIN_DLL: &str = "BoreanAstro.Plugin.dll";
+
+/// True when the Borean NINA plugin is present under %LOCALAPPDATA%\NINA\Plugins.
+pub fn nina_plugin_installed() -> bool {
+    nina_plugin_install_path().is_some()
+}
+
+fn nina_plugin_install_path() -> Option<PathBuf> {
+    let local = std::env::var("LOCALAPPDATA").ok()?;
+    let plugins_root = PathBuf::from(local).join("NINA").join("Plugins");
+    let entries = fs_read_dir(&plugins_root).ok()?;
+    for entry in entries {
+        let version_dir = entry.path();
+        if !version_dir.is_dir() {
+            continue;
+        }
+        let dll = version_dir
+            .join(NINA_PLUGIN_FOLDER)
+            .join(NINA_PLUGIN_DLL);
+        if dll.is_file() {
+            return Some(dll);
+        }
+    }
+    None
+}
+
+fn nina_plugins_root() -> Result<PathBuf, String> {
+    let local = std::env::var("LOCALAPPDATA")
+        .map_err(|_| "LOCALAPPDATA is not set.".to_string())?;
+    let root = PathBuf::from(local).join("NINA").join("Plugins");
+    fs::create_dir_all(&root).map_err(|e| format!("Cannot create {}: {e}", root.display()))?;
+    Ok(root)
+}
+
+/// Pick NINA's plugin API version folder (e.g. 3.0.0), preferring the newest 3.x already present.
+fn resolve_nina_plugin_version_folder(plugins_root: &Path) -> String {
+    let mut versions: Vec<String> = Vec::new();
+    if let Ok(entries) = fs_read_dir(plugins_root) {
+        for entry in entries {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if name.starts_with("3.") || name.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+                versions.push(name.to_string());
+            }
+        }
+    }
+    versions.sort();
+    versions
+        .into_iter()
+        .next_back()
+        .unwrap_or_else(|| "3.0.0".to_string())
+}
+
+fn dotnet_available() -> bool {
+    hidden_cmd("dotnet")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn try_dotnet_publish_plugin(csproj: &Path, out_dir: &Path) -> Result<(), String> {
+    if !csproj.is_file() {
+        return Err(format!("Plugin project not found: {}", csproj.display()));
+    }
+    if !dotnet_available() {
+        return Err(
+            ".NET SDK not found. Install .NET 8 SDK or reinstall Station from the full Windows installer."
+                .into(),
+        );
+    }
+    let _ = fs::remove_dir_all(out_dir);
+    fs::create_dir_all(out_dir).map_err(|e| format!("Cannot create {}: {e}", out_dir.display()))?;
+
+    append_install_log(&format!(
+        "Building NINA plugin via dotnet publish → {}",
+        out_dir.display()
+    ));
+
+    let mut command = hidden_cmd("dotnet");
+    command.args([
+        "publish",
+        &csproj.to_string_lossy(),
+        "-c",
+        "Release",
+        "-o",
+        &out_dir.to_string_lossy(),
+    ]);
+    let output = command
+        .output()
+        .map_err(|e| format!("Could not run dotnet publish: {e}"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !stdout.trim().is_empty() {
+        append_install_log(&format!("dotnet stdout: {stdout}"));
+    }
+    if !stderr.trim().is_empty() {
+        append_install_log(&format!("dotnet stderr: {stderr}"));
+    }
+
+    if !output.status.success() {
+        return Err("dotnet publish failed. Install .NET 8 SDK or use the full Station installer.".into());
+    }
+
+    let dll = out_dir.join(NINA_PLUGIN_DLL);
+    if !dll.is_file() {
+        return Err(format!(
+            "Plugin build finished but {} was not produced.",
+            NINA_PLUGIN_DLL
+        ));
+    }
+    Ok(())
+}
+
+fn find_plugin_source_dir(candidates: &[PathBuf]) -> Option<PathBuf> {
+    for dir in candidates {
+        if dir.join(NINA_PLUGIN_DLL).is_file() {
+            return Some(dir.clone());
+        }
+    }
+    None
+}
+
+fn copy_plugin_payload(source: &Path, dest: &Path) -> Result<(), String> {
+    fs::create_dir_all(dest).map_err(|e| format!("Cannot create {}: {e}", dest.display()))?;
+
+    let entries = fs_read_dir(source)?;
+    let mut copied = 0usize;
+    for entry in entries {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let name = entry.file_name();
+        let target = dest.join(&name);
+        fs::copy(&path, &target)
+            .map_err(|e| format!("Cannot copy {}: {e}", path.display()))?;
+        copied += 1;
+    }
+
+    if copied == 0 {
+        return Err(format!("No plugin files found in {}", source.display()));
+    }
+    Ok(())
+}
+
+/// Copy bundled (or freshly built) plugin files into NINA's user plugin folder.
+pub fn install_nina_plugin(source_candidates: &[PathBuf], csproj_fallback: Option<&Path>) -> Result<String, String> {
+    if nina_plugin_installed() {
+        let path = nina_plugin_install_path()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| NINA_PLUGIN_DLL.into());
+        append_install_log(&format!("NINA plugin already installed at {path}"));
+        return Ok(format!("Already installed ({path})"));
+    }
+
+    let mut source = find_plugin_source_dir(source_candidates);
+
+    if source.is_none() {
+        if let Some(csproj) = csproj_fallback {
+            let build_dir = station_data_dir().join(".nina-plugin-build");
+            if try_dotnet_publish_plugin(csproj, &build_dir).is_ok() {
+                source = Some(build_dir);
+            }
+        }
+    }
+
+    let source = source.ok_or_else(|| {
+        "Plugin bundle missing from this Station install and automatic build failed. \
+         Reinstall Station using build-windows.ps1 on Windows, or install .NET 8 SDK and retry."
+            .to_string()
+    })?;
+
+    let plugins_root = nina_plugins_root()?;
+    let version = resolve_nina_plugin_version_folder(&plugins_root);
+    let dest = plugins_root
+        .join(version)
+        .join(NINA_PLUGIN_FOLDER);
+
+    copy_plugin_payload(&source, &dest)?;
+
+    let dll = dest.join(NINA_PLUGIN_DLL);
+    if !dll.is_file() {
+        return Err(format!(
+            "Install copy finished but {} is missing.",
+            dll.display()
+        ));
+    }
+
+    let msg = format!("Installed Borean Astro plugin to {}", dest.display());
+    append_install_log(&msg);
+    Ok(msg)
+}
+
+fn station_data_dir() -> PathBuf {
+    if let Ok(base) = std::env::var("LOCALAPPDATA") {
+        return PathBuf::from(base).join("BoreanAstro").join("Station");
+    }
+    PathBuf::from(".")
 }
 
 pub fn enable_autostart(exe_path: &Path) -> Result<(), String> {

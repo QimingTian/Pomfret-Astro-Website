@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { contentJson, contentOptions } from '@/lib/content/cors'
 import { DEFAULT_OBS_LAT, DEFAULT_OBS_LON } from '@/lib/content/observatory-coords'
 import { getTonightSchedulingWindow } from '@/lib/content/sunrise-window'
 import {
@@ -10,6 +10,10 @@ import {
 export const runtime = 'nodejs'
 
 const KMH_TO_MS = 1 / 3.6
+
+export function OPTIONS() {
+  return contentOptions()
+}
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url)
@@ -25,7 +29,7 @@ export async function GET(request: Request) {
   try {
     const response = await fetch(url, { cache: 'no-store' })
     if (!response.ok) {
-      return NextResponse.json({ ok: false as const, error: 'Failed to fetch weather forecast' }, { status: 502 })
+      return contentJson({ ok: false as const, error: 'Failed to fetch weather forecast' }, 502)
     }
     const data = (await response.json()) as {
       hourly?: {
@@ -52,10 +56,10 @@ export async function GET(request: Request) {
       precipProb.length !== times.length ||
       windSpeed.length !== times.length
     ) {
-      return NextResponse.json({ ok: false as const, error: 'Forecast data is incomplete' }, { status: 502 })
+      return contentJson({ ok: false as const, error: 'Forecast data is incomplete' }, 502)
     }
     if (dailySunset.length < 1 || dailySunrise.length < 2) {
-      return NextResponse.json({ ok: false as const, error: 'Daily sunrise/sunset data is incomplete' }, { status: 502 })
+      return contentJson({ ok: false as const, error: 'Daily sunrise/sunset data is incomplete' }, 502)
     }
 
     const parsedStartSec = startSecParam ? Number(startSecParam) : NaN
@@ -115,7 +119,7 @@ export async function GET(request: Request) {
       .filter((x): x is { hourStartSec: number; precipitationProbability: number; cloudCover: number | null } => x != null)
 
     if (isNighttimeNow) {
-      return NextResponse.json({
+      return contentJson({
         ok: true as const,
         prediction: 'unavailable' as const,
         message: 'nighttime now, prediction not available',
@@ -144,7 +148,7 @@ export async function GET(request: Request) {
     })
     const prediction = permitted ? 'permitted' : 'not_permitted'
 
-    return NextResponse.json({
+    return contentJson({
       ok: true as const,
       prediction,
       permitted,
@@ -159,6 +163,6 @@ export async function GET(request: Request) {
     })
   } catch (error) {
     console.error('[tonight-weather-prediction] failed', error)
-    return NextResponse.json({ ok: false as const, error: 'Unable to evaluate weather prediction' }, { status: 500 })
+    return contentJson({ ok: false as const, error: 'Unable to evaluate weather prediction' }, 500)
   }
 }

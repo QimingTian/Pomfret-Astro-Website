@@ -1,10 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { formatObservatoryLocalTimeFromUnixSec } from '../lib/observatory-local-time'
 import {
   getTonightScheduleEveningAstronomyUtc,
   getTonightScheduleMorningAstronomyUtc,
-  OBSERVATORY_TIME_ZONE,
 } from '../lib/site/sunrise-window'
 import { contentApiPath } from '../lib/content-base'
+import {
+  fetchSunsetSunriseFallback,
+  getTonightScheduleStrip,
+} from '../lib/site/schedule-strip'
+import { useObservatoryLocation } from '../lib/useObservatoryLocation'
+import { computeFov, overlayRotationDeg } from '../lib/equipment'
+import { useEquipment } from '../lib/useEquipment'
+import { computeFovOverlayRotationDeg } from '../lib/site/fov-overlay'
 
 export type RemotePrefill = {
   target: string
@@ -16,59 +24,11 @@ type AtlasPageProps = {
   onSendToRemote?: (prefill: RemotePrefill) => void
 }
 
-const BOREAN_LATITUDE = 41.9159
-const BOREAN_LONGITUDE = -71.9626
-const BOREAN_ALTITUDE_METERS = 150
+/** Camera frame geometry derived from the configured imaging rig. Angular FOV in radians;
+ * the on-screen rotation is computed live from the engine projection (field rotation). */
+type CameraFrameProfile = { fovWRad: number; fovHRad: number; positionAngleDeg: number }
 
-/** Angular FOV (rad) from physical chip size and focal length: 2*atan(chip/(2*FL)). */
-type CameraFrameProfile = { fovWRad: number; fovHRad: number; rotationDeg: number }
-
-function cameraFovFromChipMm(chipWidthMm: number, chipHeightMm: number, focalLengthMm: number): Pick<CameraFrameProfile, 'fovWRad' | 'fovHRad'> {
-  return {
-    fovWRad: 2 * Math.atan(chipWidthMm / (2 * focalLengthMm)),
-    fovHRad: 2 * Math.atan(chipHeightMm / (2 * focalLengthMm)),
-  }
-}
-
-/* TOA 106: sensor 6248×4176 px @ 3.76 µm pitch; focal length 530 mm. */
-const TOA_106_SENSOR_W_MM = 6248 * 3.76e-3
-const TOA_106_SENSOR_H_MM = 4176 * 3.76e-3
-const TOA_106_FOCAL_MM = 530
-const TOA_106_CAMERA: CameraFrameProfile = {
-  ...cameraFovFromChipMm(TOA_106_SENSOR_W_MM, TOA_106_SENSOR_H_MM, TOA_106_FOCAL_MM),
-  /** From `integration_autocrop_Annotated.png`: Dec grid vs image horizontal ≈15–20° CW; midpoint. */
-  rotationDeg: 18,
-}
-
-/* SeeStar S30 Pro: Stellarium Oculars — chip 6.30×11.10 mm, focal 163 mm, sensor rotation 0°. */
-const SEESTAR_S30_PRO_CAMERA: CameraFrameProfile = {
-  ...cameraFovFromChipMm(6.3, 11.1, 163),
-  rotationDeg: 0,
-}
-
-/* Dwarf Mini: Oculars — chip 5.57×3.13 mm (3840×2160), focal 150 mm, sensor rotation 0°. */
-const DWARF_MINI_CAMERA: CameraFrameProfile = {
-  ...cameraFovFromChipMm(5.57, 3.13, 150),
-  rotationDeg: 0,
-}
-
-/* Dwarf3: Oculars — chip 7.70×4.36 mm (3840×2160), focal 148 mm, sensor rotation 90°.
- * 90° in-plane rotation swaps which physical edge maps to horizontal vs vertical on the sky;
- * use the shorter edge for horizontal FOV and the longer for vertical (rotationDeg stays 0). */
-const DWARF_3_CAMERA: CameraFrameProfile = {
-  ...cameraFovFromChipMm(4.36, 7.7, 148),
-  rotationDeg: 0,
-}
-
-/** Atlas overlay: physical scopes for planning / Send to Remote context (same UX as Remote variable-star list). */
-const ATLAS_TELESCOPE_OPTIONS = ['TOA 106', 'SeeStar S30 Pro', 'Dwarf 3', 'Dwarf Mini'] as const
-
-const CAMERA_FRAME_BY_TELESCOPE: Record<(typeof ATLAS_TELESCOPE_OPTIONS)[number], CameraFrameProfile> = {
-  'TOA 106': TOA_106_CAMERA,
-  'SeeStar S30 Pro': SEESTAR_S30_PRO_CAMERA,
-  'Dwarf 3': DWARF_3_CAMERA,
-  'Dwarf Mini': DWARF_MINI_CAMERA,
-}
+const DEG2RAD = Math.PI / 180
 
 type WeatherPrediction = {
   ok: boolean
@@ -179,11 +139,7 @@ type AtlasRibbonAstronomyMarker = { id: string; label: string; sec: number; frac
 
 /** Wall time for ribbon astronomy ticks (matches Remote schedule timezone). */
 function formatRibbonAstronomyTime(sec: number): string {
-  return new Date(sec * 1000).toLocaleTimeString(undefined, {
-    timeZone: OBSERVATORY_TIME_ZONE,
-    hour: 'numeric',
-    minute: '2-digit',
-  })
+  return formatObservatoryLocalTimeFromUnixSec(sec)
 }
 
 function usePolling<T>(fn: () => Promise<T | null>, intervalMs: number): T | null {
@@ -287,31 +243,50 @@ export function AtlasPage({ onSendToRemote }: AtlasPageProps) {
     azimuthal: false,
     equatorial: false,
   })
-  const [nightMode, setNightMode] = useState(false)
   const [hoverFrac, setHoverFrac] = useState<number | null>(null)
 
   const [searchQuery, setSearchQuery] = useState('')
   const [searchLoading, setSearchLoading] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
-  const [activeCameraScope, setActiveCameraScope] = useState<(typeof ATLAS_TELESCOPE_OPTIONS)[number] | null>(null)
+  const equipment = useEquipment()
+  const [cameraFrameOn, setCameraFrameOn] = useState(false)
   const cameraFrameProfile = useMemo((): CameraFrameProfile | null => {
-    if (!activeCameraScope) return null
-    return CAMERA_FRAME_BY_TELESCOPE[activeCameraScope] ?? null
-  }, [activeCameraScope])
+    if (!cameraFrameOn || !equipment) return null
+    const fov = computeFov(equipment)
+    return {
+      fovWRad: fov.fovWidthDeg * DEG2RAD,
+      fovHRad: fov.fovHeightDeg * DEG2RAD,
+      positionAngleDeg: overlayRotationDeg(equipment),
+    }
+  }, [cameraFrameOn, equipment])
   const [trackingTarget, setTrackingTarget] = useState<{ name: string; raHours: number; decDeg: number } | null>(null)
 
   const [alt30OverlayOn, setAlt30OverlayOn] = useState(false)
   const [orbitOverlayOn, setOrbitOverlayOn] = useState(false)
   const [selectionInfo, setSelectionInfo] = useState<SelectionInfoPayload | null>(null)
 
+  const observatory = useObservatoryLocation()
+  const scheduleStrip = useMemo(
+    () => getTonightScheduleStrip(),
+    [observatory.lat, observatory.lon],
+  )
+  const [fallbackNightWindow, setFallbackNightWindow] = useState<{
+    startSec: number
+    endSec: number
+  } | null>(null)
+
+  useEffect(() => {
+    void fetchSunsetSunriseFallback(observatory.lat, observatory.lon).then(setFallbackNightWindow)
+  }, [observatory.lat, observatory.lon])
+
   const viewerSrc = useMemo(
     () =>
       `/stellarium/engine.html?${new URLSearchParams({
-        lat: String(BOREAN_LATITUDE),
-        lng: String(BOREAN_LONGITUDE),
-        elev: String(BOREAN_ALTITUDE_METERS),
+        lat: String(observatory.lat),
+        lng: String(observatory.lon),
+        elev: String(observatory.elevationM),
       }).toString()}`,
-    [],
+    [observatory.lat, observatory.lon, observatory.elevationM],
   )
 
   useEffect(() => {
@@ -395,6 +370,9 @@ export function AtlasPage({ onSendToRemote }: AtlasPageProps) {
         const scale = h / fov
         el.style.width = `${cameraFrameProfile.fovWRad * scale}px`
         el.style.height = `${cameraFrameProfile.fovHRad * scale}px`
+        // Field rotation: rotate the frame by the live on-screen orientation of the sensor.
+        const rot = computeFovOverlayRotationDeg(stel, cameraFrameProfile.positionAngleDeg)
+        el.style.transform = `translate(-50%, -50%) rotate(${rot ?? cameraFrameProfile.positionAngleDeg}deg)`
       }
       rafId = window.requestAnimationFrame(tick)
     }
@@ -582,20 +560,31 @@ export function AtlasPage({ onSendToRemote }: AtlasPageProps) {
   const canSendToRemote = stelReady && (trackingTarget !== null || cameraFrameProfile !== null)
 
   const weather = usePolling<WeatherPrediction | null>(async () => {
-    const res = await fetch(contentApiPath(`/api/imaging/tonight-weather-prediction?_=${Date.now()}`), {
-      cache: 'no-store',
-    })
+    const startSec = Math.floor(scheduleStrip.windowStartMs / 1000)
+    const endSec = Math.floor(scheduleStrip.windowEndMs / 1000)
+    const res = await fetch(
+      contentApiPath(
+        `/api/imaging/tonight-weather-prediction?startSec=${startSec}&endSec=${endSec}&_=${Date.now()}`
+      ),
+      { cache: 'no-store' }
+    )
     const data = (await res.json().catch(() => null)) as WeatherPrediction | null
     return data
   }, 60_000)
 
   const readySet = useMemo(() => new Set(weather?.readyHourStartsSec ?? []), [weather?.readyHourStartsSec])
 
-  const nightStartSec = weather?.nightHourStartsSec?.[0]
+  /* Ribbon spans sunset → sunrise (the actual dark window), not the longer 4pm–8am
+   * scheduling window. Weather hour cells still overlay within this range. */
+  const nightStartSec =
+    fallbackNightWindow?.startSec ??
+    weather?.nightHourStartsSec?.[0] ??
+    Math.floor(scheduleStrip.windowStartMs / 1000)
   const nightEndSec =
-    weather?.nightHourStartsSec && weather.nightHourStartsSec.length > 0
+    fallbackNightWindow?.endSec ??
+    (weather?.nightHourStartsSec && weather.nightHourStartsSec.length > 0
       ? (weather.nightHourStartsSec[weather.nightHourStartsSec.length - 1] as number) + 3600
-      : undefined
+      : Math.floor(scheduleStrip.windowEndMs / 1000))
 
   const atlasRibbonAstronomyMarkers = useMemo((): AtlasRibbonAstronomyMarker[] => {
     if (nightStartSec == null || nightEndSec == null || nightEndSec <= nightStartSec) return []
@@ -640,14 +629,11 @@ export function AtlasPage({ onSendToRemote }: AtlasPageProps) {
   }, [getStel])
 
   return (
-    <div className="pb-8">
-      <div className="flex flex-col gap-4">
-        {/* Full-bleed wrapper: ml/mr:[calc(50%-50vw)] + w-screen escapes the dashboard layout's
-         * mx-auto max-w-[1400px] column so the iframe touches both viewport edges. -mt-8 eats
-         * the <main>'s py-8 top padding so the iframe abuts the sticky header's bottom border
-         * with no visible "Atlas" title between them. */}
-        <div className="relative -mt-8 ml-[calc(50%-50vw)] mr-[calc(50%-50vw)] w-screen bg-black">
+    <div className="glass-panel h-full min-h-0 flex flex-col gap-3 p-3">
+      <div className="relative flex-1 min-h-0 overflow-hidden rounded-xl bg-black">
+        <div className="relative h-full min-h-0">
           <iframe
+            key={viewerSrc}
             ref={iframeRef}
             src={viewerSrc}
             title="Stellarium sky atlas"
@@ -667,11 +653,11 @@ export function AtlasPage({ onSendToRemote }: AtlasPageProps) {
               window.setTimeout(nudge, 500)
               window.setTimeout(nudge, 1500)
             }}
-            className="block h-[72vh] min-h-[520px] w-full overflow-hidden"
+            className="block h-full w-full overflow-hidden"
             allow="accelerometer; autoplay; fullscreen; gyroscope; microphone; xr-spatial-tracking"
           />
 
-          {/* Top-left overlay: search + buttons. Wide max-w + input min-w so the placeholder fits. */}
+          {/* Top-left overlay: search + buttons */}
           <div className="pointer-events-none absolute left-3 top-3 z-10 flex max-w-[min(calc(100vw-1.5rem),56rem)] flex-col gap-1 sm:max-w-[min(calc(100vw-1.5rem),72rem)]">
             <form
               onSubmit={(e) => {
@@ -731,7 +717,7 @@ export function AtlasPage({ onSendToRemote }: AtlasPageProps) {
               aria-hidden
               className="pointer-events-none absolute left-1/2 top-1/2 box-border border-2 border-yellow-400/90"
               style={{
-                transform: `translate(-50%, -50%) rotate(${cameraFrameProfile.rotationDeg}deg)`,
+                transform: `translate(-50%, -50%) rotate(${cameraFrameProfile.positionAngleDeg}deg)`,
                 transformOrigin: 'center center',
                 width: '1px',
                 height: '1px',
@@ -745,8 +731,9 @@ export function AtlasPage({ onSendToRemote }: AtlasPageProps) {
             </div>
           )}
         </div>
+      </div>
 
-        <section aria-label="Sky layers" className="flex flex-wrap gap-2">
+        <section aria-label="Sky layers" className="flex flex-wrap justify-center gap-2 shrink-0">
           {LAYER_ORDER.map((k) => {
             const active = layers[k]
             return (
@@ -767,42 +754,24 @@ export function AtlasPage({ onSendToRemote }: AtlasPageProps) {
               </button>
             )
           })}
-          {/* Night mode is pure CSS (viewport red multiply overlay); no engine dependency, so not
-           * gated on stelReady. Matches upstream Stellarium Web's #nightmode div approach. */}
-          <button
-            type="button"
-            onClick={() => setNightMode((v) => !v)}
-            aria-pressed={nightMode}
-            className={
-              'rounded-full border px-3 py-1.5 text-xs font-medium transition ' +
-              (nightMode
-                ? 'border-white/60 bg-white text-black hover:bg-white/90'
-                : 'border-white/25 bg-[#151616] text-white hover:bg-[#1b1c1c]')
-            }
-          >
-            Night mode
-          </button>
-          {ATLAS_TELESCOPE_OPTIONS.map((name) => {
-            const active = activeCameraScope === name
-            return (
-              <button
-                key={name}
-                type="button"
-                onClick={() => setActiveCameraScope((cur) => (cur === name ? null : name))}
-                aria-pressed={active}
-                disabled={!stelReady}
-                title={`Camera frame for ${name}`}
-                className={
-                  'rounded-full border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ' +
-                  (active
-                    ? 'border-white/60 bg-white text-black hover:bg-white/90'
-                    : 'border-white/25 bg-[#151616] text-white hover:bg-[#1b1c1c]')
-                }
-              >
-                {name}
-              </button>
-            )
-          })}
+          {/* Camera frame overlay only appears once an imaging rig is configured in Settings. */}
+          {equipment ? (
+            <button
+              type="button"
+              onClick={() => setCameraFrameOn((v) => !v)}
+              aria-pressed={cameraFrameOn}
+              disabled={!stelReady}
+              title={`Camera frame for ${equipment.label} (field rotation applied)`}
+              className={
+                'rounded-full border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ' +
+                (cameraFrameOn
+                  ? 'border-white/60 bg-white text-black hover:bg-white/90'
+                  : 'border-white/25 bg-[#151616] text-white hover:bg-[#1b1c1c]')
+              }
+            >
+              Camera frame
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => setAlt30OverlayOn((v) => !v)}
@@ -835,7 +804,7 @@ export function AtlasPage({ onSendToRemote }: AtlasPageProps) {
           </button>
         </section>
 
-        <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+        <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:gap-3 shrink-0">
           {nightStartSec && nightEndSec ? (
             <div
               className="relative min-w-0 flex-1 cursor-default pb-5 sm:pb-0"
@@ -995,16 +964,6 @@ export function AtlasPage({ onSendToRemote }: AtlasPageProps) {
             </dl>
           </section>
         ) : null}
-      </div>
-      {/* Stellarium-Web-style night mode: #ff2200 with mix-blend-mode:multiply over the whole
-       * viewport. pointer-events:none keeps pills/ribbon/nav clickable through the tint. */}
-      {nightMode && (
-        <div
-          aria-hidden="true"
-          className="pointer-events-none fixed inset-0 z-[1000]"
-          style={{ background: '#ff2200', mixBlendMode: 'multiply' }}
-        />
-      )}
     </div>
   )
 }

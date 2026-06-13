@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { personalIsEmergencyStopBlocking } from '@/lib/cloud/personal-emergency-stop'
 import { personalJson, personalOptions, requirePersonalTenant } from '@/lib/cloud/route-helpers'
 
 export const runtime = 'nodejs'
@@ -14,6 +15,12 @@ export async function GET(
   const { tenantId } = await context.params
   const denied = await requirePersonalTenant(tenantId, request)
   if (denied) return denied
+  if (await personalIsEmergencyStopBlocking(tenantId)) {
+    return personalJson(
+      { error: 'Emergency STOP active; no imaging sequences are available.' },
+      409
+    )
+  }
   return personalJson(
     {
       ok: false,

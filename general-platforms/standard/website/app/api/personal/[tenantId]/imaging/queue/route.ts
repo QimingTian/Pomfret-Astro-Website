@@ -5,6 +5,7 @@ import {
   personalSessionToPublicJson,
   type PersonalSessionOutputMode,
 } from '@/lib/cloud/hub-store'
+import { personalAppendAuditLog } from '@/lib/cloud/personal-audit-log'
 import { personalJson, personalOptions, requirePersonalTenant } from '@/lib/cloud/route-helpers'
 
 export const runtime = 'nodejs'
@@ -36,6 +37,11 @@ export async function POST(
     filter: typeof body.filter === 'string' ? body.filter : null,
     exposureSeconds: typeof body.exposureSeconds === 'number' ? body.exposureSeconds : null,
     count: typeof body.count === 'number' ? body.count : null,
+  })
+  void personalAppendAuditLog(tenantId, {
+    kind: 'queue.created',
+    message: `Imaging session created: ${target} (${session.id})`,
+    detail: { id: session.id, target, status: session.status },
   })
   return personalJson({ ok: true, request: personalSessionToPublicJson(session) }, 201)
 }

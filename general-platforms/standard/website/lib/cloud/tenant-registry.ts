@@ -1,7 +1,26 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import { kvGetJson, kvSetJson } from '@/lib/cloud/kv-rest'
-import { SITE_URL } from '@/lib/site-config'
+import { SITE_URL, PLANS } from '@/lib/site-config'
 import type { ProductPlan } from '@/lib/site-config'
+
+export type LicensePurchaseType =
+  | 'promo_code'
+  | 'one_time'
+  | 'monthly_subscription'
+  | 'annual_subscription'
+
+export function inferPurchaseType(
+  plan: ProductPlan,
+  promoCode: string | null | undefined,
+  explicit?: LicensePurchaseType | null
+): LicensePurchaseType {
+  if (explicit) return explicit
+  if (promoCode?.trim()) return 'promo_code'
+  const period = PLANS[plan].period.toLowerCase()
+  if (period.includes('month')) return 'monthly_subscription'
+  if (period.includes('year') || period.includes('annual')) return 'annual_subscription'
+  return 'one_time'
+}
 
 export type PersonalOrderRecord = {
   orderId: string
@@ -11,8 +30,14 @@ export type PersonalOrderRecord = {
   email: string | null
   memberId: string | null
   promoCode: string | null
+  purchaseType: LicensePurchaseType
+  validUntil: string | null
+  nextBillAt: string | null
   createdAt: string
   downloadToken: string
+  stripeSessionId?: string | null
+  stripeCustomerId?: string | null
+  stripeSubscriptionId?: string | null
 }
 
 type TenantRegistryRecord = {
@@ -41,6 +66,27 @@ function registryKey(tenantId: string): string {
 
 function memberOrdersKey(memberId: string): string {
   return `borean-member-orders:${memberId}`
+}
+
+function stripeSessionKey(sessionId: string): string {
+  return `stripe-session:${sessionId}`
+}
+
+export async function saveOrder(order: PersonalOrderRecord): Promise<void> {
+  const normalized = normalizeOrderRecord(order)
+  if (!normalized) return
+  memoryOrders.set(normalized.orderId, normalized)
+  await kvSetJson(orderKey(normalized.orderId), normalized)
+}
+
+export async function linkStripeSession(sessionId: string, orderId: string): Promise<void> {
+  await kvSetJson(stripeSessionKey(sessionId), { orderId })
+}
+
+export async function orderByStripeSession(sessionId: string): Promise<PersonalOrderRecord | undefined> {
+  const link = await kvGetJson<{ orderId?: string }>(stripeSessionKey(sessionId))
+  if (!link?.orderId) return undefined
+  return loadOrder(link.orderId)
 }
 
 function generateApiSecret(): string {
@@ -82,12 +128,21 @@ async function appendMemberOrder(memberId: string, orderId: string): Promise<voi
   }
 }
 
+export async function loadTenantRegistry(tenantId: string): Promise<TenantRegistryRecord | undefined> {
+  const remote = await kvGetJson<TenantRegistryRecord>(registryKey(tenantId))
+  if (remote?.tenantId) return remote
+  return undefined
+}
+
 export async function provisionPersonalTenant(input: {
   plan: ProductPlan
   displayName?: string | null
   email?: string | null
   memberId?: string | null
   promoCode?: string | null
+  purchaseType?: LicensePurchaseType | null
+  validUntil?: string | null
+  nextBillAt?: string | null
 }): Promise<{
   order: PersonalOrderRecord
   tenantConfig: {
@@ -95,6 +150,8 @@ export async function provisionPersonalTenant(input: {
     apiBaseUrl: string
     apiSecret: string
     displayName: string
+    plan: ProductPlan
+    validUntil: string | null
   }
 }> {
   const tenantId = randomUUID()
@@ -103,6 +160,7 @@ export async function provisionPersonalTenant(input: {
   const displayName = input.displayName?.trim() || `Personal ${tenantId.slice(0, 8)}`
   const downloadToken = randomBytes(24).toString('base64url')
   const memberId = input.memberId?.trim() || null
+  const purchaseType = inferPurchaseType(input.plan, input.promoCode, input.purchaseType)
 
   const order: PersonalOrderRecord = {
     orderId,
@@ -112,6 +170,9 @@ export async function provisionPersonalTenant(input: {
     email: input.email?.trim() || null,
     memberId,
     promoCode: input.promoCode?.trim() || null,
+    purchaseType,
+    validUntil: input.validUntil ?? null,
+    nextBillAt: input.nextBillAt ?? null,
     createdAt: new Date().toISOString(),
     downloadToken,
   }
@@ -139,18 +200,38 @@ export async function provisionPersonalTenant(input: {
       apiBaseUrl: SITE_URL,
       apiSecret,
       displayName,
+      plan: input.plan,
+      validUntil: input.validUntil ?? null,
     },
   }
 }
 
 export async function loadOrder(orderId: string): Promise<PersonalOrderRecord | undefined> {
-  if (memoryOrders.has(orderId)) return memoryOrders.get(orderId)
+  if (memoryOrders.has(orderId)) return normalizeOrderRecord(memoryOrders.get(orderId))
   const remote = await kvGetJson<PersonalOrderRecord>(orderKey(orderId))
   if (remote?.orderId) {
-    memoryOrders.set(orderId, remote)
-    return remote
+    const normalized = normalizeOrderRecord(remote)
+    if (normalized) {
+      memoryOrders.set(orderId, normalized)
+      return normalized
+    }
   }
   return undefined
+}
+
+function normalizeOrderRecord(raw: PersonalOrderRecord | undefined): PersonalOrderRecord | undefined {
+  if (!raw?.orderId) return undefined
+  const plan = raw.plan
+  const promoCode = raw.promoCode ?? null
+  return {
+    ...raw,
+    purchaseType: raw.purchaseType ?? inferPurchaseType(plan, promoCode),
+    validUntil: raw.validUntil ?? null,
+    nextBillAt: raw.nextBillAt ?? null,
+    stripeSessionId: raw.stripeSessionId ?? null,
+    stripeCustomerId: raw.stripeCustomerId ?? null,
+    stripeSubscriptionId: raw.stripeSubscriptionId ?? null,
+  }
 }
 
 export async function listOrdersForMember(memberId: string): Promise<PersonalOrderRecord[]> {
@@ -196,6 +277,8 @@ export async function tenantConfigForOrder(order: PersonalOrderRecord) {
     apiBaseUrl: SITE_URL,
     apiSecret: secret,
     displayName: order.displayName,
+    plan: order.plan,
+    validUntil: order.validUntil ?? null,
   }
 }
 

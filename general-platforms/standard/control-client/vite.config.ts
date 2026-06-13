@@ -38,5 +38,27 @@ export default defineConfig(async () => ({
     watch: {
       ignored: ["**/src-tauri/**"],
     },
+    proxy: {
+      "/api/librewxr": {
+        target: "http://localhost:3100",
+        changeOrigin: true,
+      },
+      "/api/noaa-goes": {
+        target: "http://localhost:3100",
+        changeOrigin: true,
+      },
+      "/api/astro": {
+        target: "http://localhost:3100",
+        changeOrigin: true,
+      },
+      "/api/imaging": {
+        target: "http://localhost:3100",
+        changeOrigin: true,
+      },
+      "/api/astrometry": {
+        target: "http://localhost:3100",
+        changeOrigin: true,
+      },
+    },
   },
 }));

@@ -1,15 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ConsoleHeader } from '../components/console/ConsoleHeader'
-import { NewSessionSection } from '../components/console/NewSessionSection'
-import { ScheduleSection } from '../components/console/ScheduleSection'
-import { SettingsModal } from '../components/console/SettingsModal'
-import { TelescopeStatusSection } from '../components/console/TelescopeStatusSection'
-import { TonightScheduleTimeline } from '../components/console/TonightScheduleTimeline'
-import { WeatherSection } from '../components/console/WeatherSection'
+import { RemoteGlassConsole } from '../components/console/RemoteGlassConsole'
 import { fetchCurrentSessions, probeHub } from '../lib/hub-client'
+import { pickActiveDashboardSession } from '../lib/imaging/queue-status'
 import type { HubProbeResult, SessionRow } from '../lib/types'
 import { fetchTonightWeather, type TonightWeatherSnapshot } from '../lib/weather-client'
-import type { RemotePrefill } from '../pages/AtlasPage'
+import type { SessionPrefill } from '../components/console/new-session/types'
+import type { RemotePrefill } from './AtlasPage'
 
 type ControlConsoleProps = {
   embedded?: boolean
@@ -26,11 +23,21 @@ export function ControlConsole({
   const [weather, setWeather] = useState<TonightWeatherSnapshot | null>(null)
   const [sessions, setSessions] = useState<SessionRow[]>([])
   const [sessionsError, setSessionsError] = useState<string | null>(null)
-  const [clock, setClock] = useState('')
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  const [refreshing, setRefreshing] = useState(false)
   const [loadingSessions, setLoadingSessions] = useState(true)
-  const [loadingWeather, setLoadingWeather] = useState(true)
+  const [sessionOpen, setSessionOpen] = useState(false)
+  const [dashboardOpen, setDashboardOpen] = useState(false)
+  const [dashboardSession, setDashboardSession] = useState<SessionRow | null>(null)
+  const [editPrefill, setEditPrefill] = useState<SessionPrefill | null>(null)
+
+  const toggleDashboard = useCallback(() => {
+    if (dashboardOpen) {
+      setDashboardOpen(false)
+      return
+    }
+    setSessionOpen(false)
+    setDashboardSession(pickActiveDashboardSession(sessions))
+    setDashboardOpen(true)
+  }, [dashboardOpen, sessions])
 
   const loadSessions = useCallback(async () => {
     setLoadingSessions(true)
@@ -49,6 +56,10 @@ export function ControlConsole({
             filter: s.filter ?? null,
             exposureSeconds: s.exposureSeconds ?? null,
             count: s.count ?? null,
+            raHours: typeof s.raHours === 'number' ? s.raHours : null,
+            decDeg: typeof s.decDeg === 'number' ? s.decDeg : null,
+            sessionType: typeof s.sessionType === 'string' ? s.sessionType : 'dso',
+            projectMode: s.projectMode === true,
           }))
         )
       } else {
@@ -64,17 +75,13 @@ export function ControlConsole({
   }, [])
 
   const refreshAll = useCallback(async () => {
-    setRefreshing(true)
-    setLoadingWeather(true)
     const [probeResult, weatherResult] = await Promise.all([
       probeHub(),
       fetchTonightWeather(),
     ])
     setProbe(probeResult)
     setWeather(weatherResult)
-    setLoadingWeather(false)
     await loadSessions()
-    setRefreshing(false)
   }, [loadSessions])
 
   useEffect(() => {
@@ -89,57 +96,47 @@ export function ControlConsole({
     }
   }, [refreshAll])
 
-  useEffect(() => {
-    const tick = () => {
-      setClock(
-        new Date().toLocaleString(undefined, {
-          weekday: 'short',
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-        })
-      )
-    }
-    tick()
-    const id = window.setInterval(tick, 1000)
-    return () => window.clearInterval(id)
-  }, [])
-
   return (
     <div className={embedded ? 'control-console embedded' : 'control-console'}>
-      <div className="console-grid-bg" aria-hidden />
       <ConsoleHeader
         embedded={embedded}
         probe={probe}
-        weatherPrediction={weather?.prediction ?? null}
-        clock={clock}
-        onRefresh={() => void refreshAll()}
-        onOpenSettings={() => setSettingsOpen(true)}
-        refreshing={refreshing}
+        sessionOpen={embedded ? sessionOpen : undefined}
+        onToggleSession={embedded ? () => setSessionOpen((prev) => !prev) : undefined}
+        dashboardOpen={embedded ? dashboardOpen : undefined}
+        onToggleDashboard={embedded ? toggleDashboard : undefined}
       />
 
       <div className="console-body">
-        <div className="console-upper">
-          <WeatherSection weather={weather} loading={loadingWeather} />
-          <NewSessionSection
-            onSubmitted={() => void loadSessions()}
-            disabled={!probe?.hubReachable}
-            prefill={prefill}
-            onPrefillConsumed={onPrefillConsumed}
-          />
-        </div>
-        <div className="console-middle">
-          <TonightScheduleTimeline weather={weather} sessions={sessions} />
-          <TelescopeStatusSection probe={probe} />
-        </div>
-        <ScheduleSection sessions={sessions} loading={loadingSessions} error={sessionsError} />
+        <RemoteGlassConsole
+          probe={probe}
+          weather={weather}
+          sessions={sessions}
+          loadingSessions={loadingSessions}
+          sessionsError={sessionsError}
+          prefill={editPrefill ?? prefill ?? null}
+          onPrefillConsumed={() => {
+            setEditPrefill(null)
+            onPrefillConsumed?.()
+          }}
+          sessionOpen={sessionOpen}
+          onSessionOpenChange={setSessionOpen}
+          dashboardOpen={dashboardOpen}
+          dashboardSession={dashboardSession}
+          onDashboardOpenChange={setDashboardOpen}
+          onDashboardSessionChange={setDashboardSession}
+          onSubmitted={() => void loadSessions()}
+          onRefreshSessions={() => void loadSessions()}
+          onEditSession={(session) => {
+            setEditPrefill({
+              target: session.target,
+              raHours: session.raHours ?? undefined,
+              decDeg: session.decDeg ?? undefined,
+            })
+            setSessionOpen(true)
+          }}
+        />
       </div>
-
-      <SettingsModal
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        onSaved={() => void refreshAll()}
-      />
     </div>
   )
 }

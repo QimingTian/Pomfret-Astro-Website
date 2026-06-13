@@ -1,7 +1,3 @@
-/** Borean default observatory coordinates. */
-export const BOREAN_LAT = 41.9159
-export const BOREAN_LON = -71.9626
-
 const DEFAULT_BASE = 'https://api.librewxr.net'
 
 /** Upstream LibreWXR API — Personal client uses www.boreanastro.com proxy routes. */

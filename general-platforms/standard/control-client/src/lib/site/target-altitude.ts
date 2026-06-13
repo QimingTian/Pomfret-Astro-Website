@@ -1,10 +1,17 @@
-export const OBS_LAT_DEG = 41 + 53 / 60 + 10 / 3600
-export const OBS_LON_DEG = -(71 + 57 / 60 + 54 / 3600) // West is negative
+import { readObservatoryCoords } from '../observatory-local-time'
 
 export const MIN_ALTITUDE_DEG = 30
 /** Fraction of session duration that must have target >= MIN_ALTITUDE_DEG when scheduling a slot. */
 export const MIN_ALTITUDE_SESSION_COVERAGE_FRACTION = 1
 export const TONIGHT_OBSERVABLE_MIN_COVERAGE_MS = 30 * 60 * 1000
+
+export type ObsSiteCoords = { lat: number; lon: number }
+
+function resolveObsCoords(explicit?: ObsSiteCoords): ObsSiteCoords {
+  if (explicit) return explicit
+  const { lat, lon } = readObservatoryCoords()
+  return { lat, lon }
+}
 
 function degToRad(deg: number): number {
   return (deg * Math.PI) / 180
@@ -35,12 +42,18 @@ function gmstDegrees(date: Date): number {
   return normalizeDegrees(gmst)
 }
 
-export function currentAltitudeDeg(raHours: number, decDeg: number, now = new Date()): number {
+export function currentAltitudeDeg(
+  raHours: number,
+  decDeg: number,
+  now = new Date(),
+  site?: ObsSiteCoords
+): number {
+  const { lat, lon } = resolveObsCoords(site)
   const raDeg = raHours * 15
-  const lstDeg = normalizeDegrees(gmstDegrees(now) + OBS_LON_DEG)
+  const lstDeg = normalizeDegrees(gmstDegrees(now) + lon)
   const hourAngleDeg = normalizeDegrees(lstDeg - raDeg)
 
-  const latRad = degToRad(OBS_LAT_DEG)
+  const latRad = degToRad(lat)
   const decRad = degToRad(decDeg)
   const haRad = degToRad(hourAngleDeg > 180 ? hourAngleDeg - 360 : hourAngleDeg)
 
@@ -52,12 +65,16 @@ export function currentAltitudeDeg(raHours: number, decDeg: number, now = new Da
   return radToDeg(Math.asin(clamped))
 }
 
-export function isAltitudeAllowed(raHours: number, decDeg: number): {
+export function isAltitudeAllowed(
+  raHours: number,
+  decDeg: number,
+  site?: ObsSiteCoords
+): {
   ok: boolean
   altitudeDeg: number
   minAltitudeDeg: number
 } {
-  const altitudeDeg = currentAltitudeDeg(raHours, decDeg)
+  const altitudeDeg = currentAltitudeDeg(raHours, decDeg, new Date(), site)
   return {
     ok: altitudeDeg >= MIN_ALTITUDE_DEG,
     altitudeDeg,
@@ -75,7 +92,8 @@ export function altitudeCoverageMsAtMinAltitude(
   startMs: number,
   endMs: number,
   minAltitudeDeg: number,
-  stepMs = 5 * 60 * 1000
+  stepMs = 5 * 60 * 1000,
+  site?: ObsSiteCoords
 ): number {
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return 0
   const step = Math.max(60_000, Math.floor(stepMs))
@@ -83,7 +101,7 @@ export function altitudeCoverageMsAtMinAltitude(
   for (let t = startMs; t < endMs; t += step) {
     const segEnd = Math.min(t + step, endMs)
     const mid = t + (segEnd - t) / 2
-    const altitude = currentAltitudeDeg(raHours, decDeg, new Date(mid))
+    const altitude = currentAltitudeDeg(raHours, decDeg, new Date(mid), site)
     if (altitude >= minAltitudeDeg) {
       covered += segEnd - t
     }
@@ -96,7 +114,8 @@ export function altitudeAllowedCoverageMs(
   decDeg: number,
   startMs: number,
   endMs: number,
-  stepMs = 5 * 60 * 1000
+  stepMs = 5 * 60 * 1000,
+  site?: ObsSiteCoords
 ): number {
   return altitudeCoverageMsAtMinAltitude(
     raHours,
@@ -104,7 +123,8 @@ export function altitudeAllowedCoverageMs(
     startMs,
     endMs,
     MIN_ALTITUDE_DEG,
-    stepMs
+    stepMs,
+    site
   )
 }
 
@@ -116,12 +136,14 @@ export function altitudeSessionCoverageOk(
   raHours: number,
   decDeg: number,
   startMs: number,
-  endMs: number
+  endMs: number,
+  site?: ObsSiteCoords
 ): boolean {
   const duration = endMs - startMs
   if (!Number.isFinite(duration) || duration <= 0) return false
   return (
-    altitudeAllowedCoverageMs(raHours, decDeg, startMs, endMs) >= requiredAltitudeCoverageMs(duration)
+    altitudeAllowedCoverageMs(raHours, decDeg, startMs, endMs, 5 * 60 * 1000, site) >=
+    requiredAltitudeCoverageMs(duration)
   )
 }
 
@@ -132,7 +154,8 @@ export function intervalsWhereAltitudeAtOrAbove(
   startMs: number,
   endMs: number,
   minAltitudeDeg = MIN_ALTITUDE_DEG,
-  stepMs = 5 * 60 * 1000
+  stepMs = 5 * 60 * 1000,
+  site?: ObsSiteCoords
 ): Array<{ startMs: number; endMs: number }> {
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return []
   const step = Math.max(60_000, Math.floor(stepMs))
@@ -142,7 +165,7 @@ export function intervalsWhereAltitudeAtOrAbove(
   for (let t = startMs; t < endMs; t += step) {
     const segEnd = Math.min(t + step, endMs)
     const mid = t + (segEnd - t) / 2
-    const altitude = currentAltitudeDeg(raHours, decDeg, new Date(mid))
+    const altitude = currentAltitudeDeg(raHours, decDeg, new Date(mid), site)
     const allowed = altitude >= minAltitudeDeg
 
     if (allowed) {
@@ -162,12 +185,13 @@ export function firstAltitudeAllowedTimeMs(
   decDeg: number,
   startMs: number,
   endMs: number,
-  stepMs = 5 * 60 * 1000
+  stepMs = 5 * 60 * 1000,
+  site?: ObsSiteCoords
 ): number | null {
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return null
   const step = Math.max(60_000, Math.floor(stepMs))
   for (let t = startMs; t <= endMs; t += step) {
-    if (currentAltitudeDeg(raHours, decDeg, new Date(t)) >= MIN_ALTITUDE_DEG) return t
+    if (currentAltitudeDeg(raHours, decDeg, new Date(t), site) >= MIN_ALTITUDE_DEG) return t
   }
   return null
 }

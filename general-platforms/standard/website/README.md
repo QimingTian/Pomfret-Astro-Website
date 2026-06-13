@@ -24,7 +24,22 @@ npm run dev   # http://localhost:3100
 | `FRAOS_CONTROL_DOWNLOAD_URL_WINDOWS` | Control Client OTA (Windows) |
 | `FRAOS_CONTROL_DOWNLOAD_URL_MAC` | Control Client OTA (macOS) |
 | `STATION_LATEST_VERSION` / `CONTROL_LATEST_VERSION` | OTA version overrides |
+| `STRIPE_SECRET_KEY` | Stripe secret key (enables card checkout) |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret (`/api/checkout/webhook`) |
+| `STRIPE_CHECKOUT_BASE_URL` | Optional — defaults to `https://www.boreanastro.com` for success/cancel URLs |
+| `STRIPE_PRICE_STANDARD_MONTHLY` | Optional Stripe Price ID — otherwise uses dynamic `price_data` |
+| `STRIPE_PRICE_STANDARD_ANNUAL` | Optional Stripe Price ID for annual billing |
+| `STRIPE_PRICE_STANDARD_LIFETIME` | Optional Stripe Price ID for one-time lifetime purchase |
 | `LIBREWXR_API_BASE_URL` | Optional LibreWXR upstream |
+
+## Checkout (Stripe)
+
+1. Create products/prices in [Stripe Dashboard](https://dashboard.stripe.com) (or rely on dynamic `price_data` in dev).
+2. Set `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` on Vercel.
+3. Add webhook endpoint: `https://www.boreanastro.com/api/checkout/webhook` — event `checkout.session.completed`.
+4. Optional: set `STRIPE_PRICE_STANDARD_{MONTHLY|ANNUAL|LIFETIME}` to use dashboard Price IDs in production.
+
+Promotion codes (100% off) still work via `/api/checkout/redeem` without Stripe.
 
 ## API routes
 

@@ -36,8 +36,19 @@ body {
 }
 
 .librewxr-radar-map .leaflet-control-attribution,
-.librewxr-radar-map .leaflet-control-zoom {
+.librewxr-radar-map .leaflet-control-zoom,
+.obs-map .leaflet-control-attribution,
+.obs-map .leaflet-control-zoom {
   display: none !important;
+}
+
+/* Glassmorphism surface — mirrors the marketing site's .glass-panel */
+.glass-panel {
+  border: 0;
+  border-radius: 1rem;
+  background-color: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
 }
 
 h1,
@@ -209,6 +220,32 @@ body,
   padding-bottom: 0.75rem;
   border-bottom: 1px solid var(--line);
   flex-shrink: 0;
+  min-width: 0;
+}
+
+.client-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.client-logo {
+  height: 2rem;
+  width: auto;
+  max-width: min(12rem, 40vw);
+  object-fit: contain;
+  object-position: left center;
+  opacity: 0.95;
+}
+
+.client-edition {
+  font-size: 0.72rem;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .client-header h1 {
@@ -231,52 +268,62 @@ body,
 }
 
 .client-tabs {
-  display: none;
+  display: flex;
   align-items: center;
   gap: 0.45rem;
+  overflow-x: auto;
+  max-width: 100%;
+  flex-shrink: 1;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.client-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .client-tabs-mobile {
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-  padding-bottom: 0.25rem;
-}
-
-.client-tab-mobile {
-  width: 100%;
+  display: none;
 }
 
 .client-menu-toggle {
-  display: inline-flex;
-}
-
-@media (min-width: 768px) {
-  .client-tabs {
-    display: flex;
-  }
-
-  .client-tabs-mobile {
-    display: none;
-  }
-
-  .client-menu-toggle {
-    display: none;
-  }
+  display: none;
 }
 
 .client-main {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
 }
 
-.client-main:not(.client-main-flush) {
+.client-main:not(.client-main-flush):not(.client-main-atlas):not(.client-main-weather) {
   padding-top: 0.15rem;
 }
 
-.client-main-flush {
+.client-main-flush,
+.client-main-atlas,
+.client-main-weather {
   overflow: hidden;
+  padding-top: 0;
+}
+
+.client-main-weather {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.client-main-atlas {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.client-main-settings {
+  overflow: hidden;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .client-shell .btn {

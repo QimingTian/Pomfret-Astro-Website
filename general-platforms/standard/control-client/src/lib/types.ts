@@ -25,6 +25,18 @@ export type SessionRow = {
   filter?: string | null
   exposureSeconds?: number | null
   count?: number | null
+  raHours?: number | null
+  decDeg?: number | null
+  estimatedDurationSeconds?: number | null
+  filterPlans?: Array<{ filterName: string; exposureSeconds: number; count: number }> | null
+  nightKey?: string | null
+  failedAt?: string | null
+  scheduleStripNightKey?: string | null
+  scheduleBarStartMs?: number | null
+  scheduleBarEndMs?: number | null
+  sessionType?: 'dso' | 'variable_star' | string
+  projectMode?: boolean
+  hasDownload?: boolean
 }
 
 export type CurrentSessionsResponse = {

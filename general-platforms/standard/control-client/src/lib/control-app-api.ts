@@ -1,10 +1,12 @@
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
+import { invalidateRuntimeTenant } from './tenant'
 
 export type PersonalTenantInfo = {
   tenantId: string
   apiBaseUrl: string
   displayName: string
+  plan?: string | null
 }
 
 export type UpdateStatus = {
@@ -12,6 +14,14 @@ export type UpdateStatus = {
   latestVersion: string
   updateAvailable: boolean
   downloadUrl: string | null
+}
+
+export type LocalLicenseStatus = {
+  installed: boolean
+  valid: boolean
+  expired: boolean
+  validUntil: string | null
+  plan: string | null
 }
 
 function isTauri(): boolean {
@@ -33,16 +43,31 @@ export async function hasUserLicense(): Promise<boolean> {
   return invoke<boolean>('control_has_user_license')
 }
 
+export async function getLocalLicenseStatus(): Promise<LocalLicenseStatus> {
+  if (!isTauri()) {
+    return {
+      installed: import.meta.env.DEV,
+      valid: import.meta.env.DEV,
+      expired: false,
+      validUntil: null,
+      plan: null,
+    }
+  }
+  return invoke<LocalLicenseStatus>('control_local_license_status')
+}
+
 export async function activateAccount(input: {
   apiBaseUrl: string
   login: string
   password: string
 }): Promise<PersonalTenantInfo> {
-  return invoke<PersonalTenantInfo>('control_activate_account', {
+  const info = await invoke<PersonalTenantInfo>('control_activate_account', {
     apiBaseUrl: input.apiBaseUrl,
     login: input.login,
     password: input.password,
   })
+  invalidateRuntimeTenant()
+  return info
 }
 
 export async function importTenantLicense(): Promise<PersonalTenantInfo> {
@@ -53,7 +78,9 @@ export async function importTenantLicense(): Promise<PersonalTenantInfo> {
   if (!selected || Array.isArray(selected)) {
     throw new Error('No license file selected.')
   }
-  return invoke<PersonalTenantInfo>('control_import_tenant', { sourcePath: selected })
+  const info = await invoke<PersonalTenantInfo>('control_import_tenant', { sourcePath: selected })
+  invalidateRuntimeTenant()
+  return info
 }
 
 export async function checkForUpdate(): Promise<UpdateStatus | null> {

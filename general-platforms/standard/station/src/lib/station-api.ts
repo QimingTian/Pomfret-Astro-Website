@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { CheckItem, PersonalTenantInfo, StationConfig } from './types'
+import type { CheckItem, LocalLicenseStatus, PersonalTenantInfo, StationConfig } from './types'
 
 export async function loadTenant(): Promise<PersonalTenantInfo> {
   return invoke<PersonalTenantInfo>('station_get_tenant')
@@ -45,6 +45,10 @@ export async function installPython(): Promise<void> {
   await invoke('station_install_python')
 }
 
+export async function installNinaPlugin(): Promise<string> {
+  return invoke<string>('station_install_nina_plugin')
+}
+
 export async function setupAutostart(): Promise<StationConfig> {
   return invoke<StationConfig>('station_setup_autostart')
 }
@@ -55,6 +59,12 @@ export async function applyUpdate(): Promise<void> {
 
 export async function hasUserLicense(): Promise<boolean> {
   return invoke<boolean>('station_has_user_license')
+}
+
+export type { LocalLicenseStatus } from './types'
+
+export async function getLocalLicenseStatus(): Promise<LocalLicenseStatus> {
+  return invoke<LocalLicenseStatus>('station_local_license_status')
 }
 
 export async function activateAccount(input: {

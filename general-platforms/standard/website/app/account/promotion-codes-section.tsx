@@ -11,10 +11,11 @@ type PromoRow = {
   percentOff: number
   maxUses: number
   uses: number
-  expiresAt: string
+  licenseValidDays: number
   createdAt: string
+  redeemedAt: string | null
   label: string | null
-  status: 'available' | 'used' | 'expired'
+  status: 'available' | 'used'
 }
 
 type PromoPayload = {
@@ -38,20 +39,24 @@ const VALIDITY_OPTIONS = [
 
 function statusLabel(status: PromoRow['status']): string {
   if (status === 'available') return 'Available'
-  if (status === 'used') return 'Used'
-  return 'Expired'
+  return 'Used'
 }
 
 function statusClass(status: PromoRow['status']): string {
   if (status === 'available') return 'text-emerald-300'
-  if (status === 'used') return 'text-muted'
-  return 'text-amber-300'
+  return 'text-muted'
 }
 
 function formatDate(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
+function licenseDurationLabel(days: number): string {
+  const match = VALIDITY_OPTIONS.find((opt) => opt.days === days)
+  if (match) return match.label
+  return `${days} days`
 }
 
 export function PromotionCodesSection({ className = '' }: { className?: string }) {
@@ -150,7 +155,8 @@ export function PromotionCodesSection({ className = '' }: { className?: string }
       className={className}
     >
       <p className="text-sm text-muted">
-        Generate single-use codes. Each code expires after the chosen period and can only be redeemed once.
+        Generate single-use codes. Codes do not expire; after redemption the license stays active for the
+        chosen period.
       </p>
 
       <form onSubmit={(e) => void createPromo(e)} className="mt-4 space-y-3 rounded-lg border border-white/15 p-4">
@@ -171,7 +177,7 @@ export function PromotionCodesSection({ className = '' }: { className?: string }
             </select>
           </label>
           <label className="block text-sm">
-            <span className="text-muted">Valid for</span>
+            <span className="text-muted">License valid for</span>
             <select
               value={validDays}
               onChange={(e) => setValidDays(Number.parseInt(e.target.value, 10))}
@@ -202,7 +208,7 @@ export function PromotionCodesSection({ className = '' }: { className?: string }
         </button>
         {lastCreated ? (
           <p className="text-sm text-emerald-300">
-            Created <span className="font-mono text-fg">{lastCreated}</span> — share it before it expires or is used.
+            Created <span className="font-mono text-fg">{lastCreated}</span> — share it; it can only be used once.
           </p>
         ) : null}
       </form>
@@ -224,9 +230,15 @@ export function PromotionCodesSection({ className = '' }: { className?: string }
                   {p.label ? `${p.label} · ` : ''}
                   {PLANS[normalizeProductPlan(String(p.plan))].shortName}
                   <span className="mx-2">·</span>
-                  <span className={statusClass(p.status)}>{statusLabel(p.status)}</span>
+                  License {licenseDurationLabel(p.licenseValidDays)} after redemption
                   <span className="mx-2">·</span>
-                  Expires {formatDate(p.expiresAt)}
+                  <span className={statusClass(p.status)}>{statusLabel(p.status)}</span>
+                  {p.redeemedAt ? (
+                    <>
+                      <span className="mx-2">·</span>
+                      Redeemed {formatDate(p.redeemedAt)}
+                    </>
+                  ) : null}
                 </p>
               </div>
               <button

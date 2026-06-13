@@ -13,7 +13,7 @@ gsap.registerPlugin(useGSAP)
 const NAV = [
   { href: '/', label: 'About' },
   { href: '/fraos', label: 'FRAOS' },
-  { href: '/asc', label: 'ASC' },
+  // { href: '/asc', label: 'ASC' },
 ] as const
 
 function accountNavLabel(member: ReturnType<typeof useMember>): string {

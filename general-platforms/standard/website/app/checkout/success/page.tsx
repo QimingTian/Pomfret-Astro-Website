@@ -21,17 +21,66 @@ function SuccessContent() {
   const searchParams = useSearchParams()
   const orderId = searchParams.get('order') ?? ''
   const token = searchParams.get('token') ?? ''
+  const sessionId = searchParams.get('session_id') ?? ''
   const [payload, setPayload] = useState<SuccessPayload | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [waiting, setWaiting] = useState(false)
 
   useEffect(() => {
+    if (sessionId) {
+      let cancelled = false
+      let attempts = 0
+
+      const poll = async () => {
+        if (cancelled) return
+        attempts += 1
+        setWaiting(true)
+        try {
+          const res = await fetch(
+            `/api/checkout/fulfill?session_id=${encodeURIComponent(sessionId)}`
+          )
+          const data = (await res.json()) as SuccessPayload & {
+            error?: string
+            pending?: boolean
+          }
+          if (res.status === 202 || data.pending) {
+            if (attempts < 12) {
+              window.setTimeout(() => void poll(), 1500)
+              return
+            }
+            setError('Payment received — provisioning is taking longer than expected. Refresh in a moment.')
+            setWaiting(false)
+            return
+          }
+          if (!res.ok || !data.ok) {
+            setError(data.error ?? 'Could not confirm your order.')
+            setWaiting(false)
+            return
+          }
+          setPayload(data)
+          setWaiting(false)
+        } catch (ex) {
+          setError(ex instanceof Error ? ex.message : 'Could not confirm your order.')
+          setWaiting(false)
+        }
+      }
+
+      void poll()
+      return () => {
+        cancelled = true
+      }
+    }
+
     if (!orderId || !token) {
       setError('Missing order information.')
       return
     }
+
     void (async () => {
       try {
-        const res = await fetch(`/api/checkout/order/${orderId}/summary?token=${encodeURIComponent(token)}`)
+        const res = await fetch(
+          `/api/checkout/order/${orderId}/summary?token=${encodeURIComponent(token)}`
+        )
         const data = (await res.json()) as SuccessPayload & { error?: string }
         if (!res.ok || !data.ok) {
           setError(data.error ?? 'Could not load order.')
@@ -42,7 +91,7 @@ function SuccessContent() {
         setError(ex instanceof Error ? ex.message : 'Could not load order.')
       }
     })()
-  }, [orderId, token])
+  }, [orderId, token, sessionId])
 
   const tenantUrl =
     payload?.tenantConfigUrl ??
@@ -55,8 +104,8 @@ function SuccessContent() {
       </Link>
       <h1 className="mt-8 font-display text-3xl font-bold text-fg">You&apos;re ready to install</h1>
       <p className="mt-2 max-w-xl text-muted">
-        Install the apps below, then sign in with your Borean Astro account inside each app to
-        activate your license automatically.
+        Install the apps below, then sign in with your Borean Astro account inside each app to activate
+        your license automatically.
       </p>
 
       {error ? <p className="mt-8 text-sm text-red-300">{error}</p> : null}
@@ -77,26 +126,17 @@ function SuccessContent() {
             </p>
             <div className="flex flex-wrap gap-3">
               {payload.downloads.controlMac ? (
-                <a
-                  href={payload.downloads.controlMac}
-                  className="btn-primary px-5 py-2.5 text-sm"
-                >
+                <a href={payload.downloads.controlMac} className="btn-primary px-5 py-2.5 text-sm">
                   Control Client (macOS)
                 </a>
               ) : null}
               {payload.downloads.controlWindows ? (
-                <a
-                  href={payload.downloads.controlWindows}
-                  className="btn-primary px-5 py-2.5 text-sm"
-                >
+                <a href={payload.downloads.controlWindows} className="btn-primary px-5 py-2.5 text-sm">
                   Control Client (Windows)
                 </a>
               ) : null}
               {payload.downloads.stationWindows ? (
-                <a
-                  href={payload.downloads.stationWindows}
-                  className="btn-secondary px-5 py-2.5 text-sm"
-                >
+                <a href={payload.downloads.stationWindows} className="btn-secondary px-5 py-2.5 text-sm">
                   Station (Windows)
                 </a>
               ) : null}
@@ -130,22 +170,17 @@ function SuccessContent() {
           <div className="space-y-3 border-t border-white/15 pt-6">
             <h2 className="font-display text-lg font-semibold text-fg">2. Activate license</h2>
             <p className="text-sm text-muted">
-              Open Control Client or Station → Settings and sign in with your Borean Astro account
-              (same email/password as checkout). Your license is installed automatically — you do
-              not need to download <code className="text-fg">tenant.json</code> separately.
+              Install the app, then sign in on first launch with your Borean Astro account. Your license
+              is saved on this device automatically — no separate download required.
             </p>
             <details className="text-sm text-muted">
               <summary className="cursor-pointer text-fg/80">Optional: manual tenant.json</summary>
               <p className="mt-2">
-                If you prefer, you can still download the JSON file and import it in Settings, or
-                save it to{' '}
-                <code className="text-fg">%LOCALAPPDATA%/BoreanAstro/tenant.json</code> (Windows) or{' '}
+                If you prefer, you can still download the JSON file and import it in Settings, or save it
+                to <code className="text-fg">%LOCALAPPDATA%/BoreanAstro/tenant.json</code> (Windows) or{' '}
                 <code className="text-fg">~/.boreanastro/tenant.json</code> (macOS).
               </p>
-              <a
-                href={tenantUrl}
-                className="btn-secondary mt-3 inline-flex px-5 py-2.5 text-sm"
-              >
+              <a href={tenantUrl} className="btn-secondary mt-3 inline-flex px-5 py-2.5 text-sm">
                 Download tenant.json
               </a>
             </details>
@@ -155,13 +190,15 @@ function SuccessContent() {
             <h2 className="font-display text-lg font-semibold text-fg">3. OTA updates</h2>
             <p className="text-sm text-muted">
               After install, use <strong className="font-medium text-fg">Update</strong> in Station and
-              Settings → Updates in Control Client. The apps poll your cloud hub for the latest version and
-              download URL automatically.
+              Settings → Updates in Control Client. The apps poll your cloud hub for the latest version
+              and download URL automatically.
             </p>
           </div>
         </div>
       ) : !error ? (
-        <p className="mt-10 text-muted">Loading your downloads…</p>
+        <p className="mt-10 text-muted">
+          {waiting ? 'Confirming payment and provisioning your cloud hub…' : 'Loading your downloads…'}
+        </p>
       ) : null}
     </section>
   )

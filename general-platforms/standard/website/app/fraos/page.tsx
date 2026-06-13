@@ -5,7 +5,7 @@ import { FRAOS, PRODUCT_PLANS } from '@/lib/site-config'
 
 export const metadata = {
   title: 'FRAOS — Borean Astro',
-  description: FRAOS.fullName,
+  description: FRAOS.homeSummary,
 }
 
 export default function FraosPage() {
@@ -22,24 +22,24 @@ export default function FraosPage() {
           <p data-stagger className="mx-auto mt-4 max-w-2xl text-lg text-muted">
             {FRAOS.fullName}
           </p>
-          <p data-stagger className="mx-auto mt-6 max-w-xl text-base text-muted/90">
-            {FRAOS.summary}
+          <p data-stagger className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-muted/90">
+            {FRAOS.homeSummary}
           </p>
-          <p data-stagger className="mx-auto mt-4 max-w-2xl text-sm text-muted/80">
+          <p data-stagger className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-muted/75">
             {FRAOS.tierTagline}
           </p>
         </StaggerEntrance>
       </section>
-      {PRODUCT_PLANS.map((plan, index) => (
-        <div key={plan}>
-          {index > 0 ? (
-            <ScrollReveal>
-              <div aria-hidden className="page-shell h-px bg-white/10" />
+
+      <section className="page-shell pb-24 pt-8 md:pb-32">
+        <div className="mt-10 grid gap-6 md:grid-cols-2">
+          {PRODUCT_PLANS.map((plan, index) => (
+            <ScrollReveal key={plan} delay={(index % 2) * 0.08} className="h-full">
+              <FraosEditionPanel plan={plan} />
             </ScrollReveal>
-          ) : null}
-          <FraosEditionPanel plan={plan} />
+          ))}
         </div>
-      ))}
+      </section>
     </>
   )
 }

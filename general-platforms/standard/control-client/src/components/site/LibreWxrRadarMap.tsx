@@ -1,6 +1,7 @@
 import 'leaflet/dist/leaflet.css'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import MapFrameTimeOverlay from './MapFrameTimeOverlay'
+import { contentApiPath } from '../../lib/content-base'
 import { formatEstDateTime } from '../../lib/site/est-datetime'
 import {
   createRadarPlayback,
@@ -12,18 +13,19 @@ import {
 } from '../../lib/site/librewxr-radar-playback'
 import {
   librewxrRadarFrames,
-  BOREAN_LAT,
-  BOREAN_LON,
   type LibrewxrFrame,
   type LibrewxrWeatherMaps,
 } from '../../lib/site/librewxr'
-import { contentApiPath } from '../../lib/content-base'
+import { useObservatoryLocation } from '../../lib/useObservatoryLocation'
 
 const MAP_ZOOM = 8
+/** Frame interval — crossfade + preload-ahead keeps the loop continuous. */
 const FRAME_MS = 1100
+
 const BASEMAP_URL = 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png'
 
 export default function LibreWxrRadarMap() {
+  const { lat, lon } = useObservatoryLocation()
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<import('leaflet').Map | null>(null)
   const playbackRef = useRef<RadarPlayback | null>(null)
@@ -61,17 +63,21 @@ export default function LibreWxrRadarMap() {
   }, [])
 
   useEffect(() => {
-    if (frames.length === 0 || !containerRef.current || mapRef.current) return
+    if (frames.length === 0 || !containerRef.current) return
 
     let disposed = false
     let resizeObserver: ResizeObserver | undefined
+
+    mapRef.current?.remove()
+    mapRef.current = null
+    playbackRef.current = null
 
     ;(async () => {
       const L = await import('leaflet')
       if (disposed || !containerRef.current) return
 
       const map = L.map(containerRef.current, {
-        center: [BOREAN_LAT, BOREAN_LON],
+        center: [lat, lon],
         zoom: MAP_ZOOM,
         minZoom: MAP_ZOOM,
         maxZoom: MAP_ZOOM,
@@ -115,7 +121,12 @@ export default function LibreWxrRadarMap() {
       goToFrameIndex(playback, startIdx)
       preloadNextFrame(playback, startIdx)
 
-      L.circleMarker([BOREAN_LAT, BOREAN_LON], {
+      map.createPane('obsMarker')
+      const markerPane = map.getPane('obsMarker')
+      if (markerPane) markerPane.style.zIndex = '650'
+
+      L.circleMarker([lat, lon], {
+        pane: 'obsMarker',
         radius: 7,
         color: '#ffffff',
         weight: 2,
@@ -137,7 +148,7 @@ export default function LibreWxrRadarMap() {
       mapRef.current = null
       playbackRef.current = null
     }
-  }, [frames])
+  }, [frames, lat, lon])
 
   useEffect(() => {
     const playback = playbackRef.current
@@ -161,10 +172,9 @@ export default function LibreWxrRadarMap() {
   }, [frames, frameIndex])
 
   return (
-    <div>
-      <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-4">Precipitation Radar</h1>
-      <div className="relative w-full rounded-lg overflow-hidden bg-[#1a1a1a] librewxr-radar-map aspect-[4/3]">
-        <MapFrameTimeOverlay timeLabel={frameTimeLabel} />
+    <div className="h-full min-h-0 flex flex-col">
+      <div className="relative w-full flex-1 min-h-0 rounded-xl overflow-hidden bg-[#1a1a1a] librewxr-radar-map obs-map">
+        <MapFrameTimeOverlay title="Precipitation Radar" timeLabel={frameTimeLabel} />
         <div ref={containerRef} className="absolute inset-0 z-0 h-full w-full" />
         {(loading || error) && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/50 text-sm text-white px-4 text-center">

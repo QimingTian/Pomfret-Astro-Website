@@ -2,11 +2,17 @@
 
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
-import { Suspense, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
+import { CheckoutBillingCards } from '@/components/checkout/CheckoutBillingCards'
 import { MemberAuthPanel } from '@/components/member-auth-panel'
 import { useMember } from '@/hooks/use-member'
-import { PLANS, planIsPurchasable } from '@/lib/site-config'
+import {
+  billingCycleLabel,
+  checkoutPricingForPlan,
+  type CheckoutPriceOption,
+} from '@/lib/checkout-pricing'
 import { normalizeProductPlan } from '@/lib/plan-utils'
+import { PLANS, planIsPurchasable } from '@/lib/site-config'
 
 type PromoPreview = {
   code: string
@@ -14,23 +20,57 @@ type PromoPreview = {
   label: string | null
 }
 
-function CheckoutContent() {
-  const searchParams = useSearchParams()
-  const rawPlan = searchParams.get('plan')
-  const plan = normalizeProductPlan(rawPlan)
-  const product = PLANS[plan]
-  const purchasable = planIsPurchasable(plan)
-  const member = useMember()
+function CheckoutProductHeader({ name, tagline }: { name: string; tagline: string }) {
+  return (
+    <div>
+      <h2 className="font-display text-2xl font-semibold text-fg md:text-3xl">{name}</h2>
+      <p className="mt-2 text-muted">{tagline}</p>
+    </div>
+  )
+}
 
+function CheckoutMain({
+  plan,
+  product,
+  memberEmail,
+}: {
+  plan: ReturnType<typeof normalizeProductPlan>
+  product: (typeof PLANS)[typeof plan]
+  memberEmail: string
+}) {
+  const priceOptions = checkoutPricingForPlan(plan)
+  const [billingCycle, setBillingCycle] = useState<CheckoutPriceOption['cycle']>('monthly')
   const [promoCode, setPromoCode] = useState('')
   const [promoPreview, setPromoPreview] = useState<PromoPreview | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [stripeEnabled, setStripeEnabled] = useState(false)
 
-  const displayTotal = useMemo(() => {
-    if (promoPreview?.finalPriceLabel === 'Free') return 'Free'
-    return product.price
-  }, [product.price, promoPreview])
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch('/api/checkout/config')
+        const data = (await res.json()) as { stripeEnabled?: boolean }
+        setStripeEnabled(Boolean(data.stripeEnabled))
+      } catch {
+        setStripeEnabled(false)
+      }
+    })()
+  }, [])
+
+  const selectedOption = useMemo(
+    () => priceOptions.find((o) => o.cycle === billingCycle) ?? priceOptions[0],
+    [priceOptions, billingCycle]
+  )
+
+  const promoActive = promoPreview?.finalPriceLabel === 'Free'
+
+  const displayTotal = promoActive ? 'Free' : selectedOption.price
+  const displayPeriod = promoActive
+    ? 'promotion applied'
+    : promoPreview
+      ? `${promoPreview.finalPriceLabel} with code`
+      : selectedOption.period
 
   async function handleValidatePromo() {
     setError(null)
@@ -66,6 +106,39 @@ function CheckoutContent() {
     }
   }
 
+  async function handleStripeCheckout() {
+    setError(null)
+    setBusy(true)
+    try {
+      const res = await fetch('/api/checkout/create-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ plan, billingCycle }),
+      })
+      const data = (await res.json()) as { ok?: boolean; error?: string; url?: string }
+      if (!res.ok || !data.ok || !data.url) {
+        setError(data.error ?? 'Could not start card checkout.')
+        return
+      }
+      window.location.href = data.url
+    } catch (ex) {
+      setError(ex instanceof Error ? ex.message : 'Could not start card checkout.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleCompletePurchase() {
+    if (promoActive) {
+      await handleRedeem()
+      return
+    }
+    await handleStripeCheckout()
+  }
+
+  const canComplete = promoActive || stripeEnabled
+
   async function handleRedeem() {
     setError(null)
     setBusy(true)
@@ -96,9 +169,136 @@ function CheckoutContent() {
     }
   }
 
+  return (
+    <>
+      <p className="mt-2 text-sm text-muted">
+        Signed in as <span className="text-fg">{memberEmail}</span>
+      </p>
+
+      <div className="glass-card mt-10 p-8 md:p-10">
+        <CheckoutProductHeader name={product.name} tagline={product.tagline} />
+
+        <div className="mt-10">
+          <h3 className="font-display text-lg font-semibold text-fg">Choose a plan</h3>
+          <p className="mt-1 text-sm text-muted">Monthly, annual, or pay once — same full {product.shortName} stack.</p>
+          <div className="mt-6">
+            <CheckoutBillingCards
+              options={priceOptions}
+              selected={billingCycle}
+              onSelect={(cycle) => {
+                setBillingCycle(cycle)
+                if (promoPreview) {
+                  setPromoPreview(null)
+                  setPromoCode('')
+                }
+              }}
+              disabled={promoActive}
+            />
+          </div>
+        </div>
+
+        <div className="glass-card mt-6 border border-white/10 bg-white/[0.02] p-6 md:p-8">
+          <h3 className="font-display text-lg font-semibold text-fg">Promotion code</h3>
+          <p className="mt-1 text-sm text-muted">
+            Have a code? Apply it for a complimentary license and instant download.
+          </p>
+          <label className="mt-5 block">
+            <span className="sr-only">Promotion code</span>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input
+                type="text"
+                value={promoCode}
+                onChange={(e) => {
+                  setPromoCode(e.target.value)
+                  setPromoPreview(null)
+                  setError(null)
+                }}
+                placeholder="Enter promotion code"
+                className="min-w-0 flex-1 rounded-xl border border-white/15 bg-surface/80 px-4 py-3 text-sm text-fg placeholder:text-muted/60 backdrop-blur"
+                autoComplete="off"
+                disabled={busy}
+              />
+              <button
+                type="button"
+                onClick={() => void handleValidatePromo()}
+                disabled={busy || !promoCode.trim()}
+                className="btn-secondary shrink-0 px-6 py-3 text-sm disabled:opacity-50"
+              >
+                Apply
+              </button>
+            </div>
+          </label>
+          {promoPreview ? (
+            <p className="mt-3 text-sm text-fg">
+              {promoPreview.label ? `${promoPreview.label} · ` : ''}
+              {promoPreview.code} applied — {promoPreview.finalPriceLabel}
+            </p>
+          ) : (
+            <p className="mt-3 text-xs text-muted/80">
+              100% promotion codes provision your cloud hub immediately.
+            </p>
+          )}
+        </div>
+
+        <div className="mt-8 flex flex-col gap-6 border-t border-white/10 pt-8 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-sm text-muted">
+              {promoActive ? 'Promotion code' : billingCycleLabel(billingCycle)}
+            </p>
+            <p className="mt-1 font-display text-4xl font-bold text-fg">{displayTotal}</p>
+            <p className="mt-1 text-sm text-muted">{displayPeriod}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleCompletePurchase()}
+            disabled={busy || !canComplete}
+            className="btn-primary w-full shrink-0 px-10 py-3.5 sm:w-auto disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            {busy
+              ? promoActive
+                ? 'Provisioning license…'
+                : 'Redirecting to checkout…'
+              : promoActive
+                ? 'Activate license'
+                : 'Continue to payment'}
+          </button>
+        </div>
+
+        {!promoActive && stripeEnabled ? (
+          <p className="mt-4 text-center text-xs text-muted/80 sm:text-right">
+            Secure payment by Stripe. You can also enter a promotion code above.
+          </p>
+        ) : null}
+        {!promoActive && !stripeEnabled ? (
+          <p className="mt-4 text-center text-xs text-muted/80 sm:text-right">
+            Card checkout is not configured on this server yet — use a 100% promotion code to activate
+            today.
+          </p>
+        ) : null}
+        {error ? <p className="mt-4 text-center text-sm text-red-300 sm:text-right">{error}</p> : null}
+      </div>
+
+      <p className="mt-6 text-center text-xs leading-relaxed text-muted/80">
+        Your order provisions a dedicated cloud hub on www.boreanastro.com. Download Control Client and
+        Station, plus a personal <code className="text-fg/90">tenant.json</code> that connects your install
+        to your hub.
+      </p>
+    </>
+  )
+}
+
+function CheckoutContent() {
+  const searchParams = useSearchParams()
+  const rawPlan = searchParams.get('plan')
+  const plan = normalizeProductPlan(rawPlan)
+  const product = PLANS[plan]
+  const purchasable = planIsPurchasable(plan)
+  const member = useMember()
+  const priceOptions = checkoutPricingForPlan(plan)
+
   if (member.status === 'loading') {
     return (
-      <section className="page-shell-form py-16 md:py-20">
+      <section className="page-shell-checkout py-16 md:py-20">
         <p className="text-muted">Loading…</p>
       </section>
     )
@@ -106,7 +306,7 @@ function CheckoutContent() {
 
   if (!purchasable) {
     return (
-      <section className="page-shell-narrow py-16 md:py-20">
+      <section className="page-shell-checkout py-16 md:py-20">
         <Link href="/fraos" className="text-sm text-muted hover:text-fg">
           ← Back to FRAOS
         </Link>
@@ -124,103 +324,47 @@ function CheckoutContent() {
 
   if (member.status === 'guest') {
     return (
-      <section className="page-shell-narrow py-16 md:py-20">
-        <Link href="/fraos" className="text-sm text-muted hover:text-fg">
-          ← Back to FRAOS
+      <section className="page-shell-checkout py-16 md:py-20">
+        <Link href={`/fraos/${plan}`} className="text-sm text-muted hover:text-fg">
+          ← Back to {product.shortName}
         </Link>
         <h1 className="mt-8 font-display text-3xl font-bold text-fg">Checkout</h1>
         <p className="mt-2 text-muted">Log in or create an account to complete your purchase.</p>
-        <MemberAuthPanel
-          onSignedIn={(user) => {
-            if (user) member.completeSignIn(user)
-            else void member.refresh()
-          }}
-        />
+
+        <div className="glass-card mt-10 p-8 md:p-10">
+          <CheckoutProductHeader name={product.name} tagline={product.tagline} />
+          <div className="mt-10">
+            <h3 className="font-display text-lg font-semibold text-fg">Choose a plan</h3>
+            <p className="mt-1 text-sm text-muted">Preview pricing — sign in below to checkout.</p>
+            <div className="mt-6 pointer-events-none opacity-80">
+              <CheckoutBillingCards options={priceOptions} selected="monthly" onSelect={() => {}} disabled />
+            </div>
+          </div>
+          <div className="glass-card mt-6 border border-white/10 bg-white/[0.02] p-6 opacity-80">
+            <h3 className="font-display text-lg font-semibold text-fg">Promotion code</h3>
+            <p className="mt-1 text-sm text-muted">Available after you sign in.</p>
+          </div>
+        </div>
+
+        <div className="glass-card mt-8 p-8">
+          <MemberAuthPanel
+            onSignedIn={(user) => {
+              if (user) member.completeSignIn(user)
+              else void member.refresh()
+            }}
+          />
+        </div>
       </section>
     )
   }
 
   return (
-    <section className="page-shell-form py-16 md:py-20">
-      <Link href="/fraos" className="text-sm text-muted hover:text-fg">
-        ← Back to FRAOS
+    <section className="page-shell-checkout py-16 md:py-20">
+      <Link href={`/fraos/${plan}`} className="text-sm text-muted hover:text-fg">
+        ← Back to {product.shortName}
       </Link>
       <h1 className="mt-8 font-display text-3xl font-bold text-fg">Checkout</h1>
-      <p className="mt-2 text-muted">
-        Signed in as <span className="text-fg">{member.user.email}</span>
-      </p>
-
-      <div className="glass-card mt-10 p-8">
-        <h2 className="font-display text-xl font-semibold text-fg">{product.name}</h2>
-        <p className="mt-2 text-sm text-muted">{product.tagline}</p>
-
-        <label className="mt-8 block">
-          <span className="text-sm text-muted">Promotion code</span>
-          <div className="mt-2 flex gap-2">
-            <input
-              type="text"
-              value={promoCode}
-              onChange={(e) => {
-                setPromoCode(e.target.value)
-                setPromoPreview(null)
-              }}
-              placeholder="Enter promotion code"
-              className="min-w-0 flex-1 rounded-xl border border-white/15 bg-surface px-4 py-2.5 text-sm text-fg placeholder:text-muted/60"
-              autoComplete="off"
-              disabled={busy}
-            />
-            <button
-              type="button"
-              onClick={() => void handleValidatePromo()}
-              disabled={busy || !promoCode.trim()}
-              className="btn-secondary px-4 py-2.5 text-sm disabled:opacity-50"
-            >
-              Apply
-            </button>
-          </div>
-          {promoPreview ? (
-            <p className="mt-2 text-sm text-fg">
-              {promoPreview.label ? `${promoPreview.label} · ` : ''}
-              {promoPreview.code} applied — {promoPreview.finalPriceLabel}
-            </p>
-          ) : (
-            <p className="mt-2 text-xs text-muted/80">
-              Enter a promotion code from your admin for a free license and instant download.
-            </p>
-          )}
-        </label>
-
-        <div className="mt-6 flex items-baseline justify-between border-t border-white/15 pt-6">
-          <span className="text-muted">Total</span>
-          <div className="text-right">
-            <span className="font-display text-3xl font-bold text-fg">{displayTotal}</span>
-            <p className="text-xs text-muted">
-              {displayTotal === 'Free' ? 'promotion applied' : product.period}
-            </p>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => void handleRedeem()}
-          disabled={busy || !promoPreview || promoPreview.finalPriceLabel !== 'Free'}
-          className="btn-primary mt-8 w-full py-3.5 disabled:cursor-not-allowed disabled:opacity-45"
-        >
-          {busy ? 'Provisioning license…' : 'Complete purchase'}
-        </button>
-        {!promoPreview ? (
-          <p className="mt-3 text-center text-xs text-muted/80">
-            Apply a 100% promotion code to enable checkout. Paid card checkout is coming soon.
-          </p>
-        ) : null}
-        {error ? <p className="mt-4 text-center text-sm text-red-300">{error}</p> : null}
-      </div>
-
-      <p className="mt-6 text-center text-xs text-muted/80">
-        Your order provisions a dedicated cloud hub on www.boreanastro.com. You download the same
-        Control Client and Station apps as everyone else, plus a personal{' '}
-        <code className="text-fg/90">tenant.json</code> file that connects your install to your hub.
-      </p>
+      <CheckoutMain plan={plan} product={product} memberEmail={member.user.email} />
     </section>
   )
 }

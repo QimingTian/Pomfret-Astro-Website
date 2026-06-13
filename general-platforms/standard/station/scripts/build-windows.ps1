@@ -6,6 +6,9 @@ Set-Location (Join-Path $PSScriptRoot "..")
 Write-Host "Installing npm dependencies..."
 npm ci
 
+Write-Host "Building NINA plugin bundle..."
+powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "build-nina-plugin.ps1")
+
 Write-Host "Building Windows installer (first run may take 10-20 min)..."
 npm run tauri build
 

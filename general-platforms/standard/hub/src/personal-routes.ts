@@ -1,17 +1,8 @@
-import type { Express, Request, Response } from 'express'
+import express, { type Express, type Request, type Response } from 'express'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { v4 as uuidv4 } from 'uuid'
-import {
-  getObservatoryState,
-  insertSession,
-  listSessions,
-  sessionToPublicJson,
-  setObservatoryPatch,
-  touchAgentPulse,
-  type SessionOutputMode,
-} from './db.js'
+import { mountImagingRoutes } from './imaging/routes.js'
 import { personalTenantSecret } from './tenant-auth.js'
 
 const fraosRelease = JSON.parse(
@@ -34,7 +25,9 @@ function bearerAuthorized(req: Request, tenantId: string): boolean {
   if (!expected) return false
   const header = req.header('authorization') ?? ''
   const token = header.startsWith('Bearer ') ? header.slice(7).trim() : ''
-  return token === expected
+  if (token === expected) return true
+  const q = req.query.access_token ?? req.query.token
+  return typeof q === 'string' && q === expected
 }
 
 function requireTenant(req: Request, res: Response, tenantId: string): boolean {
@@ -51,7 +44,7 @@ function requireTenant(req: Request, res: Response, tenantId: string): boolean {
 
 export function mountPersonalRoutes(app: Express): void {
   app.get('/api/personal/:tenantId/health', (req, res) => {
-    res.json({ ok: true, edition: 'personal', tenantId: req.params.tenantId, hub: 'cloud' })
+    res.json({ ok: true, edition: 'personal', tenantId: req.params.tenantId, hub: 'local' })
   })
 
   app.get('/api/personal/:tenantId/station/version', (req, res) => {
@@ -80,75 +73,31 @@ export function mountPersonalRoutes(app: Express): void {
     })
   })
 
-  app.get('/api/personal/:tenantId/imaging/observatory-status', (req, res) => {
+  app.get('/api/personal/:tenantId/license', (req, res) => {
     const { tenantId } = req.params
     if (!requireTenant(req, res, tenantId)) return
-    const { mode, status } = getObservatoryState()
-    res.json({ ok: true, mode, status })
-  })
-
-  app.patch('/api/personal/:tenantId/imaging/observatory-status', (req, res) => {
-    const { tenantId } = req.params
-    if (!requireTenant(req, res, tenantId)) return
-    const body = req.body as { mode?: string; status?: string }
-    if (body.mode !== 'manual' && body.mode !== 'auto' && body.mode != null) {
-      res.status(400).json({ ok: false, error: 'Invalid mode' })
-      return
-    }
-    setObservatoryPatch({
-      mode: body.mode as 'manual' | 'auto' | undefined,
-      status: body.status as Parameters<typeof setObservatoryPatch>[0]['status'],
-    })
-    const next = getObservatoryState()
-    res.json({ ok: true, mode: next.mode, status: next.status })
-  })
-
-  app.get('/api/personal/:tenantId/imaging/current-sessions', (req, res) => {
-    const { tenantId } = req.params
-    if (!requireTenant(req, res, tenantId)) return
-    const sessions = listSessions().map(sessionToPublicJson)
-    res.json({ ok: true, sessions })
-  })
-
-  app.post('/api/personal/:tenantId/imaging/queue', (req, res) => {
-    const { tenantId } = req.params
-    if (!requireTenant(req, res, tenantId)) return
-    const body = req.body as Record<string, unknown>
-    const target = typeof body.target === 'string' ? body.target.trim() : ''
-    if (!target) {
-      res.status(400).json({ ok: false, error: 'target is required' })
-      return
-    }
-    const outputModeRaw = typeof body.outputMode === 'string' ? body.outputMode : 'none'
-    const outputMode: SessionOutputMode = outputModeRaw === 'raw_zip' ? 'raw_zip' : 'none'
-    const session = insertSession({
-      id: uuidv4(),
-      target,
-      outputMode,
-      raHours: typeof body.raHours === 'number' ? body.raHours : null,
-      decDeg: typeof body.decDeg === 'number' ? body.decDeg : null,
-      filter: typeof body.filter === 'string' ? body.filter : null,
-      exposureSeconds: typeof body.exposureSeconds === 'number' ? body.exposureSeconds : null,
-      count: typeof body.count === 'number' ? body.count : null,
-    })
-    res.status(201).json({ ok: true, request: sessionToPublicJson(session) })
-  })
-
-  app.post('/api/personal/:tenantId/imaging/agent-pulse', (req, res) => {
-    const { tenantId } = req.params
-    if (!requireTenant(req, res, tenantId)) return
-    const ninaRunning = Boolean((req.body as { ninaRunning?: unknown })?.ninaRunning)
-    touchAgentPulse(ninaRunning)
-    res.json({ ok: true })
-  })
-
-  app.get('/api/personal/:tenantId/imaging/nina-sequence', (req, res) => {
-    const { tenantId } = req.params
-    if (!requireTenant(req, res, tenantId)) return
-    touchAgentPulse(false)
-    res.status(404).json({
-      ok: false,
-      error: 'No sequence available yet (Personal Hub scheduling pending).',
+    res.json({
+      ok: true,
+      active: true,
+      ownerName: 'Developer',
+      plan: 'standard',
+      planLabel: 'FRAOS Standard',
+      purchaseType: 'one_time',
+      purchaseTypeLabel: 'One-time purchase',
+      validUntil: null,
+      nextBillAt: null,
     })
   })
+
+  const personalRouter = express.Router({ mergeParams: true })
+  personalRouter.use((req, res, next) => {
+    const tenantId = String(req.params.tenantId ?? '')
+    if (!requireTenant(req, res, tenantId)) return
+    next()
+  })
+  mountImagingRoutes(personalRouter, {
+    tenantId: (req) => String(req.params.tenantId ?? ''),
+    requireAuth: true,
+  })
+  app.use('/api/personal/:tenantId', personalRouter)
 }

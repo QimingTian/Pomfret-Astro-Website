@@ -1,6 +1,6 @@
 import { personalAuthHeaders, personalTenantApiUrl } from '@shared/tenant-config'
 import type { SessionOutputMode } from '@shared/output-mode'
-import { getPersonalTenant } from './tenant'
+import { loadRuntimeTenant } from './tenant'
 
 export type SubmitSessionInput = {
   target: string
@@ -17,7 +17,7 @@ export type SubmitSessionResult =
   | { ok: false; error: string }
 
 export async function submitSession(input: SubmitSessionInput): Promise<SubmitSessionResult> {
-  const tenant = getPersonalTenant()
+  const tenant = await loadRuntimeTenant()
   const url = personalTenantApiUrl(tenant, '/imaging/queue')
   try {
     const res = await fetch(url, {

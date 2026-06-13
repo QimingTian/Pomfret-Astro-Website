@@ -1,4 +1,4 @@
-import { OBS_LAT_DEG, OBS_LON_DEG } from './target-altitude'
+import { readObservatoryCoords } from '../observatory-local-time'
 
 const DEG2RAD = Math.PI / 180
 const RAD2DEG = 180 / Math.PI
@@ -106,21 +106,60 @@ export function moonEquatorial(date: Date): { raHours: number; decDeg: number } 
   return { raHours: normDeg(ra * RAD2DEG) / 15, decDeg: dec * RAD2DEG }
 }
 
-/** Moon altitude (degrees) above the local horizon at the observatory. */
-export function moonAltDeg(date: Date): number {
+/** Moon altitude (degrees) above the local horizon at the configured observatory. */
+export function moonAltDeg(date: Date, latDeg?: number, lonDeg?: number): number {
+  const { lat, lon } = readObservatoryCoords()
+  return moonAltDegAt(date, latDeg ?? lat, lonDeg ?? lon)
+}
+
+/** Moon altitude (degrees) above the horizon for an arbitrary observer. */
+export function moonAltDegAt(date: Date, latDeg: number, lonDeg: number): number {
   const { raHours, decDeg } = moonEquatorial(date)
   const jd = date.getTime() / 86400000 + 2440587.5
   const T = (jd - 2451545.0) / 36525
   const gmst = normDeg(
     280.46061837 + 360.98564736629 * (jd - 2451545.0) + 0.000387933 * T * T - (T * T * T) / 38710000
   )
-  const lst = normDeg(gmst + OBS_LON_DEG)
+  const lst = normDeg(gmst + lonDeg)
   let ha = lst - raHours * 15
   if (ha > 180) ha -= 360
   if (ha < -180) ha += 360
-
-  const sinAlt = sinD(decDeg) * sinD(OBS_LAT_DEG) + cosD(decDeg) * cosD(OBS_LAT_DEG) * cosD(ha)
+  const sinAlt = sinD(decDeg) * sinD(latDeg) + cosD(decDeg) * cosD(latDeg) * cosD(ha)
   return Math.asin(Math.max(-1, Math.min(1, sinAlt))) * RAD2DEG
+}
+
+/**
+ * Moonrise / moonset for the local day containing `ref`, found by scanning the
+ * moon altitude for horizon crossings (accounting for the standard −0.833° refraction
+ * + semidiameter offset). Returns the next upcoming rise/set within ±24h, or null.
+ */
+export function moonRiseSet(
+  ref: Date,
+  latDeg: number,
+  lonDeg: number
+): { rise: Date | null; set: Date | null } {
+  const HORIZON = -0.833
+  const STEP_MIN = 10
+  const start = ref.getTime() - 12 * 3600_000
+  let prevT = start
+  let prevAlt = moonAltDegAt(new Date(prevT), latDeg, lonDeg) - HORIZON
+  let rise: Date | null = null
+  let set: Date | null = null
+
+  for (let m = STEP_MIN; m <= 36 * 60; m += STEP_MIN) {
+    const t = start + m * 60_000
+    const alt = moonAltDegAt(new Date(t), latDeg, lonDeg) - HORIZON
+    if (prevAlt < 0 && alt >= 0 && !rise) {
+      rise = new Date(prevT + ((0 - prevAlt) / (alt - prevAlt)) * (t - prevT))
+    } else if (prevAlt >= 0 && alt < 0 && !set) {
+      set = new Date(prevT + ((0 - prevAlt) / (alt - prevAlt)) * (t - prevT))
+    }
+    prevT = t
+    prevAlt = alt
+    if (rise && set) break
+  }
+
+  return { rise, set }
 }
 
 /** Great-circle angular separation (degrees) between two equatorial coordinates. */

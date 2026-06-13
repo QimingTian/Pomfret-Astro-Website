@@ -1,5 +1,7 @@
+import { buildHourKey } from './site/tonight-schedule'
+import { getTonightScheduleStrip } from './site/schedule-strip'
 import { getObservatoryLocation } from './settings'
-import { getPersonalTenant } from './tenant'
+import { loadRuntimeTenant } from './tenant'
 
 export type WeatherPrediction = 'permitted' | 'not_permitted' | 'unavailable'
 
@@ -28,6 +30,9 @@ export type TonightWeatherSnapshot = {
   readyHours: number
   totalNightHours: number
   hasAnyPrecipitationTonight: boolean
+  readyWeatherHourKeys: string[]
+  nightWeatherHourKeys: string[]
+  notPermittedReasonByHourKey: Record<string, Array<'cloud' | 'rain' | 'wind'>>
   error?: string
 }
 
@@ -59,7 +64,7 @@ async function fetchOpenMeteoTonight(): Promise<TonightWeatherSnapshot> {
     'https://api.open-meteo.com/v1/forecast' +
     `?latitude=${lat}&longitude=${lon}` +
     '&current=temperature_2m,relative_humidity_2m,cloud_cover,wind_speed_10m,precipitation_probability' +
-    '&hourly=cloud_cover,precipitation_probability,wind_speed_10m,is_day' +
+    '&hourly=cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high,visibility,precipitation_probability,wind_speed_10m,is_day' +
     '&daily=sunrise,sunset&forecast_days=2&timezone=auto&timeformat=unixtime'
 
   const res = await fetch(url)
@@ -124,6 +129,15 @@ async function fetchOpenMeteoTonight(): Promise<TonightWeatherSnapshot> {
     prediction = 'permitted'
   }
 
+  const readyWeatherHourKeys = hours.filter((h) => h.permitted).map((h) => buildHourKey(new Date(h.hourStartSec * 1000)))
+  const nightWeatherHourKeys = hours.map((h) => buildHourKey(new Date(h.hourStartSec * 1000)))
+  const notPermittedReasonByHourKey: Record<string, Array<'cloud' | 'rain' | 'wind'>> = {}
+  for (const h of hours) {
+    if (h.permitted) continue
+    if (h.reasons.length === 0) continue
+    notPermittedReasonByHourKey[buildHourKey(new Date(h.hourStartSec * 1000))] = h.reasons
+  }
+
   return {
     ok: true,
     prediction,
@@ -137,20 +151,19 @@ async function fetchOpenMeteoTonight(): Promise<TonightWeatherSnapshot> {
     readyHours,
     totalNightHours: hours.length,
     hasAnyPrecipitationTonight,
+    readyWeatherHourKeys,
+    nightWeatherHourKeys,
+    notPermittedReasonByHourKey,
   }
 }
 
 async function fetchHubTonightWeather(): Promise<TonightWeatherSnapshot | null> {
-  const base = getPersonalTenant().apiBaseUrl
+  const base = (await loadRuntimeTenant()).apiBaseUrl
   if (!base.includes('www.boreanastro.com')) return null
 
-  const now = new Date()
-  const scheduleStart = new Date(now)
-  scheduleStart.setHours(16, 0, 0, 0)
-  if (now.getHours() < 8) scheduleStart.setDate(scheduleStart.getDate() - 1)
-  const scheduleEnd = new Date(scheduleStart)
-  scheduleEnd.setDate(scheduleEnd.getDate() + 1)
-  scheduleEnd.setHours(8, 0, 0, 0)
+  const strip = getTonightScheduleStrip()
+  const scheduleStart = new Date(strip.windowStartMs)
+  const scheduleEnd = new Date(strip.windowEndMs)
 
   const url =
     `${base.replace(/\/+$/, '')}/api/imaging/tonight-weather-prediction` +
@@ -193,6 +206,26 @@ async function fetchHubTonightWeather(): Promise<TonightWeatherSnapshot | null> 
 
   const openMeteo = await fetchOpenMeteoTonight().catch(() => null)
 
+  const readyWeatherHourKeys = (data.readyHourStartsSec ?? [])
+    .filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
+    .map((sec) => buildHourKey(new Date(sec * 1000)))
+  const nightWeatherHourKeys = nightSecs.map((sec) => buildHourKey(new Date(sec * 1000)))
+  const notPermittedReasonByHourKey: Record<string, Array<'cloud' | 'rain' | 'wind'>> = {}
+  for (const row of data.notPermittedHourReasons ?? []) {
+    if (!row || typeof row !== 'object') continue
+    const hourStartSec =
+      typeof (row as { hourStartSec?: unknown }).hourStartSec === 'number'
+        ? (row as { hourStartSec: number }).hourStartSec
+        : null
+    const reasonsRaw = (row as { reasons?: unknown }).reasons
+    if (hourStartSec == null || !Array.isArray(reasonsRaw)) continue
+    const reasons = reasonsRaw.filter(
+      (r): r is 'cloud' | 'rain' | 'wind' => r === 'cloud' || r === 'rain' || r === 'wind'
+    )
+    if (reasons.length === 0) continue
+    notPermittedReasonByHourKey[buildHourKey(new Date(hourStartSec * 1000))] = reasons
+  }
+
   return {
     ok: true,
     prediction: data.prediction,
@@ -206,6 +239,14 @@ async function fetchHubTonightWeather(): Promise<TonightWeatherSnapshot | null> 
     readyHours: data.readyHourStartsSec?.length ?? 0,
     totalNightHours: nightSecs.length,
     hasAnyPrecipitationTonight: data.hasAnyPrecipitationTonight === true,
+    readyWeatherHourKeys:
+      readyWeatherHourKeys.length > 0 ? readyWeatherHourKeys : (openMeteo?.readyWeatherHourKeys ?? []),
+    nightWeatherHourKeys:
+      nightWeatherHourKeys.length > 0 ? nightWeatherHourKeys : (openMeteo?.nightWeatherHourKeys ?? []),
+    notPermittedReasonByHourKey:
+      Object.keys(notPermittedReasonByHourKey).length > 0
+        ? notPermittedReasonByHourKey
+        : (openMeteo?.notPermittedReasonByHourKey ?? {}),
   }
 }
 
@@ -223,6 +264,9 @@ export async function fetchTonightWeather(): Promise<TonightWeatherSnapshot> {
       readyHours: 0,
       totalNightHours: 0,
       hasAnyPrecipitationTonight: false,
+      readyWeatherHourKeys: [],
+      nightWeatherHourKeys: [],
+      notPermittedReasonByHourKey: {},
       error: ex instanceof Error ? ex.message : 'Weather unavailable',
     }
   }

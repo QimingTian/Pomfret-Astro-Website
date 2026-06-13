@@ -135,9 +135,9 @@
 
     try {
       var observer = core.observer
-      observer.latitude = parseNum(params.get('lat'), 41.9159) * DD2R
-      observer.longitude = parseNum(params.get('lng'), -71.9626) * DD2R
-      observer.elevation = parseNum(params.get('elev'), 150)
+      observer.latitude = parseNum(params.get('lat'), 0) * DD2R
+      observer.longitude = parseNum(params.get('lng'), 0) * DD2R
+      observer.elevation = parseNum(params.get('elev'), 0)
 
       var dateParam = params.get('date')
       var when = dateParam ? new Date(dateParam) : new Date()

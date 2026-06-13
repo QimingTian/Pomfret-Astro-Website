@@ -5,19 +5,21 @@ const overlayTextShadowStyle: CSSProperties = {
 }
 
 type MapFrameTimeOverlayProps = {
-  timeLabel: string | null
+  title?: string | null
+  timeLabel?: string | null
 }
 
-/** Top-left timestamp overlay (matches All Sky Camera overlay styling). */
-export default function MapFrameTimeOverlay({ timeLabel }: MapFrameTimeOverlayProps) {
-  if (!timeLabel) return null
+/** Top-left overlay for map title and/or timestamp. */
+export default function MapFrameTimeOverlay({ title, timeLabel }: MapFrameTimeOverlayProps) {
+  if (!title && !timeLabel) return null
 
   return (
     <div
       className="pointer-events-none absolute left-0 top-0 z-20 max-w-[min(100%,min(92vw,28rem))] px-2.5 py-1.5 text-left text-[0.8rem] leading-tight sm:px-3 sm:py-2 sm:text-[0.9375rem] sm:leading-snug"
       style={overlayTextShadowStyle}
     >
-      <p className="break-words text-emerald-400">{timeLabel}</p>
+      {title ? <p className="break-words font-medium text-white">{title}</p> : null}
+      {timeLabel ? <p className="break-words text-emerald-400">{timeLabel}</p> : null}
     </div>
   )
 }

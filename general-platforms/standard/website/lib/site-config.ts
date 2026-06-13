@@ -9,9 +9,11 @@ export const SITE_URL = 'https://www.boreanastro.com'
 export const FRAOS = {
   name: 'FRAOS',
   fullName: 'Fully Remote Automated Observatory System',
-  summary:
-    'Cloud-connected observatory software — remote control, automated scheduling, and NINA integration for serious astrophotography.',
-  tierTagline: 'Standard · Pro · Max · Ultra — one rig to a full observatory network.',
+  /** Shared intro — homepage card and FRAOS hero. */
+  homeSummary:
+    'The intelligent operating system for unattended remote observatories — advanced scheduling algorithms, closed-loop automation, and a private cloud hub for every site. No VPN, no screen sharing: just two apps.',
+  tierTagline:
+    'From one pier to a network of observatories. From a solo operator to a whole team. Standard · Pro · Max · Ultra — scale the way you observe.',
 } as const
 
 export const ASC = {
@@ -26,12 +28,11 @@ export const PLANS: Record<
     name: string
     shortName: string
     tagline: string
+    tierBlurb: string
     headline: string
     price: string
     period: string
     availability: PlanAvailability
-    sites: string
-    seats: string
     features: string[]
     highlights: Array<{ title: string; body: string }>
   }
@@ -40,12 +41,12 @@ export const PLANS: Record<
     name: 'FRAOS Standard',
     shortName: 'Standard',
     tagline: 'One telescope · one operator.',
+    tierBlurb:
+      'The full intelligent stack for a solo remote imager — one pier, one private hub, Control anywhere plus Station on the observatory PC.',
     headline: 'Your backyard observatory, always within reach.',
-    price: '$499',
-    period: 'one-time license',
+    price: 'Starting from $15',
+    period: 'per month',
     availability: 'available',
-    sites: '1 site',
-    seats: '1 seat',
     features: [
       'Borean Control Client (Windows / macOS)',
       'Borean Station + NINA agent (Windows)',
@@ -73,19 +74,19 @@ export const PLANS: Record<
     name: 'FRAOS Pro',
     shortName: 'Pro',
     tagline: 'One telescope · your team.',
+    tierBlurb:
+      'Same automation for one shared observatory — your whole team on one pier, with roles and a single team hub for clubs and schools.',
     headline: 'Share one observatory safely across operators.',
-    price: 'From $799',
-    period: 'per year',
+    price: 'Starting from $49',
+    period: 'per month',
     availability: 'coming-soon',
-    sites: '1 site',
-    seats: 'Up to 10 seats',
     features: [
       'Everything in FRAOS Standard',
-      'Multi-seat access with role-based permissions',
+      'Unlimited team members with role-based permissions',
       'Operator vs admin roles for night sessions',
       'Shared session queue with accountability',
       'Team cloud hub on www.boreanastro.com',
-      'Included R2 storage quota with fair-use policy',
+      '100 GB included R2 storage (48 h rolling fair use)',
     ],
     highlights: [
       {
@@ -98,7 +99,7 @@ export const PLANS: Record<
       },
       {
         title: 'One rig, many people',
-        body: 'Cloud costs stay predictable because you scale seats, not telescopes — ideal for a single shared pier.',
+        body: 'Add as many operators as your club or school needs — one shared pier, one hub, no per-seat cap.',
       },
     ],
   },
@@ -106,17 +107,17 @@ export const PLANS: Record<
     name: 'FRAOS Max',
     shortName: 'Max',
     tagline: 'Multiple telescopes · one operator.',
+    tierBlurb:
+      'Run as many remote sites as you need from one owner account — a dedicated hub per observatory and cross-site visibility in Control.',
     headline: 'Run every site from a single account.',
-    price: 'From $1,299',
-    period: 'per year',
+    price: 'Starting from $99',
+    period: 'per month',
     availability: 'coming-soon',
-    sites: 'Up to 5 sites',
-    seats: '1 seat',
     features: [
       'Everything in FRAOS Standard',
       'Multi-site dashboard under one owner account',
-      'Dedicated cloud hub per observatory site',
-      'Per-site R2 storage quotas',
+      'Add sites anytime — dedicated cloud hub per observatory',
+      '50 GB R2 per site (48 h rolling fair use)',
       'Cross-site visibility in Control Client',
       'Priority email support',
     ],
@@ -131,7 +132,7 @@ export const PLANS: Record<
       },
       {
         title: 'Cloud that grows with you',
-        body: 'Each additional site provisions its own hub and storage — costs track real infrastructure use.',
+        body: 'Each site provisions its own hub and storage — add observatories whenever you expand, with no site cap.',
       },
     ],
   },
@@ -139,12 +140,12 @@ export const PLANS: Record<
     name: 'FRAOS Ultra',
     shortName: 'Ultra',
     tagline: 'Multiple telescopes · your organization.',
+    tierBlurb:
+      'Observatory networks at scale — many sites and many teams under one organization, with enterprise roles, audit, and onboarding.',
     headline: 'Operate observatory networks at scale.',
     price: 'Custom',
-    period: 'annual contract',
+    period: 'contact sales',
     availability: 'coming-soon',
-    sites: 'Unlimited sites',
-    seats: 'Unlimited seats',
     features: [
       'Everything in FRAOS Pro and Max',
       'Organization dashboard across all sites',

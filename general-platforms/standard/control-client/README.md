@@ -15,6 +15,14 @@ npm install
 npm run tauri dev
 ```
 
+Stellarium sky atlas data (`public/skydata/`) is committed in-repo. To refresh from upstream:
+
+```bash
+npm run sync:skydata
+```
+
+Requires `third-party/stellarium-web-engine` at the repo root.
+
 ## Build (Windows installer)
 
 On a Windows machine:

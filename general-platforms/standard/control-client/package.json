@@ -1,12 +1,13 @@
 {
   "name": "control-client",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.16",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "sync:skydata": "bash scripts/sync-stellarium-skydata.sh",
     "tauri": "tauri"
   },
   "dependencies": {

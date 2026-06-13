@@ -11,6 +11,7 @@ export type PersonalTenantInfo = {
   tenantId: string
   apiBaseUrl: string
   displayName: string
+  plan?: string | null
 }
 
 export type StationConfig = {
@@ -20,4 +21,16 @@ export type StationConfig = {
   r2Enabled: boolean
   autostartEnabled: boolean
   pythonPath: string
+  pduEnabled: boolean
+  pduBaseUrl: string
+  pduUser: string
+  pduPassword: string
+}
+
+export type LocalLicenseStatus = {
+  installed: boolean
+  valid: boolean
+  expired: boolean
+  validUntil: string | null
+  plan: string | null
 }

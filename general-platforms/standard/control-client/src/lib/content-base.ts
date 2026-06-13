@@ -1,11 +1,7 @@
-import { getPersonalTenant } from './tenant'
-
 const DEFAULT_CONTENT_BASE = 'https://www.boreanastro.com'
 
-/** APIs for maps, moon images, object resolve, Stellarium — until Personal Station serves them locally. */
+/** APIs for maps, weather proxies, plate-solve — hosted on boreanastro.com (CORS *). */
 export function getContentBaseUrl(): string {
-  const hub = getPersonalTenant().apiBaseUrl
-  if (hub.includes('www.boreanastro.com')) return hub.replace(/\/+$/, '')
   return DEFAULT_CONTENT_BASE
 }
 

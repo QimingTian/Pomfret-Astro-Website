@@ -154,6 +154,33 @@ export async function personalTouchAgentPulse(tenantId: string, ninaRunning: boo
   await saveState(tenantId, state)
 }
 
+export async function personalApplyEmergencyStopHolds(tenantId: string): Promise<string[]> {
+  const state = await loadState(tenantId)
+  const now = new Date().toISOString()
+  const held: string[] = []
+  for (const session of state.sessions) {
+    if (session.status === 'pending' || session.status === 'scheduled') {
+      session.status = 'on_hold'
+      session.updatedAt = now
+      held.push(session.id)
+    } else if (session.status === 'in_progress') {
+      session.status = 'failed'
+      session.updatedAt = now
+    }
+  }
+  await saveState(tenantId, state)
+  return held
+}
+
+export async function personalDeleteSession(tenantId: string, sessionId: string): Promise<boolean> {
+  const state = await loadState(tenantId)
+  const before = state.sessions.length
+  state.sessions = state.sessions.filter((s) => s.id !== sessionId)
+  if (state.sessions.length === before) return false
+  await saveState(tenantId, state)
+  return true
+}
+
 export function personalSessionToPublicJson(s: PersonalSession): Record<string, unknown> {
   return {
     id: s.id,

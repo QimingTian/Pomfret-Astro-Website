@@ -3,21 +3,24 @@
   font-family: 'SF Pro Text', 'Segoe UI', system-ui, -apple-system, sans-serif;
   line-height: 1.45;
   font-weight: 400;
-  color: #dbeafe;
-  background-color: #04070c;
+  color: var(--fg-primary, #eee9dc);
+  background-color: var(--bg-primary, #08090a);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
 
-  --console-bg: #04070c;
-  --console-panel: rgba(8, 14, 24, 0.92);
-  --console-border: rgba(52, 211, 153, 0.22);
-  --console-border-dim: rgba(100, 116, 139, 0.35);
-  --console-accent: #34d399;
-  --console-accent-dim: #065f46;
-  --console-warn: #fbbf24;
-  --console-danger: #f87171;
+  --console-bg: var(--bg-primary, #08090a);
+  --console-panel: rgba(255, 255, 255, 0.04);
+  --console-border: rgba(255, 255, 255, 0.14);
+  --console-border-dim: rgba(255, 255, 255, 0.1);
+  --console-accent: var(--fg-primary, #eee9dc);
+  --console-warn: #ffd400;
+  --console-danger: #ff0000;
   --console-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Monaco, Consolas, monospace;
+  --lamp-ok: #00e600;
+  --lamp-warning: #ffd400;
+  --lamp-error: #ff0000;
+  --lamp-off: #555555;
 }
 
 * {

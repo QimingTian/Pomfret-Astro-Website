@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { SettingsLicensePanel } from '../components/SettingsLicensePanel'
 import { StatusRow, type StatusAction } from '../components/StatusRow'
+import { StationHeader } from '../components/StationHeader'
 import {
-  activateAccount,
   agentIsRunning,
   applyUpdate,
   clearAgentLogs,
-  hasUserLicense,
   installPython,
+  installNinaPlugin,
   loadConfig,
   loadTenant,
   readAgentLogs,
@@ -17,7 +18,7 @@ import {
   startAgent,
   stopAgent,
 } from '../lib/station-api'
-import { getPersonalTenant } from '../lib/tenant'
+import { planDisplayLabel } from '../lib/plan-label'
 import type { CheckItem, PersonalTenantInfo, StationConfig } from '../lib/types'
 
 const emptyConfig: StationConfig = {
@@ -27,18 +28,15 @@ const emptyConfig: StationConfig = {
   r2Enabled: false,
   autostartEnabled: false,
   pythonPath: '',
+  pduEnabled: false,
+  pduBaseUrl: '',
+  pduUser: '',
+  pduPassword: '',
 }
-
-const DEFAULT_HUB_URL = 'https://www.boreanastro.com'
 
 export function StationDashboard() {
   const [config, setConfig] = useState<StationConfig>(emptyConfig)
   const [tenant, setTenant] = useState<PersonalTenantInfo | null>(null)
-  const [licensed, setLicensed] = useState(false)
-  const [login, setLogin] = useState('')
-  const [password, setPassword] = useState('')
-  const [licenseMsg, setLicenseMsg] = useState<string | null>(null)
-  const [licenseErr, setLicenseErr] = useState<string | null>(null)
   const [checks, setChecks] = useState<CheckItem[]>([])
   const [logs, setLogs] = useState('')
   const [running, setRunning] = useState(false)
@@ -65,19 +63,17 @@ export function StationDashboard() {
   }, [])
 
   const refresh = useCallback(async () => {
-    const [c, t, hasLicense] = await Promise.all([loadConfig(), loadTenant(), hasUserLicense()])
+    const [c, t] = await Promise.all([loadConfig(), loadTenant()])
     setConfig(c)
     setTenant(t)
-    setLicensed(hasLicense)
     await refreshChecks()
   }, [refreshChecks])
 
   useEffect(() => {
     void (async () => {
-      const [c, t, hasLicense] = await Promise.all([loadConfig(), loadTenant(), hasUserLicense()])
+      const [c, t] = await Promise.all([loadConfig(), loadTenant()])
       setConfig(c)
       setTenant(t)
-      setLicensed(hasLicense)
       await refreshChecks()
     })()
     const id = window.setInterval(() => void refreshChecks(), 8000)
@@ -92,28 +88,6 @@ export function StationDashboard() {
 
   function appendUiLog(message: string) {
     setLogs((prev) => `${prev}\n[ui] ${message}`.trim())
-  }
-
-  async function handleActivateLicense() {
-    setBusy(true)
-    setLicenseErr(null)
-    setLicenseMsg(null)
-    try {
-      const next = await activateAccount({
-        apiBaseUrl: DEFAULT_HUB_URL,
-        login: login.trim(),
-        password,
-      })
-      setTenant(next)
-      setLicensed(true)
-      setPassword('')
-      setLicenseMsg(`License activated for ${next.displayName}.`)
-      await refresh()
-    } catch (ex) {
-      setLicenseErr(ex instanceof Error ? ex.message : 'Activation failed.')
-    } finally {
-      setBusy(false)
-    }
   }
 
   async function handleSave(e: React.FormEvent) {
@@ -190,6 +164,19 @@ export function StationDashboard() {
     }
   }
 
+  async function handleInstallNinaPlugin() {
+    setActionId('nina_plugin_installed')
+    try {
+      const msg = await installNinaPlugin()
+      appendUiLog(msg)
+      await refreshChecks()
+    } catch (ex) {
+      appendUiLog(ex instanceof Error ? ex.message : 'NINA plugin install failed')
+    } finally {
+      setActionId(null)
+    }
+  }
+
   async function handleSetupAutostart() {
     setActionId('autostart')
     try {
@@ -234,6 +221,13 @@ export function StationDashboard() {
           busy: isBusy,
           onClick: () => void handleInstallPython(),
         }
+      case 'nina_plugin_installed':
+        return {
+          label: 'Install',
+          disabled: isOk,
+          busy: isBusy,
+          onClick: () => void handleInstallNinaPlugin(),
+        }
       case 'autostart':
         return {
           label: 'Set up',
@@ -254,169 +248,134 @@ export function StationDashboard() {
   }
 
   return (
-    <div className="station-shell">
-      <header className="station-header">
-        <div>
-          <h1>Borean Astro Station</h1>
-          <p className="station-sub">FRAOS Standard</p>
-        </div>
-        <div className="station-actions">
-          <span className={`run-pill ${running ? 'run-on' : 'run-off'}`}>
-            {running ? 'Agent Running' : 'Agent Stopped'}
-          </span>
-          <button type="button" className="btn" disabled={busy || running} onClick={() => void handleStart()}>
-            Start
-          </button>
-          <button type="button" className="btn btn-muted" disabled={busy || !running} onClick={() => void handleStop()}>
-            Stop
-          </button>
-        </div>
-      </header>
+    <div className="client-shell">
+      <StationHeader
+        edition={planDisplayLabel('standard')}
+        running={running}
+        busy={busy}
+        onStart={() => void handleStart()}
+        onStop={() => void handleStop()}
+      />
 
-      <div className="station-grid">
-        <section className="panel panel-checks">
-          <div className="panel-heading">
-            <h2>System status</h2>
-          </div>
-          <ul className="check-list">
-            {checksLoading && checks.length === 0 ? (
-              <li className="check-row check-row-loading">Running system checks…</li>
-            ) : (
-              checks.map((item) => (
-                <StatusRow
-                  key={item.id}
-                  label={item.label}
-                  status={item.status}
-                  detail={item.id === 'station_version' ? item.detail : undefined}
-                  action={statusAction(item)}
-                />
-              ))
-            )}
-          </ul>
-        </section>
+      <main className="station-main">
+        <div className="station-glass-grid">
+          <section className="station-glass-pane">
+            <div className="station-pane-head">
+              <h2>System status</h2>
+            </div>
+            <ul className="check-list">
+              {checksLoading && checks.length === 0 ? (
+                <li className="check-row check-row-loading">Running system checks…</li>
+              ) : (
+                checks.map((item) => (
+                  <StatusRow
+                    key={item.id}
+                    label={item.label}
+                    status={item.status}
+                    detail={item.id === 'station_version' ? item.detail : undefined}
+                    action={statusAction(item)}
+                  />
+                ))
+              )}
+            </ul>
+          </section>
 
-        <section className="panel panel-logs">
-          <div className="panel-heading panel-heading-split">
-            <h2>Agent log</h2>
-            <button
-              type="button"
-              className="btn btn-muted"
-              disabled={busy || !logs.trim()}
-              onClick={() => void handleClearLogs()}
-            >
-              Clear
-            </button>
-          </div>
-          <pre ref={logRef} className="log-view">
-            {logs.trim()}
-          </pre>
-        </section>
-
-        <section className="panel panel-settings">
-          <div className="panel-heading">
-            <h2>Settings</h2>
-          </div>
-          <p className="settings-license">
-            License / cloud hub:{' '}
-            <strong>{tenant?.displayName ?? getPersonalTenant().displayName ?? getPersonalTenant().tenantId}</strong>
-            {' · '}
-            tenant <code>{tenant?.tenantId ?? getPersonalTenant().tenantId}</code>
-          </p>
-          {!licensed ? (
-            <div className="license-activate">
-              <p className="settings-license">
-                Sign in with your Borean Astro account to activate this install (same credentials as
-                checkout).
-              </p>
-              <label>
-                <span>Email or username</span>
-                <input
-                  type="text"
-                  value={login}
-                  onChange={(e) => setLogin(e.target.value)}
-                  autoComplete="username"
-                />
-              </label>
-              <label>
-                <span>Password</span>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="current-password"
-                />
-              </label>
+          <section className="station-glass-pane station-glass-pane-log">
+            <div className="station-pane-head">
+              <h2>Agent log</h2>
+            </div>
+            <div className="station-log-toolbar">
               <button
                 type="button"
-                className="btn btn-primary"
-                disabled={busy || !login.trim() || !password}
-                onClick={() => void handleActivateLicense()}
+                className="btn btn-muted btn-sm"
+                disabled={busy || !logs.trim()}
+                onClick={() => void handleClearLogs()}
               >
-                {busy ? 'Signing in…' : 'Sign in & activate license'}
+                Clear
               </button>
-              {licenseMsg ? <p className="save-msg">{licenseMsg}</p> : null}
-              {licenseErr ? <p className="save-msg save-msg-error">{licenseErr}</p> : null}
             </div>
-          ) : (
-            <p className="settings-license">License is active on this PC.</p>
-          )}
-          <form className="settings-form" onSubmit={(e) => void handleSave(e)}>
-            <label>
-              <span>NINA install directory</span>
-              <input
-                type="text"
-                value={config.ninaInstallDir}
-                onChange={(e) => setConfig({ ...config, ninaInstallDir: e.target.value })}
-              />
-            </label>
-            <label>
-              <span>Jobs directory</span>
-              <input
-                type="text"
-                value={config.jobsDir}
-                onChange={(e) => setConfig({ ...config, jobsDir: e.target.value })}
-              />
-            </label>
-            <label>
-              <span>NINA output directory</span>
-              <input
-                type="text"
-                value={config.ninaOutputDir}
-                onChange={(e) => setConfig({ ...config, ninaOutputDir: e.target.value })}
-              />
-            </label>
-            <label>
-              <span>Python path (optional)</span>
-              <input
-                type="text"
-                value={config.pythonPath}
-                onChange={(e) => setConfig({ ...config, pythonPath: e.target.value })}
-                placeholder="py"
-              />
-            </label>
-            <label className="checkbox-row">
-              <input
-                type="checkbox"
-                checked={config.r2Enabled}
-                onChange={(e) => setConfig({ ...config, r2Enabled: e.target.checked })}
-              />
-              <span>Enable R2 upload (raw_zip) — set R2_* env on this PC</span>
-            </label>
-            <label className="checkbox-row">
-              <input
-                type="checkbox"
-                checked={config.autostartEnabled}
-                onChange={(e) => setConfig({ ...config, autostartEnabled: e.target.checked })}
-              />
-              <span>Start Station at login (use Set up in System status)</span>
-            </label>
-            <button type="submit" className="btn btn-primary" disabled={busy}>
-              Save settings
-            </button>
-            {saveMsg && <p className="save-msg">{saveMsg}</p>}
-          </form>
-        </section>
-      </div>
+            <pre ref={logRef} className="log-view">
+              {logs.trim()}
+            </pre>
+          </section>
+
+          <div className="station-right-stack">
+            <section className="station-glass-pane station-glass-pane-compact">
+              <div className="station-pane-head">
+                <h2>License</h2>
+              </div>
+              <SettingsLicensePanel tenant={tenant} />
+            </section>
+
+            <section className="station-glass-pane">
+              <div className="station-pane-head">
+                <h2>Settings</h2>
+              </div>
+              <form className="settings-form" onSubmit={(e) => void handleSave(e)}>
+                <fieldset className="settings-pdu-fieldset">
+                  <legend>Power distribution</legend>
+                  <div className="settings-pdu-choices">
+                    <label className="settings-choice-row">
+                      <input
+                        type="radio"
+                        name="pdu-mode"
+                        checked={!config.pduEnabled}
+                        onChange={() => setConfig({ ...config, pduEnabled: false })}
+                      />
+                      <span>No PDU</span>
+                    </label>
+                    <label className="settings-choice-row">
+                      <input
+                        type="radio"
+                        name="pdu-mode"
+                        checked={config.pduEnabled}
+                        onChange={() => setConfig({ ...config, pduEnabled: true })}
+                      />
+                      <span>PDU</span>
+                    </label>
+                  </div>
+                </fieldset>
+
+                {config.pduEnabled ? (
+                  <>
+                    <label>
+                      <span>PDU URL</span>
+                      <input
+                        type="url"
+                        value={config.pduBaseUrl}
+                        onChange={(e) => setConfig({ ...config, pduBaseUrl: e.target.value })}
+                      />
+                    </label>
+                    <label>
+                      <span>PDU username</span>
+                      <input
+                        type="text"
+                        value={config.pduUser}
+                        onChange={(e) => setConfig({ ...config, pduUser: e.target.value })}
+                        autoComplete="username"
+                      />
+                    </label>
+                    <label>
+                      <span>PDU password</span>
+                      <input
+                        type="password"
+                        value={config.pduPassword}
+                        onChange={(e) => setConfig({ ...config, pduPassword: e.target.value })}
+                        autoComplete="current-password"
+                      />
+                    </label>
+                  </>
+                ) : null}
+
+                <button type="submit" className="btn btn-primary" disabled={busy}>
+                  Save settings
+                </button>
+                {saveMsg ? <p className="save-msg">{saveMsg}</p> : null}
+              </form>
+            </section>
+          </div>
+        </div>
+      </main>
     </div>
   )
 }

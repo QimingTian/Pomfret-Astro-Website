@@ -31,6 +31,14 @@ mod platform_windows {
     pub fn enable_autostart(_exe_path: &Path) -> Result<(), String> {
         Err("This action is only available in the Windows Station app.".into())
     }
+
+    pub fn nina_plugin_installed() -> bool {
+        false
+    }
+
+    pub fn install_nina_plugin(_source_candidates: &[PathBuf], _csproj_fallback: Option<&Path>) -> Result<String, String> {
+        Err("This action is only available in the Windows Station app.".into())
+    }
 }
 
 use serde::{Deserialize, Serialize};
@@ -43,17 +51,43 @@ pub struct PersonalTenantInfo {
     pub tenant_id: String,
     pub api_base_url: String,
     pub display_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonalTenantConfig {
+    pub tenant_id: String,
+    pub api_base_url: String,
+    pub api_secret: String,
+    pub display_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StationConfig {
     pub nina_install_dir: String,
+    #[serde(default = "default_jobs_dir")]
     pub jobs_dir: String,
+    #[serde(default = "default_nina_output_dir")]
     pub nina_output_dir: String,
+    #[serde(default)]
     pub r2_enabled: bool,
+    #[serde(default)]
     pub autostart_enabled: bool,
+    #[serde(default)]
     pub python_path: String,
+    #[serde(default)]
+    pub pdu_enabled: bool,
+    #[serde(default)]
+    pub pdu_base_url: String,
+    #[serde(default)]
+    pub pdu_user: String,
+    #[serde(default)]
+    pub pdu_password: String,
 }
 
 impl Default for StationConfig {
@@ -66,25 +100,34 @@ fn windows_profile_dir() -> Option<PathBuf> {
     std::env::var("USERPROFILE").ok().map(PathBuf::from)
 }
 
-fn default_station_config() -> StationConfig {
+fn default_jobs_dir() -> String {
     #[cfg(windows)]
     if let Some(home) = windows_profile_dir() {
-        return StationConfig {
-            nina_install_dir: r"C:\Program Files\N.I.N.A. - Nighttime Imaging 'N' Astronomy".into(),
-            jobs_dir: home.join("Downloads").join("NinaJobs").to_string_lossy().into_owned(),
-            nina_output_dir: home.join("Documents").join("N.I.N.A").to_string_lossy().into_owned(),
-            r2_enabled: false,
-            autostart_enabled: false,
-            python_path: String::new(),
-        };
+        return home.join("Downloads").join("NinaJobs").to_string_lossy().into_owned();
     }
+    "Downloads/NinaJobs".into()
+}
+
+fn default_nina_output_dir() -> String {
+    #[cfg(windows)]
+    if let Some(home) = windows_profile_dir() {
+        return home.join("Documents").join("N.I.N.A").to_string_lossy().into_owned();
+    }
+    "Documents/N.I.N.A".into()
+}
+
+fn default_station_config() -> StationConfig {
     StationConfig {
         nina_install_dir: r"C:\Program Files\N.I.N.A. - Nighttime Imaging 'N' Astronomy".into(),
-        jobs_dir: "Downloads/NinaJobs".into(),
-        nina_output_dir: "Documents/N.I.N.A".into(),
+        jobs_dir: default_jobs_dir(),
+        nina_output_dir: default_nina_output_dir(),
         r2_enabled: false,
         autostart_enabled: false,
         python_path: String::new(),
+        pdu_enabled: false,
+        pdu_base_url: String::new(),
+        pdu_user: String::new(),
+        pdu_password: String::new(),
     }
 }
 
@@ -95,6 +138,10 @@ struct BakedTenantFile {
     api_base_url: String,
     api_secret: String,
     display_name: Option<String>,
+    #[serde(default)]
+    plan: Option<String>,
+    #[serde(default)]
+    valid_until: Option<String>,
 }
 
 fn user_tenant_path() -> PathBuf {
@@ -213,7 +260,74 @@ fn tenant_info_from(raw: &BakedTenantFile) -> PersonalTenantInfo {
             .filter(|s| !s.trim().is_empty())
             .cloned()
             .unwrap_or_else(|| raw.tenant_id.clone()),
+        plan: raw.plan.clone(),
     }
+}
+
+fn tenant_config_from(raw: &BakedTenantFile) -> PersonalTenantConfig {
+    PersonalTenantConfig {
+        tenant_id: raw.tenant_id.trim().to_string(),
+        api_base_url: raw.api_base_url.trim().trim_end_matches('/').to_string(),
+        api_secret: raw.api_secret.trim().to_string(),
+        display_name: raw
+            .display_name
+            .as_ref()
+            .filter(|s| !s.trim().is_empty())
+            .cloned()
+            .unwrap_or_else(|| raw.tenant_id.clone()),
+        plan: raw.plan.clone(),
+    }
+}
+
+fn tenant_is_expired(raw: &BakedTenantFile) -> bool {
+    let Some(until) = raw.valid_until.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) else {
+        return false;
+    };
+    let Ok(expires_ms) = chrono::DateTime::parse_from_rfc3339(until).map(|dt| dt.timestamp_millis()) else {
+        return false;
+    };
+    expires_ms <= chrono::Utc::now().timestamp_millis()
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalLicenseStatus {
+    installed: bool,
+    valid: bool,
+    expired: bool,
+    valid_until: Option<String>,
+    plan: Option<String>,
+}
+
+fn local_license_status() -> LocalLicenseStatus {
+    let user_installed = read_user_tenant_raw().is_some();
+    let Ok(raw) = baked_tenant_file() else {
+        return LocalLicenseStatus {
+            installed: false,
+            valid: false,
+            expired: false,
+            valid_until: None,
+            plan: None,
+        };
+    };
+    let expired = tenant_is_expired(&raw);
+    LocalLicenseStatus {
+        installed: user_installed,
+        valid: user_installed && !expired,
+        expired: user_installed && expired,
+        valid_until: raw.valid_until.clone(),
+        plan: raw.plan.clone(),
+    }
+}
+
+#[tauri::command]
+fn station_local_license_status() -> Result<LocalLicenseStatus, String> {
+    Ok(local_license_status())
+}
+
+#[tauri::command]
+fn station_get_tenant_config() -> Result<PersonalTenantConfig, String> {
+    Ok(tenant_config_from(&baked_tenant_file()?))
 }
 
 #[tauri::command]
@@ -249,6 +363,7 @@ fn baked_tenant_info() -> Result<PersonalTenantInfo, String> {
             .display_name
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| raw.tenant_id.clone()),
+        plan: raw.plan.clone(),
     })
 }
 
@@ -398,6 +513,45 @@ fn ensure_data_dir() -> Result<(), String> {
     fs::create_dir_all(station_data_dir()).map_err(|e| e.to_string())
 }
 
+fn nina_plugin_csproj_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../nina-plugins/BoreanAstro.Plugin/BoreanAstro.Plugin.csproj")
+}
+
+fn nina_plugin_source_candidates(app: &AppHandle) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+
+    if let Ok(path) = app.path().resolve(
+        "nina-plugin/BoreanAstro.Plugin",
+        BaseDirectory::Resource,
+    ) {
+        out.push(path);
+    }
+
+    let dev_bundle = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../nina-plugin-bundle/BoreanAstro.Plugin");
+    out.push(dev_bundle);
+
+    let plugin_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../nina-plugins/BoreanAstro.Plugin");
+    for profile in ["Release", "Debug"] {
+        out.push(
+            plugin_root
+                .join("bin")
+                .join(profile)
+                .join("net8.0-windows"),
+        );
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            out.push(dir.join("nina-plugin").join("BoreanAstro.Plugin"));
+        }
+    }
+
+    out
+}
+
 fn agent_script_path(app: &AppHandle) -> PathBuf {
     let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../agent/nina_agent.py");
     if dev.exists() {
@@ -489,8 +643,14 @@ fn read_log_tail(max_bytes: usize) -> String {
     buf
 }
 
+const LOCAL_HUB_URL: &str = "http://127.0.0.1:7841";
+const BOREAN_HTTP_USER_AGENT: &str = "Borean Astro Station/1.0 (Windows)";
+
 fn probe_url(url: &str) -> Result<String, String> {
-    let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(2)).build();
+    let agent = ureq::AgentBuilder::new()
+        .timeout(Duration::from_secs(2))
+        .user_agent(BOREAN_HTTP_USER_AGENT)
+        .build();
     match agent.get(url).call() {
         Ok(resp) => {
             if resp.status() >= 400 {
@@ -500,6 +660,18 @@ fn probe_url(url: &str) -> Result<String, String> {
         }
         Err(e) => Err(e.to_string()),
     }
+}
+
+fn resolve_agent_api_base_url(tenant_id: &str, cloud_base: &str) -> String {
+    let local_health = format!(
+        "{LOCAL_HUB_URL}/api/personal/{}/health",
+        tenant_id.trim()
+    );
+    if probe_url(&local_health).is_ok() {
+        append_log("[station-ui] Local Personal Hub detected — agent will use http://127.0.0.1:7841");
+        return LOCAL_HUB_URL.to_string();
+    }
+    cloud_base.trim().trim_end_matches('/').to_string()
 }
 
 fn local_ipv4_addresses() -> Vec<String> {
@@ -527,25 +699,11 @@ fn local_ipv4_addresses() -> Vec<String> {
     rx.recv_timeout(Duration::from_millis(1500)).unwrap_or_default()
 }
 
-fn nina_process_running() -> bool {
-    #[cfg(windows)]
-    {
-        let mut command = Command::new("tasklist");
-        command
-            .args(["/FI", "IMAGENAME eq NINA.exe", "/NH"])
-            .creation_flags(0x08000000);
-        command
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).contains("NINA.exe"))
-            .unwrap_or(false)
-    }
-    #[cfg(not(windows))]
-    {
-        false
-    }
-}
-
-fn build_checks(config: &StationConfig, agent_running: bool) -> Vec<CheckItem> {
+fn build_checks(
+    config: &StationConfig,
+    agent_running: bool,
+    agent_installed: bool,
+) -> Vec<CheckItem> {
     let mut checks = Vec::new();
     let nina_exe = Path::new(&config.nina_install_dir).join("NINA.exe");
     checks_push(
@@ -558,10 +716,18 @@ fn build_checks(config: &StationConfig, agent_running: bool) -> Vec<CheckItem> {
 
     checks_push(
         &mut checks,
-        "nina_running",
-        "NINA running",
-        nina_process_running(),
-        "NINA is not running",
+        "nina_agent_installed",
+        "NINA Agent Installed",
+        agent_installed,
+        "NINA agent script not found",
+    );
+
+    checks_push(
+        &mut checks,
+        "nina_plugin_installed",
+        "NINA Plugin Installed",
+        platform_windows::nina_plugin_installed(),
+        "Borean Astro NINA plugin not found",
     );
 
     checks_push(
@@ -714,10 +880,14 @@ fn agent_is_running_locked(state: &AgentState) -> Result<bool, String> {
 }
 
 #[tauri::command]
-async fn station_run_diagnostics(state: State<'_, AgentState>) -> Result<Vec<CheckItem>, String> {
+async fn station_run_diagnostics(
+    app: AppHandle,
+    state: State<'_, AgentState>,
+) -> Result<Vec<CheckItem>, String> {
     let cfg = read_config_file()?;
     let running = agent_is_running_locked(&state)?;
-    tauri::async_runtime::spawn_blocking(move || build_checks(&cfg, running))
+    let agent_installed = agent_script_path(&app).is_file();
+    tauri::async_runtime::spawn_blocking(move || build_checks(&cfg, running, agent_installed))
         .await
         .map_err(|e| e.to_string())
 }
@@ -769,15 +939,22 @@ async fn station_start_agent(state: State<'_, AgentState>, app: AppHandle) -> Re
             cmd.arg("-3");
         }
         cmd.arg(&script)
-            .env("BOREAN_API_BASE_URL", &tenant.api_base_url)
-            .env("BOREAN_TENANT_ID", &tenant.tenant_id)
             .env(
-                "PERSONAL_R2_ENABLED",
-                if cfg.r2_enabled { "1" } else { "0" },
+                "BOREAN_API_BASE_URL",
+                resolve_agent_api_base_url(&tenant.tenant_id, &tenant.api_base_url),
             )
+            .env("BOREAN_TENANT_ID", &tenant.tenant_id)
+            .env("PERSONAL_R2_ENABLED", "0")
             .env("BOREAN_NINA_INSTALL_DIR", &cfg.nina_install_dir)
             .env("BOREAN_JOBS_DIR", &cfg.jobs_dir)
             .env("BOREAN_NINA_OUTPUT_DIR", &cfg.nina_output_dir)
+            .env(
+                "PERSONAL_PDU_ENABLED",
+                if cfg.pdu_enabled { "1" } else { "0" },
+            )
+            .env("PDU_BASE_URL", &cfg.pdu_base_url)
+            .env("PDU_USER", &cfg.pdu_user)
+            .env("PDU_PASSWORD", &cfg.pdu_password)
             .env("IMAGING_QUEUE_SECRET", &api_secret)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -853,6 +1030,20 @@ async fn station_install_python() -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn station_install_nina_plugin(app: AppHandle) -> Result<String, String> {
+    let candidates = nina_plugin_source_candidates(&app);
+    let csproj = nina_plugin_csproj_path();
+    let csproj = if csproj.is_file() { Some(csproj) } else { None };
+    tauri::async_runtime::spawn_blocking(move || {
+        let msg = platform_windows::install_nina_plugin(&candidates, csproj.as_deref())?;
+        append_log(&format!("[station-ui] {msg}"));
+        Ok(msg)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 async fn station_setup_autostart() -> Result<StationConfig, String> {
     tauri::async_runtime::spawn_blocking(|| {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
@@ -922,6 +1113,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             station_get_tenant,
+            station_get_tenant_config,
+            station_local_license_status,
             station_has_user_license,
             station_activate_account,
             station_load_config,
@@ -934,6 +1127,7 @@ pub fn run() {
             station_stop_agent,
             station_scan_nina,
             station_install_python,
+            station_install_nina_plugin,
             station_setup_autostart,
             station_apply_update,
         ])

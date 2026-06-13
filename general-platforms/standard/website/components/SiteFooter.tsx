@@ -16,9 +16,9 @@ export function SiteFooter() {
           <Link href="/fraos" className="hover:text-fg">
             FRAOS
           </Link>
-          <Link href="/asc" className="hover:text-fg">
+          {/* <Link href="/asc" className="hover:text-fg">
             ASC
-          </Link>
+          </Link> */}
           <a href={SITE_URL} className="hover:text-fg">
             www.boreanastro.com
           </a>

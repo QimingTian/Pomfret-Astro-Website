@@ -1,4 +1,7 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { loadAppTenant } from '../lib/control-app-api'
+import { planDisplayLabel } from '../lib/plan-label'
+import { useNightMode } from '../lib/useNightMode'
 
 export type DashboardTab = 'weather' | 'atlas' | 'remote' | 'settings'
 
@@ -19,18 +22,16 @@ function NavPill({
   label,
   active,
   onClick,
-  className = '',
 }: {
   label: string
   active: boolean
   onClick: () => void
-  className?: string
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`btn ${active ? '' : 'btn-muted'} ${className}`.trim()}
+      className={`btn ${active ? '' : 'btn-muted'}`.trim()}
       aria-current={active ? 'page' : undefined}
     >
       {label}
@@ -38,28 +39,53 @@ function NavPill({
   )
 }
 
+function mainClassForTab(tab: DashboardTab): string {
+  switch (tab) {
+    case 'remote':
+      return 'client-main client-main-flush'
+    case 'weather':
+      return 'client-main client-main-weather'
+    case 'atlas':
+      return 'client-main client-main-atlas'
+    case 'settings':
+      return 'client-main client-main-settings'
+    default:
+      return 'client-main'
+  }
+}
+
 export function DashboardLayout({ tab, onNavigate, children }: DashboardLayoutProps) {
-  const [menuOpen, setMenuOpen] = useState(false)
+  const [edition, setEdition] = useState('Standard')
+  const { nightMode, toggle: toggleNightMode } = useNightMode()
+
+  useEffect(() => {
+    void loadAppTenant().then((tenant) => {
+      setEdition(planDisplayLabel(tenant?.plan))
+    })
+  }, [])
 
   return (
     <div className="client-shell">
       <header className="client-header">
-        <div>
-          <h1>Borean Astro</h1>
-          <p className="client-sub">FRAOS Standard</p>
+        <div className="client-brand">
+          <img
+            src="/brand/borean-logo-light.png"
+            alt="Borean Astro"
+            className="client-logo"
+          />
+          <span className="client-edition">{edition}</span>
         </div>
 
         <div className="client-header-actions">
           <button
             type="button"
-            onClick={() => setMenuOpen((v) => !v)}
-            className="btn btn-muted client-menu-toggle"
-            aria-label="Toggle navigation"
-            aria-expanded={menuOpen}
+            onClick={toggleNightMode}
+            aria-pressed={nightMode}
+            title="Night vision (red tint, whole app)"
+            className={`btn ${nightMode ? '' : 'btn-muted'}`.trim()}
           >
-            Menu
+            Night
           </button>
-
           <nav className="client-tabs" aria-label="Main">
             {NAV.map((item) => (
               <NavPill
@@ -73,26 +99,15 @@ export function DashboardLayout({ tab, onNavigate, children }: DashboardLayoutPr
         </div>
       </header>
 
-      {menuOpen && (
-        <nav className="client-tabs-mobile" aria-label="Main mobile">
-          {NAV.map((item) => (
-            <NavPill
-              key={item.id}
-              label={item.label}
-              active={tab === item.id}
-              className="client-tab-mobile"
-              onClick={() => {
-                onNavigate(item.id)
-                setMenuOpen(false)
-              }}
-            />
-          ))}
-        </nav>
-      )}
+      <main className={mainClassForTab(tab)}>{children}</main>
 
-      <main className={tab === 'remote' ? 'client-main client-main-flush' : 'client-main'}>
-        {children}
-      </main>
+      {nightMode ? (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none fixed inset-0 z-[2000]"
+          style={{ background: '#ff2200', mixBlendMode: 'multiply' }}
+        />
+      ) : null}
     </div>
   )
 }

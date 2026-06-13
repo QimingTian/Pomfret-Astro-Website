@@ -9,6 +9,8 @@ export type PromoCodeDefinition = {
   percentOff: number
   maxUses?: number | null
   label?: string
+  /** License duration in days after redemption (env-defined codes). */
+  licenseValidDays?: number | null
 }
 
 export type StoredPromoCode = {
@@ -17,16 +19,19 @@ export type StoredPromoCode = {
   percentOff: number
   maxUses: number
   uses: number
-  expiresAt: string
+  /** License duration in days after the user redeems — not a code expiry date. */
+  licenseValidDays: number
   createdAt: string
   createdByUserId: string
   redeemedByMemberId: string | null
   redeemedAt: string | null
   label: string | null
+  /** @deprecated Legacy field from earlier builds; migrated to licenseValidDays on read. */
+  expiresAt?: string
 }
 
 export type AdminPromoCodeRow = StoredPromoCode & {
-  status: 'available' | 'used' | 'expired'
+  status: 'available' | 'used'
 }
 
 const PROMO_INDEX_KEY = 'borean-promo-index'
@@ -39,6 +44,23 @@ function promoKey(code: string): string {
 
 export function normalizePromoCode(code: string): string {
   return code.trim().toUpperCase()
+}
+
+export function licenseValidUntilFromDays(validDays: number, from = new Date()): string {
+  const days = Math.max(1, Math.min(365, Math.floor(validDays)))
+  return new Date(from.getTime() + days * 24 * 60 * 60 * 1000).toISOString()
+}
+
+function normalizeStoredPromo(raw: StoredPromoCode): StoredPromoCode {
+  if (typeof raw.licenseValidDays === 'number' && raw.licenseValidDays > 0) {
+    return raw
+  }
+  if (raw.expiresAt && raw.createdAt) {
+    const deltaMs = Date.parse(raw.expiresAt) - Date.parse(raw.createdAt)
+    const inferred = Math.max(1, Math.min(365, Math.round(deltaMs / (24 * 60 * 60 * 1000))))
+    return { ...raw, licenseValidDays: inferred }
+  }
+  return { ...raw, licenseValidDays: 30 }
 }
 
 function parseEnvPromoDefinitions(): Record<string, PromoCodeDefinition> {
@@ -61,11 +83,18 @@ function parseEnvPromoDefinitions(): Record<string, PromoCodeDefinition> {
           : entry.maxUses === null
             ? null
             : undefined
+      const licenseValidDays =
+        typeof entry.licenseValidDays === 'number' && Number.isFinite(entry.licenseValidDays)
+          ? Math.max(1, Math.min(365, Math.floor(entry.licenseValidDays)))
+          : entry.licenseValidDays === null
+            ? null
+            : undefined
       out[normalizePromoCode(code)] = {
         plan,
         percentOff,
         maxUses: maxUses ?? null,
         label: typeof entry.label === 'string' ? entry.label : undefined,
+        licenseValidDays: licenseValidDays ?? 365,
       }
     }
     return out
@@ -90,8 +119,9 @@ async function readStoredPromo(code: string): Promise<StoredPromoCode | undefine
   if (memoryPromos.has(normalized)) return memoryPromos.get(normalized)
   const remote = await kvGetJson<StoredPromoCode>(promoKey(normalized))
   if (remote?.code) {
-    memoryPromos.set(normalized, remote)
-    return remote
+    const normalizedRecord = normalizeStoredPromo(remote)
+    memoryPromos.set(normalized, normalizedRecord)
+    return normalizedRecord
   }
   return undefined
 }
@@ -104,7 +134,6 @@ async function writeStoredPromo(record: StoredPromoCode): Promise<void> {
 
 function promoStatus(record: StoredPromoCode): AdminPromoCodeRow['status'] {
   if (record.uses >= record.maxUses) return 'used'
-  if (Date.parse(record.expiresAt) <= Date.now()) return 'expired'
   return 'available'
 }
 
@@ -118,9 +147,8 @@ export async function createAdminPromoCode(input: {
   createdByUserId: string
   label?: string | null
 }): Promise<{ ok: true; promo: AdminPromoCodeRow } | { ok: false; error: string }> {
-  const validDays = Math.max(1, Math.min(365, Math.floor(input.validDays)))
+  const licenseValidDays = Math.max(1, Math.min(365, Math.floor(input.validDays)))
   const now = Date.now()
-  const expiresAt = new Date(now + validDays * 24 * 60 * 60 * 1000).toISOString()
 
   let code = generatePromoCodeValue()
   for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -137,7 +165,7 @@ export async function createAdminPromoCode(input: {
     percentOff: 100,
     maxUses: 1,
     uses: 0,
-    expiresAt,
+    licenseValidDays,
     createdAt: new Date(now).toISOString(),
     createdByUserId: input.createdByUserId,
     redeemedByMemberId: null,
@@ -171,6 +199,7 @@ export type PromoValidationResult =
       plan: ProductPlan
       percentOff: number
       label: string | null
+      licenseValidDays: number
       finalPriceLabel: string
       source: 'stored' | 'env'
     }
@@ -189,9 +218,6 @@ async function validateStoredPromo(
       error: `This code applies to FRAOS ${PLANS[record.plan].shortName} only.`,
     }
   }
-  if (Date.parse(record.expiresAt) <= Date.now()) {
-    return { ok: false, error: 'Promotion code has expired.' }
-  }
   if (record.uses >= record.maxUses) {
     return { ok: false, error: 'Promotion code has already been used.' }
   }
@@ -203,6 +229,7 @@ async function validateStoredPromo(
     plan: record.plan,
     percentOff: record.percentOff,
     label: record.label,
+    licenseValidDays: record.licenseValidDays,
     finalPriceLabel,
     source: 'stored',
   }
@@ -227,7 +254,7 @@ async function validateEnvPromo(
     const remote = await kvGetJson<{ count?: number }>(usesKey)
     const uses = typeof remote?.count === 'number' ? remote.count : 0
     if (uses >= definition.maxUses) {
-      return { ok: false, error: 'Promotion code has reached its usage limit.' }
+      return { ok: false, error: 'Promotion code has already been used.' }
     }
   }
 
@@ -239,6 +266,7 @@ async function validateEnvPromo(
     plan: definition.plan,
     percentOff: definition.percentOff,
     label: definition.label ?? null,
+    licenseValidDays: definition.licenseValidDays ?? 365,
     finalPriceLabel,
     source: 'env',
   }

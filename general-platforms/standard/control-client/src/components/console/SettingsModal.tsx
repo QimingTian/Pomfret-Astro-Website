@@ -1,10 +1,9 @@
 import { useState } from 'react'
 import { getCloudHubLabel, probeHub, patchObservatoryMode } from '../../lib/hub-client'
 import {
-  DEFAULT_OBS_LAT,
-  DEFAULT_OBS_LON,
   getObservatoryLocation,
   setObservatoryLocation,
+  validateObservatoryInput,
 } from '../../lib/settings'
 import { getTenantLabel } from '../../lib/tenant'
 import type { ObservatoryMode } from '../../lib/types'
@@ -19,6 +18,7 @@ export function SettingsModal({ open, onClose, onSaved }: SettingsModalProps) {
   const loc = getObservatoryLocation()
   const [lat, setLat] = useState(String(loc.lat))
   const [lon, setLon] = useState(String(loc.lon))
+  const [elevationM, setElevationM] = useState(String(loc.elevationM))
   const [label, setLabel] = useState(loc.label)
   const [mode, setMode] = useState<ObservatoryMode>('auto')
   const [testResult, setTestResult] = useState<string | null>(null)
@@ -28,11 +28,12 @@ export function SettingsModal({ open, onClose, onSaved }: SettingsModalProps) {
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
-    const latN = Number(lat)
-    const lonN = Number(lon)
-    if (Number.isFinite(latN) && Number.isFinite(lonN)) {
-      setObservatoryLocation({ lat: latN, lon: lonN, label })
+    const validated = validateObservatoryInput({ label, lat, lon, elevationM })
+    if (!validated.ok) {
+      setTestResult(validated.error)
+      return
     }
+    setObservatoryLocation(validated.location)
     setBusy(true)
     try {
       const probe = await probeHub()
@@ -85,6 +86,11 @@ export function SettingsModal({ open, onClose, onSaved }: SettingsModalProps) {
             License / hub: <strong>{getTenantLabel()}</strong> — {getCloudHubLabel()} (built into this app)
           </p>
 
+          <label className="settings-field">
+            <span>Site label</span>
+            <input type="text" value={label} onChange={(e) => setLabel(e.target.value)} />
+          </label>
+
           <div className="settings-row">
             <label className="settings-field">
               <span>Latitude</span>
@@ -97,8 +103,8 @@ export function SettingsModal({ open, onClose, onSaved }: SettingsModalProps) {
           </div>
 
           <label className="settings-field">
-            <span>Site label</span>
-            <input type="text" value={label} onChange={(e) => setLabel(e.target.value)} />
+            <span>Elevation (m)</span>
+            <input type="text" value={elevationM} onChange={(e) => setElevationM(e.target.value)} />
           </label>
 
           <fieldset className="settings-field">
@@ -116,10 +122,6 @@ export function SettingsModal({ open, onClose, onSaved }: SettingsModalProps) {
               ))}
             </div>
           </fieldset>
-
-          <p className="panel-footnote">
-            Weather uses lat/lon ({DEFAULT_OBS_LAT}, {DEFAULT_OBS_LON} = default if unset).
-          </p>
 
           <div className="settings-actions">
             <button type="submit" className="btn launch-btn" disabled={busy}>

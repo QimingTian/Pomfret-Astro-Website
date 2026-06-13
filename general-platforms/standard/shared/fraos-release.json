@@ -1,14 +1,14 @@
 {
   "channel": "stable",
   "station": {
-    "latestVersion": "0.1.1",
-    "downloadUrlWindows": "https://www.boreanastro.com/releases/borean-station-0.1.1-windows-setup.exe",
-    "releaseNotes": "New Borean Astro app icon; sign in with your Borean Astro account to activate license automatically."
+    "latestVersion": "0.1.2",
+    "downloadUrlWindows": "https://www.boreanastro.com/releases/borean-station-0.1.2-windows-setup.exe",
+    "releaseNotes": "Agent Cloudflare fix; NINA plugin install; License + PDU settings UI; bundled BoreanAstro.Plugin."
   },
   "control": {
-    "latestVersion": "0.1.1",
-    "downloadUrlWindows": "https://www.boreanastro.com/releases/borean-control-0.1.1-windows-setup.exe",
-    "downloadUrlMac": "https://www.boreanastro.com/releases/borean-control-0.1.1-macos.dmg",
-    "releaseNotes": "New Borean Astro app icon; macOS ad-hoc signing fix; sign in to activate license (no tenant.json required)."
+    "latestVersion": "0.1.16",
+    "downloadUrlWindows": "https://www.boreanastro.com/releases/borean-control-0.1.16-windows-setup.exe",
+    "downloadUrlMac": "https://www.boreanastro.com/releases/borean-control-0.1.16-macos.dmg",
+    "releaseNotes": "Remote console refresh; mount-pointing stream; removed Stacked Master output mode."
   }
 }

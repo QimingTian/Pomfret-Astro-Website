@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server'
 import { isSameSiteMutation } from '@/lib/member/csrf-origin'
 import { requireUser } from '@/lib/member/member-auth'
-import { consumePromoCode, validatePromoCode } from '@/lib/cloud/promo-codes'
+import { consumePromoCode, licenseValidUntilFromDays, validatePromoCode } from '@/lib/cloud/promo-codes'
 import {
   controlReleaseManifest,
   stationReleaseManifest,
@@ -66,12 +66,15 @@ export async function POST(request: NextRequest) {
     )
   }
 
+  const redeemedAt = new Date()
   const { order, tenantConfig } = await provisionPersonalTenant({
     plan,
     email: auth.user.email,
     displayName: displayNameForUser(auth.user),
     memberId: auth.user.id,
     promoCode: validation.code,
+    purchaseType: 'promo_code',
+    validUntil: licenseValidUntilFromDays(validation.licenseValidDays, redeemedAt),
   })
 
   await consumePromoCode(validation.code, auth.user.id)

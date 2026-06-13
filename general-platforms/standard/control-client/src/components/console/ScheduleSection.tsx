@@ -1,105 +1,192 @@
+import { useCallback, useState } from 'react'
+import { deleteSession } from '../../lib/hub-client'
+import {
+  queueStatusBadgeClass,
+  queueStatusLabel,
+  sessionActionButtonClass,
+} from '../../lib/imaging/queue-status'
 import type { SessionRow } from '../../lib/types'
-
 type ScheduleSectionProps = {
   sessions: SessionRow[]
   loading: boolean
   error: string | null
+  hubReachable: boolean
+  onRefresh?: () => void
+  onEditSession?: (session: SessionRow) => void
+  onCheckProgress?: (session: SessionRow) => void
 }
 
-function formatWhen(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  return Number.isFinite(d.getTime())
-    ? d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
-    : iso
+function sessionTypeLabel(row: SessionRow): string {
+  if (row.sessionType === 'variable_star') return 'Variable Star'
+  return 'Deep Sky Object'
 }
 
-function statusClass(status: string): string {
-  switch (status) {
-    case 'in_progress':
-      return 'status-active'
-    case 'scheduled':
-      return 'status-scheduled'
-    case 'completed':
-      return 'status-done'
-    case 'failed':
-      return 'status-failed'
-    default:
-      return 'status-pending'
-  }
+function projectLabel(row: SessionRow): string {
+  return row.projectMode ? ' · Project Mode' : ''
 }
 
-function exposureSummary(row: SessionRow): string {
-  const parts: string[] = []
-  if (row.filter) parts.push(row.filter)
-  if (row.exposureSeconds) parts.push(`${row.exposureSeconds}s`)
-  if (row.count) parts.push(`×${row.count}`)
-  return parts.length > 0 ? parts.join(' · ') : '—'
-}
+export function ScheduleSection({
+  sessions,
+  loading,
+  error,
+  hubReachable,
+  onRefresh,
+  onEditSession,
+  onCheckProgress,
+}: ScheduleSectionProps) {
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false)
 
-export function ScheduleSection({ sessions, loading, error }: ScheduleSectionProps) {
-  const active = sessions.find((s) => s.status === 'in_progress')
-  const upcoming = sessions.filter((s) => s.status !== 'completed' && s.status !== 'failed')
+  const actionsEnabled = hubReachable
+
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!deleteTargetId) return
+    setDeleteSubmitting(true)
+    setDeleteError(null)
+    try {
+      const result = await deleteSession(deleteTargetId)
+      if (!result.ok) {
+        setDeleteError(result.error ?? 'Unable to delete session')
+        return
+      }
+      setDeleteTargetId(null)
+      onRefresh?.()
+    } catch (ex) {
+      setDeleteError(ex instanceof Error ? ex.message : 'Unable to delete session')
+    } finally {
+      setDeleteSubmitting(false)
+    }
+  }, [deleteTargetId, onRefresh])
 
   return (
-    <section className="console-panel schedule-panel">
-      <div className="panel-head">
-        <h2>Schedule</h2>
-        <span className="panel-tag">{sessions.length} IN QUEUE</span>
+    <section className="remote-glass-pane schedule-panel">
+      <div className="remote-pane-head">
+        <h2>Current Sessions</h2>
       </div>
 
-      {active && (
-        <div className="active-run">
-          <span className="active-run-label">ACTIVE RUN</span>
-          <span className="active-run-target">{active.target}</span>
-          <span className="active-run-meta">{exposureSummary(active)}</span>
-        </div>
-      )}
+      <div className="session-queue-wrap">
+        {error && <p className="panel-error">{error}</p>}
+        {deleteError && !deleteTargetId && <p className="panel-error">{deleteError}</p>}
 
-      {error && <p className="panel-error">{error}</p>}
+        {loading && sessions.length === 0 ? (
+          <p className="session-queue-empty">Loading…</p>
+        ) : sessions.length === 0 ? (
+          <p className="session-queue-empty">No sessions.</p>
+        ) : (
+          <ul className="session-queue-list">
+            {sessions.map((item) => {
+              const displayStatus = item.status === 'claimed' ? 'in_progress' : item.status
+              const showDownloadButton = item.projectMode
+                ? false
+                : item.hasDownload === true ||
+                  (item.outputMode !== 'none' &&
+                    item.outputMode !== undefined &&
+                    displayStatus === 'completed')
+              const canEdit = displayStatus === 'pending' || displayStatus === 'scheduled'
 
-      {loading && sessions.length === 0 ? (
-        <p className="muted-inline">Loading queue…</p>
-      ) : sessions.length === 0 ? (
-        <p className="muted-inline">Queue empty — add a target above.</p>
-      ) : (
-        <div className="schedule-table-wrap">
-          <table className="schedule-table">
-            <thead>
-              <tr>
-                <th>Target</th>
-                <th>Status</th>
-                <th>Plan</th>
-                <th>Sequence</th>
-                <th>Output</th>
-              </tr>
-            </thead>
-            <tbody>
-              {upcoming.map((row) => (
-                <tr key={row.id}>
-                  <td className="cell-target">{row.target}</td>
-                  <td>
-                    <span className={`status-pill ${statusClass(row.status)}`}>{row.status}</span>
-                  </td>
-                  <td>{formatWhen(row.plannedStartIso)}</td>
-                  <td>{exposureSummary(row)}</td>
-                  <td className="cell-mono">{row.outputMode ?? 'none'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              return (
+                <li key={item.id} className="session-queue-item">
+                  <div className="session-queue-item-head">
+                    <span className="session-queue-title">{`${item.target} | ${sessionTypeLabel(item)}${projectLabel(item)}`}</span>
+                    <span className={`queue-status-badge ${queueStatusBadgeClass(displayStatus)}`}>
+                      {queueStatusLabel(displayStatus)}
+                    </span>
+                  </div>
+                  <div className="session-queue-actions">
+                    {showDownloadButton && (
+                      <button
+                        type="button"
+                        disabled={!actionsEnabled}
+                        className={sessionActionButtonClass(actionsEnabled)}
+                        onClick={() =>
+                          setDeleteError('Download will be available when the observatory publishes session files.')
+                        }
+                      >
+                        Download file
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      disabled={!actionsEnabled}
+                      className={sessionActionButtonClass(actionsEnabled)}
+                      onClick={() => onCheckProgress?.(item)}
+                    >
+                      Check progress
+                    </button>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        disabled={!actionsEnabled}
+                        className={sessionActionButtonClass(actionsEnabled)}
+                        onClick={() => onEditSession?.(item)}
+                      >
+                        Edit session
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      disabled={!actionsEnabled}
+                      className={sessionActionButtonClass(actionsEnabled, 'danger')}
+                      onClick={() => {
+                        setDeleteError(null)
+                        setDeleteTargetId(item.id)
+                      }}
+                    >
+                      Delete session
+                    </button>
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </div>
 
-      <div className="schedule-rail">
-        {upcoming.slice(0, 8).map((row, i) => (
-          <div key={row.id} className={`rail-slot ${statusClass(row.status)}`}>
-            <span className="rail-index">{String(i + 1).padStart(2, '0')}</span>
-            <span className="rail-target">{row.target}</span>
+      {deleteTargetId && (
+        <div
+          className="session-modal-backdrop"
+          role="presentation"
+          onClick={() => {
+            if (deleteSubmitting) return
+            setDeleteTargetId(null)
+            setDeleteError(null)
+          }}
+        >
+          <div
+            className="session-delete-modal"
+            role="dialog"
+            aria-labelledby="delete-session-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="delete-session-title">Delete Session</h2>
+            <p className="session-delete-copy">Delete this session permanently? This cannot be undone.</p>
+            {deleteError && <p className="panel-error">{deleteError}</p>}
+            <div className="session-delete-actions">
+              <button
+                type="button"
+                className="session-action-btn"
+                disabled={deleteSubmitting}
+                onClick={() => {
+                  setDeleteTargetId(null)
+                  setDeleteError(null)
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="session-action-btn danger solid"
+                disabled={deleteSubmitting}
+                onClick={() => void handleDeleteConfirm()}
+              >
+                {deleteSubmitting ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
           </div>
-        ))}
-        {upcoming.length === 0 && <span className="muted-inline">No upcoming slots</span>}
-      </div>
+        </div>
+      )}
+
     </section>
   )
 }

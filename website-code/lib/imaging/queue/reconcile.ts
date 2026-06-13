@@ -60,7 +60,8 @@ export async function reconcilePendingScheduleStatus(): Promise<void> {
     { status: 'scheduled' | 'unscheduled'; plannedStartIso: string | null; reasons: string[] }
   >()
 
-  if (pending.length === 0) return
+  // Do not return when pending is empty: multi-night projects whose queue row was
+  // consumed after the first NINA delivery still need reconcileActiveInProgressProjectTonight.
 
   async function clearTonightScheduledProjectSubs(clearReason: string): Promise<void> {
     const projects = await listProjects()

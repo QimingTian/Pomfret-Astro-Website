@@ -6,9 +6,9 @@
     "releaseNotes": "NINA plugin options fix; plugin Update button in System Status; agent HTTPError fix; mount telemetry reload."
   },
   "control": {
-    "latestVersion": "0.1.18",
+    "latestVersion": "0.1.19",
     "downloadUrlWindows": "https://www.boreanastro.com/releases/borean-control-0.1.16-windows-setup.exe",
-    "downloadUrlMac": "https://www.boreanastro.com/releases/borean-control-0.1.18-macos.dmg",
-    "releaseNotes": "Connection stability fixes; Edit Session Finish Editing; faster hub status polling; Close Dome timeline and Activity Log UI polish."
+    "downloadUrlMac": "https://www.boreanastro.com/releases/borean-control-0.1.19-macos.dmg",
+    "releaseNotes": "Activity Log detail overlay matches Remote panel pattern; connection stability and Edit Session Finish Editing from 0.1.18."
   }
 }

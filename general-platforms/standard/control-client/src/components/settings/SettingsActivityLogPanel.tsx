@@ -66,43 +66,48 @@ export function SettingsActivityLogPanel({ refreshToken = 0 }: SettingsActivityL
 
   return (
     <div className="settings-log-root">
-      <div className="remote-pane-head settings-log-head">
-        <h2>Log</h2>
-        <div className="settings-log-toolbar" aria-label="Log actions">
-          <button type="button" className="btn btn-muted settings-log-btn" onClick={exportCsv} disabled={entries.length === 0}>
-            Export
-          </button>
-          <button type="button" className="btn btn-muted settings-log-btn" onClick={() => void loadLog()} disabled={loading}>
-            {loading ? '…' : 'Refresh'}
-          </button>
+      <div
+        className={selected ? 'settings-log-base settings-log-base-hidden' : 'settings-log-base'}
+        aria-hidden={Boolean(selected)}
+      >
+        <div className="remote-pane-head settings-log-head">
+          <h2>Log</h2>
+          <div className="settings-log-toolbar" aria-label="Log actions">
+            <button type="button" className="btn btn-muted settings-log-btn" onClick={exportCsv} disabled={entries.length === 0}>
+              Export
+            </button>
+            <button type="button" className="btn btn-muted settings-log-btn" onClick={() => void loadLog()} disabled={loading}>
+              {loading ? '…' : 'Refresh'}
+            </button>
+          </div>
         </div>
-      </div>
 
-      {error ? <p className="mb-2 text-sm text-red-400">{error}</p> : null}
+        {error ? <p className="mb-2 text-sm text-red-400">{error}</p> : null}
 
-      <div className="settings-log-scroll">
-        {entries.length === 0 && !loading ? (
-          <p className="text-sm text-white/45">No log entries yet.</p>
-        ) : (
-          entries.filter(auditLogRowVisible).map((row) => {
-            const failed = auditLogLineFailed(row)
-            const headline = auditLogHeadline(row)
-            const timeLabel = Number.isFinite(Date.parse(row.at))
-              ? new Date(row.at).toLocaleTimeString()
-              : row.at
-            return (
-              <button
-                key={row.id}
-                type="button"
-                onClick={() => setSelected(row)}
-                className={`settings-log-line ${failed ? 'settings-log-line-failed' : 'settings-log-line-ok'}`}
-              >
-                <span className="settings-log-time">[{timeLabel}]</span>{' '}
-                <span className={failed ? 'settings-log-failed-text' : 'settings-log-ok-text'}>{headline}</span>
-              </button>
-            )
-          })
-        )}
+        <div className="settings-log-scroll">
+          {entries.length === 0 && !loading ? (
+            <p className="text-sm text-white/45">No log entries yet.</p>
+          ) : (
+            entries.filter(auditLogRowVisible).map((row) => {
+              const failed = auditLogLineFailed(row)
+              const headline = auditLogHeadline(row)
+              const timeLabel = Number.isFinite(Date.parse(row.at))
+                ? new Date(row.at).toLocaleTimeString()
+                : row.at
+              return (
+                <button
+                  key={row.id}
+                  type="button"
+                  onClick={() => setSelected(row)}
+                  className={`settings-log-line ${failed ? 'settings-log-line-failed' : 'settings-log-line-ok'}`}
+                >
+                  <span className="settings-log-time">[{timeLabel}]</span>{' '}
+                  <span className={failed ? 'settings-log-failed-text' : 'settings-log-ok-text'}>{headline}</span>
+                </button>
+              )
+            })
+          )}
+        </div>
       </div>
 
       <div className={selected ? 'settings-log-detail-layer open' : 'settings-log-detail-layer'} aria-hidden={!selected}>

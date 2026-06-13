@@ -58,6 +58,9 @@ export function ControlConsole({
             count: s.count ?? null,
             raHours: typeof s.raHours === 'number' ? s.raHours : null,
             decDeg: typeof s.decDeg === 'number' ? s.decDeg : null,
+            estimatedDurationSeconds:
+              typeof s.estimatedDurationSeconds === 'number' ? s.estimatedDurationSeconds : null,
+            filterPlans: Array.isArray(s.filterPlans) ? s.filterPlans : null,
             sessionType: typeof s.sessionType === 'string' ? s.sessionType : 'dso',
             projectMode: s.projectMode === true,
           }))

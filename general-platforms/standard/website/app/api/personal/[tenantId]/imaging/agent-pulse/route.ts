@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server'
-import { personalTouchAgentPulse } from '@/lib/cloud/hub-store'
+import { imagingAgentPulse } from '@/lib/cloud/personal-imaging/handlers'
 import { personalJson, personalOptions, requirePersonalTenant } from '@/lib/cloud/route-helpers'
 
 export const runtime = 'nodejs'
@@ -16,6 +16,6 @@ export async function POST(
   const denied = await requirePersonalTenant(tenantId, request)
   if (denied) return denied
   const body = (await request.json().catch(() => ({}))) as { ninaRunning?: unknown }
-  await personalTouchAgentPulse(tenantId, Boolean(body.ninaRunning))
+  await imagingAgentPulse(tenantId, Boolean(body.ninaRunning))
   return personalJson({ ok: true })
 }

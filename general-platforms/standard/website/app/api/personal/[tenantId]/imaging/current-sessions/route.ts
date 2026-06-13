@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server'
-import { personalListSessions, personalSessionToPublicJson } from '@/lib/cloud/hub-store'
+import { imagingListSessions } from '@/lib/cloud/personal-imaging/handlers'
 import { personalJson, personalOptions, requirePersonalTenant } from '@/lib/cloud/route-helpers'
 
 export const runtime = 'nodejs'
@@ -15,6 +15,6 @@ export async function GET(
   const { tenantId } = await context.params
   const denied = await requirePersonalTenant(tenantId, request)
   if (denied) return denied
-  const sessions = (await personalListSessions(tenantId)).map(personalSessionToPublicJson)
+  const sessions = await imagingListSessions(tenantId)
   return personalJson({ ok: true, sessions })
 }

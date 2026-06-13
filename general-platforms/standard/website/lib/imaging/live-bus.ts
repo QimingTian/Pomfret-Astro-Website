@@ -1,4 +1,8 @@
-export type LiveChannel = `mount:${string}:${string}` | `agent:wake:${string}`
+export type LiveChannel =
+  | `agent:wake:${string}`
+  | `site:sessions:${string}`
+  | `progress:${string}`
+  | `mount:${string}:${string}`
 
 type Listener = (payload: unknown) => void
 
@@ -12,7 +16,7 @@ function listenersMap(): Map<string, Set<Listener>> {
   return g.__borean_live_bus_listeners__
 }
 
-function notifyLocal(channel: LiveChannel, payload: unknown): void {
+function notify(channel: LiveChannel, payload: unknown): void {
   const listeners = listenersMap().get(channel)
   if (!listeners || listeners.size === 0) return
   for (const listener of Array.from(listeners)) {
@@ -24,8 +28,30 @@ function notifyLocal(channel: LiveChannel, payload: unknown): void {
   }
 }
 
-export async function emitLiveEvent(channel: LiveChannel, payload: unknown): Promise<void> {
-  notifyLocal(channel, payload)
+export function emitLiveEvent(channel: LiveChannel, payload: unknown): void {
+  notify(channel, payload)
+}
+
+export function liveAgentWakeChannel(tenantId: string): LiveChannel {
+  return `agent:wake:${tenantId.trim() || 'global'}`
+}
+
+export function liveSiteSessionsChannel(tenantId: string): LiveChannel {
+  return `site:sessions:${tenantId.trim() || 'global'}`
+}
+
+export function liveProgressChannel(queueId: string): LiveChannel {
+  return `progress:${queueId}`
+}
+
+export function emitAgentWakePollSequence(tenantId?: string): void {
+  const channel = liveAgentWakeChannel(tenantId ?? 'global')
+  emitLiveEvent(channel, { type: 'poll_sequence', at: new Date().toISOString() })
+}
+
+export function emitSiteSessionsChanged(tenantId?: string): void {
+  const channel = liveSiteSessionsChannel(tenantId ?? 'global')
+  emitLiveEvent(channel, { type: 'sessions_changed', at: new Date().toISOString() })
 }
 
 export function subscribeLiveEvents(
@@ -66,14 +92,6 @@ export function liveMountChannel(
   return `mount:${tenant}:${t.length > 0 ? t : 'default'}`
 }
 
-export function liveAgentWakeChannel(tenantId: string): LiveChannel {
-  const tenant = tenantId.trim() || 'global'
-  return `agent:wake:${tenant}`
-}
-
-export async function emitAgentWakePollSequence(tenantId: string): Promise<void> {
-  await emitLiveEvent(liveAgentWakeChannel(tenantId), {
-    type: 'poll_sequence',
-    at: new Date().toISOString(),
-  })
+export async function emitAgentWakePollSequenceAsync(tenantId: string): Promise<void> {
+  emitAgentWakePollSequence(tenantId)
 }

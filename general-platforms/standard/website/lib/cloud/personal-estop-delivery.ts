@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server'
-import { personalEstopSequenceJson } from '@/lib/cloud/personal-estop-sequence'
+import { runWithTenantImaging } from '@/lib/cloud/personal-imaging/ctx'
 import {
-  personalGetEmergencyStopState,
-  personalIsEmergencyStopStopping,
-  personalMarkEmergencyStopDelivered,
-} from '@/lib/cloud/personal-emergency-stop'
+  estopSequenceJson,
+  isEmergencyStopStopping,
+  markEmergencyStopDelivered,
+  getEmergencyStopState,
+} from '@/lib/cloud/personal-imaging/estop-sync'
+import { personalIsEmergencyStopBlocking } from '@/lib/cloud/personal-emergency-stop'
 
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -15,21 +17,23 @@ const CORS_HEADERS: Record<string, string> = {
 export async function personalTryDeliverEmergencyStop(
   tenantId: string
 ): Promise<NextResponse | null> {
-  if (!(await personalIsEmergencyStopStopping(tenantId))) return null
-  const state = await personalGetEmergencyStopState(tenantId)
-  if (!state || state.deliveredAt) return null
+  return runWithTenantImaging(tenantId, () => {
+    if (!isEmergencyStopStopping()) return null
+    const state = getEmergencyStopState()
+    if (!state || state.deliveredAt) return null
 
-  const marked = await personalMarkEmergencyStopDelivered(tenantId, state.queueId)
-  if (!marked) return null
+    const marked = markEmergencyStopDelivered(state.queueId)
+    if (!marked) return null
 
-  const payload = personalEstopSequenceJson(tenantId, state.queueId)
-  return new NextResponse(payload, {
-    status: 200,
-    headers: {
-      ...CORS_HEADERS,
-      'Content-Type': 'application/json; charset=utf-8',
-      'Cache-Control': 'no-store',
-    },
+    const payload = estopSequenceJson(tenantId, state.queueId)
+    return new NextResponse(payload, {
+      status: 200,
+      headers: {
+        ...CORS_HEADERS,
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+      },
+    })
   })
 }
 
@@ -38,4 +42,8 @@ export function personalEstopDeliveryBlockingResponse(): NextResponse {
     { error: 'Emergency STOP active; no imaging sequences are available.' },
     { status: 409, headers: CORS_HEADERS }
   )
+}
+
+export async function personalIsEstopDeliveryBlocking(tenantId: string): Promise<boolean> {
+  return personalIsEmergencyStopBlocking(tenantId)
 }

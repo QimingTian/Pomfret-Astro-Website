@@ -1,9 +1,5 @@
 import { NextRequest } from 'next/server'
-import {
-  personalArmEmergencyStop,
-  personalGetEmergencyStopPublicState,
-  isPersonalAgentConnected,
-} from '@/lib/cloud/personal-emergency-stop'
+import { imagingArmEmergencyStop, imagingEmergencyStopPublic } from '@/lib/cloud/personal-imaging/handlers'
 import { emitAgentWakePollSequence } from '@/lib/imaging/live-bus'
 import { personalJson, personalOptions, requirePersonalTenant } from '@/lib/cloud/route-helpers'
 
@@ -20,7 +16,7 @@ export async function GET(
   const { tenantId } = await context.params
   const denied = await requirePersonalTenant(tenantId, request)
   if (denied) return denied
-  const publicState = await personalGetEmergencyStopPublicState(tenantId)
+  const publicState = await imagingEmergencyStopPublic(tenantId)
   return personalJson({ ok: true as const, ...publicState })
 }
 
@@ -32,8 +28,8 @@ export async function POST(
   const denied = await requirePersonalTenant(tenantId, request)
   if (denied) return denied
 
-  const agentConnected = await isPersonalAgentConnected(tenantId)
-  if (!agentConnected) {
+  const publicBefore = await imagingEmergencyStopPublic(tenantId)
+  if (!publicBefore.agentConnected) {
     return personalJson(
       { ok: false as const, error: 'NINA agent is disconnected. ESTOP is unavailable.' },
       409
@@ -41,13 +37,13 @@ export async function POST(
   }
 
   try {
-    await personalArmEmergencyStop(tenantId, 'control-client')
+    await imagingArmEmergencyStop(tenantId, 'control-client')
   } catch (ex) {
     const message = ex instanceof Error ? ex.message : 'Emergency STOP failed.'
     return personalJson({ ok: false as const, error: message }, 409)
   }
 
   void emitAgentWakePollSequence(tenantId)
-  const publicState = await personalGetEmergencyStopPublicState(tenantId)
+  const publicState = await imagingEmergencyStopPublic(tenantId)
   return personalJson({ ok: true as const, ...publicState })
 }

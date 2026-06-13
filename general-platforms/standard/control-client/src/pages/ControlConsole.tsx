@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ConsoleHeader } from '../components/console/ConsoleHeader'
 import { RemoteGlassConsole } from '../components/console/RemoteGlassConsole'
 import { fetchCurrentSessions, probeHub } from '../lib/hub-client'
 import { pickActiveDashboardSession } from '../lib/imaging/queue-status'
 import type { HubProbeResult, SessionRow } from '../lib/types'
 import { fetchTonightWeather, type TonightWeatherSnapshot } from '../lib/weather-client'
-import type { SessionPrefill } from '../components/console/new-session/types'
 import type { RemotePrefill } from './AtlasPage'
 
 type ControlConsoleProps = {
@@ -27,7 +26,8 @@ export function ControlConsole({
   const [sessionOpen, setSessionOpen] = useState(false)
   const [dashboardOpen, setDashboardOpen] = useState(false)
   const [dashboardSession, setDashboardSession] = useState<SessionRow | null>(null)
-  const [editPrefill, setEditPrefill] = useState<SessionPrefill | null>(null)
+  const [editingSession, setEditingSession] = useState<SessionRow | null>(null)
+  const disconnectStreakRef = useRef(0)
 
   const toggleDashboard = useCallback(() => {
     if (dashboardOpen) {
@@ -63,6 +63,8 @@ export function ControlConsole({
             filterPlans: Array.isArray(s.filterPlans) ? s.filterPlans : null,
             sessionType: typeof s.sessionType === 'string' ? s.sessionType : 'dso',
             projectMode: s.projectMode === true,
+            cameraCoolingTempC:
+              typeof s.cameraCoolingTempC === 'number' ? s.cameraCoolingTempC : null,
           }))
         )
       } else {
@@ -77,11 +79,32 @@ export function ControlConsole({
     }
   }, [])
 
+  const refreshStatus = useCallback(async () => {
+    const probeResult = await probeHub()
+    setProbe((prev) => {
+      const disconnected =
+        probeResult.hubReachable && probeResult.observatory?.status === 'disconnected'
+      if (!disconnected) {
+        disconnectStreakRef.current = 0
+        return probeResult
+      }
+      disconnectStreakRef.current += 1
+      if (disconnectStreakRef.current >= 2) {
+        return probeResult
+      }
+      if (prev?.hubReachable && prev.observatory?.status !== 'disconnected') {
+        return prev
+      }
+      return probeResult
+    })
+  }, [])
+
   const refreshAll = useCallback(async () => {
     const [probeResult, weatherResult] = await Promise.all([
       probeHub(),
       fetchTonightWeather(),
     ])
+    disconnectStreakRef.current = 0
     setProbe(probeResult)
     setWeather(weatherResult)
     await loadSessions()
@@ -89,15 +112,24 @@ export function ControlConsole({
 
   useEffect(() => {
     void refreshAll()
+    const statusId = window.setInterval(() => void refreshStatus(), 8_000)
     const hubId = window.setInterval(() => void refreshAll(), 30_000)
     const weatherId = window.setInterval(() => {
       void fetchTonightWeather().then(setWeather)
     }, 10 * 60_000)
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void refreshStatus()
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibility)
     return () => {
+      window.clearInterval(statusId)
       window.clearInterval(hubId)
       window.clearInterval(weatherId)
+      document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [refreshAll])
+  }, [refreshAll, refreshStatus])
 
   return (
     <div className={embedded ? 'control-console embedded' : 'control-console'}>
@@ -117,13 +149,15 @@ export function ControlConsole({
           sessions={sessions}
           loadingSessions={loadingSessions}
           sessionsError={sessionsError}
-          prefill={editPrefill ?? prefill ?? null}
-          onPrefillConsumed={() => {
-            setEditPrefill(null)
-            onPrefillConsumed?.()
-          }}
+          prefill={prefill ?? null}
+          onPrefillConsumed={onPrefillConsumed}
+          editingSession={editingSession}
+          onEditingSessionClear={() => setEditingSession(null)}
           sessionOpen={sessionOpen}
-          onSessionOpenChange={setSessionOpen}
+          onSessionOpenChange={(open) => {
+            setSessionOpen(open)
+            if (!open) setEditingSession(null)
+          }}
           dashboardOpen={dashboardOpen}
           dashboardSession={dashboardSession}
           onDashboardOpenChange={setDashboardOpen}
@@ -131,11 +165,7 @@ export function ControlConsole({
           onSubmitted={() => void loadSessions()}
           onRefreshSessions={() => void loadSessions()}
           onEditSession={(session) => {
-            setEditPrefill({
-              target: session.target,
-              raHours: session.raHours ?? undefined,
-              decDeg: session.decDeg ?? undefined,
-            })
+            setEditingSession(session)
             setSessionOpen(true)
           }}
         />

@@ -65,14 +65,17 @@ export function SettingsActivityLogPanel({ refreshToken = 0 }: SettingsActivityL
   }
 
   return (
-    <>
-      <div className="settings-log-toolbar" aria-label="Log actions">
-        <button type="button" className="btn btn-muted settings-log-btn" onClick={exportCsv} disabled={entries.length === 0}>
-          Export
-        </button>
-        <button type="button" className="btn btn-muted settings-log-btn" onClick={() => void loadLog()} disabled={loading}>
-          {loading ? '…' : 'Refresh'}
-        </button>
+    <div className="settings-log-root">
+      <div className="remote-pane-head settings-log-head">
+        <h2>Log</h2>
+        <div className="settings-log-toolbar" aria-label="Log actions">
+          <button type="button" className="btn btn-muted settings-log-btn" onClick={exportCsv} disabled={entries.length === 0}>
+            Export
+          </button>
+          <button type="button" className="btn btn-muted settings-log-btn" onClick={() => void loadLog()} disabled={loading}>
+            {loading ? '…' : 'Refresh'}
+          </button>
+        </div>
       </div>
 
       {error ? <p className="mb-2 text-sm text-red-400">{error}</p> : null}
@@ -102,25 +105,16 @@ export function SettingsActivityLogPanel({ refreshToken = 0 }: SettingsActivityL
         )}
       </div>
 
-      {selected ? (
-        <div className="settings-log-detail-backdrop" role="presentation" onClick={() => setSelected(null)}>
-          <div
-            role="dialog"
-            aria-labelledby="audit-log-detail-title"
-            className="settings-log-detail-dialog"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="settings-log-detail-head">
-              <div className="min-w-0">
-                <h2 id="audit-log-detail-title" className="settings-log-detail-title">
-                  {auditLogHeadline(selected)}
-                </h2>
-                <p className="settings-log-detail-kind">{selected.kind}</p>
-              </div>
-              <button type="button" className="btn btn-muted" onClick={() => setSelected(null)}>
-                Close
-              </button>
-            </div>
+      <div className={selected ? 'settings-log-detail-layer open' : 'settings-log-detail-layer'} aria-hidden={!selected}>
+        {selected ? (
+          <div className="remote-overlay-pane settings-log-detail-pane" role="dialog" aria-labelledby="audit-log-detail-title">
+            <button type="button" className="settings-log-detail-close" onClick={() => setSelected(null)}>
+              Close
+            </button>
+            <h2 id="audit-log-detail-title" className="settings-log-detail-title">
+              {auditLogHeadline(selected)}
+            </h2>
+            <p className="settings-log-detail-kind">{selected.kind}</p>
             <div className="settings-log-detail-body">
               {auditLogDetailFields(selected).map((field) => (
                 <div key={field.label}>
@@ -130,8 +124,8 @@ export function SettingsActivityLogPanel({ refreshToken = 0 }: SettingsActivityL
               ))}
             </div>
           </div>
-        </div>
-      ) : null}
-    </>
+        ) : null}
+      </div>
+    </div>
   )
 }

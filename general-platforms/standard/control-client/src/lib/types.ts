@@ -36,6 +36,7 @@ export type SessionRow = {
   scheduleBarEndMs?: number | null
   sessionType?: 'dso' | 'variable_star' | string
   projectMode?: boolean
+  cameraCoolingTempC?: number | null
   hasDownload?: boolean
 }
 

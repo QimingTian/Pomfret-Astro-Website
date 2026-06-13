@@ -3,6 +3,7 @@ import {
   getSessionById,
   insertSession,
   listPendingSessions,
+  patchSessionRow,
   sessionToPublicJson,
   setSessionNinaSequenceJson,
 } from '@/lib/cloud/personal-imaging/db'
@@ -14,7 +15,7 @@ import type {
 } from '@/lib/cloud/personal-imaging/types'
 import { setObservatorySite } from '@/lib/cloud/personal-imaging/observatory-site'
 import { buildNinaSequenceJson } from '@/lib/imaging/nina-sequence-json'
-import { initProjectRemaining } from '@/lib/cloud/personal-imaging/project-db'
+import { initProjectRemaining, clearProjectNights } from '@/lib/cloud/personal-imaging/project-db'
 import { reconcilePendingScheduleStatus } from '@/lib/imaging/reconcile'
 import { VARIABLE_STAR_SESSION_OVERHEAD_SEC } from '@/lib/imaging/session-overhead'
 import type { SchedulePendingRow } from '@/lib/imaging/schedule-insight'
@@ -200,6 +201,102 @@ export async function createQueueSession(
       reasons: insight ?? [],
     },
   })
+  return session
+}
+
+export async function updatePendingSession(
+  id: string,
+  input: QueueCreateInput,
+  tenantId?: string
+): Promise<SessionRow | { error: string; status?: number }> {
+  const current = getSessionById(id)
+  if (!current) return { error: 'Not found', status: 404 }
+  if (current.status !== 'pending' && current.status !== 'scheduled' && current.status !== 'on_hold') {
+    return { error: "Session already started, can't edit session", status: 409 }
+  }
+
+  if (
+    typeof input.observatoryLat === 'number' &&
+    Number.isFinite(input.observatoryLat) &&
+    typeof input.observatoryLon === 'number' &&
+    Number.isFinite(input.observatoryLon)
+  ) {
+    setObservatorySite({
+      lat: input.observatoryLat,
+      lon: input.observatoryLon,
+      elevationM:
+        typeof input.observatoryElevationM === 'number' && Number.isFinite(input.observatoryElevationM)
+          ? input.observatoryElevationM
+          : undefined,
+    })
+  }
+
+  const outputModeRaw = typeof input.outputMode === 'string' ? input.outputMode : current.outputMode
+  const outputMode: SessionOutputMode = outputModeRaw === 'raw_zip' ? 'raw_zip' : 'none'
+  const sessionType: SessionType =
+    input.sessionType === 'variable_star' ? 'variable_star' : 'dso'
+  const firstPlan = input.filterPlans?.[0]
+
+  const patched = patchSessionRow(id, {
+    target: input.target,
+    requestName: input.requestName ?? input.target,
+    sessionType,
+    sequenceTemplate: sessionType,
+    outputMode,
+    outputModeRequested: input.outputModeRequested ?? outputModeRaw,
+    whenClosedBehavior: input.whenClosedBehavior ?? current.whenClosedBehavior,
+    projectMode: input.projectMode === true,
+    cameraCoolingTempC: input.cameraCoolingTempC ?? null,
+    raHours: input.raHours ?? null,
+    decDeg: input.decDeg ?? null,
+    filter: input.filter ?? firstPlan?.filterName ?? null,
+    exposureSeconds: input.exposureSeconds ?? firstPlan?.exposureSeconds ?? null,
+    count: input.count ?? firstPlan?.count ?? null,
+    filterPlans: input.filterPlans ?? [],
+    estimatedDurationSeconds: input.estimatedDurationSeconds ?? null,
+    variableStarBlockHours: input.variableStarBlockHours ?? null,
+    catalogQuery: input.catalogQuery ?? current.catalogQuery,
+    ninaSequenceJson: null,
+    remainingByFilter: null,
+    status: 'pending',
+    plannedStartIso: null,
+    scheduleReasons: [],
+  })
+  if (!patched) return { error: 'Not found', status: 404 }
+
+  clearProjectNights(id)
+  if (patched.projectMode) {
+    initProjectRemaining(patched)
+  } else {
+    const ninaSequenceJson = buildSequenceForSession(patched, tenantId)
+    if (ninaSequenceJson) {
+      setSessionNinaSequenceJson(id, ninaSequenceJson)
+    }
+  }
+
+  await reconcilePendingScheduleStatus()
+  emitSiteSessionsChanged(tenantId ?? getTenantId())
+  emitAgentWakePollSequence(tenantId ?? getTenantId())
+
+  const session = getSessionById(id)!
+  appendAuditLog({
+    kind: 'queue.edited',
+    message: `Pending session edited: ${session.target} (${session.id}).`,
+    detail: { id: session.id, target: session.target, status: session.status },
+  })
+
+  const insight = session.scheduleReasons
+  if (session.status === 'scheduled' || (insight && insight.length > 0)) {
+    void logSessionStatusChange({
+      subject: { id: session.id, target: session.target, projectMode: session.projectMode },
+      previousStatus: 'pending',
+      nextStatus: session.status === 'scheduled' ? 'scheduled' : 'pending',
+      plannedStartIso: session.plannedStartIso,
+      reasons: insight,
+      source: 'queue.edit',
+    })
+  }
+
   return session
 }
 

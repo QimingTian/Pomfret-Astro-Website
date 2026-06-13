@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
   VARIABLE_STAR_SESSION_OVERHEAD_HOURS,
+  VARIABLE_STAR_SESSION_OVERHEAD_SEC,
 } from '../../../lib/imaging/session-overhead'
 import {
   applySexagesimalPartsFromRadec,
@@ -14,7 +15,8 @@ import {
   type RemoteSavedSessionFormV1,
   type SavedSessionEntry,
 } from '../../../lib/imaging/saved-sessions-local'
-import { submitImagingSession } from '../../../lib/imaging/submit-imaging-session'
+import { submitImagingSession, updateImagingSession } from '../../../lib/imaging/submit-imaging-session'
+import type { SessionRow } from '../../../lib/types'
 import { contentApiPath } from '../../../lib/content-base'
 import type { WeatherPrediction } from '../../../lib/weather-client'
 import {
@@ -52,6 +54,8 @@ type Props = {
   weatherPrediction: WeatherPrediction
   prefill?: SessionPrefill | null
   onPrefillConsumed?: () => void
+  editingSession?: SessionRow | null
+  onEditingSessionClear?: () => void
   onSubmitted?: () => void
 }
 
@@ -63,8 +67,11 @@ export function useNewImagingSessionForm({
   weatherPrediction,
   prefill,
   onPrefillConsumed,
+  editingSession,
+  onEditingSessionClear,
   onSubmitted,
 }: Props) {
+  const editingSessionId = editingSession?.id ?? null
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null)
@@ -124,7 +131,7 @@ const VARIABLE_STAR_FILTER_VALUES: VariableStarFilterUi[] = [
 ]
 
   useEffect(() => {
-    if (!prefill) return
+    if (!prefill || editingSessionId) return
     setRequestName(prefill.target)
     if (
       typeof prefill.raHours === 'number' &&
@@ -145,7 +152,71 @@ const VARIABLE_STAR_FILTER_VALUES: VariableStarFilterUi[] = [
       )
     }
     onPrefillConsumed?.()
-  }, [prefill, onPrefillConsumed])
+  }, [prefill, editingSessionId, onPrefillConsumed])
+
+  useEffect(() => {
+    if (!editingSession) return
+    const item = editingSession
+    setProjectMode(item.projectMode === true)
+    setSessionType(item.sessionType === 'variable_star' ? 'variable_star' : 'dso')
+    setVariableStarPreviewStar(null)
+    setVariableStarLastFoundName(null)
+    setVariableStarListSelection('')
+    setCatalogQuery('')
+    setCatalogLookupResult(null)
+    setCatalogLookupError(null)
+    setRequestName(item.target ?? '')
+    if (typeof item.raHours === 'number' && Number.isFinite(item.raHours)) {
+      const totalRaSec = item.raHours * 3600
+      const raH = Math.floor(totalRaSec / 3600)
+      const raM = Math.floor((totalRaSec - raH * 3600) / 60)
+      const raS = totalRaSec - raH * 3600 - raM * 60
+      setRaHourPart(String(raH))
+      setRaMinutePart(String(raM))
+      setRaSecondPart(String(Number(raS.toFixed(3))))
+    }
+    if (typeof item.decDeg === 'number' && Number.isFinite(item.decDeg)) {
+      const sign: '+' | '-' = item.decDeg < 0 ? '-' : '+'
+      const absDec = Math.abs(item.decDeg)
+      const decD = Math.floor(absDec)
+      const decM = Math.floor((absDec - decD) * 60)
+      const decS = (absDec - decD - decM / 60) * 3600
+      setDecSign(sign)
+      setDecDegreePart(String(decD))
+      setDecMinutePart(String(decM))
+      setDecSecondPart(String(Number(decS.toFixed(3))))
+    }
+    if (item.sessionType === 'variable_star') {
+      const est = item.estimatedDurationSeconds
+      if (typeof est === 'number' && Number.isFinite(est) && est > VARIABLE_STAR_SESSION_OVERHEAD_SEC) {
+        const blockH = est / 3600 - VARIABLE_STAR_SESSION_OVERHEAD_HOURS
+        const snapped = Math.round(blockH * 2) / 2
+        setVariableStarBlockHours(Number.isFinite(snapped) && snapped >= 0.5 ? snapped : 1)
+      } else {
+        setVariableStarBlockHours(1)
+      }
+      setVariableStarDurationUserSelected(true)
+    } else {
+      setVariableStarBlockHours(1)
+    }
+    const output = item.outputMode === 'none' ? 'none' : 'raw_zip'
+    setOutputMode(output)
+    if (item.cameraCoolingTempC === 0 || item.cameraCoolingTempC === -10) {
+      setCameraCoolingTempC(item.cameraCoolingTempC)
+    }
+    if (Array.isArray(item.filterPlans) && item.filterPlans.length > 0) {
+      setFilterPlans(
+        item.filterPlans.map((p) => ({
+          filterName: p.filterName,
+          count: String(p.count),
+          exposureSeconds: String(p.exposureSeconds),
+        }))
+      )
+    }
+    setSessionPassword('')
+    setSubmitError(null)
+    setSubmitSuccess('Editing pending session. Update fields then click Finish Editing.')
+  }, [editingSession])
 
   useEffect(() => {
     if (sessionType !== 'variable_star') {
@@ -688,7 +759,7 @@ const VARIABLE_STAR_FILTER_VALUES: VariableStarFilterUi[] = [
         ? Math.round((variableStarBlockHours + VARIABLE_STAR_SESSION_OVERHEAD_HOURS) * 3600)
         : estimateDurationSecondsFromPlans(normalizedPlans)
 
-    const result = await submitImagingSession({
+    const payload = {
       target: requestName.trim(),
       requestName: requestName.trim(),
       sessionType,
@@ -703,14 +774,23 @@ const VARIABLE_STAR_FILTER_VALUES: VariableStarFilterUi[] = [
       catalogQuery,
       variableStarBlockHours: sessionType === 'variable_star' ? variableStarBlockHours : undefined,
       filterPlans: normalizedPlans,
-    })
+    }
+
+    const result = editingSessionId
+      ? await updateImagingSession(editingSessionId, payload)
+      : await submitImagingSession(payload)
 
     if (!result.ok) {
       setSubmitError(result.error)
       return false
     }
     setSubmitError(null)
-    setSubmitSuccess(`Queued · ${result.id.slice(0, 8).toUpperCase()}`)
+    if (editingSessionId) {
+      setSubmitSuccess('Session edited successfully.')
+      onEditingSessionClear?.()
+    } else {
+      setSubmitSuccess(`Queued · ${result.id.slice(0, 8).toUpperCase()}`)
+    }
     onSubmitted?.()
     return true
   }, [
@@ -724,6 +804,8 @@ const VARIABLE_STAR_FILTER_VALUES: VariableStarFilterUi[] = [
     projectMode,
     sessionPassword,
     catalogQuery,
+    editingSessionId,
+    onEditingSessionClear,
     onSubmitted,
   ])
 
@@ -736,6 +818,10 @@ const VARIABLE_STAR_FILTER_VALUES: VariableStarFilterUi[] = [
     try {
       const coords = parseCoordinates()
       if (!coords) return
+      if (editingSessionId) {
+        await submitRequest('reject', coords)
+        return
+      }
       const altitudeDeg = currentAltitudeDeg(coords.raHours, coords.decDeg)
       setLastComputedAltitude(altitudeDeg)
       if (altitudeDeg < MIN_ALTITUDE_DEG) {
@@ -750,7 +836,7 @@ const VARIABLE_STAR_FILTER_VALUES: VariableStarFilterUi[] = [
     } finally {
       setSubmitting(false)
     }
-  }, [hubReachable, submitting, parseCoordinates, observatoryStatus, submitRequest])
+  }, [hubReachable, submitting, parseCoordinates, editingSessionId, observatoryStatus, submitRequest])
 
   const handleSubmitWhenClosed = useCallback(async () => {
     const coords = parseCoordinates()
@@ -935,5 +1021,6 @@ const VARIABLE_STAR_FILTER_VALUES: VariableStarFilterUi[] = [
     runSavedSession,
     savedSessions,
     availableFilterOptions: FILTER_OPTIONS,
+    editingSessionId,
   }
 }

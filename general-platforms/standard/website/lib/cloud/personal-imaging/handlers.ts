@@ -4,7 +4,7 @@ import { deleteSessionById, getObservatoryState, listSessions, sessionToPublicJs
 import { appendAuditLog } from '@/lib/cloud/personal-imaging/db'
 import { getEmergencyStopPublicState, armEmergencyStop } from '@/lib/cloud/personal-imaging/estop-sync'
 import { handleNinaSequenceGet, handleSessionProgressPost } from '@/lib/imaging/delivery'
-import { createQueueSession, sessionToPublic, type QueueCreateInput } from '@/lib/imaging/queue-service'
+import { createQueueSession, sessionToPublic, updatePendingSession, type QueueCreateInput } from '@/lib/imaging/queue-service'
 import { reconcilePendingScheduleStatus } from '@/lib/imaging/reconcile'
 import { emitAgentWakePollSequence } from '@/lib/imaging/live-bus'
 
@@ -68,6 +68,14 @@ export async function imagingCreateSession(tenantId: string, body: QueueCreateIn
   return runWithTenantImaging(tenantId, async () => {
     const session = await createQueueSession(body, randomUUID(), tenantId)
     return sessionToPublic(session)
+  })
+}
+
+export async function imagingUpdateSession(tenantId: string, sessionId: string, body: QueueCreateInput) {
+  return runWithTenantImaging(tenantId, async () => {
+    const result = await updatePendingSession(sessionId, body, tenantId)
+    if ('error' in result) return result
+    return sessionToPublic(result)
   })
 }
 

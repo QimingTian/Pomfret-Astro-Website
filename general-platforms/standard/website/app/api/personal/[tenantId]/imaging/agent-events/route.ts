@@ -1,4 +1,5 @@
 import { liveAgentWakeChannel, subscribeLiveEvents } from '@/lib/imaging/live-bus'
+import { touchAgentHeartbeatRemote } from '@/lib/cloud/personal-imaging/agent-heartbeat'
 import { personalOptions, requirePersonalTenant } from '@/lib/cloud/route-helpers'
 import type { NextRequest } from 'next/server'
 
@@ -33,10 +34,11 @@ export async function GET(
   const channel = liveAgentWakeChannel(tenantId)
 
   const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
+    async start(controller) {
       const encoder = new TextEncoder()
       const enqueue = (payload: unknown) => controller.enqueue(encoder.encode(sseData(payload)))
 
+      await touchAgentHeartbeatRemote(tenantId)
       enqueue({ type: 'connected', ok: true, at: new Date().toISOString() })
 
       const onWake = (payload: unknown) => {
@@ -50,6 +52,7 @@ export async function GET(
       const unsubscribe = subscribeLiveEvents(channel, onWake, request.signal)
 
       const keepAlive = setInterval(() => {
+        void touchAgentHeartbeatRemote(tenantId)
         enqueue({ type: 'ping', at: new Date().toISOString() })
       }, 15_000)
 

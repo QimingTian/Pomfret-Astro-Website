@@ -221,18 +221,21 @@ export function TonightScheduleTimeline({ weather, sessions }: TonightScheduleTi
             </div>
           ))}
 
-          {sessionScheduleBlocks.map((block, idx) => (
-            <div
-              key={`session-${block.id}-${idx}`}
-              className={`tonight-block tonight-block-session${block.id === '__end_night_tail__' ? ' tail' : ''}`}
-              style={{
-                top: `${block.topPct}%`,
-                height: `${Math.max(block.heightPct, 4)}%`,
-              }}
-            >
-              <p>{block.label}</p>
-            </div>
-          ))}
+          {sessionScheduleBlocks.map((block, idx) => {
+            const isCloseDome = block.id === '__end_night_tail__'
+            return (
+              <div
+                key={`session-${block.id}-${idx}`}
+                className={`tonight-block tonight-block-session${isCloseDome ? ' tail tail-marker' : ''}`}
+                style={{
+                  top: `${block.topPct}%`,
+                  ...(isCloseDome ? {} : { height: `${Math.max(block.heightPct, 4)}%` }),
+                }}
+              >
+                <p>{block.label}</p>
+              </div>
+            )
+          })}
 
           {tonightSchedule.adminClosedBlocks.map((block) => (
             <div

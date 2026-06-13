@@ -1,6 +1,7 @@
 import { VARIABLE_STAR_FILTER_PRESETS } from './constants'
 import { useNewImagingSessionForm } from './useNewImagingSessionForm'
 import type { SessionPrefill } from './types'
+import type { SessionRow } from '../../../lib/types'
 import type { WeatherPrediction } from '../../../lib/weather-client'
 import { VariableStarPreviewCharts } from './variable-star-preview-charts'
 
@@ -10,6 +11,8 @@ type Props = {
   weatherPrediction: WeatherPrediction
   prefill?: SessionPrefill | null
   onPrefillConsumed?: () => void
+  editingSession?: SessionRow | null
+  onEditingSessionClear?: () => void
   onSubmitted?: () => void
 }
 
@@ -367,7 +370,13 @@ export function NewImagingSessionForm(props: Props) {
             disabled={s.submitting || !props.hubReachable}
             className="nis-launch"
           >
-            {s.submitting ? 'Starting...' : 'Start Session'}
+            {s.submitting
+              ? s.editingSessionId
+                ? 'Finishing...'
+                : 'Starting...'
+              : s.editingSessionId
+                ? 'Finish Editing'
+                : 'Start Session'}
           </button>
           <button type="button" disabled={!props.hubReachable} className="nis-pill" onClick={s.openRunModal}>
             Run Saved

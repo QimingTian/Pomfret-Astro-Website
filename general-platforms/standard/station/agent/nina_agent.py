@@ -462,6 +462,12 @@ def _handle_agent_sse_payload(raw: str) -> None:
         _wake_reconcile.set()
     if event_type in ("connected", "estop", "poll_sequence", "reconcile", "ping"):
         _mark_agent_sse_connected()
+    if event_type in ("connected", "ping"):
+        threading.Thread(
+            target=lambda: report_agent_pulse(is_nina_running()),
+            name="agent-pulse-on-sse",
+            daemon=True,
+        ).start()
 
 
 def agent_events_reader_loop() -> None:

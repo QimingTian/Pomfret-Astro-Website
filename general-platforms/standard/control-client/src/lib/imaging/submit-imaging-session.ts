@@ -26,8 +26,27 @@ export type SubmitImagingSessionResult =
 export async function submitImagingSession(
   payload: SubmitImagingSessionPayload
 ): Promise<SubmitImagingSessionResult> {
+  return writeImagingSession('POST', '/imaging/queue', payload)
+}
+
+export async function updateImagingSession(
+  sessionId: string,
+  payload: SubmitImagingSessionPayload
+): Promise<SubmitImagingSessionResult> {
+  return writeImagingSession(
+    'PUT',
+    `/imaging/queue/${encodeURIComponent(sessionId)}`,
+    payload
+  )
+}
+
+async function writeImagingSession(
+  method: 'POST' | 'PUT',
+  path: string,
+  payload: SubmitImagingSessionPayload
+): Promise<SubmitImagingSessionResult> {
   const tenant = await loadRuntimeTenant()
-  const url = personalTenantApiUrl(tenant, '/imaging/queue')
+  const url = personalTenantApiUrl(tenant, path)
   const coords = readObservatoryCoords()
   const firstPlan = payload.filterPlans[0]
   const outputModeForHub = payload.outputMode
@@ -68,7 +87,7 @@ export async function submitImagingSession(
 
   try {
     const res = await fetch(url, {
-      method: 'POST',
+      method,
       headers: personalAuthHeaders(tenant, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     })

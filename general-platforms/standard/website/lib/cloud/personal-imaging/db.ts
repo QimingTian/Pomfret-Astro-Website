@@ -1,5 +1,6 @@
 import { personalAppendAuditLog } from '@/lib/cloud/personal-audit-log'
-import { getImagingState, getTenantId } from '@/lib/cloud/personal-imaging/ctx'
+import { getAgentHeartbeat, getImagingState, getTenantId, getTenantImagingCtx } from '@/lib/cloud/personal-imaging/ctx'
+import { touchAgentHeartbeatInCtx } from '@/lib/cloud/personal-imaging/agent-heartbeat'
 import type {
   FilterPlan,
   FilterRemaining,
@@ -48,6 +49,10 @@ export function deleteSessionById(sessionId: string): boolean {
   state.sessions = state.sessions.filter((s) => s.id !== sessionId)
   state.projectNights = state.projectNights.filter((n) => n.projectId !== sessionId)
   return state.sessions.length < before
+}
+
+export function patchSessionRow(id: string, patch: Partial<SessionRow>): SessionRow | null {
+  return updateSession(id, patch)
 }
 
 export function insertSession(input: {
@@ -138,8 +143,9 @@ export function getObservatoryState(): {
   ninaRunning: boolean
 } {
   const { observatory } = getImagingState()
-  const agentLastSeenMs = observatory.agentLastSeenMs
-  const ninaRunning = observatory.ninaRunning
+  const heartbeat = getAgentHeartbeat()
+  const agentLastSeenMs = Math.max(heartbeat.agentLastSeenMs, observatory.agentLastSeenMs)
+  const ninaRunning = heartbeat.ninaRunning
   const mode = observatory.mode
   const storedStatus = observatory.status
   const staleMs = 90_000
@@ -176,9 +182,12 @@ export function isObservatoryReady(): boolean {
 }
 
 export function touchAgentPulse(ninaRunning: boolean): void {
-  const state = getImagingState()
-  state.observatory.agentLastSeenMs = Date.now()
-  state.observatory.ninaRunning = ninaRunning
+  const ctx = getTenantImagingCtx()
+  ctx.agentHeartbeat = touchAgentHeartbeatInCtx(ctx.agentHeartbeat, {
+    ninaRunning,
+    nowMs: Date.now(),
+  })
+  ctx.agentHeartbeatDirty = true
 }
 
 export function setObservatoryPatch(input: {

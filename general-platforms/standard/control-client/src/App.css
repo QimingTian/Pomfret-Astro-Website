@@ -334,8 +334,7 @@
 .estop-confirm-backdrop,
 .session-modal-backdrop,
 .modal-backdrop,
-.nis-modal-backdrop,
-.settings-log-detail-backdrop {
+.nis-modal-backdrop {
   position: fixed;
   inset: 0;
   display: flex;
@@ -351,8 +350,7 @@
   z-index: 50;
 }
 
-.estop-confirm-backdrop,
-.settings-log-detail-backdrop {
+.estop-confirm-backdrop {
   z-index: 100;
 }
 
@@ -360,7 +358,6 @@
 .estop-confirm-dialog,
 .session-delete-modal,
 .nis-modal,
-.settings-log-detail-dialog,
 .modal.console-panel {
   border: 0;
   border-radius: 1rem;
@@ -1324,6 +1321,11 @@
   opacity: 0.85;
 }
 
+.tonight-block-session.tail-marker {
+  transform: translateY(-50%);
+  height: auto;
+}
+
 .tonight-block-closed {
   left: 66.666%;
   right: 0;
@@ -1549,13 +1551,20 @@
   min-height: 22rem;
   display: flex;
   flex-direction: column;
+}
+
+.settings-log-root {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   position: relative;
 }
 
 .settings-log-toolbar {
   position: absolute;
-  top: 0.85rem;
-  right: 1rem;
+  top: 0;
+  right: 0;
   display: flex;
   align-items: center;
   gap: 0.45rem;
@@ -1571,7 +1580,6 @@
 .settings-log-scroll {
   flex: 1;
   min-height: 12rem;
-  max-height: 28rem;
   overflow-y: auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.72rem;
@@ -1619,28 +1627,58 @@
   font-weight: 600;
 }
 
-.settings-log-detail-backdrop {
-  z-index: 100;
+.settings-log-head {
+  position: relative;
+  padding-right: 8.5rem;
 }
 
-.settings-log-detail-dialog {
-  width: min(42rem, calc(100vw - 2rem));
-  max-height: 85vh;
-  display: flex;
-  flex-direction: column;
+.settings-log-detail-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  border-radius: 1rem;
+  opacity: 0;
+  transform: translateY(12px);
+  pointer-events: none;
+  transition:
+    opacity 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.settings-log-detail-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.85rem 1rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+.settings-log-detail-layer.open {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.settings-log-detail-pane {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding-top: 2.75rem;
+}
+
+.settings-log-detail-close {
+  position: absolute;
+  top: 0.85rem;
+  right: 1rem;
+  z-index: 2;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: var(--bg-surface);
+  padding: 0.45rem 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: #fff;
+  cursor: pointer;
+}
+
+.settings-log-detail-close:hover {
+  background: var(--surface-hover);
 }
 
 .settings-log-detail-title {
-  margin: 0;
+  margin: 0 1rem 0.35rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.82rem;
   font-weight: 600;
@@ -1648,14 +1686,14 @@
 }
 
 .settings-log-detail-kind {
-  margin: 0.25rem 0 0;
-  font-size: 0.68rem;
-  color: rgba(255, 255, 255, 0.42);
+  margin: 0 1rem 0.85rem;
+  font-size: 0.72rem;
+  color: var(--fg-muted);
 }
 
 .settings-log-detail-body {
   overflow-y: auto;
-  padding: 1rem;
+  padding: 0 1rem 1rem;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;

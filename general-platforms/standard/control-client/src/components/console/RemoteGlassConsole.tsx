@@ -17,6 +17,8 @@ type RemoteGlassConsoleProps = {
   sessionsError: string | null
   prefill?: SessionPrefill | null
   onPrefillConsumed?: () => void
+  editingSession?: SessionRow | null
+  onEditingSessionClear?: () => void
   onSubmitted?: () => void
   onRefreshSessions?: () => void
   onEditSession?: (session: SessionRow) => void
@@ -36,6 +38,8 @@ export function RemoteGlassConsole({
   sessionsError,
   prefill,
   onPrefillConsumed,
+  editingSession,
+  onEditingSessionClear,
   onSubmitted,
   onRefreshSessions,
   onEditSession,
@@ -69,7 +73,10 @@ export function RemoteGlassConsole({
           weatherPrediction={weatherPrediction}
           prefill={prefill}
           onPrefillConsumed={onPrefillConsumed}
+          editingSession={editingSession}
+          onEditingSessionClear={onEditingSessionClear}
           onSubmitted={() => {
+            onEditingSessionClear?.()
             onSubmitted?.()
             window.setTimeout(() => onSessionOpenChange(false), 1200)
           }}

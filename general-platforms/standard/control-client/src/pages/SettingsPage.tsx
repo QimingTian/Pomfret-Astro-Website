@@ -439,9 +439,6 @@ export function SettingsPage() {
         </section>
 
         <section className="remote-glass-pane settings-pane settings-pane-log">
-          <div className="remote-pane-head">
-            <h2>Log</h2>
-          </div>
           <SettingsActivityLogPanel refreshToken={logRefreshToken} />
         </section>
       </div>

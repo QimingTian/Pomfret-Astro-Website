@@ -2,6 +2,13 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { kvGetJson, kvSetJson } from '@/lib/cloud/kv-rest'
 import type { PersonalEmergencyStopState } from '@/lib/cloud/personal-emergency-stop'
 import {
+  defaultAgentHeartbeat,
+  loadAgentHeartbeat,
+  mergeHeartbeat,
+  persistAgentHeartbeat,
+  type AgentHeartbeat,
+} from '@/lib/cloud/personal-imaging/agent-heartbeat'
+import {
   defaultTenantImagingState,
   type TenantImagingState,
 } from '@/lib/cloud/personal-imaging/state'
@@ -10,6 +17,8 @@ import type { ObservatoryMode, ObservatoryStatus, SessionRow } from '@/lib/cloud
 type ImagingCtx = {
   tenantId: string
   state: TenantImagingState
+  agentHeartbeat: AgentHeartbeat
+  agentHeartbeatDirty: boolean
   estop: PersonalEmergencyStopState | null
   estopDirty: boolean
 }
@@ -208,6 +217,10 @@ export function getImagingState(): TenantImagingState {
   return getTenantImagingCtx().state
 }
 
+export function getAgentHeartbeat(): AgentHeartbeat {
+  return getTenantImagingCtx().agentHeartbeat
+}
+
 export function getEstopState(): PersonalEmergencyStopState | null {
   return getTenantImagingCtx().estop
 }
@@ -224,9 +237,28 @@ export async function runWithTenantImaging<T>(
 ): Promise<T> {
   const state = await loadState(tenantId)
   const estop = await loadEstop(tenantId)
-  const ctx: ImagingCtx = { tenantId, state, estop, estopDirty: false }
+  let agentHeartbeat = await loadAgentHeartbeat(tenantId)
+  let agentHeartbeatDirty = false
+  if (agentHeartbeat.agentLastSeenMs <= 0 && state.observatory.agentLastSeenMs > 0) {
+    agentHeartbeat = mergeHeartbeat(agentHeartbeat, {
+      nowMs: state.observatory.agentLastSeenMs,
+      ninaRunning: state.observatory.ninaRunning,
+    })
+    agentHeartbeatDirty = true
+  }
+  const ctx: ImagingCtx = {
+    tenantId,
+    state,
+    agentHeartbeat,
+    agentHeartbeatDirty,
+    estop,
+    estopDirty: false,
+  }
   const result = await als.run(ctx, async () => fn())
   await saveState(tenantId, ctx.state)
+  if (ctx.agentHeartbeatDirty) {
+    await persistAgentHeartbeat(tenantId, ctx.agentHeartbeat)
+  }
   if (ctx.estopDirty) {
     await saveEstop(tenantId, ctx.estop)
   }

@@ -39,6 +39,11 @@ export function remainingFramesTotal(remaining: FilterRemaining[] | null): numbe
   return remaining.reduce((sum, r) => sum + Math.max(0, r.countRemaining), 0)
 }
 
+export function clearProjectNights(projectId: string): void {
+  const state = getImagingState()
+  state.projectNights = state.projectNights.filter((n) => n.projectId !== projectId)
+}
+
 export function initProjectRemaining(project: SessionRow): FilterRemaining[] {
   if (project.remainingByFilter) return project.remainingByFilter
   const remaining: FilterRemaining[] = project.filterPlans.map((p) => ({

@@ -333,7 +333,7 @@ code {
 }
 
 .settings-choice-row input {
-  accent-color: #60a5fa;
+  accent-color: var(--fg-primary);
 }
 
 .check-list {

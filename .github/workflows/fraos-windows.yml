@@ -2,12 +2,6 @@ name: FRAOS Windows Installers
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - 'general-platforms/standard/control-client/**'
-      - 'general-platforms/standard/station/**'
-      - '.github/workflows/fraos-windows.yml'
 
 jobs:
   control-client:

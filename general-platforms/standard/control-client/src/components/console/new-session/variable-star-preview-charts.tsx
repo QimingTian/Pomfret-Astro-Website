@@ -308,7 +308,7 @@ export function VariableStarPreviewCharts({ star }: Props) {
                 )
               })}
               {nightPaths.fills.map((d, i) => (
-                <path key={i} d={d} fill="rgb(34 211 238)" fillOpacity={0.18} stroke="none" />
+                <path key={i} d={d} fill="rgb(0 230 0)" fillOpacity={0.12} stroke="none" />
               ))}
               {nightPaths.altSegs.map((pts, i) => (
                 <polyline

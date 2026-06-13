@@ -78,7 +78,7 @@ export default function NOAAGoesCloudMap() {
         radius: 7,
         color: '#ffffff',
         weight: 2,
-        fillColor: '#38bdf8',
+        fillColor: '#9da0a7',
         fillOpacity: 0.95,
       }).addTo(map)
 

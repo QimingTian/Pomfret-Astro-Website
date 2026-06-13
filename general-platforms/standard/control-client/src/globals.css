@@ -185,6 +185,8 @@ h3 {
   --fg-primary: #eee9dc;
   --fg-muted: #9da0a7;
   --line: rgba(255, 255, 255, 0.14);
+  --overlay-backdrop: rgba(0, 0, 0, 0.55);
+  --surface-hover: #1b1c1c;
   --font-sf: 'SF Pro Text', 'SF Pro', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
 }
 

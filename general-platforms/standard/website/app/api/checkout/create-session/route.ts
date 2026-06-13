@@ -6,6 +6,8 @@ import { normalizeProductPlan } from '@/lib/plan-utils'
 import {
   buildStripeLineItem,
   stripeCheckoutMode,
+  stripeCheckoutPaymentMethodOptions,
+  stripeCheckoutPaymentMethodTypes,
 } from '@/lib/cloud/stripe-checkout'
 import { checkoutBaseUrl, getStripe, stripeConfigured } from '@/lib/cloud/stripe-client'
 import { PLANS, planIsPurchasable } from '@/lib/site-config'
@@ -71,7 +73,8 @@ export async function POST(request: NextRequest) {
   try {
     const session = await stripe.checkout.sessions.create({
       mode,
-      payment_method_types: ['card'],
+      payment_method_types: stripeCheckoutPaymentMethodTypes(),
+      payment_method_options: stripeCheckoutPaymentMethodOptions(),
       line_items: [buildStripeLineItem(plan, billingCycle)],
       success_url: `${baseUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${baseUrl}/checkout?plan=${plan}`,

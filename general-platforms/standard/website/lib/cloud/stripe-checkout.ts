@@ -21,6 +21,23 @@ export function stripeCheckoutMode(cycle: BillingCycle): 'subscription' | 'payme
   return cycle === 'lifetime' ? 'payment' : 'subscription'
 }
 
+/** Checkout payment methods (enable matching types in Stripe Dashboard → Payment methods). */
+export function stripeCheckoutPaymentMethodTypes(): Stripe.Checkout.SessionCreateParams.PaymentMethodType[] {
+  return ['card', 'link', 'us_bank_account', 'cashapp']
+}
+
+/** Apple Pay / Google Pay are wallet options on `card` — enable Wallets in the Dashboard, not here. */
+export function stripeCheckoutPaymentMethodOptions(): Stripe.Checkout.SessionCreateParams.PaymentMethodOptions {
+  return {
+    us_bank_account: {
+      financial_connections: {
+        permissions: ['payment_method'],
+      },
+      verification_method: 'automatic',
+    },
+  }
+}
+
 export function buildStripeLineItem(plan: ProductPlan, cycle: BillingCycle): Stripe.Checkout.SessionCreateParams.LineItem {
   const priceId = envPriceId(plan, cycle)
   if (priceId) {

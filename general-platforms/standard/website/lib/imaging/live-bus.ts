@@ -1,4 +1,4 @@
-export type LiveChannel = `mount:${string}:${string}`
+export type LiveChannel = `mount:${string}:${string}` | `agent:wake:${string}`
 
 type Listener = (payload: unknown) => void
 
@@ -64,4 +64,16 @@ export function liveMountChannel(
   const tenant = typeof tenantId === 'string' && tenantId.trim() ? tenantId.trim() : 'global'
   const t = typeof stationId === 'string' ? stationId.trim() : ''
   return `mount:${tenant}:${t.length > 0 ? t : 'default'}`
+}
+
+export function liveAgentWakeChannel(tenantId: string): LiveChannel {
+  const tenant = tenantId.trim() || 'global'
+  return `agent:wake:${tenant}`
+}
+
+export async function emitAgentWakePollSequence(tenantId: string): Promise<void> {
+  await emitLiveEvent(liveAgentWakeChannel(tenantId), {
+    type: 'poll_sequence',
+    at: new Date().toISOString(),
+  })
 }

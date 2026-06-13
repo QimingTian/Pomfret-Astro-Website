@@ -24,8 +24,9 @@ export async function GET(
   return personalJson(
     {
       ok: false,
-      error: 'No sequence available yet (Borean cloud scheduling pending).',
+      error:
+        'No scheduled pending session available for download. Submit a session from Control Client and wait for scheduling.',
     },
-    404
+    409
   )
 }

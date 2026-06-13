@@ -1137,17 +1137,6 @@ def run_loop() -> None:
 
             try:
                 content = download_bytes(SEQUENCE_JSON_URL)
-            except urllib.error.URLError as ex:
-                reason = getattr(ex, "reason", None)
-                err_text = str(ex)
-                if isinstance(reason, ConnectionRefusedError) or "10061" in err_text:
-                    log(
-                        f"Cloud hub not reachable for tenant '{_tenant_id()}' at {_api_base_url()} "
-                        "(connection refused). Check network or www.boreanastro.com status."
-                    )
-                    sleep_between_polls()
-                    continue
-                raise
             except urllib.error.HTTPError as ex:
                 if ex.code == 404:
                     log("No sequence available yet (HTTP 404).")
@@ -1166,6 +1155,17 @@ def run_loop() -> None:
                     except Exception:
                         pass
                     log(f"Sequence not ready yet (HTTP 409, server-side gate not met){detail}.")
+                    sleep_between_polls()
+                    continue
+                raise
+            except urllib.error.URLError as ex:
+                reason = getattr(ex, "reason", None)
+                err_text = str(ex)
+                if isinstance(reason, ConnectionRefusedError) or "10061" in err_text:
+                    log(
+                        f"Cloud hub not reachable for tenant '{_tenant_id()}' at {_api_base_url()} "
+                        "(connection refused). Check network or www.boreanastro.com status."
+                    )
                     sleep_between_polls()
                     continue
                 raise

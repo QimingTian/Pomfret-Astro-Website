@@ -6,6 +6,7 @@ import {
   type PersonalSessionOutputMode,
 } from '@/lib/cloud/hub-store'
 import { personalAppendAuditLog } from '@/lib/cloud/personal-audit-log'
+import { emitAgentWakePollSequence } from '@/lib/imaging/live-bus'
 import { personalJson, personalOptions, requirePersonalTenant } from '@/lib/cloud/route-helpers'
 
 export const runtime = 'nodejs'
@@ -43,5 +44,6 @@ export async function POST(
     message: `Imaging session created: ${target} (${session.id})`,
     detail: { id: session.id, target, status: session.status },
   })
+  void emitAgentWakePollSequence(tenantId)
   return personalJson({ ok: true, request: personalSessionToPublicJson(session) }, 201)
 }

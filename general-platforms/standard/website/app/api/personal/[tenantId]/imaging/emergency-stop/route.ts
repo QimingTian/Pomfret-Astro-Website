@@ -4,6 +4,7 @@ import {
   personalGetEmergencyStopPublicState,
   isPersonalAgentConnected,
 } from '@/lib/cloud/personal-emergency-stop'
+import { emitAgentWakePollSequence } from '@/lib/imaging/live-bus'
 import { personalJson, personalOptions, requirePersonalTenant } from '@/lib/cloud/route-helpers'
 
 export const runtime = 'nodejs'
@@ -46,6 +47,7 @@ export async function POST(
     return personalJson({ ok: false as const, error: message }, 409)
   }
 
+  void emitAgentWakePollSequence(tenantId)
   const publicState = await personalGetEmergencyStopPublicState(tenantId)
   return personalJson({ ok: true as const, ...publicState })
 }

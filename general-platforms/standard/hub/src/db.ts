@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3'
+import { isWithinDaytimeClosedWindow } from './astro/sunrise-window.js'
 import { dbPath, ensureDataDir } from './config.js'
 
 export type SessionOutputMode = 'none' | 'raw_zip'
@@ -424,21 +425,33 @@ export function getObservatoryState(): {
     .get() as Record<string, unknown>
   const agentLastSeenMs = Number(row.agent_last_seen_ms) || 0
   const ninaRunning = Number(row.nina_running) === 1
-  let status = row.status as ObservatoryStatus
+  const mode = row.mode as ObservatoryMode
+  const storedStatus = row.status as ObservatoryStatus
   const staleMs = 90_000
-  if (Date.now() - agentLastSeenMs > staleMs) {
-    status = 'disconnected'
-  } else if (ninaRunning) {
-    status = 'busy_in_use'
-  } else if (status === 'busy_in_use' || status === 'disconnected') {
-    status = 'ready'
+  const now = Date.now()
+
+  if (now - agentLastSeenMs > staleMs) {
+    return { mode, status: 'disconnected', agentLastSeenMs, ninaRunning }
   }
-  return {
-    mode: row.mode as ObservatoryMode,
-    status,
-    agentLastSeenMs,
-    ninaRunning,
+  if (ninaRunning) {
+    return { mode, status: 'busy_in_use', agentLastSeenMs, ninaRunning }
   }
+
+  if (mode === 'auto') {
+    const status: ObservatoryStatus = isWithinDaytimeClosedWindow(new Date(now))
+      ? 'closed_daytime'
+      : 'ready'
+    return { mode, status, agentLastSeenMs, ninaRunning }
+  }
+
+  const manualStatus: ObservatoryStatus =
+    storedStatus === 'ready' ||
+    storedStatus === 'closed_weather_not_permitted' ||
+    storedStatus === 'closed_daytime' ||
+    storedStatus === 'closed_observatory_maintenance'
+      ? storedStatus
+      : 'ready'
+  return { mode, status: manualStatus, agentLastSeenMs, ninaRunning }
 }
 
 export function isObservatoryReady(): boolean {

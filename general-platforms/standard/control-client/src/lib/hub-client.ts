@@ -173,8 +173,11 @@ export async function fetchAuditLog(limit = 200): Promise<AuditLogResponse> {
 export function observatoryStatusLabel(status: string | undefined | null): string {
   if (!status) return '—'
   if (status === 'ready') return 'Ready'
-  if (status === 'busy_in_use') return 'Busy'
+  if (status === 'busy_in_use') return 'Busy — In Use'
   if (status === 'disconnected') return 'Disconnected'
+  if (status === 'closed_daytime') return 'Closed — Daytime'
+  if (status === 'closed_weather_not_permitted') return 'Closed — Weather Not Permitted'
+  if (status === 'closed_observatory_maintenance') return 'Closed — Observatory Maintenance'
   return 'Closed'
 }
 

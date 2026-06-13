@@ -1,4 +1,5 @@
 import { kvGetJson, kvSetJson } from '@/lib/cloud/kv-rest'
+import { isWithinDaytimeClosedWindow } from '@/lib/content/sunrise-window'
 
 export type PersonalSessionOutputMode = 'none' | 'raw_zip'
 
@@ -79,11 +80,26 @@ async function saveState(tenantId: string, state: TenantState): Promise<void> {
 
 function resolveObservatoryStatus(state: TenantState): PersonalObservatoryStatus {
   const staleMs = 90_000
-  const { agentLastSeenMs, ninaRunning, status } = state.observatory
-  if (Date.now() - agentLastSeenMs > staleMs) return 'disconnected'
+  const now = Date.now()
+  const { agentLastSeenMs, ninaRunning, status: storedStatus, mode } = state.observatory
+
+  if (now - agentLastSeenMs > staleMs) return 'disconnected'
   if (ninaRunning) return 'busy_in_use'
-  if (status === 'busy_in_use' || status === 'disconnected') return 'ready'
-  return status
+
+  if (mode === 'auto') {
+    if (isWithinDaytimeClosedWindow(new Date(now))) return 'closed_daytime'
+    return 'ready'
+  }
+
+  if (
+    storedStatus === 'ready' ||
+    storedStatus === 'closed_weather_not_permitted' ||
+    storedStatus === 'closed_daytime' ||
+    storedStatus === 'closed_observatory_maintenance'
+  ) {
+    return storedStatus
+  }
+  return 'ready'
 }
 
 export async function personalGetObservatory(tenantId: string): Promise<{

@@ -176,6 +176,110 @@ pub fn autostart_is_active() -> bool {
 
 const NINA_PLUGIN_FOLDER: &str = "BoreanAstro.Plugin";
 const NINA_PLUGIN_DLL: &str = "BoreanAstro.Plugin.dll";
+const NINA_PLUGIN_VERSION_FILE: &str = "version.txt";
+/// Matches `nina-plugins/BoreanAstro.Plugin/version.txt` when bundle metadata is missing.
+const BUNDLED_NINA_PLUGIN_VERSION: &str = "0.1.1";
+
+#[derive(Debug, Clone)]
+pub struct NinaPluginDiagnostics {
+    pub installed: bool,
+    pub installed_version: Option<String>,
+    pub bundled_version: String,
+    pub update_available: bool,
+}
+
+fn parse_version_parts(version: &str) -> Vec<u64> {
+    version
+        .trim()
+        .trim_start_matches('v')
+        .split('.')
+        .map(|part| part.parse().unwrap_or(0))
+        .collect()
+}
+
+fn compare_versions(left: &str, right: &str) -> std::cmp::Ordering {
+    let left_parts = parse_version_parts(left);
+    let right_parts = parse_version_parts(right);
+    let len = left_parts.len().max(right_parts.len());
+    for index in 0..len {
+        let left_value = *left_parts.get(index).unwrap_or(&0);
+        let right_value = *right_parts.get(index).unwrap_or(&0);
+        match left_value.cmp(&right_value) {
+            std::cmp::Ordering::Equal => {}
+            other => return other,
+        }
+    }
+    std::cmp::Ordering::Equal
+}
+
+fn read_trimmed_text(path: &Path) -> Option<String> {
+    fs::read_to_string(path)
+        .ok()
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())
+}
+
+fn bundled_plugin_version(source_candidates: &[PathBuf]) -> String {
+    for dir in source_candidates {
+        if let Some(version) = read_trimmed_text(&dir.join(NINA_PLUGIN_VERSION_FILE)) {
+            return version;
+        }
+    }
+    BUNDLED_NINA_PLUGIN_VERSION.to_string()
+}
+
+fn read_dll_file_version(dll: &Path) -> Option<String> {
+    let path_str = dll.display().to_string().replace('\'', "''");
+    let script = format!("(Get-Item -LiteralPath '{path_str}').VersionInfo.FileVersion");
+    let output = hidden_cmd("powershell")
+        .args(["-NoProfile", "-Command", &script])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if version.is_empty() {
+        None
+    } else {
+        Some(version)
+    }
+}
+
+fn read_installed_plugin_version(dll_path: &Path) -> Option<String> {
+    if let Some(parent) = dll_path.parent() {
+        if let Some(version) = read_trimmed_text(&parent.join(NINA_PLUGIN_VERSION_FILE)) {
+            return Some(version);
+        }
+    }
+    read_dll_file_version(dll_path)
+}
+
+/// Compare installed plugin against the bundle shipped with this Station build.
+pub fn nina_plugin_diagnostics(source_candidates: &[PathBuf]) -> NinaPluginDiagnostics {
+    let bundled_version = bundled_plugin_version(source_candidates);
+    let Some(dll_path) = nina_plugin_install_path() else {
+        return NinaPluginDiagnostics {
+            installed: false,
+            installed_version: None,
+            bundled_version,
+            update_available: false,
+        };
+    };
+
+    let installed_version = read_installed_plugin_version(&dll_path);
+    let update_available = installed_version
+        .as_ref()
+        .map(|installed| compare_versions(installed, &bundled_version) == std::cmp::Ordering::Less)
+        .unwrap_or(true);
+
+    NinaPluginDiagnostics {
+        installed: true,
+        installed_version,
+        bundled_version,
+        update_available,
+    }
+}
 
 /// True when the Borean NINA plugin is present under %LOCALAPPDATA%\NINA\Plugins.
 pub fn nina_plugin_installed() -> bool {
@@ -328,8 +432,12 @@ fn copy_plugin_payload(source: &Path, dest: &Path) -> Result<(), String> {
 }
 
 /// Copy bundled (or freshly built) plugin files into NINA's user plugin folder.
-pub fn install_nina_plugin(source_candidates: &[PathBuf], csproj_fallback: Option<&Path>) -> Result<String, String> {
-    if nina_plugin_installed() {
+pub fn install_nina_plugin(
+    source_candidates: &[PathBuf],
+    csproj_fallback: Option<&Path>,
+    force_update: bool,
+) -> Result<String, String> {
+    if nina_plugin_installed() && !force_update {
         let path = nina_plugin_install_path()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|| NINA_PLUGIN_DLL.into());
@@ -370,7 +478,11 @@ pub fn install_nina_plugin(source_candidates: &[PathBuf], csproj_fallback: Optio
         ));
     }
 
-    let msg = format!("Installed Borean Astro plugin to {}", dest.display());
+    let msg = if force_update {
+        format!("Updated Borean Astro plugin to {}", dest.display())
+    } else {
+        format!("Installed Borean Astro plugin to {}", dest.display())
+    };
     append_install_log(&msg);
     Ok(msg)
 }

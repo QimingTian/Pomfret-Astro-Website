@@ -36,7 +36,28 @@ mod platform_windows {
         false
     }
 
-    pub fn install_nina_plugin(_source_candidates: &[PathBuf], _csproj_fallback: Option<&Path>) -> Result<String, String> {
+    #[derive(Debug, Clone)]
+    pub struct NinaPluginDiagnostics {
+        pub installed: bool,
+        pub installed_version: Option<String>,
+        pub bundled_version: String,
+        pub update_available: bool,
+    }
+
+    pub fn nina_plugin_diagnostics(_source_candidates: &[PathBuf]) -> NinaPluginDiagnostics {
+        NinaPluginDiagnostics {
+            installed: false,
+            installed_version: None,
+            bundled_version: "0.0.0".into(),
+            update_available: false,
+        }
+    }
+
+    pub fn install_nina_plugin(
+        _source_candidates: &[PathBuf],
+        _csproj_fallback: Option<&Path>,
+        _force_update: bool,
+    ) -> Result<String, String> {
         Err("This action is only available in the Windows Station app.".into())
     }
 }
@@ -703,6 +724,7 @@ fn build_checks(
     config: &StationConfig,
     agent_running: bool,
     agent_installed: bool,
+    nina_plugin_candidates: &[PathBuf],
 ) -> Vec<CheckItem> {
     let mut checks = Vec::new();
     let nina_exe = Path::new(&config.nina_install_dir).join("NINA.exe");
@@ -722,13 +744,7 @@ fn build_checks(
         "NINA agent script not found",
     );
 
-    checks_push(
-        &mut checks,
-        "nina_plugin_installed",
-        "NINA Plugin Installed",
-        platform_windows::nina_plugin_installed(),
-        "Borean Astro NINA plugin not found",
-    );
+    push_nina_plugin_check(&mut checks, nina_plugin_candidates);
 
     checks_push(
         &mut checks,
@@ -779,6 +795,41 @@ fn build_checks(
     push_station_version_check(&mut checks);
 
     checks
+}
+
+fn push_nina_plugin_check(checks: &mut Vec<CheckItem>, source_candidates: &[PathBuf]) {
+    let diag = platform_windows::nina_plugin_diagnostics(source_candidates);
+    let detail = if !diag.installed {
+        "Borean Astro NINA plugin not found".into()
+    } else if diag.update_available {
+        format!(
+            "Installed v{} · Bundled v{} · Update available",
+            diag.installed_version
+                .as_deref()
+                .unwrap_or("unknown"),
+            diag.bundled_version
+        )
+    } else {
+        format!(
+            "Installed v{} · Up to date",
+            diag.installed_version
+                .as_deref()
+                .unwrap_or("unknown")
+        )
+    };
+    let status = if !diag.installed {
+        "error".into()
+    } else if diag.update_available {
+        "warning".into()
+    } else {
+        "ok".into()
+    };
+    checks.push(CheckItem {
+        id: "nina_plugin_installed".into(),
+        label: "NINA Plugin Installed".into(),
+        status,
+        detail,
+    });
 }
 
 fn push_station_version_check(checks: &mut Vec<CheckItem>) {
@@ -887,7 +938,10 @@ async fn station_run_diagnostics(
     let cfg = read_config_file()?;
     let running = agent_is_running_locked(&state)?;
     let agent_installed = agent_script_path(&app).is_file();
-    tauri::async_runtime::spawn_blocking(move || build_checks(&cfg, running, agent_installed))
+    let plugin_candidates = nina_plugin_source_candidates(&app);
+    tauri::async_runtime::spawn_blocking(move || {
+        build_checks(&cfg, running, agent_installed, &plugin_candidates)
+    })
         .await
         .map_err(|e| e.to_string())
 }
@@ -1030,12 +1084,16 @@ async fn station_install_python() -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn station_install_nina_plugin(app: AppHandle) -> Result<String, String> {
+async fn station_install_nina_plugin(
+    app: AppHandle,
+    force_update: Option<bool>,
+) -> Result<String, String> {
     let candidates = nina_plugin_source_candidates(&app);
     let csproj = nina_plugin_csproj_path();
     let csproj = if csproj.is_file() { Some(csproj) } else { None };
+    let force = force_update.unwrap_or(false);
     tauri::async_runtime::spawn_blocking(move || {
-        let msg = platform_windows::install_nina_plugin(&candidates, csproj.as_deref())?;
+        let msg = platform_windows::install_nina_plugin(&candidates, csproj.as_deref(), force)?;
         append_log(&format!("[station-ui] {msg}"));
         Ok(msg)
     })

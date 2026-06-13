@@ -164,10 +164,10 @@ export function StationDashboard() {
     }
   }
 
-  async function handleInstallNinaPlugin() {
+  async function handleInstallNinaPlugin(forceUpdate = false) {
     setActionId('nina_plugin_installed')
     try {
-      const msg = await installNinaPlugin()
+      const msg = await installNinaPlugin(forceUpdate)
       appendUiLog(msg)
       await refreshChecks()
     } catch (ex) {
@@ -221,13 +221,15 @@ export function StationDashboard() {
           busy: isBusy,
           onClick: () => void handleInstallPython(),
         }
-      case 'nina_plugin_installed':
+      case 'nina_plugin_installed': {
+        const needsUpdate = item.status === 'warning'
         return {
-          label: 'Install',
+          label: needsUpdate ? 'Update' : 'Install',
           disabled: isOk,
           busy: isBusy,
-          onClick: () => void handleInstallNinaPlugin(),
+          onClick: () => void handleInstallNinaPlugin(needsUpdate),
         }
+      }
       case 'autostart':
         return {
           label: 'Set up',

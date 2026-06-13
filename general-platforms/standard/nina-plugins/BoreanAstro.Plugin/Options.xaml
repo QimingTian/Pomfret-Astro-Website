@@ -2,7 +2,7 @@
     x:Class="BoreanAstro.Plugin.Options"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <DataTemplate x:Key="BoreanAstroPlugin_Options">
+    <DataTemplate x:Key="BoreanAstro.Plugin_Options">
         <StackPanel Orientation="Vertical">
             <Label Content="Borean Astro" FontWeight="Bold" Margin="0,4,0,0" />
             <TextBlock Text="Reads license from %LOCALAPPDATA%\BoreanAstro\tenant.json on startup." TextWrapping="Wrap" Margin="0,4,0,0" Opacity="0.85" />

@@ -3,8 +3,8 @@ using System.Runtime.InteropServices;
 
 [assembly: Guid("c4e8a1f2-7b3d-4e9a-8f2c-1d6b5e0a3f71")]
 
-[assembly: AssemblyVersion("0.1.0.0")]
-[assembly: AssemblyFileVersion("0.1.0.0")]
+[assembly: AssemblyVersion("0.1.1.0")]
+[assembly: AssemblyFileVersion("0.1.1.0")]
 
 [assembly: AssemblyTitle("BoreanAstro.Plugin")]
 [assembly: AssemblyDescription("POSTs live telescope pointing to your Borean Astro hub")]

@@ -45,8 +45,8 @@ export async function installPython(): Promise<void> {
   await invoke('station_install_python')
 }
 
-export async function installNinaPlugin(): Promise<string> {
-  return invoke<string>('station_install_nina_plugin')
+export async function installNinaPlugin(forceUpdate = false): Promise<string> {
+  return invoke<string>('station_install_nina_plugin', { forceUpdate })
 }
 
 export async function setupAutostart(): Promise<StationConfig> {

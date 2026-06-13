@@ -19,4 +19,12 @@ if (-not (Test-Path $dll)) {
     Write-Error "Expected output missing: $dll"
 }
 
+$VersionFile = Join-Path (Split-Path $PluginProject -Parent) "version.txt"
+if (Test-Path $VersionFile) {
+    Copy-Item $VersionFile (Join-Path $OutDir "version.txt") -Force
+    Write-Host "Copied plugin version.txt to bundle"
+} else {
+    Write-Warning "version.txt missing next to plugin project"
+}
+
 Write-Host "Plugin staged at $OutDir" -ForegroundColor Green

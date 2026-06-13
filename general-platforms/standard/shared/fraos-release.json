@@ -1,9 +1,9 @@
 {
   "channel": "stable",
   "station": {
-    "latestVersion": "0.1.2",
-    "downloadUrlWindows": "https://www.boreanastro.com/releases/borean-station-0.1.2-windows-setup.exe",
-    "releaseNotes": "Agent Cloudflare fix; NINA plugin install; License + PDU settings UI; bundled BoreanAstro.Plugin."
+    "latestVersion": "0.1.3",
+    "downloadUrlWindows": "https://www.boreanastro.com/releases/borean-station-0.1.3-windows-setup.exe",
+    "releaseNotes": "NINA plugin options fix; plugin Update button in System Status; agent HTTPError fix; mount telemetry reload."
   },
   "control": {
     "latestVersion": "0.1.16",

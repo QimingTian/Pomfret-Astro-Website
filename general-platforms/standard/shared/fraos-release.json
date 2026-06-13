@@ -6,9 +6,9 @@
     "releaseNotes": "NINA plugin options fix; plugin Update button in System Status; agent HTTPError fix; mount telemetry reload."
   },
   "control": {
-    "latestVersion": "0.1.16",
+    "latestVersion": "0.1.17",
     "downloadUrlWindows": "https://www.boreanastro.com/releases/borean-control-0.1.16-windows-setup.exe",
-    "downloadUrlMac": "https://www.boreanastro.com/releases/borean-control-0.1.16-macos.dmg",
-    "releaseNotes": "Remote console refresh; mount-pointing stream; removed Stacked Master output mode."
+    "downloadUrlMac": "https://www.boreanastro.com/releases/borean-control-0.1.17-macos.dmg",
+    "releaseNotes": "Unified glass modals and Borean palette; session queue fields for timeline; cloud imaging hub compatibility."
   }
 }

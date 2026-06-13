@@ -1,0 +1,45 @@
+name: Control Mac OTA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-mac:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: general-platforms/standard/control-client
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: general-platforms/standard/control-client/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: general-platforms/standard/control-client/src-tauri
+
+      - run: npm ci
+      - run: npm run tauri build
+
+      - name: Stage macOS installer
+        working-directory: general-platforms/standard
+        run: |
+          mkdir -p control-client/dist-ci
+          cp control-client/src-tauri/target/release/bundle/dmg/*.dmg \
+            "control-client/dist-ci/Borean Astro Control_$(node -p "require('./control-client/package.json').version")_aarch64.dmg"
+          node scripts/stage-release-installers.mjs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: control-mac-ota
+          path: |
+            general-platforms/standard/shared/fraos-release.json
+            general-platforms/standard/website/lib/fraos-release.json
+            general-platforms/standard/website/public/releases/borean-control-*-macos.dmg
+          if-no-files-found: error

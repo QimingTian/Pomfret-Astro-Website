@@ -14,6 +14,7 @@ import base64
 import json
 import queue
 import subprocess
+import sys
 import threading
 import time
 import traceback
@@ -179,9 +180,32 @@ PDU_OUTLETS = (1, 2)
 PDU_WARMUP_SECONDS = 60
 
 
+def _configure_stdio() -> None:
+    """Windows: avoid OSError [Errno 22] when stdout is a pipe with a non-UTF-8 code page."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
+            except Exception:
+                pass
+
+
+_configure_stdio()
+
+
 def log(message: str) -> None:
     now = time.strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{now}] {message}", flush=True)
+    safe = str(message).encode("utf-8", errors="replace").decode("utf-8", errors="replace")
+    line = f"[{now}] {safe}"
+    try:
+        print(line, flush=True)
+    except OSError:
+        try:
+            sys.stdout.buffer.write(line.encode("utf-8", errors="replace") + b"\n")
+            sys.stdout.buffer.flush()
+        except Exception:
+            pass
 
 
 def queue_bearer_token() -> str:
@@ -205,16 +229,13 @@ def build_headers() -> Dict[str, str]:
     return headers
 
 
-def reconcile_queue_headers() -> Dict[str, str]:
-    headers = client_request_headers()
-    bearer = reconcile_queue_bearer_token()
-    if bearer:
-        headers["Authorization"] = f"Bearer {bearer}"
-    return headers
-
-
 def reconcile_queue_bearer_token() -> str:
-    return (RECONCILE_BEARER or os.environ.get("BOREAN_CRON_SECRET") or TOKEN or "").strip()
+    """Same tenant secret as nina-sequence; optional cron override for hosted cron jobs."""
+    return (
+        RECONCILE_BEARER.strip()
+        or queue_bearer_token()
+        or os.environ.get("BOREAN_CRON_SECRET", "").strip()
+    )
 
 
 def pdu_credentials() -> tuple[str, str]:
@@ -333,13 +354,12 @@ def try_reconcile_queue_schedule() -> None:
     if not url:
         return
     try:
-        req = urllib.request.Request(url, headers=reconcile_queue_headers(), method="GET")
+        req = urllib.request.Request(url, headers=build_headers(), method="GET")
         with urllib.request.urlopen(req, timeout=120) as resp:
             raw = resp.read().decode("utf-8", errors="replace").strip()
         log(f"Queue schedule reconcile HTTP {resp.status}: {raw[:300]}")
     except urllib.error.HTTPError as ex:
-        body = ex.read().decode("utf-8", errors="replace").strip() if ex.fp else ""
-        log(f"Queue schedule reconcile HTTP {ex.code}: {body[:300]}")
+        log(f"Queue schedule reconcile {http_error_detail(ex)}")
     except Exception as ex:
         log(f"Queue schedule reconcile failed: {ex}")
 
@@ -574,10 +594,10 @@ def validate_config() -> None:
         )
     if RECONCILE_EVERY_N_POLLS > 0 and not str(RECONCILE_QUEUE_URL).strip():
         raise ValueError("RECONCILE_QUEUE_URL is empty (check SEQUENCE_JSON_URL).")
-    if RECONCILE_EVERY_N_POLLS > 0 and str(RECONCILE_QUEUE_URL).strip() and not reconcile_queue_bearer_token():
+    if str(RECONCILE_QUEUE_URL).strip() and not queue_bearer_token():
         log(
-            "Queue reconcile is enabled but no bearer token: set Windows env BOREAN_CRON_SECRET "
-            "(same as Vercel CRON_SECRET), or RECONCILE_BEARER / TOKEN, if the host returns 401."
+            "Queue reconcile URL is set but no bearer token (IMAGING_QUEUE_SECRET from Station). "
+            "Reconcile requests will return HTTP 401 until the agent is restarted from Station."
         )
     nina_exe = Path(NINA_INSTALL_DIR) / "NINA.exe"
     if not nina_exe.exists():

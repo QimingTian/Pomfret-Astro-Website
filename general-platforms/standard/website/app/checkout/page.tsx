@@ -257,12 +257,6 @@ function CheckoutMain({
           </button>
         </div>
 
-        {!promoActive && !stripeEnabled ? (
-          <p className="mt-4 text-center text-xs text-muted/80 sm:text-right">
-            Card checkout is not configured on this server yet — use a 100% promotion code to activate
-            today.
-          </p>
-        ) : null}
         {error ? <p className="mt-4 text-center text-sm text-red-300 sm:text-right">{error}</p> : null}
       </div>
     </>

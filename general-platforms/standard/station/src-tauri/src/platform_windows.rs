@@ -337,6 +337,24 @@ fn resolve_nina_plugin_version_folder(plugins_root: &Path) -> String {
         .unwrap_or_else(|| "3.0.0".to_string())
 }
 
+fn is_nina_running() -> bool {
+    hidden_cmd("tasklist")
+        .args(["/FI", "IMAGENAME eq NINA.exe", "/NH"])
+        .output()
+        .map(|output| {
+            if !output.status.success() {
+                return false;
+            }
+            String::from_utf8_lossy(&output.stdout)
+                .to_ascii_uppercase()
+                .contains("NINA.EXE")
+        })
+        .unwrap_or(false)
+}
+
+const NINA_PLUGIN_LOCK_HINT: &str =
+    "Close NINA completely, then try again. NINA locks plugin files while it is running.";
+
 fn dotnet_available() -> bool {
     hidden_cmd("dotnet")
         .arg("--version")
@@ -420,8 +438,17 @@ fn copy_plugin_payload(source: &Path, dest: &Path) -> Result<(), String> {
         }
         let name = entry.file_name();
         let target = dest.join(&name);
-        fs::copy(&path, &target)
-            .map_err(|e| format!("Cannot copy {}: {e}", path.display()))?;
+        fs::copy(&path, &target).map_err(|e| {
+            let detail = format!("Cannot copy {}: {e}", path.display());
+            if is_nina_running()
+                || detail.contains("Access is denied")
+                || detail.contains("os error 5")
+            {
+                format!("{detail} {NINA_PLUGIN_LOCK_HINT}")
+            } else {
+                detail
+            }
+        })?;
         copied += 1;
     }
 
@@ -443,6 +470,12 @@ pub fn install_nina_plugin(
             .unwrap_or_else(|| NINA_PLUGIN_DLL.into());
         append_install_log(&format!("NINA plugin already installed at {path}"));
         return Ok(format!("Already installed ({path})"));
+    }
+
+    if is_nina_running() {
+        let msg = format!("Cannot install plugin while NINA is running. {NINA_PLUGIN_LOCK_HINT}");
+        append_install_log(&msg);
+        return Err(msg);
     }
 
     let mut source = find_plugin_source_dir(source_candidates);

@@ -86,6 +86,12 @@ export function StationDashboard() {
     }
   }, [logs])
 
+  function invokeErrorMessage(ex: unknown, fallback: string): string {
+    if (typeof ex === 'string' && ex.trim()) return ex
+    if (ex instanceof Error && ex.message) return ex.message
+    return fallback
+  }
+
   function appendUiLog(message: string) {
     setLogs((prev) => `${prev}\n[ui] ${message}`.trim())
   }
@@ -171,7 +177,7 @@ export function StationDashboard() {
       appendUiLog(msg)
       await refreshChecks()
     } catch (ex) {
-      appendUiLog(ex instanceof Error ? ex.message : 'NINA plugin install failed')
+      appendUiLog(invokeErrorMessage(ex, 'NINA plugin install failed'))
     } finally {
       setActionId(null)
     }

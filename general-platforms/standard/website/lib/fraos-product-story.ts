@@ -21,6 +21,7 @@ export const MEDIA = {
   atlas: '/media/fraos/atlas.png',
   atlasNight: '/media/fraos/atlas-night.png',
   weather: '/media/fraos/weather.png',
+  station: '/media/fraos/station.png',
   logoFull: '/media/fraos/borean-logo-full.png',
 } as const
 

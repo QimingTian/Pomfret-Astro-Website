@@ -227,8 +227,8 @@ export function ProductStoryPage({ plan }: ProductStoryPageProps) {
         />
         <div data-reveal-item className="page-shell mt-14">
           <ProductMediaFrame
-            alt="Borean Station dashboard"
-            placeholderLabel="Borean Station — system checks, live log, and NINA status (screenshot coming)"
+            src={MEDIA.station}
+            alt="Borean Station dashboard with system checks, agent log, license, and settings"
             aspect="hero"
             className="mx-auto max-w-5xl"
           />

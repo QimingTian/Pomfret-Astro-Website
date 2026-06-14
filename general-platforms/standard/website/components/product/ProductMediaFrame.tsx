@@ -1,6 +1,6 @@
 import Image from 'next/image'
 
-type Aspect = 'wide' | 'hero' | 'tall' | 'square' | 'auto'
+type Aspect = 'wide' | 'hero' | 'station' | 'tall' | 'square' | 'auto'
 
 type ProductMediaFrameProps = {
   src?: string
@@ -17,6 +17,8 @@ type ProductMediaFrameProps = {
 const ASPECT: Record<Exclude<Aspect, 'auto'>, string> = {
   wide: 'aspect-[16/10]',
   hero: 'aspect-[1024/639]',
+  /** Station UI capture — 3024×1620, wider than Control hero frames. */
+  station: 'aspect-[28/15]',
   tall: 'aspect-[3/4]',
   square: 'aspect-square',
 }

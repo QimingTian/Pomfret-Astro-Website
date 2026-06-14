@@ -229,7 +229,7 @@ export function ProductStoryPage({ plan }: ProductStoryPageProps) {
           <ProductMediaFrame
             src={MEDIA.station}
             alt="Borean Station dashboard with system checks, agent log, license, and settings"
-            aspect="hero"
+            aspect="station"
             className="mx-auto max-w-5xl"
           />
         </div>

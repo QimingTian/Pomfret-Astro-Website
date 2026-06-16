@@ -23,6 +23,28 @@ const CONTROL_VERSION = controlPkg.version
 const STATION_VERSION = stationPkg.version
 const SITE = 'https://www.boreanastro.com'
 
+function readCargoVersion(cargoTomlPath) {
+  const text = fs.readFileSync(cargoTomlPath, 'utf8')
+  const match = text.match(/^version\s*=\s*"([^"]+)"/m)
+  return match?.[1] ?? null
+}
+
+function assertTauriVersionsMatch(label, rootDir, pkgVersion) {
+  const cargoVersion = readCargoVersion(path.join(rootDir, 'src-tauri/Cargo.toml'))
+  const tauriVersion = JSON.parse(
+    fs.readFileSync(path.join(rootDir, 'src-tauri/tauri.conf.json'), 'utf8')
+  ).version
+  if (cargoVersion !== pkgVersion || tauriVersion !== pkgVersion) {
+    console.error(
+      `${label} version mismatch — package.json=${pkgVersion}, Cargo.toml=${cargoVersion}, tauri.conf.json=${tauriVersion}`
+    )
+    process.exit(1)
+  }
+}
+
+assertTauriVersionsMatch('control-client', path.join(standardRoot, 'control-client'), CONTROL_VERSION)
+assertTauriVersionsMatch('station', path.join(standardRoot, 'station'), STATION_VERSION)
+
 const sources = [
   {
     key: 'controlMac',

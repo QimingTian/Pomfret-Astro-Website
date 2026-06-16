@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { armEmergencyStop, fetchEmergencyStopStatus } from '../../lib/hub-client'
+import { MotionExpand } from '../motion'
 
 type EmergencyStopPhase = 'idle' | 'stopping' | 'stopped'
 
@@ -73,6 +74,10 @@ export function EmergencyStopPanel({ hubReachable }: { hubReachable: boolean }) 
     return () => window.clearInterval(timer)
   }, [hubReachable, refreshStatus, status.phase])
 
+  useEffect(() => {
+    if (status.phase !== 'idle') setShowConfirm(false)
+  }, [status.phase])
+
   async function confirmEmergencyStop() {
     setShowConfirm(false)
     setPending(true)
@@ -100,66 +105,57 @@ export function EmergencyStopPanel({ hubReachable }: { hubReachable: boolean }) 
     }
   }
 
-  const disabled =
-    !hubReachable ||
-    !statusLoaded ||
-    pending ||
-    status.phase !== 'idle' ||
-    !status.agentConnected ||
-    !status.canArm
+  const canArmEstop =
+    hubReachable &&
+    statusLoaded &&
+    !pending &&
+    status.phase === 'idle' &&
+    status.agentConnected &&
+    status.canArm
+
+  const idleLabel = !statusLoaded ? 'Loading…' : pending ? 'Sending…' : emergencyStopButtonLabel(status)
 
   return (
-    <>
-      <div className="console-header-estop-inner">
-        <button
-          type="button"
-          className="estop-pill"
-          disabled={disabled}
-          onClick={() => setShowConfirm(true)}
-        >
-          <div
-            className="estop-pill-progress"
-            style={{ width: `${status.progress}%` }}
-            aria-hidden
-          />
-          <span className="estop-pill-label">
-            {!statusLoaded
-              ? 'Loading…'
-              : pending
-                ? 'Sending…'
-                : emergencyStopButtonLabel(status)}
-          </span>
-        </button>
-        {error ? <p className="estop-error">{error}</p> : null}
-      </div>
-
-      {showConfirm ? (
-        <div className="estop-confirm-backdrop">
-          <div role="dialog" aria-labelledby="estop-confirm-title" className="estop-confirm-dialog">
-            <p id="estop-confirm-title" className="estop-confirm-text">
-              ESTOP will kill any ongoing observatory work and close the dome.
-            </p>
-            <div className="estop-confirm-actions">
+    <div className="console-header-estop-inner">
+      <div className="estop-pill-wrap">
+        {!showConfirm ? (
+          <button
+            type="button"
+            className="estop-pill"
+            disabled={!canArmEstop}
+            onClick={() => setShowConfirm(true)}
+          >
+            <div
+              className="estop-pill-progress"
+              style={{ width: `${status.progress}%` }}
+              aria-hidden
+            />
+            <span className="estop-pill-label">{idleLabel}</span>
+          </button>
+        ) : (
+          <MotionExpand open={showConfirm}>
+            <div className="estop-confirm-pills" role="group" aria-label="Confirm emergency stop">
               <button
                 type="button"
+                className="estop-pill"
                 disabled={pending}
-                className="estop-confirm-primary"
                 onClick={() => void confirmEmergencyStop()}
               >
-                Confirm ESTOP
+                <span className="estop-pill-label">Confirm ESTOP</span>
               </button>
               <button
                 type="button"
+                className="estop-pill"
                 disabled={pending}
-                className="estop-confirm-secondary"
                 onClick={() => setShowConfirm(false)}
               >
-                Cancel
+                <span className="estop-pill-label">Cancel</span>
               </button>
             </div>
-          </div>
-        </div>
-      ) : null}
-    </>
+          </MotionExpand>
+        )}
+      </div>
+      {error ? <p className="estop-error">{error}</p> : null}
+    </div>
   )
 }

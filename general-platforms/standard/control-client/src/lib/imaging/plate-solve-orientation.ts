@@ -3,25 +3,40 @@ function normalizeDeg(deg: number): number {
 }
 
 /**
- * astrometry.net `orientation`: image +X (column) axis, degrees east of celestial north.
- * NINA rotator PositionAngle uses a different convention (typically ~180° from +X for DSLR JPEG).
+ * Raw `orientation` from GET /api/jobs/:id/calibration/ (TanWCS.get_orientation).
+ * This is **not** the nova web UI string "Up is …° E of N" until adjusted for JPEG-like uploads.
+ *
+ * @see astrometry.net net/models.py Calibration.get_orientation — JPEG/PNG flip: (180 - orient).
  */
-export function astrometryOrientationToPositionAngle(orientationDeg: number): number {
-  const pa = 360 - (180 - orientationDeg + 360)
-  return normalizeDeg(pa)
+export type AstrometryUploadKind = 'jpeg' | 'fits'
+
+/**
+ * Image **top** edge direction, degrees east of celestial north — matches nova "Up is …° E of N"
+ * for JPEG/PNG uploads (what the Control Client sends to astrometry.net).
+ */
+export function astrometryApiOrientationToImageTopPA(
+  orientationDeg: number,
+  uploadKind: AstrometryUploadKind = 'jpeg',
+): number {
+  if (uploadKind === 'jpeg') {
+    return normalizeDeg(180 - orientationDeg)
+  }
+  return normalizeDeg(orientationDeg)
+}
+
+/** @deprecated Use astrometryApiOrientationToImageTopPA — parity is already in the WCS orientation. */
+export function astrometryCalibrationToImageTopPA(
+  orientationDeg: number,
+  _parity?: number | null,
+  uploadKind: AstrometryUploadKind = 'jpeg',
+): number {
+  return astrometryApiOrientationToImageTopPA(orientationDeg, uploadKind)
 }
 
 /**
- * Atlas camera-frame overlay: direction of the **displayed image top** (−Y pixel axis)
- * east of celestial north. Derived from astrometry +X orientation and parity.
- * JPEG/PNG plate solves usually have negative parity.
+ * Approximate NINA rotator PA (Settings field) from raw API orientation.
+ * Legacy heuristic for display only; Atlas uses {@link astrometryApiOrientationToImageTopPA}.
  */
-export function astrometryCalibrationToImageTopPA(
-  orientationDeg: number,
-  parity: number | null | undefined,
-): number {
-  if (typeof parity === 'number' && parity < 0) {
-    return normalizeDeg(orientationDeg + 90)
-  }
-  return normalizeDeg(orientationDeg - 90)
+export function astrometryOrientationToPositionAngle(orientationDeg: number): number {
+  return normalizeDeg(orientationDeg - 180)
 }

@@ -3,6 +3,7 @@ import { useNewImagingSessionForm } from './useNewImagingSessionForm'
 import type { SessionPrefill } from './types'
 import type { SessionRow } from '../../../lib/types'
 import type { WeatherPrediction } from '../../../lib/weather-client'
+import { MotionExpand, MotionModal } from '../../motion'
 import { VariableStarPreviewCharts } from './variable-star-preview-charts'
 
 type Props = {
@@ -109,7 +110,7 @@ export function NewImagingSessionForm(props: Props) {
                       ? '-- Select Filter --'
                       : `${s.variableStarFilterSelection.length} Filter${s.variableStarFilterSelection.length > 1 ? 's' : ''} Selected`}
                   </button>
-                  {s.variableStarFilterDropdownOpen && (
+                  <MotionExpand open={s.variableStarFilterDropdownOpen} className="nis-dropdown-motion">
                     <div className="nis-dropdown">
                       {VARIABLE_STAR_FILTER_PRESETS.map((option) => {
                         const checked = s.variableStarFilterSelection.includes(option.value)
@@ -131,7 +132,7 @@ export function NewImagingSessionForm(props: Props) {
                         )
                       })}
                     </div>
-                  )}
+                  </MotionExpand>
                 </div>
               </label>
               <label className="nis-group">
@@ -347,10 +348,22 @@ export function NewImagingSessionForm(props: Props) {
           <div className="nis-group">
             <span className="nis-label">Output Type *</span>
             <div className="nis-pill-row">
-              <button type="button" className={s.outputMode === 'raw_zip' ? 'nis-pill active' : 'nis-pill'} onClick={() => s.setOutputMode('raw_zip')}>Raw ZIP</button>
+              <button
+                type="button"
+                disabled={s.storageOverQuota}
+                className={s.outputMode === 'raw_zip' ? 'nis-pill active' : 'nis-pill'}
+                onClick={() => s.setOutputMode('raw_zip')}
+              >
+                Raw ZIP
+              </button>
               {/* Stacked Master removed — Borean Astro no longer offers this output mode. */}
               <button type="button" className={s.outputMode === 'none' ? 'nis-pill active' : 'nis-pill'} onClick={() => s.setOutputMode('none')}>None</button>
             </div>
+            {s.storageOverQuota ? (
+              <p className="mt-2 text-xs text-white/55">
+                Cloud storage is full. Delete files in Settings or choose None.
+              </p>
+            ) : null}
           </div>
           <div className="nis-group">
             <span className="nis-label">Camera Temperature</span>
@@ -388,97 +401,101 @@ export function NewImagingSessionForm(props: Props) {
         <p className="nis-note">Estimated duration: {s.estimatedDurationText}</p>
       </form>
 
-      {s.showClosedModal && (
-        <div className="nis-modal-backdrop">
-          <div className="nis-modal">
-            <h3>Observatory Closed</h3>
-            <p>Choose how to continue:</p>
-            <button type="button" className="nis-modal-btn" onClick={() => {
-              s.setShowClosedModal(false)
-            }}>
-              1. Do not start now.
-            </button>
-            <button type="button" className="nis-modal-btn" onClick={() => void s.handleSubmitWhenClosed()}>
-              2. Start now and queue until observatory is Ready.
-            </button>
-          </div>
-        </div>
-      )}
+      <MotionModal
+        show={s.showClosedModal}
+        onClose={() => s.setShowClosedModal(false)}
+        backdropClassName="nis-modal-backdrop"
+        panelClassName="nis-modal"
+      >
+        <h3>Observatory Closed</h3>
+        <p>Choose how to continue:</p>
+        <button type="button" className="nis-modal-btn" onClick={() => {
+          s.setShowClosedModal(false)
+        }}>
+          1. Do not start now.
+        </button>
+        <button type="button" className="nis-modal-btn" onClick={() => void s.handleSubmitWhenClosed()}>
+          2. Start now and queue until observatory is Ready.
+        </button>
+      </MotionModal>
 
-      {s.showAltitudeModal && (
-        <div className="nis-modal-backdrop">
-          <div className="nis-modal">
-            <h3>Target Below 30°</h3>
-            <p>
-              {s.lastComputedAltitude != null
-                ? `Current altitude is ${s.lastComputedAltitude.toFixed(2)}° (< 30°).`
-                : 'Current altitude is below 30°.'}
-            </p>
-            <button type="button" className="nis-modal-btn" onClick={() => s.setShowAltitudeModal(false)}>
-              1. Do not start.
-            </button>
-            <button type="button" className="nis-modal-btn" onClick={() => void s.handleSubmitWhenLowAltitude()}>
-              2. Start now and wait until altitude reaches 30°.
-            </button>
-          </div>
-        </div>
-      )}
+      <MotionModal
+        show={s.showAltitudeModal}
+        onClose={() => s.setShowAltitudeModal(false)}
+        backdropClassName="nis-modal-backdrop"
+        panelClassName="nis-modal"
+      >
+        <h3>Target Below 30°</h3>
+        <p>
+          {s.lastComputedAltitude != null
+            ? `Current altitude is ${s.lastComputedAltitude.toFixed(2)}° (< 30°).`
+            : 'Current altitude is below 30°.'}
+        </p>
+        <button type="button" className="nis-modal-btn" onClick={() => s.setShowAltitudeModal(false)}>
+          1. Do not start.
+        </button>
+        <button type="button" className="nis-modal-btn" onClick={() => void s.handleSubmitWhenLowAltitude()}>
+          2. Start now and wait until altitude reaches 30°.
+        </button>
+      </MotionModal>
 
-      {s.showSaveModal && (
-        <div className="nis-modal-backdrop">
-          <div className="nis-modal">
-            <h3>Save Session</h3>
-            <p>Save this form as a reusable template on your local control client.</p>
-            <label className="nis-group">
-              <span className="nis-label">Session name</span>
-              <input type="text" value={s.saveModalName} onChange={(e) => s.setSaveModalName(e.target.value)} className="nis-input" />
-            </label>
-            {s.saveModalError && <p className="nis-error">{s.saveModalError}</p>}
-            <div className="nis-modal-actions">
-              <button type="button" className="nis-pill" onClick={() => s.setShowSaveModal(false)}>
-                Cancel
-              </button>
-              <button type="button" className="nis-pill active" onClick={s.saveCurrentSession}>
-                Save
-              </button>
-            </div>
-          </div>
+      <MotionModal
+        show={s.showSaveModal}
+        onClose={() => s.setShowSaveModal(false)}
+        backdropClassName="nis-modal-backdrop"
+        panelClassName="nis-modal"
+      >
+        <h3>Save Session</h3>
+        <p>Save this form as a reusable template on your local control client.</p>
+        <label className="nis-group">
+          <span className="nis-label">Session name</span>
+          <input type="text" value={s.saveModalName} onChange={(e) => s.setSaveModalName(e.target.value)} className="nis-input" />
+        </label>
+        {s.saveModalError && <p className="nis-error">{s.saveModalError}</p>}
+        <div className="nis-modal-actions">
+          <button type="button" className="nis-pill" onClick={() => s.setShowSaveModal(false)}>
+            Cancel
+          </button>
+          <button type="button" className="nis-pill active" onClick={s.saveCurrentSession}>
+            Save
+          </button>
         </div>
-      )}
+      </MotionModal>
 
-      {s.showRunModal && (
-        <div className="nis-modal-backdrop">
-          <div className="nis-modal">
-            <h3>Run Saved Session</h3>
-            {s.savedSessions.length > 0 && (
-              <label className="nis-group">
-                <span className="nis-label">Saved templates</span>
-                <select value={s.runModalName} onChange={(e) => s.setRunModalName(e.target.value)} className="nis-input">
-                  <option value="">Select...</option>
-                  {s.savedSessions.map((session) => (
-                    <option key={session.id} value={session.name}>
-                      {session.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            <label className="nis-group">
-              <span className="nis-label">Session name</span>
-              <input type="text" value={s.runModalName} onChange={(e) => s.setRunModalName(e.target.value)} className="nis-input" />
-            </label>
-            {s.runModalError && <p className="nis-error">{s.runModalError}</p>}
-            <div className="nis-modal-actions">
-              <button type="button" className="nis-pill" onClick={() => s.setShowRunModal(false)}>
-                Cancel
-              </button>
-              <button type="button" className="nis-pill active" onClick={s.runSavedSession}>
-                Load
-              </button>
-            </div>
-          </div>
+      <MotionModal
+        show={s.showRunModal}
+        onClose={() => s.setShowRunModal(false)}
+        backdropClassName="nis-modal-backdrop"
+        panelClassName="nis-modal"
+      >
+        <h3>Run Saved Session</h3>
+        {s.savedSessions.length > 0 && (
+          <label className="nis-group">
+            <span className="nis-label">Saved templates</span>
+            <select value={s.runModalName} onChange={(e) => s.setRunModalName(e.target.value)} className="nis-input">
+              <option value="">Select...</option>
+              {s.savedSessions.map((session) => (
+                <option key={session.id} value={session.name}>
+                  {session.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <label className="nis-group">
+          <span className="nis-label">Session name</span>
+          <input type="text" value={s.runModalName} onChange={(e) => s.setRunModalName(e.target.value)} className="nis-input" />
+        </label>
+        {s.runModalError && <p className="nis-error">{s.runModalError}</p>}
+        <div className="nis-modal-actions">
+          <button type="button" className="nis-pill" onClick={() => s.setShowRunModal(false)}>
+            Cancel
+          </button>
+          <button type="button" className="nis-pill active" onClick={s.runSavedSession}>
+            Load
+          </button>
         </div>
-      )}
+      </MotionModal>
     </section>
   )
 }

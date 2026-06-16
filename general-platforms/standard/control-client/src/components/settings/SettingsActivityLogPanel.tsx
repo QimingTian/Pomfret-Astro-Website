@@ -7,6 +7,7 @@ import {
   type AuditLogRow,
 } from '../../lib/audit-log-display'
 import { fetchAuditLog } from '../../lib/hub-client'
+import { MotionOverlay } from '../motion'
 
 type SettingsActivityLogPanelProps = {
   refreshToken?: number
@@ -110,7 +111,7 @@ export function SettingsActivityLogPanel({ refreshToken = 0 }: SettingsActivityL
         </div>
       </div>
 
-      <div className={selected ? 'settings-log-detail-layer open' : 'settings-log-detail-layer'} aria-hidden={!selected}>
+      <MotionOverlay open={Boolean(selected)} className="settings-log-detail-layer">
         {selected ? (
           <div className="remote-overlay-pane settings-log-detail-pane" role="dialog" aria-labelledby="audit-log-detail-title">
             <button type="button" className="settings-log-detail-close" onClick={() => setSelected(null)}>
@@ -130,7 +131,7 @@ export function SettingsActivityLogPanel({ refreshToken = 0 }: SettingsActivityL
             </div>
           </div>
         ) : null}
-      </div>
+      </MotionOverlay>
     </div>
   )
 }

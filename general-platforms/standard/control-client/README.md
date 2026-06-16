@@ -43,7 +43,7 @@ Artifacts under `src-tauri/target/release/bundle/`.
 | Mode | Storage |
 |------|---------|
 | `none` | Local disk on observatory PC |
-| `raw_zip` | Upload ZIP to Cloudflare R2 (Station Agent) |
+| `raw_zip` | Agent uploads session ZIP to included cloud storage |
 
 ## Project layout
 

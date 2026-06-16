@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
-import { isActiveImagingSession } from '../../lib/imaging/queue-status'
 import type { HubProbeResult, SessionRow } from '../../lib/types'
 import type { TonightWeatherSnapshot, WeatherPrediction } from '../../lib/weather-client'
+import { MotionOverlay } from '../motion'
 import { ImagingDashboardPanel } from './ImagingDashboardPanel'
 import { NewImagingSessionForm } from './new-session/NewImagingSessionForm'
 import type { SessionPrefill } from './new-session/types'
@@ -66,7 +66,7 @@ export function RemoteGlassConsole({
 
   return (
     <div className="remote-console-shell">
-      <div className={sessionOpen ? 'session-form-layer open' : 'session-form-layer'} aria-hidden={!sessionOpen}>
+      <MotionOverlay open={sessionOpen} className="session-form-layer">
         <NewImagingSessionForm
           hubReachable={hubReachable}
           observatoryStatus={observatoryStatus}
@@ -81,14 +81,11 @@ export function RemoteGlassConsole({
             window.setTimeout(() => onSessionOpenChange(false), 1200)
           }}
         />
-      </div>
+      </MotionOverlay>
 
-      <div
-        className={dashboardOpen ? 'session-form-layer open' : 'session-form-layer'}
-        aria-hidden={!dashboardOpen}
-      >
+      <MotionOverlay open={dashboardOpen} className="session-form-layer">
         <ImagingDashboardPanel session={dashboardSession} />
-      </div>
+      </MotionOverlay>
 
       <div className={`remote-glass-grid${overlayOpen ? ' remote-glass-grid-hidden' : ''}`} aria-hidden={overlayOpen}>
         <TonightScheduleTimeline weather={weather} sessions={sessions} />
@@ -101,7 +98,7 @@ export function RemoteGlassConsole({
           onEditSession={onEditSession}
           onCheckProgress={(session) => {
             onSessionOpenChange(false)
-            onDashboardSessionChange(isActiveImagingSession(session) ? session : null)
+            onDashboardSessionChange(session)
             onDashboardOpenChange(true)
           }}
         />

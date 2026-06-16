@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { contentApiPath } from './content-base'
 import {
-  astrometryCalibrationToImageTopPA,
+  astrometryApiOrientationToImageTopPA,
   astrometryOrientationToPositionAngle,
 } from './imaging/plate-solve-orientation'
 
@@ -228,7 +228,7 @@ export async function solvePhoto(
             : null,
         fieldRotationDeg:
           rawOrientation != null
-            ? astrometryCalibrationToImageTopPA(rawOrientation, parity)
+            ? astrometryApiOrientationToImageTopPA(rawOrientation, 'jpeg')
             : null,
         rawImageOrientationDeg: rawOrientation,
         parity,

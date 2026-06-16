@@ -1,9 +1,10 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import {
   OUTPUT_MODE_LABELS,
   PERSONAL_DEFAULT_OUTPUT_MODE,
   type SessionOutputMode,
 } from '@shared/output-mode'
+import { fetchStorageQuota } from '../lib/hub-client'
 import { submitSession } from '../lib/submit-session'
 
 type SubmitPageProps = {
@@ -19,6 +20,17 @@ export function SubmitPage({ onSubmitted }: SubmitPageProps) {
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [storageOverQuota, setStorageOverQuota] = useState(false)
+
+  useEffect(() => {
+    void fetchStorageQuota().then((res) => {
+      if (res.ok) setStorageOverQuota(res.overQuota === true)
+    })
+  }, [])
+
+  useEffect(() => {
+    if (storageOverQuota && outputMode === 'raw_zip') setOutputMode('none')
+  }, [storageOverQuota, outputMode])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -112,13 +124,16 @@ export function SubmitPage({ onSubmitted }: SubmitPageProps) {
                 name="outputMode"
                 checked={outputMode === mode}
                 onChange={() => setOutputMode(mode)}
-                disabled={busy}
+                disabled={busy || (mode === 'raw_zip' && storageOverQuota)}
               />
               <span>
                 <strong>{mode}</strong> — {OUTPUT_MODE_LABELS[mode]}
               </span>
             </label>
           ))}
+          {storageOverQuota ? (
+            <p className="muted text-sm">Cloud storage is full. Delete files in Settings or choose none.</p>
+          ) : null}
         </fieldset>
 
         <button type="submit" className="btn primary" disabled={busy}>

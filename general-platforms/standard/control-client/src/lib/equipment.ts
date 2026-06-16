@@ -1,4 +1,4 @@
-import { astrometryCalibrationToImageTopPA } from './imaging/plate-solve-orientation'
+import { astrometryApiOrientationToImageTopPA } from './imaging/plate-solve-orientation'
 
 const EQUIPMENT_KEY = 'borean.personal.imagingEquipment'
 
@@ -23,7 +23,10 @@ export type ImagingEquipment = {
    * Not used directly for the Atlas overlay — see `fieldRotationDeg`.
    */
   positionAngleDeg: number
-  /** Displayed image top edge on sky; drives Atlas camera-frame rotation after plate-solve. */
+  /**
+   * Image top edge on sky (° east of north) — same as nova "Up is …° E of N" after JPEG solve.
+   * Drives Atlas camera-frame rotation via computeFovOverlayRotationDeg.
+   */
   fieldRotationDeg?: number
   rawImageOrientationDeg?: number
   imageParity?: number | null
@@ -37,6 +40,26 @@ export type EquipmentFov = {
 
 function isPositive(n: unknown): n is number {
   return typeof n === 'number' && Number.isFinite(n) && n > 0
+}
+
+function normalizeDeg(deg: number): number {
+  return ((deg % 360) + 360) % 360
+}
+
+/** Plate-solve orientation overrides manual PA on Atlas until cleared. */
+export function mergeEquipmentManualSave(
+  prev: ImagingEquipment | null,
+  next: ImagingEquipment,
+): ImagingEquipment {
+  const paChanged =
+    prev == null || normalizeDeg(prev.positionAngleDeg) !== normalizeDeg(next.positionAngleDeg)
+  if (paChanged) return next
+  return {
+    ...next,
+    fieldRotationDeg: prev.fieldRotationDeg,
+    rawImageOrientationDeg: prev.rawImageOrientationDeg,
+    imageParity: prev.imageParity,
+  }
 }
 
 /** A rig is usable for an overlay only when every optical parameter is present and positive. */
@@ -58,7 +81,7 @@ export function overlayRotationDeg(eq: ImagingEquipment): number {
     return eq.fieldRotationDeg
   }
   if (typeof eq.rawImageOrientationDeg === 'number' && Number.isFinite(eq.rawImageOrientationDeg)) {
-    return astrometryCalibrationToImageTopPA(eq.rawImageOrientationDeg, eq.imageParity)
+    return astrometryApiOrientationToImageTopPA(eq.rawImageOrientationDeg, 'jpeg')
   }
   // Older saves only had NINA rotator PA (astrometry +X − 180°). Typical JPEG parity −1:
   // image top ≈ rotator PA − 90°.

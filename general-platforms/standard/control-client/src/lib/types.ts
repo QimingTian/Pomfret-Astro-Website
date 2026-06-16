@@ -38,6 +38,7 @@ export type SessionRow = {
   projectMode?: boolean
   cameraCoolingTempC?: number | null
   hasDownload?: boolean
+  storageBytes?: number
 }
 
 export type CurrentSessionsResponse = {

@@ -258,7 +258,7 @@ export function AtlasPage({ onSendToRemote }: AtlasPageProps) {
       fovHRad: fov.fovHeightDeg * DEG2RAD,
       positionAngleDeg: overlayRotationDeg(equipment),
     }
-  }, [cameraFrameOn, equipment])
+  }, [cameraFrameOn, equipment, equipment?.positionAngleDeg, equipment?.fieldRotationDeg])
   const [trackingTarget, setTrackingTarget] = useState<{ name: string; raHours: number; decDeg: number } | null>(null)
 
   const [alt30OverlayOn, setAlt30OverlayOn] = useState(false)
@@ -629,8 +629,8 @@ export function AtlasPage({ onSendToRemote }: AtlasPageProps) {
   }, [getStel])
 
   return (
-    <div className="glass-panel h-full min-h-0 flex flex-col gap-3 p-3">
-      <div className="relative flex-1 min-h-0 overflow-hidden rounded-xl bg-black">
+    <div className="glass-panel flex flex-col gap-3 p-3 pb-4">
+      <div className="atlas-sky-viewer">
         <div className="relative h-full min-h-0">
           <iframe
             key={viewerSrc}
@@ -933,7 +933,7 @@ export function AtlasPage({ onSendToRemote }: AtlasPageProps) {
         {stelReady && selectionInfo ? (
           <section
             aria-label="Selected object details"
-            className="mt-6 border-t border-black/10 pt-4 dark:border-white/10"
+            className="shrink-0 border-t border-black/10 pt-4 dark:border-white/10"
           >
             <h3 className="text-xs font-semibold uppercase tracking-wide text-white/60">Selected object</h3>
             <p className="mt-1 break-words text-base font-medium leading-snug text-white">{selectionInfo.id || '—'}</p>

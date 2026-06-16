@@ -89,6 +89,48 @@ export async function deleteSession(sessionId: string): Promise<{ ok: boolean; e
   }
 }
 
+export type SessionControlAction =
+  | 'run'
+  | 'hold'
+  | 'release_hold'
+  | 'complete'
+  | 'fail'
+  | 'in_progress'
+  | 'delete'
+
+export async function postSessionControlAction(
+  sessionId: string,
+  action: SessionControlAction
+): Promise<{ ok: boolean; error?: string }> {
+  const tenant = await loadRuntimeTenant()
+  const url = personalTenantApiUrl(tenant, '/imaging/session-control')
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: personalAuthHeaders(tenant, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ sessionId, action }),
+    })
+    const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string }
+    if (!res.ok || !data.ok) {
+      return {
+        ok: false,
+        error: typeof data.error === 'string' ? data.error : `HTTP ${res.status}`,
+      }
+    }
+    return { ok: true }
+  } catch (ex) {
+    return {
+      ok: false,
+      error: ex instanceof Error ? formatHubError(ex.message, tenant) : 'Session control failed',
+    }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 export async function probeHub(): Promise<HubProbeResult> {
   const tenant = await loadRuntimeTenant()
   try {
@@ -167,6 +209,104 @@ export async function fetchLicenseSummary(): Promise<LicenseSummaryResponse> {
 
 export async function fetchAuditLog(limit = 200): Promise<AuditLogResponse> {
   return hubFetch<AuditLogResponse>(`/imaging/audit-log?limit=${encodeURIComponent(String(limit))}`)
+}
+
+export type SessionProgressResponse = {
+  ok: boolean
+  error?: string
+  queueStatus?: string
+  lines?: Array<{ at: string; text: string }>
+}
+
+export async function fetchSessionProgress(sessionId: string): Promise<SessionProgressResponse> {
+  return hubFetch<SessionProgressResponse>(
+    `/imaging/queue/${encodeURIComponent(sessionId)}/progress`
+  )
+}
+
+export type SessionPreviewResponse = {
+  ok: boolean
+  error?: string
+  updatedAt?: string
+  contentType?: string
+  dataBase64?: string
+}
+
+export async function fetchSessionPreviewJson(queueId: string): Promise<SessionPreviewResponse> {
+  return hubFetch<SessionPreviewResponse>(
+    `/imaging/preview?queueId=${encodeURIComponent(queueId)}&mode=json`
+  )
+}
+
+export type StorageQuotaResponse = {
+  ok: boolean
+  error?: string
+  usedBytes?: number
+  limitBytes?: number
+  overQuota?: boolean
+  sessions?: Array<{
+    queueId: string
+    objectKey: string
+    sizeBytes: number
+    uploadedAt: string
+    target?: string | null
+  }>
+}
+
+export async function fetchStorageQuota(): Promise<StorageQuotaResponse> {
+  return hubFetch<StorageQuotaResponse>('/imaging/storage')
+}
+
+export async function deleteSessionStorage(sessionId: string): Promise<{ ok: boolean; error?: string }> {
+  const tenant = await loadRuntimeTenant()
+  const url = personalTenantApiUrl(tenant, `/imaging/storage/${encodeURIComponent(sessionId)}`)
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+  try {
+    const res = await fetch(url, {
+      method: 'DELETE',
+      signal: controller.signal,
+      headers: personalAuthHeaders(tenant),
+    })
+    const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string }
+    if (!res.ok || !data.ok) {
+      return {
+        ok: false,
+        error: typeof data.error === 'string' ? data.error : `HTTP ${res.status}`,
+      }
+    }
+    return { ok: true }
+  } catch (ex) {
+    return {
+      ok: false,
+      error: ex instanceof Error ? formatHubError(ex.message, tenant) : 'Unable to delete stored files',
+    }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export async function fetchSessionDownloadUrl(queueId: string): Promise<string> {
+  const tenant = await loadRuntimeTenant()
+  const url = personalTenantApiUrl(
+    tenant,
+    `/imaging/download?queueId=${encodeURIComponent(queueId)}&mode=json`
+  )
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: personalAuthHeaders(tenant),
+    })
+    const data = (await res.json().catch(() => ({}))) as { ok?: boolean; signedUrl?: string; error?: string }
+    if (!res.ok || !data.ok || typeof data.signedUrl !== 'string') {
+      throw new Error(typeof data.error === 'string' ? data.error : `HTTP ${res.status}`)
+    }
+    return data.signedUrl
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 /** Observatory status labels for the control-client status bar. */

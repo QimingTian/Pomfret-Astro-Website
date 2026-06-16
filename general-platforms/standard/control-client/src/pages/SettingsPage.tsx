@@ -15,14 +15,17 @@ import { useObservatoryLocation } from '../lib/useObservatoryLocation'
 import {
   clearEquipment,
   computeFov,
+  mergeEquipmentManualSave,
   setEquipment,
   validateEquipmentInput,
 } from '../lib/equipment'
 import { useEquipment } from '../lib/useEquipment'
 import { solvePhoto } from '../lib/plate-solve'
+import { SettingsObsLogRow } from '../components/settings/SettingsObsLogRow'
 import { SettingsObservatoryStatusPanel } from '../components/settings/SettingsObservatoryStatusPanel'
 import { SettingsActivityLogPanel } from '../components/settings/SettingsActivityLogPanel'
 import { SettingsLicensePanel } from '../components/settings/SettingsLicensePanel'
+import { SettingsStoragePanel } from '../components/settings/SettingsStoragePanel'
 
 export function SettingsPage() {
   const observatory = useObservatoryLocation()
@@ -98,12 +101,7 @@ export function SettingsPage() {
       setEqError(validated.error)
       return
     }
-    setEquipment({
-      ...validated.equipment,
-      fieldRotationDeg: equipment?.fieldRotationDeg,
-      rawImageOrientationDeg: equipment?.rawImageOrientationDeg,
-      imageParity: equipment?.imageParity,
-    })
+    setEquipment(mergeEquipmentManualSave(equipment, validated.equipment))
     const fov = computeFov(validated.equipment)
     setEqMessage(
       `Saved. FOV ${fov.fovWidthDeg.toFixed(2)}° × ${fov.fovHeightDeg.toFixed(2)}° · ${fov.arcsecPerPixel.toFixed(2)}″/px.`,
@@ -431,16 +429,19 @@ export function SettingsPage() {
           {eqError ? <p className="mt-3 text-sm text-red-400">{eqError}</p> : null}
         </section>
 
-        <section className="remote-glass-pane settings-pane settings-pane-observatory">
-          <div className="remote-pane-head">
-            <h2>Observatory Status</h2>
-          </div>
-          <SettingsObservatoryStatusPanel onChanged={() => setLogRefreshToken((n) => n + 1)} />
-        </section>
+        <SettingsObsLogRow
+          observatory={
+            <>
+              <div className="remote-pane-head">
+                <h2>Observatory Status</h2>
+              </div>
+              <SettingsObservatoryStatusPanel onChanged={() => setLogRefreshToken((n) => n + 1)} />
+            </>
+          }
+          log={<SettingsActivityLogPanel refreshToken={logRefreshToken} />}
+        />
 
-        <section className="remote-glass-pane settings-pane settings-pane-log">
-          <SettingsActivityLogPanel refreshToken={logRefreshToken} />
-        </section>
+        <SettingsStoragePanel />
       </div>
 
       {message ? <p className="settings-footnote-msg text-green-400">{message}</p> : null}

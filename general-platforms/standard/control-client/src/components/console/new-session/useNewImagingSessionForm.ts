@@ -16,6 +16,7 @@ import {
   type SavedSessionEntry,
 } from '../../../lib/imaging/saved-sessions-local'
 import { submitImagingSession, updateImagingSession } from '../../../lib/imaging/submit-imaging-session'
+import { fetchStorageQuota } from '../../../lib/hub-client'
 import type { SessionRow } from '../../../lib/types'
 import { contentApiPath } from '../../../lib/content-base'
 import type { WeatherPrediction } from '../../../lib/weather-client'
@@ -103,6 +104,7 @@ export function useNewImagingSessionForm({
   const [decSecondPart, setDecSecondPart] = useState('')
   const [sessionPassword, setSessionPassword] = useState('')
   const [outputMode, setOutputMode] = useState<'raw_zip' | 'none'>('raw_zip')
+  const [storageOverQuota, setStorageOverQuota] = useState(false)
   const [cameraCoolingTempC, setCameraCoolingTempC] = useState<-10 | 0>(-10)
   const [filterPlans, setFilterPlans] = useState<FilterPlanInput[]>([])
   const [showClosedModal, setShowClosedModal] = useState(false)
@@ -116,6 +118,23 @@ export function useNewImagingSessionForm({
   const [savedSessions, setSavedSessions] = useState<SavedSessionEntry[]>([])
   const [lastComputedAltitude, setLastComputedAltitude] = useState<number | null>(null)
   const variableStarFilterDropdownRef = useRef<HTMLDivElement>(null)
+
+  const refreshStorageQuota = useCallback(async () => {
+    if (!hubReachable) {
+      setStorageOverQuota(false)
+      return
+    }
+    const res = await fetchStorageQuota()
+    if (res.ok) setStorageOverQuota(res.overQuota === true)
+  }, [hubReachable])
+
+  useEffect(() => {
+    void refreshStorageQuota()
+  }, [refreshStorageQuota, submitSuccess])
+
+  useEffect(() => {
+    if (storageOverQuota && outputMode === 'raw_zip') setOutputMode('none')
+  }, [storageOverQuota, outputMode])
 
 const VARIABLE_STAR_FILTER_VALUES: VariableStarFilterUi[] = [
   'tonight_observable',
@@ -988,6 +1007,7 @@ const VARIABLE_STAR_FILTER_VALUES: VariableStarFilterUi[] = [
     setSessionPassword,
     outputMode,
     setOutputMode,
+    storageOverQuota,
     cameraCoolingTempC,
     setCameraCoolingTempC,
     filterPlans,

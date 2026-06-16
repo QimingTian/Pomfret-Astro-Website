@@ -7,6 +7,7 @@ import {
 } from '../../lib/settings'
 import { getTenantLabel } from '../../lib/tenant'
 import type { ObservatoryMode } from '../../lib/types'
+import { MotionModal } from '../motion'
 
 type SettingsModalProps = {
   open: boolean
@@ -23,8 +24,6 @@ export function SettingsModal({ open, onClose, onSaved }: SettingsModalProps) {
   const [mode, setMode] = useState<ObservatoryMode>('auto')
   const [testResult, setTestResult] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-
-  if (!open) return null
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
@@ -67,21 +66,21 @@ export function SettingsModal({ open, onClose, onSaved }: SettingsModalProps) {
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose} role="presentation">
-      <div
-        className="modal console-panel"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-labelledby="settings-title"
-      >
-        <div className="panel-head">
-          <h2 id="settings-title">Configuration</h2>
-          <button type="button" className="btn console-btn" onClick={onClose}>
-            CLOSE
-          </button>
-        </div>
+    <MotionModal
+      show={open}
+      onClose={onClose}
+      backdropClassName="modal-backdrop"
+      panelClassName="modal console-panel"
+      aria-labelledby="settings-title"
+    >
+      <div className="panel-head">
+        <h2 id="settings-title">Configuration</h2>
+        <button type="button" className="btn console-btn" onClick={onClose}>
+          CLOSE
+        </button>
+      </div>
 
-        <form className="settings-form" onSubmit={(e) => void handleSave(e)}>
+      <form className="settings-form" onSubmit={(e) => void handleSave(e)}>
           <p className="panel-footnote">
             License / hub: <strong>{getTenantLabel()}</strong> — {getCloudHubLabel()} (built into this app)
           </p>
@@ -136,14 +135,13 @@ export function SettingsModal({ open, onClose, onSaved }: SettingsModalProps) {
               TEST HUB
             </button>
           </div>
-        </form>
+      </form>
 
-        {testResult && (
-          <p className={testResult.startsWith('OK') || testResult === 'Saved.' ? 'panel-ok' : 'panel-error'}>
-            {testResult}
-          </p>
-        )}
-      </div>
-    </div>
+      {testResult && (
+        <p className={testResult.startsWith('OK') || testResult === 'Saved.' ? 'panel-ok' : 'panel-error'}>
+          {testResult}
+        </p>
+      )}
+    </MotionModal>
   )
 }

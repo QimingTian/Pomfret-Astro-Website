@@ -1201,7 +1201,7 @@ def run_loop() -> None:
                     log(
                         "HTTPS certificate verification failed connecting to the cloud hub. "
                         "Borean uses Cloudflare (Google Trust) certs; Pomfret uses Let's Encrypt "
-                        "which is why the old agent worked on this PC. Update Station to v0.1.7+ "
+                        "which is why the old agent worked on this PC. Update Station to v0.1.8+ "
                         "or run: py -3 -m pip install --upgrade certifi"
                     )
                     sleep_between_polls()

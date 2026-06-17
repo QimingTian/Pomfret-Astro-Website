@@ -1,9 +1,9 @@
 {
   "channel": "stable",
   "station": {
-    "latestVersion": "0.1.7",
-    "downloadUrlWindows": "https://www.boreanastro.com/releases/borean-station-0.1.7-windows-setup.exe",
-    "releaseNotes": "Fix Station HTTPS: wire ureq to Windows Schannel (0.1.6 update check was broken). Agent on Windows uses plain urllib like Pomfret."
+    "latestVersion": "0.1.8",
+    "downloadUrlWindows": "https://www.boreanastro.com/releases/borean-station-0.1.8-windows-setup.exe",
+    "releaseNotes": "Trust Mozilla CA bundle for Cloudflare/Google Trust certs (observatory Windows lacks GTS root; Let's Encrypt/Pomfret worked). Station UI uses rustls+webpki-roots."
   },
   "control": {
     "latestVersion": "0.1.23",

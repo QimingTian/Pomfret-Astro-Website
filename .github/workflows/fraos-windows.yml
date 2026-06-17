@@ -82,6 +82,9 @@ jobs:
         run: |
           py -3 -m pip install --disable-pip-version-check certifi
           py -3 -c "import certifi, shutil; shutil.copy(certifi.where(), 'agent/cacert.pem')"
+          if (-not (Select-String -Path agent/cacert.pem -Pattern 'GTS Root R4' -Quiet)) {
+            throw 'cacert.pem missing Google Trust Services roots'
+          }
 
       - name: Build NSIS installer
         run: npm run tauri build

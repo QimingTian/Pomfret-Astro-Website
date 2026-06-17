@@ -1199,8 +1199,10 @@ def run_loop() -> None:
                     continue
                 if "CERTIFICATE_VERIFY_FAILED" in err_text or "certificate verify failed" in err_text.lower():
                     log(
-                        "HTTPS certificate verification failed. On the observatory PC run: "
-                        "pip install certifi  (then restart the agent)."
+                        "HTTPS certificate verification failed connecting to the cloud hub. "
+                        "Borean uses Cloudflare (Google Trust) certs; Pomfret uses Let's Encrypt "
+                        "which is why the old agent worked on this PC. Update Station to v0.1.6+ "
+                        "or run: py -3 -m pip install --upgrade certifi"
                     )
                     sleep_between_polls()
                     continue

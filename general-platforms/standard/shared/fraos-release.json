@@ -1,9 +1,9 @@
 {
   "channel": "stable",
   "station": {
-    "latestVersion": "0.1.5",
-    "downloadUrlWindows": "https://www.boreanastro.com/releases/borean-station-0.1.5-windows-setup.exe",
-    "releaseNotes": "Agent HTTPS uses certifi CA bundle (fixes CERTIFICATE_VERIFY_FAILED on Windows Python 3.13)."
+    "latestVersion": "0.1.6",
+    "downloadUrlWindows": "https://www.boreanastro.com/releases/borean-station-0.1.6-windows-setup.exe",
+    "releaseNotes": "HTTPS fix for school/observatory PCs: Station UI uses Windows Schannel; agent merges OS trust store + bundled Mozilla CA + certifi (Pomfret worked because Let's Encrypt is pre-trusted; Borean uses Cloudflare/Google Trust certs)."
   },
   "control": {
     "latestVersion": "0.1.23",
@@ -16,11 +16,9 @@
         "downloadUrlMac": "https://www.boreanastro.com/releases/borean-control-0.1.23-macos.dmg"
       },
       "pro": {
-        "downloadUrlWindows": "https://www.boreanastro.com/releases/borean-control-pro-0.1.23-windows-setup.exe",
         "downloadUrlMac": "https://www.boreanastro.com/releases/borean-control-pro-0.1.23-macos.dmg"
       },
       "max": {
-        "downloadUrlWindows": "https://www.boreanastro.com/releases/borean-control-max-0.1.23-windows-setup.exe",
         "downloadUrlMac": "https://www.boreanastro.com/releases/borean-control-max-0.1.23-macos.dmg"
       }
     }

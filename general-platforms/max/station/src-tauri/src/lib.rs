@@ -109,6 +109,8 @@ pub struct StationConfig {
     pub pdu_user: String,
     #[serde(default)]
     pub pdu_password: String,
+    #[serde(default)]
+    pub site_display_name: String,
 }
 
 impl Default for StationConfig {
@@ -149,6 +151,7 @@ fn default_station_config() -> StationConfig {
         pdu_base_url: String::new(),
         pdu_user: String::new(),
         pdu_password: String::new(),
+        site_display_name: String::new(),
     }
 }
 
@@ -183,33 +186,17 @@ fn station_data_dir() -> PathBuf {
     borean_root_dir().join(edition_slug()).join("station")
 }
 
-fn legacy_user_tenant_path() -> PathBuf {
-    borean_root_dir().join("tenant.json")
-}
-
 fn user_tenant_path() -> PathBuf {
     borean_root_dir().join(edition_slug()).join("tenant.json")
 }
 
 fn read_user_tenant_raw() -> Option<BakedTenantFile> {
     let path = user_tenant_path();
-    if path.exists() {
-        let raw = fs::read_to_string(path).ok()?;
-        if let Ok(tenant) = serde_json::from_str(&raw) {
-            return Some(tenant);
-        }
+    if !path.exists() {
+        return None;
     }
-    if edition_slug() == "standard" {
-        let legacy = legacy_user_tenant_path();
-        if legacy.exists() {
-            let raw = fs::read_to_string(legacy).ok()?;
-            if let Ok(tenant) = serde_json::from_str::<BakedTenantFile>(&raw) {
-                let _ = save_tenant_config(&tenant);
-                return Some(tenant);
-            }
-        }
-    }
-    None
+    let raw = fs::read_to_string(path).ok()?;
+    serde_json::from_str(&raw).ok()
 }
 
 fn save_tenant_config(raw: &BakedTenantFile) -> Result<(), String> {

@@ -51,24 +51,12 @@ def https_ssl_context() -> ssl.SSLContext:
 
 
 def urlopen(req: urllib.request.Request, *, timeout: float):
-    if urlparse(req.full_url).scheme == "https":
+    # On Windows, match Pomfret: plain urllib uses Schannel + the OS trust store.
+    if urlparse(req.full_url).scheme == "https" and sys.platform != "win32":
         return urllib.request.urlopen(req, timeout=timeout, context=https_ssl_context())
     return urllib.request.urlopen(req, timeout=timeout)
 
 
 def ssl_ca_status() -> str:
-    parts: list[str] = []
     if sys.platform == "win32":
-        parts.append("Windows trust store")
-    else:
-        parts.append("system default")
-    bundled = _bundled_ca_path()
-    if bundled:
-        parts.append(f"bundled cacert.pem")
-    try:
-        import certifi
-
-        parts.append(f"certifi ({certifi.where()})")
-    except ImportError:
-        parts.append("certifi not installed")
-    return " + ".join(parts)
+        return "Windows Schannel (plain urllib, same as Pomfret agent)"

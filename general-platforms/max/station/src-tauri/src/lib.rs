@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[cfg(windows)]
@@ -234,9 +234,7 @@ fn activate_account(
     if base.is_empty() {
         return Err("Cloud hub URL is required.".into());
     }
-    let agent = ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(15))
-        .build();
+    let agent = build_http_agent(Duration::from_secs(15), None)?;
 
     let login_payload = serde_json::json!({
         "login": login.trim(),
@@ -442,9 +440,7 @@ struct StationVersionResponse {
 
 fn fetch_station_version_manifest() -> Result<StationVersionResponse, String> {
     let url = tenant_station_version_url()?;
-    let agent = ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(3))
-        .build();
+    let agent = build_http_agent(Duration::from_secs(3), None)?;
     let response = agent.get(&url).call().map_err(|e| e.to_string())?;
     if response.status() >= 400 {
         return Err(format!("HTTP {}", response.status()));
@@ -720,11 +716,21 @@ fn read_log_tail(max_bytes: usize) -> String {
 const LOCAL_HUB_URL: &str = "http://127.0.0.1:7841";
 const BOREAN_HTTP_USER_AGENT: &str = "Borean Astro Station/1.0 (Windows)";
 
+fn build_http_agent(timeout: Duration, user_agent: Option<&str>) -> Result<ureq::Agent, String> {
+    let connector = native_tls::TlsConnector::builder()
+        .build()
+        .map_err(|e| format!("TLS setup: {e}"))?;
+    let mut builder = ureq::AgentBuilder::new()
+        .timeout(timeout)
+        .tls_connector(Arc::new(connector));
+    if let Some(ua) = user_agent {
+        builder = builder.user_agent(ua);
+    }
+    Ok(builder.build())
+}
+
 fn probe_url(url: &str) -> Result<String, String> {
-    let agent = ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(2))
-        .user_agent(BOREAN_HTTP_USER_AGENT)
-        .build();
+    let agent = build_http_agent(Duration::from_secs(2), Some(BOREAN_HTTP_USER_AGENT))?;
     match agent.get(url).call() {
         Ok(resp) => {
             if resp.status() >= 400 {

@@ -7,6 +7,7 @@ import {
   type AuditLogRow,
 } from '../../lib/audit-log-display'
 import { fetchAuditLog } from '../../lib/hub-client'
+import { formatObservatoryLocalDateTime, formatObservatoryLocalTime } from '../../lib/observatory-local-time'
 import { MotionOverlay } from '../motion'
 
 type SettingsActivityLogPanelProps = {
@@ -51,11 +52,18 @@ export function SettingsActivityLogPanel({ refreshToken = 0 }: SettingsActivityL
   function exportCsv() {
     if (entries.length === 0) return
     const escape = (v: string) => `"${v.replace(/"/g, '""')}"`
-    const header = 'Time (UTC),Kind,Message,Detail'
+    const header = 'Time,Kind,Message,Detail'
     const rows = entries.map((r) =>
-      [escape(r.at), escape(r.kind), escape(r.message), escape(r.detail ? JSON.stringify(r.detail) : '')].join(
-        ',',
-      ),
+      [
+        escape(
+          Number.isFinite(Date.parse(r.at))
+            ? formatObservatoryLocalDateTime(new Date(r.at))
+            : r.at
+        ),
+        escape(r.kind),
+        escape(r.message),
+        escape(r.detail ? JSON.stringify(r.detail) : ''),
+      ].join(','),
     )
     const blob = new Blob([header + '\n' + rows.join('\n')], { type: 'text/csv' })
     const a = document.createElement('a')
@@ -93,7 +101,7 @@ export function SettingsActivityLogPanel({ refreshToken = 0 }: SettingsActivityL
               const failed = auditLogLineFailed(row)
               const headline = auditLogHeadline(row)
               const timeLabel = Number.isFinite(Date.parse(row.at))
-                ? new Date(row.at).toLocaleTimeString()
+                ? formatObservatoryLocalTime(new Date(row.at))
                 : row.at
               return (
                 <button

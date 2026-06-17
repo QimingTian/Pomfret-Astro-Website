@@ -1,5 +1,6 @@
 import { emergencyStopActorLabel } from './imaging/emergency-stop-display'
 import { normalizeLegacyAuditStatus } from './imaging/status-audit'
+import { formatObservatoryLocalDateTime } from './observatory-local-time'
 
 export type AuditLogRow = {
   id: string
@@ -173,10 +174,11 @@ function stringish(v: unknown): string {
 /** Flatten detail for the detail modal (reasons expanded, nested JSON pretty). */
 export function auditLogDetailFields(row: AuditLogRow): AuditDetailField[] {
   const fields: AuditDetailField[] = [
-    { label: 'Time (UTC)', value: row.at.replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC') },
     {
-      label: 'Time (local)',
-      value: Number.isFinite(Date.parse(row.at)) ? new Date(row.at).toLocaleString() : row.at,
+      label: 'Time',
+      value: Number.isFinite(Date.parse(row.at))
+        ? formatObservatoryLocalDateTime(new Date(row.at))
+        : row.at,
     },
     { label: 'Kind', value: row.kind },
     { label: 'Message', value: row.message },

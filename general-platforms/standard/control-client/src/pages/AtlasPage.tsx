@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { formatObservatoryLocalTimeFromUnixSec } from '../lib/observatory-local-time'
+import { formatObservatoryLocalDateTime, formatObservatoryLocalTimeFromUnixSec } from '../lib/observatory-local-time'
 import {
   getTonightScheduleEveningAstronomyUtc,
   getTonightScheduleMorningAstronomyUtc,
@@ -115,19 +115,12 @@ const LAYER_LABELS: Record<LayerKey, string> = {
 const LAYER_ORDER: LayerKey[] = ['landscapes', 'atmosphere', 'dsos', 'dss', 'azimuthal', 'equatorial']
 
 function formatHourMinute(sec: number): string {
-  return new Date(sec * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return formatObservatoryLocalTimeFromUnixSec(sec).replace(/:\d{2} /, ' ')
 }
 
-/** Local date + time to the minute for the time-travel scrubber hover label. */
+/** Observatory-local date + time to the minute for the time-travel scrubber hover label. */
 function formatHoverTimeToMinute(sec: number): string {
-  const d = new Date(sec * 1000)
-  const datePart = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-  const timePart = d.toLocaleTimeString(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true,
-  })
-  return `${datePart} ${timePart}`
+  return formatObservatoryLocalDateTime(new Date(sec * 1000))
 }
 
 /** Same MJD convention as `public/stellarium/engine.html` `dateToMJD`. */

@@ -137,19 +137,19 @@ export function EmergencyStopPanel({ hubReachable }: { hubReachable: boolean }) 
             <div className="estop-confirm-pills" role="group" aria-label="Confirm emergency stop">
               <button
                 type="button"
-                className="estop-pill"
+                className="estop-confirm-pill"
                 disabled={pending}
                 onClick={() => void confirmEmergencyStop()}
               >
-                <span className="estop-pill-label">Confirm ESTOP</span>
+                Confirm
               </button>
               <button
                 type="button"
-                className="estop-pill"
+                className="estop-confirm-pill estop-confirm-pill-muted"
                 disabled={pending}
                 onClick={() => setShowConfirm(false)}
               >
-                <span className="estop-pill-label">Cancel</span>
+                Cancel
               </button>
             </div>
           </MotionExpand>

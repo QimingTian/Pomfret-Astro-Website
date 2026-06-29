@@ -1,5 +1,14 @@
 'use client'
 
+import {
+  glassPillDangerSm,
+  glassPillLg,
+  glassPillLgWide,
+  glassPillMd,
+  glassPillSm,
+  glassPillSuccessSm,
+  glassPillXs,
+} from '@/lib/glass-ui'
 import { useCallback, useEffect, useState } from 'react'
 import { DashboardPanel } from '@/app/dashboard/account/dashboard-panel'
 
@@ -99,7 +108,7 @@ export function GalleryRequestsSection({ className = '' }: { className?: string 
           type="button"
           onClick={() => void load()}
           disabled={loading}
-          className="rounded-full border border-white/25 bg-[#151616] px-3 py-1 text-xs font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-50"
+          className={`${glassPillXs} disabled:opacity-50`}
         >
           {loading ? '…' : 'Refresh'}
         </button>
@@ -132,7 +141,7 @@ export function GalleryRequestsSection({ className = '' }: { className?: string 
                     type="button"
                     disabled={busy}
                     onClick={() => void downloadRow(row)}
-                    className="rounded-full border border-green-500/50 px-3 py-1 text-xs text-green-300 disabled:opacity-40"
+                    className={`${glassPillSuccessSm} disabled:opacity-40`}
                   >
                     Download
                   </button>
@@ -140,7 +149,7 @@ export function GalleryRequestsSection({ className = '' }: { className?: string 
                     type="button"
                     disabled={busy}
                     onClick={() => void dismissRow(row)}
-                    className="rounded-full border border-red-500/50 px-3 py-1 text-xs text-red-300 disabled:opacity-40"
+                    className={`${glassPillDangerSm} disabled:opacity-40`}
                   >
                     Dismiss
                   </button>

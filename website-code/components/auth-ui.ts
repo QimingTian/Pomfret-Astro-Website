@@ -4,10 +4,10 @@ export const authLineInputClass =
 export const authLabelClass = 'mb-1 block text-sm text-white'
 
 export const authPrimaryButtonClass =
-  'inline-flex w-full items-center justify-center rounded-full border border-white/25 bg-[#151616] px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#1b1c1c] disabled:cursor-not-allowed disabled:opacity-50'
+  'glass-pill relative inline-flex w-full items-center justify-center px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50'
 
 export const authSecondaryButtonClass =
-  'inline-flex w-full items-center justify-center rounded-full border border-white/25 bg-transparent px-6 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-white/10'
+  'glass-pill relative inline-flex w-full items-center justify-center border-transparent bg-transparent px-6 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-white/10'
 
 export const authPageClass = 'min-h-screen flex items-center justify-center bg-[#09090a]'
 

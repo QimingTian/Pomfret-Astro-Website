@@ -6,6 +6,16 @@ import {
   getTonightScheduleMorningAstronomyUtc,
   OBSERVATORY_TIME_ZONE,
 } from '@/lib/sunrise-window'
+import { computeFovOverlayRotationDeg } from '@/lib/fov-overlay'
+import {
+  glassPillMd,
+  glassPillSm,
+  glassPillToggleActiveInverted,
+  glassPillToggleIdleSm,
+} from '@/lib/glass-ui'
+
+const atlasLayerPillClass = (active: boolean) =>
+  active ? glassPillToggleActiveInverted : glassPillToggleIdleSm
 
 const POMFRET_LATITUDE = 41.9159
 const POMFRET_LONGITUDE = -71.9626
@@ -386,6 +396,10 @@ export default function AtlasPage() {
         const scale = h / fov
         el.style.width = `${cameraFrameProfile.fovWRad * scale}px`
         el.style.height = `${cameraFrameProfile.fovHRad * scale}px`
+        // Field rotation: rotate the frame by the live on-screen sensor orientation
+        // (parallactic angle + sensor position angle), measured from the engine projection.
+        const rot = computeFovOverlayRotationDeg(stel, cameraFrameProfile.rotationDeg)
+        el.style.transform = `translate(-50%, -50%) rotate(${rot ?? cameraFrameProfile.rotationDeg}deg)`
       }
       rafId = window.requestAnimationFrame(tick)
     }
@@ -690,7 +704,7 @@ export default function AtlasPage() {
               <button
                 type="submit"
                 disabled={!stelReady || searchLoading || !searchQuery.trim()}
-                className="shrink-0 rounded-full border border-white/25 bg-[#151616] px-4 py-2 text-sm font-medium text-white hover:bg-[#1b1c1c] disabled:cursor-not-allowed disabled:opacity-60"
+                className={`shrink-0 ${glassPillMd} disabled:opacity-60`}
               >
                 {searchLoading ? 'Searching...' : 'Search Target'}
               </button>
@@ -698,7 +712,7 @@ export default function AtlasPage() {
                 type="button"
                 onClick={handleSendToRemote}
                 disabled={!canSendToRemote}
-                className="shrink-0 rounded-full border border-white/25 bg-[#151616] px-4 py-2 text-sm font-medium text-white hover:bg-[#1b1c1c] disabled:cursor-not-allowed disabled:opacity-40"
+                className={`shrink-0 ${glassPillMd} disabled:opacity-40`}
                 title={
                   canSendToRemote
                     ? 'Open Remote with RA/Dec pre-filled'
@@ -750,12 +764,7 @@ export default function AtlasPage() {
                 onClick={() => toggleLayer(k)}
                 disabled={!stelReady}
                 aria-pressed={active}
-                className={
-                  'rounded-full border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ' +
-                  (active
-                    ? 'border-white/60 bg-white text-black hover:bg-white/90'
-                    : 'border-white/25 bg-[#151616] text-white hover:bg-[#1b1c1c]')
-                }
+                className={atlasLayerPillClass(active)}
               >
                 {LAYER_LABELS[k]}
               </button>
@@ -767,12 +776,7 @@ export default function AtlasPage() {
             type="button"
             onClick={() => setNightMode((v) => !v)}
             aria-pressed={nightMode}
-            className={
-              'rounded-full border px-3 py-1.5 text-xs font-medium transition ' +
-              (nightMode
-                ? 'border-white/60 bg-white text-black hover:bg-white/90'
-                : 'border-white/25 bg-[#151616] text-white hover:bg-[#1b1c1c]')
-            }
+            className={atlasLayerPillClass(nightMode)}
           >
             Night mode
           </button>
@@ -786,12 +790,7 @@ export default function AtlasPage() {
                 aria-pressed={active}
                 disabled={!stelReady}
                 title={`Camera frame for ${name}`}
-                className={
-                  'rounded-full border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ' +
-                  (active
-                    ? 'border-white/60 bg-white text-black hover:bg-white/90'
-                    : 'border-white/25 bg-[#151616] text-white hover:bg-[#1b1c1c]')
-                }
+                className={atlasLayerPillClass(active)}
               >
                 {name}
               </button>
@@ -803,12 +802,7 @@ export default function AtlasPage() {
             aria-pressed={alt30OverlayOn}
             disabled={!stelReady}
             title="Show altitude 30° ring (same geometry as azimuthal grid)"
-            className={
-              'rounded-full border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ' +
-              (alt30OverlayOn
-                ? 'border-white/60 bg-white text-black hover:bg-white/90'
-                : 'border-white/25 bg-[#151616] text-white hover:bg-[#1b1c1c]')
-            }
+            className={atlasLayerPillClass(alt30OverlayOn)}
           >
             Alt 30°
           </button>
@@ -818,12 +812,7 @@ export default function AtlasPage() {
             aria-pressed={orbitOverlayOn}
             disabled={!stelReady}
             title="Show solid orbit track for the selected object"
-            className={
-              'rounded-full border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ' +
-              (orbitOverlayOn
-                ? 'border-white/60 bg-white text-black hover:bg-white/90'
-                : 'border-white/25 bg-[#151616] text-white hover:bg-[#1b1c1c]')
-            }
+            className={atlasLayerPillClass(orbitOverlayOn)}
           >
             Orbit
           </button>
@@ -946,10 +935,7 @@ export default function AtlasPage() {
             onClick={handleReturnToNow}
             disabled={!stelReady}
             title="Set sky time to the current moment (leave time-travel)"
-            className={
-              'shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ' +
-              'border-white/25 bg-[#151616] text-white hover:bg-[#1b1c1c]'
-            }
+            className={`shrink-0 ${glassPillSm}`}
           >
             Now
           </button>

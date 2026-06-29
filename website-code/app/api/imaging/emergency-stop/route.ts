@@ -11,6 +11,7 @@ import {
 import { applyEmergencyStopHolds } from '@/lib/imaging-emergency-stop-holds'
 import { requireImagingAdmin, imagingAdminActorFromUser } from '@/lib/imaging-admin-auth'
 import {
+  clearNinaStoppedPendingFail,
   failInProgressBoardSessions,
   failInProgressProjectSubSessions,
 } from '@/lib/imaging-session-failure'
@@ -62,6 +63,7 @@ export async function POST(request: NextRequest) {
 
   const failedSubs = await failInProgressProjectSubSessions('emergency_stop')
   const failedBoard = await failInProgressBoardSessions(undefined, 'emergency_stop')
+  await clearNinaStoppedPendingFail()
 
   await appendAuditLog({
     kind: 'emergency_stop',

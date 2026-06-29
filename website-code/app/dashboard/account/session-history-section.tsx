@@ -1,5 +1,14 @@
 'use client'
 
+import {
+  glassPillDangerSm,
+  glassPillLg,
+  glassPillLgWide,
+  glassPillMd,
+  glassPillSm,
+  glassPillSuccessSm,
+  glassPillXs,
+} from '@/lib/glass-ui'
 import { useCallback, useEffect, useState } from 'react'
 import { DashboardPanel } from '@/app/dashboard/account/dashboard-panel'
 
@@ -54,7 +63,7 @@ export function SessionHistorySection({
       type="button"
       onClick={() => void loadSessions()}
       disabled={loading}
-      className="rounded-full border border-white/25 bg-[#151616] px-3 py-1 text-xs font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-50"
+      className={`${glassPillXs} disabled:opacity-50`}
     >
       {loading ? '…' : 'Refresh'}
     </button>

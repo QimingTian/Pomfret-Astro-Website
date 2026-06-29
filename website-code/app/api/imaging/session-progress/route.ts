@@ -25,6 +25,10 @@ import {
   emergencyStopTriggeredBySuffix,
 } from '@/lib/imaging-emergency-stop'
 import {
+  clearNinaStoppedPendingFail,
+  maybeFailSessionsAfterNinaStopped,
+} from '@/lib/imaging-session-failure'
+import {
   setObservatoryMode,
   setObservatoryStatus,
 } from '@/lib/observatory-status-store'
@@ -203,6 +207,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (queueId && completionSignal) {
+    await clearNinaStoppedPendingFail()
     const nightSub = parseProjectNightSubId(queueId)
     if (nightSub) {
       const match = await getProjectByNightSubId(queueId)
@@ -232,7 +237,7 @@ export async function POST(request: NextRequest) {
             }
             publishProgress(match.project.id, { type: 'status', queueStatus: 'completed' })
           }
-          void reconcilePendingScheduleStatus()
+          void reconcilePendingScheduleStatus({ force: true })
           void markEndNightDueIfTonightComplete()
         }
       }
@@ -272,6 +277,12 @@ export async function POST(request: NextRequest) {
         void markEndNightDueIfTonightComplete()
       }
     }
+  }
+
+  try {
+    await maybeFailSessionsAfterNinaStopped()
+  } catch {
+    // never block progress POST
   }
 
   return withImagingCors({ ok: true as const })

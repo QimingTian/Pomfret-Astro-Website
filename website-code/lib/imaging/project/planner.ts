@@ -753,7 +753,16 @@ async function applyTonightPlansOrClearScheduled(
   const project = await getProjectById(projectId)
   if (!project || !hasScheduledSubsTonight(project, nightKey)) return
   if (hasInProgressSessionTonight(project, nightKey)) return
-  if (shouldKeepExistingDeliverableTonight(project, freeIntervals, weatherPermittedIntervals, nightKey, now)) {
+  const nowMs = now.getTime()
+  const window = getTonightSchedulingWindow(now)
+  const fullNightFree = [
+    {
+      startMs: Math.max(nowMs, window.nauticalDuskUtc.getTime()),
+      endMs: window.nauticalDawnUtc.getTime(),
+    },
+  ]
+  // Keep existing subs when weather still permits tonight — not when this project's FIFO slice is temporarily full.
+  if (shouldKeepExistingDeliverableTonight(project, fullNightFree, weatherPermittedIntervals, nightKey, now)) {
     return
   }
   await replaceScheduledSubsForNightKey(projectId, nightKey, [], {

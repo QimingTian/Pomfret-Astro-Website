@@ -1,5 +1,5 @@
 import { appendAuditLog } from '@/lib/imaging-audit-log'
-import { emitAgentWake, emitSiteSessionsChanged } from '@/lib/imaging/site-events'
+import { emitSiteSessionsChanged } from '@/lib/imaging/site-events'
 import { compactStaleProjectBoardRows } from '@/lib/imaging-project-store'
 import { purgeExpiredProjectAssets } from '@/lib/imaging-project-retention'
 import { boardEnsureScheduleBarForTerminal, boardPurgeCompletedOlderThan, listBoardEntries } from '@/lib/imaging-session-board'
@@ -31,7 +31,6 @@ export async function runImagingScheduleMaintenance(): Promise<void> {
     await Promise.all(boardNeedsBar.map((b) => boardEnsureScheduleBarForTerminal(b.id)))
   }
   emitSiteSessionsChanged('maintenance')
-  emitAgentWake('reconcile')
 }
 
 /** Purge completed sessions / project assets older than 48h (R2 + previews). */

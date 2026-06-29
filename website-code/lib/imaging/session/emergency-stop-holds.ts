@@ -30,7 +30,7 @@ export async function applyEmergencyStopHolds(): Promise<string[]> {
     }
   }
 
-  await reconcilePendingScheduleStatus()
+  await reconcilePendingScheduleStatus({ force: true })
   return heldSessionIds
 }
 
@@ -48,5 +48,5 @@ export async function releaseEmergencyStopHolds(heldSessionIds: string[]): Promi
     if (!row || row.status !== 'on_hold') continue
     await releaseQueueSessionHold(sessionId)
   }
-  await reconcilePendingScheduleStatus()
+  await reconcilePendingScheduleStatus({ force: true })
 }

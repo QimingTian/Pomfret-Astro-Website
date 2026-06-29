@@ -555,7 +555,7 @@ export async function adminRunSession(sessionId: string): Promise<{ ok: true } |
     })
 
     const { reconcilePendingScheduleStatus } = await import('@/lib/imaging-queue-reconcile')
-    await reconcilePendingScheduleStatus()
+    await reconcilePendingScheduleStatus({ force: true })
     return { ok: true }
   }
 

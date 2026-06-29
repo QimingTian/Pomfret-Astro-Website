@@ -111,7 +111,7 @@ export async function POST(request: NextRequest) {
   if ('error' in created) {
     return withImagingCors({ ok: false as const, error: created.error }, 400)
   }
-  await reconcilePendingScheduleStatus()
+  await reconcilePendingScheduleStatus({ force: true })
   void appendAuditLog({
     kind: 'schedule_control.add',
     message: `Admin scheduled closed window ${created.startIso} -> ${created.endIso}`,
@@ -135,7 +135,7 @@ export async function DELETE(request: NextRequest) {
   if (!id) return withImagingCors({ ok: false as const, error: 'id is required' }, 400)
   const ok = await removeAdminClosedWindow(id)
   if (!ok) return withImagingCors({ ok: false as const, error: 'Not found' }, 404)
-  await reconcilePendingScheduleStatus()
+  await reconcilePendingScheduleStatus({ force: true })
   void appendAuditLog({
     kind: 'schedule_control.remove',
     message: `Admin removed closed window ${id}`,

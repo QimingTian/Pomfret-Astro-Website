@@ -1,5 +1,14 @@
 'use client'
 
+import {
+  glassPillDangerSm,
+  glassPillLg,
+  glassPillLgWide,
+  glassPillMd,
+  glassPillSm,
+  glassPillSuccessSm,
+  glassPillXs,
+} from '@/lib/glass-ui'
 import { useCallback, useEffect, useState } from 'react'
 import { DashboardPanel } from '@/app/dashboard/account/dashboard-panel'
 import { memberVerificationStatusLabel } from '@/lib/member-access'
@@ -158,7 +167,7 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
       type="button"
       onClick={() => void load()}
       disabled={loading}
-      className="rounded-full border border-white/25 bg-[#151616] px-3 py-1 text-xs font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-50"
+      className={`${glassPillXs} disabled:opacity-50`}
     >
       {loading ? '…' : 'Refresh'}
     </button>
@@ -208,7 +217,7 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
                         type="button"
                         disabled={busy || loading}
                         onClick={() => void setAsAdmin(m)}
-                        className="rounded-full border border-white/25 bg-[#151616] px-3 py-1 text-xs font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-40"
+                        className={`${glassPillXs} disabled:opacity-40`}
                       >
                         {busyPromote ? '…' : 'Set as Admin'}
                       </button>
@@ -217,7 +226,7 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
                         type="button"
                         disabled={busy || loading}
                         onClick={() => void setAsMember(m)}
-                        className="rounded-full border border-white/25 bg-[#151616] px-3 py-1 text-xs font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-40"
+                        className={`${glassPillXs} disabled:opacity-40`}
                       >
                         {busyDemote ? '…' : 'Set as Member'}
                       </button>
@@ -226,7 +235,7 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
                       type="button"
                       disabled={busy || loading}
                       onClick={() => void removeMember(m)}
-                      className="rounded-full border border-red-500/50 px-3 py-1 text-xs text-red-300 disabled:opacity-40"
+                      className={`${glassPillDangerSm} disabled:opacity-40`}
                     >
                       {busyRemove ? '…' : 'Remove'}
                     </button>

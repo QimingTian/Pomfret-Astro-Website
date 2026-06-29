@@ -37,6 +37,23 @@ import {
   VARIABLE_STAR_SESSION_OVERHEAD_SEC,
 } from '@/lib/imaging-session-overhead'
 import { parseProjectNightSubId } from '@/lib/imaging-project-ids'
+import {
+  glassPillDangerSm,
+  glassPillDangerMd,
+  glassPillDangerSolid,
+  glassPillDisabled,
+  glassPillFullWidthMd,
+  glassPillFullWidthSm,
+  glassPillMd,
+  glassPillMuted,
+  glassPillSm,
+  glassPillToggleActive,
+  glassPillToggleActiveMd,
+  glassPillToggleDisabledMd,
+  glassPillToggleIdle,
+  glassPillToggleIdleMd,
+  glassPillXs,
+} from '@/lib/glass-ui'
 
 const jsonHeaders: HeadersInit = { 'Content-Type': 'application/json' }
 const STACKED_MASTER_REQUIRED_EXPOSURE_SECONDS = 600
@@ -869,14 +886,13 @@ export default function RemotePage() {
   )
 
   const sessionActionButtonClass = useCallback((enabled: boolean, variant: 'default' | 'danger' = 'default') => {
-    const base = 'rounded-full border px-3 py-1.5 text-xs font-medium'
     if (!enabled) {
-      return `${base} border-white/10 bg-[#151616] text-gray-500 cursor-not-allowed opacity-50`
+      return `${glassPillDisabled} px-3 py-1.5 text-xs`
     }
     if (variant === 'danger') {
-      return `${base} border-red-500/50 bg-[#151616] text-red-300 hover:bg-[#1b1c1c] hover:text-red-200`
+      return `${glassPillDangerSm} px-3 py-1.5`
     }
-    return `${base} border-white/25 bg-[#151616] text-white hover:bg-[#1b1c1c]`
+    return glassPillSm
   }, [])
 
   const refreshCloudSavedSessions = useCallback(async () => {
@@ -3290,7 +3306,7 @@ export default function RemotePage() {
                         setVerifySending(false)
                       }
                     }}
-                    className="mt-2 rounded-full border border-white/25 bg-[#151616] px-4 py-2 text-sm font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-50"
+                    className={`${glassPillMd} mt-2 disabled:opacity-50`}
                   >
                     {verifySending ? 'Sending…' : 'Resend verification email'}
                   </button>
@@ -3332,11 +3348,7 @@ export default function RemotePage() {
                   setCatalogLookupResult(null)
                   setVariableStarBlockHours(1)
                 }}
-                className={`rounded-full border px-4 py-2 text-sm font-medium ${
-                  sessionType === 'dso'
-                    ? 'border-white/60 bg-[#151616] text-white'
-                    : 'border-gray-300 dark:border-gray-600 bg-[#151616] text-gray-300 hover:text-white'
-                }`}
+                className={sessionType === 'dso' ? glassPillToggleActiveMd : glassPillToggleIdleMd}
               >
                 Deep Sky Object Imaging
               </button>
@@ -3367,11 +3379,7 @@ export default function RemotePage() {
                   setFilterPlans([{ filterName: 'G', count: '10', exposureSeconds: '60' }])
                   setVariableStarBlockHours(1)
                 }}
-                className={`rounded-full border px-4 py-2 text-sm font-medium ${
-                  sessionType === 'variable_star'
-                    ? 'border-white/60 bg-[#151616] text-white'
-                    : 'border-gray-300 dark:border-gray-600 bg-[#151616] text-gray-300 hover:text-white'
-                }`}
+                className={sessionType === 'variable_star' ? glassPillToggleActiveMd : glassPillToggleIdleMd}
               >
                 Variable Star Imaging
               </button>
@@ -3385,11 +3393,7 @@ export default function RemotePage() {
                     type="button"
                     aria-pressed={!projectMode}
                     onClick={() => setProjectMode(false)}
-                    className={`rounded-full border px-4 py-2 text-sm font-medium ${
-                      !projectMode
-                        ? 'border-white/60 bg-[#151616] text-white'
-                        : 'border-gray-300 dark:border-gray-600 bg-[#151616] text-gray-300 hover:text-white'
-                    }`}
+                    className={!projectMode ? glassPillToggleActiveMd : glassPillToggleIdleMd}
                   >
                     Off
                   </button>
@@ -3397,11 +3401,7 @@ export default function RemotePage() {
                     type="button"
                     aria-pressed={projectMode}
                     onClick={() => setProjectMode(true)}
-                    className={`rounded-full border px-4 py-2 text-sm font-medium ${
-                      projectMode
-                        ? 'border-white/60 bg-[#151616] text-white'
-                        : 'border-gray-300 dark:border-gray-600 bg-[#151616] text-gray-300 hover:text-white'
-                    }`}
+                    className={projectMode ? glassPillToggleActiveMd : glassPillToggleIdleMd}
                   >
                     On
                   </button>
@@ -3560,7 +3560,7 @@ export default function RemotePage() {
                     void handleCatalogLookup()
                   }}
                   disabled={catalogLookupLoading}
-                  className="rounded-full border border-white/25 bg-[#151616] px-4 py-2 text-sm font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-60"
+                  className={`${glassPillMd} disabled:opacity-60`}
                 >
                   {catalogLookupLoading ? 'Searching...' : 'Search Target'}
                 </button>
@@ -3731,13 +3731,7 @@ export default function RemotePage() {
                           setVariableStarDurationUserSelected(true)
                         }
                       }}
-                      className={`w-full rounded-full border px-3 py-2 text-sm font-medium ${
-                        selected
-                          ? 'border-white/60 bg-[#151616] text-white'
-                          : enabled
-                            ? 'border-gray-300 dark:border-gray-600 bg-[#151616] text-gray-300 hover:text-white'
-                            : 'cursor-not-allowed border-gray-600/50 bg-[#151616]/80 text-gray-600'
-                      }`}
+                      className={selected ? `${glassPillToggleActive} w-full` : enabled ? `${glassPillToggleIdle} w-full` : glassPillToggleDisabledMd}
                     >
                       {`${h} h`}
                     </button>
@@ -3763,11 +3757,7 @@ export default function RemotePage() {
                           return [...prev, { filterName: option.value, count: '10', exposureSeconds: '' }]
                         })
                       }}
-                      className={`rounded-full border px-3 py-2 text-sm font-medium ${
-                        selected
-                          ? 'border-white/60 bg-[#151616] text-white'
-                          : 'border-gray-300 dark:border-gray-600 bg-[#151616] text-gray-300 hover:text-white'
-                      }`}
+                      className={selected ? glassPillToggleActive : glassPillToggleIdle}
                     >
                       {option.label}
                     </button>
@@ -3795,7 +3785,7 @@ export default function RemotePage() {
                             type="button"
                             disabled
                             aria-disabled="true"
-                            className="w-full rounded-full border border-white/25 bg-[#151616] px-3 py-2 text-center text-sm font-medium text-white opacity-90 cursor-default sm:self-end"
+                            className={`${glassPillFullWidthMd} opacity-90 cursor-default sm:self-end`}
                           >
                             {label}
                           </button>
@@ -3841,11 +3831,7 @@ export default function RemotePage() {
                 <button
                   type="button"
                   onClick={() => setOutputMode('raw_zip')}
-                  className={`rounded-full border px-3 py-2 text-sm font-medium ${
-                    outputMode === 'raw_zip'
-                      ? 'border-white/60 bg-[#151616] text-white'
-                      : 'border-gray-300 dark:border-gray-600 bg-[#151616] text-gray-300 hover:text-white'
-                  }`}
+                  className={outputMode === 'raw_zip' ? glassPillToggleActive : glassPillToggleIdle}
                 >
                   Raw ZIP
                 </button>
@@ -3853,11 +3839,7 @@ export default function RemotePage() {
                   <button
                     type="button"
                     onClick={() => setOutputMode('stacked_master')}
-                    className={`rounded-full border px-3 py-2 text-sm font-medium ${
-                      outputMode === 'stacked_master'
-                        ? 'border-white/60 bg-[#151616] text-white'
-                        : 'border-gray-300 dark:border-gray-600 bg-[#151616] text-gray-300 hover:text-white'
-                    }`}
+                    className={outputMode === 'stacked_master' ? glassPillToggleActive : glassPillToggleIdle}
                   >
                     Stacked Master
                   </button>
@@ -3865,11 +3847,7 @@ export default function RemotePage() {
                 <button
                   type="button"
                   onClick={() => setOutputMode('none')}
-                  className={`rounded-full border px-3 py-2 text-sm font-medium ${
-                    outputMode === 'none'
-                      ? 'border-white/60 bg-[#151616] text-white'
-                      : 'border-gray-300 dark:border-gray-600 bg-[#151616] text-gray-300 hover:text-white'
-                  }`}
+                  className={outputMode === 'none' ? glassPillToggleActive : glassPillToggleIdle}
                 >
                   None
                 </button>
@@ -3882,24 +3860,20 @@ export default function RemotePage() {
                   type="button"
                   disabled={ambientTempC !== null && ambientTempC > 20}
                   onClick={() => setCameraCoolingTempC(-10)}
-                  className={`rounded-full border px-3 py-2 text-sm font-medium ${
+                  className={
                     ambientTempC !== null && ambientTempC > 20
-                      ? 'border-gray-700 bg-[#151616] text-gray-600 cursor-not-allowed'
+                      ? `${glassPillDisabled} px-3 py-2 text-sm`
                       : cameraCoolingTempC === -10
-                        ? 'border-white/60 bg-[#151616] text-white'
-                        : 'border-gray-300 dark:border-gray-600 bg-[#151616] text-gray-300 hover:text-white'
-                  }`}
+                        ? glassPillToggleActive
+                        : glassPillToggleIdle
+                  }
                 >
                   −10°C
                 </button>
                 <button
                   type="button"
                   onClick={() => setCameraCoolingTempC(0)}
-                  className={`rounded-full border px-3 py-2 text-sm font-medium ${
-                    cameraCoolingTempC === 0
-                      ? 'border-white/60 bg-[#151616] text-white'
-                      : 'border-gray-300 dark:border-gray-600 bg-[#151616] text-gray-300 hover:text-white'
-                  }`}
+                  className={cameraCoolingTempC === 0 ? glassPillToggleActive : glassPillToggleIdle}
                 >
                   0°C
                 </button>
@@ -3920,7 +3894,7 @@ export default function RemotePage() {
             <button
               type="submit"
               disabled={submitting || !imagingAccess.ok}
-              className="inline-flex items-center justify-center rounded-full border border-white/25 bg-[#151616] px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#1b1c1c] disabled:cursor-not-allowed disabled:opacity-60"
+              className={`${glassPillMd} disabled:opacity-60`}
             >
               {submitting ? (editingSessionId ? 'Finishing...' : 'Starting...') : editingSessionId ? 'Finish Editing' : 'Start Session'}
             </button>
@@ -3933,7 +3907,7 @@ export default function RemotePage() {
                 setRunModalName('')
                 setShowRunRemoteSessionModal(true)
               }}
-              className="inline-flex items-center justify-center rounded-full border border-white/25 bg-[#151616] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#1b1c1c] disabled:cursor-not-allowed disabled:opacity-50"
+              className={`${glassPillMd} disabled:opacity-50`}
             >
               Run A Saved Session
             </button>
@@ -3946,7 +3920,7 @@ export default function RemotePage() {
                 setSaveModalName(requestName.trim())
                 setShowSaveRemoteSessionModal(true)
               }}
-              className="inline-flex items-center justify-center rounded-full border border-white/25 bg-[#151616] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#1b1c1c] disabled:cursor-not-allowed disabled:opacity-50"
+              className={`${glassPillMd} disabled:opacity-50`}
             >
               Save Session
             </button>
@@ -4356,7 +4330,7 @@ export default function RemotePage() {
                               const err = await downloadSessionFile(night.id, password)
                               if (err) setDeleteError(err)
                             }}
-                            className="shrink-0 rounded-full border border-white/25 bg-[#151616] px-3 py-1 text-xs font-medium text-white hover:bg-[#1b1c1c]"
+                            className={`shrink-0 ${glassPillXs}`}
                           >
                             Download
                           </button>
@@ -4449,7 +4423,7 @@ export default function RemotePage() {
                 setNightPickerProjectId(null)
                 setNightPickerPurpose(null)
               }}
-              className="w-full rounded-full border border-gray-600 px-4 py-2 text-sm text-gray-300 hover:text-white"
+              className={glassPillMuted}
             >
               Cancel
             </button>
@@ -4574,14 +4548,14 @@ export default function RemotePage() {
                   setAuthPassword('')
                   setAuthError(null)
                 }}
-                className="rounded-full border border-white/25 bg-[#151616] px-3 py-2 text-sm font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-60"
+                className={`${glassPillFullWidthSm} disabled:opacity-60`}
                 disabled={authSubmitting}
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="rounded-full border border-white/25 bg-[#151616] px-3 py-2 text-sm font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-60"
+                className={`${glassPillFullWidthSm} disabled:opacity-60`}
                 disabled={authSubmitting}
               >
                 Continue
@@ -4649,14 +4623,14 @@ export default function RemotePage() {
                   setDeletePassword('')
                   setDeleteError(null)
                 }}
-                className="rounded-full border border-white/25 bg-[#151616] px-4 py-2 text-sm font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-60"
+                className={`${glassPillMd} disabled:opacity-60`}
                 disabled={deleteSubmitting}
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="rounded-full border border-red-500/60 bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
+                className={`${glassPillDangerSolid} disabled:opacity-60`}
                 disabled={deleteSubmitting}
               >
                 {deleteSubmitting ? 'Deleting…' : 'Delete'}
@@ -4688,7 +4662,7 @@ export default function RemotePage() {
                   setShowSaveRemoteSessionModal(false)
                   setSaveModalError(null)
                 }}
-                className="rounded-full border border-white/25 bg-[#151616] px-4 py-2 text-sm font-medium text-white hover:bg-[#1b1c1c]"
+                className={`${glassPillMd}`}
               >
                 Cancel
               </button>
@@ -4717,7 +4691,7 @@ export default function RemotePage() {
                     setSubmitSuccess(`Saved session "${name}" to your account.`)
                   })()
                 }}
-                className="rounded-full border border-white/60 bg-[#151616] px-4 py-2 text-sm font-medium text-white hover:bg-[#1b1c1c]"
+                className={`${glassPillMd} glass-pill-active`}
               >
                 Save
               </button>
@@ -4764,7 +4738,7 @@ export default function RemotePage() {
                   setShowRunRemoteSessionModal(false)
                   setRunModalError(null)
                 }}
-                className="rounded-full border border-white/25 bg-[#151616] px-4 py-2 text-sm font-medium text-white hover:bg-[#1b1c1c]"
+                className={`${glassPillMd}`}
               >
                 Cancel
               </button>
@@ -4789,7 +4763,7 @@ export default function RemotePage() {
                     setSubmitSuccess(`Loaded saved session "${found.name}".`)
                   })()
                 }}
-                className="rounded-full border border-white/60 bg-[#151616] px-4 py-2 text-sm font-medium text-white hover:bg-[#1b1c1c]"
+                className={`${glassPillMd} glass-pill-active`}
               >
                 Load
               </button>

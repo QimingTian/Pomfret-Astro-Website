@@ -217,7 +217,7 @@ export async function adminMarkSessionComplete(sessionId: string): Promise<{ ok:
       }
       publishProgress(match.project.id, { type: 'status', queueStatus: 'completed' })
     }
-    void reconcilePendingScheduleStatus()
+    void reconcilePendingScheduleStatus({ force: true })
     return { ok: true }
   }
 
@@ -278,7 +278,7 @@ export async function adminMarkSessionInProgress(
       message: `Admin restored project sub-session ${sessionId} to in_progress.`,
       detail: { sessionId, projectId: match.project.id, nightIndex: match.night.nightIndex },
     })
-    void reconcilePendingScheduleStatus()
+    void reconcilePendingScheduleStatus({ force: true })
     return { ok: true }
   }
 
@@ -336,7 +336,7 @@ export async function adminMarkSessionFailed(sessionId: string): Promise<{ ok: t
       },
       new Date().toISOString()
     )
-    void reconcilePendingScheduleStatus()
+    void reconcilePendingScheduleStatus({ force: true })
     return { ok: true }
   }
 
@@ -399,7 +399,7 @@ export async function adminDeleteSession(sessionId: string): Promise<{ ok: true 
       message: `Admin deleted project sub-session ${sessionId}.`,
       detail: { sessionId, projectId: match.project.id },
     })
-    void reconcilePendingScheduleStatus()
+    void reconcilePendingScheduleStatus({ force: true })
     return { ok: true }
   }
 

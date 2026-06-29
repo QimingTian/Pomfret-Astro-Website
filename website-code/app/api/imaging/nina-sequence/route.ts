@@ -322,7 +322,7 @@ export async function GET(request: NextRequest) {
   await touchObservatoryPoll()
   const now = new Date()
   const nowMs = now.getTime()
-  const status = await getObservatoryStatus({ trackSessionFailure: false })
+  const status = await getObservatoryStatus()
   const emergencyDelivered = await tryDeliverEmergencyStop()
   if (emergencyDelivered) return emergencyDelivered
   if (await isEmergencyStopBlocking()) {

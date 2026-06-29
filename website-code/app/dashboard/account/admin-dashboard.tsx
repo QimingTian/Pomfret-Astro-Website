@@ -9,6 +9,12 @@ import { AccountTwoColRow } from '@/app/dashboard/account/account-two-col-row'
 import { AccountPageHeader } from '@/app/dashboard/account/account-page-header'
 import { AccountInfoSection } from '@/app/dashboard/account/account-info-section'
 import type { PublicMemberUser } from '@/lib/member-store'
+import {
+  glassPillDangerLg,
+  glassPillDangerWide,
+  glassPillMd,
+  glassPillXl,
+} from '@/lib/glass-ui'
 
 type EmergencyStopPhase = 'idle' | 'stopping' | 'stopped'
 
@@ -20,8 +26,7 @@ type EmergencyStopStatus = {
   canArm: boolean
 }
 
-const emergencyStopPillClass =
-  'relative w-full max-w-md overflow-hidden rounded-full border border-red-500/50 bg-red-950 px-5 py-2.5 text-2xl font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60'
+const emergencyStopPillClass = `${glassPillDangerWide} bg-red-950/80`
 
 function emergencyStopButtonLabel(status: EmergencyStopStatus): string {
   if (status.phase === 'stopping') return 'STOPPING'
@@ -162,7 +167,7 @@ function EmergencyStopButton() {
               <button
                 type="button"
                 disabled={pending}
-                className="rounded-full border border-red-500/50 bg-red-600 px-5 py-2.5 text-lg font-semibold text-white hover:bg-red-500 active:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className={`${glassPillDangerLg} disabled:opacity-60`}
                 onClick={() => void confirmEmergencyStop()}
               >
                 Confirm ESTOP
@@ -170,7 +175,7 @@ function EmergencyStopButton() {
               <button
                 type="button"
                 disabled={pending}
-                className="rounded-full border border-white/25 bg-[#151616] px-5 py-2.5 text-lg font-semibold text-white hover:bg-[#1b1c1c] disabled:cursor-not-allowed disabled:opacity-60"
+                className={`${glassPillXl} disabled:opacity-60`}
                 onClick={() => setShowConfirm(false)}
               >
                 Cancel

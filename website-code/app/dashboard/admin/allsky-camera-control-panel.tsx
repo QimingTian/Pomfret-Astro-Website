@@ -16,6 +16,7 @@ import {
   type AutoTuningSample,
 } from '@/lib/auto-tuning-history'
 import { useAppStore } from '@/lib/store'
+import { glassPillDangerSm, glassPillSm, glassPillSuccessSm } from '@/lib/glass-ui'
 
 import { AutoExposureTuningChart } from './auto-exposure-tuning-chart'
 import { AutoWbTuningChart } from './auto-wb-tuning-chart'
@@ -124,11 +125,9 @@ function writeSavedMode(mode: CamMode) {
   localStorage.setItem(MODE_STORAGE_KEY, mode)
 }
 
-const btnBase =
-  'rounded-full border px-3 py-1.5 text-xs font-medium disabled:opacity-40 transition-colors'
-const btnPrimary = `${btnBase} border-white/25 bg-[#151616] text-white hover:bg-[#1b1c1c]`
-const btnDanger = `${btnBase} border-red-500/50 text-red-300 hover:bg-red-500/10`
-const btnSuccess = `${btnBase} border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/10`
+const btnPrimary = glassPillSm
+const btnDanger = glassPillDangerSm
+const btnSuccess = glassPillSuccessSm
 
 const TRACK_H = 8
 const THUMB_D = 22
@@ -431,7 +430,7 @@ const NumericInput = forwardRef<
 })
 const fieldSelect =
   'w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm text-white dark:border-gray-600 dark:bg-transparent'
-const btnSet = `${btnBase} border-white/25 bg-[#1d1e1e] text-white hover:bg-[#252626]`
+const btnSet = `${glassPillSm} bg-white/[0.06] hover:bg-white/[0.09]`
 const setButtonSpacer = (
   <span className={`${btnSet} pointer-events-none invisible shrink-0 select-none`} aria-hidden>
     Set

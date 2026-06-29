@@ -11,9 +11,25 @@ import { ImagingRequestsSection } from '@/app/dashboard/admin/imaging-requests-s
 import { AllMembersSection } from '@/app/dashboard/admin/all-members-section'
 import { AllSkyCameraControlPanel } from '@/app/dashboard/admin/allsky-camera-control-panel'
 import { statusOptions, useAdminTools } from '@/app/dashboard/admin/use-admin-tools'
+import {
+  glassPillSkySm,
+  glassPillAccentSm,
+  glassPillDangerSm,
+  glassPillInfoSm,
+  glassPillMd,
+  glassPillSuccessSm,
+  glassPillToggleActive,
+  glassPillToggleIdle,
+  glassPillToggleActiveBlock,
+  glassPillToggleIdleBlock,
+  glassPillWarningSm,
+  glassPillXs,
+} from '@/lib/glass-ui'
 
-const pillActive = 'border-white/60 bg-[#151616] text-white'
-const pillIdle = 'border-gray-600 bg-[#151616] text-gray-300 hover:text-white'
+const pillActive = glassPillToggleActive
+const pillIdle = glassPillToggleIdle
+const pillActiveBlock = glassPillToggleActiveBlock
+const pillIdleBlock = glassPillToggleIdleBlock
 
 export function AdminDashboardGrid() {
   const t = useAdminTools()
@@ -43,7 +59,7 @@ export function AdminDashboardGrid() {
                   type="button"
                   onClick={() => void t.updateMode('manual')}
                   disabled={t.saving}
-                  className={`rounded-full border px-3 py-2 text-sm font-medium ${t.mode === 'manual' ? pillActive : pillIdle}`}
+                  className={`${t.mode === 'manual' ? pillActive : pillIdle}`}
                 >
                   Manual
                 </button>
@@ -51,7 +67,7 @@ export function AdminDashboardGrid() {
                   type="button"
                   onClick={() => void t.updateMode('auto')}
                   disabled={t.saving}
-                  className={`rounded-full border px-3 py-2 text-sm font-medium ${t.mode === 'auto' ? pillActive : pillIdle}`}
+                  className={`${t.mode === 'auto' ? pillActive : pillIdle}`}
                 >
                   Auto
                 </button>
@@ -64,9 +80,7 @@ export function AdminDashboardGrid() {
                     type="button"
                     onClick={() => void t.updateStatus(opt.value)}
                     disabled={t.saving || t.mode === 'auto'}
-                    className={`w-full rounded-full border px-4 py-2 text-left text-sm font-medium ${
-                      t.status === opt.value ? pillActive : pillIdle
-                    }`}
+                    className={t.status === opt.value ? pillActiveBlock : pillIdleBlock}
                   >
                     {opt.label}
                   </button>
@@ -102,7 +116,7 @@ export function AdminDashboardGrid() {
                     URL.revokeObjectURL(a.href)
                   }}
                   disabled={t.logEntries.length === 0}
-                  className="rounded-full border border-white/25 bg-[#151616] px-3 py-1 text-xs font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-50"
+                  className={`${glassPillXs} disabled:opacity-50`}
                 >
                   Export
                 </button>
@@ -110,7 +124,7 @@ export function AdminDashboardGrid() {
                   type="button"
                   onClick={() => void t.loadLog()}
                   disabled={t.logLoading}
-                  className="rounded-full border border-white/25 bg-[#151616] px-3 py-1 text-xs font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-50"
+                  className={`${glassPillXs} disabled:opacity-50`}
                 >
                   {t.logLoading ? '…' : 'Refresh'}
                 </button>
@@ -160,7 +174,7 @@ export function AdminDashboardGrid() {
               <button
                 type="submit"
                 disabled={t.scheduleSaving}
-                className="rounded-full border border-white/25 bg-[#151616] px-4 py-2 text-sm font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-50"
+                className={`${glassPillMd} disabled:opacity-50`}
               >
                 {t.scheduleSaving ? 'Saving…' : 'Add closed window'}
               </button>
@@ -192,7 +206,7 @@ export function AdminDashboardGrid() {
                         await t.loadClosedWindows()
                         await t.loadLog()
                       }}
-                      className="shrink-0 rounded-full border border-red-500/50 px-2 py-1 text-red-300"
+                      className={`shrink-0 ${glassPillDangerSm}`}
                     >
                       Remove
                     </button>
@@ -211,7 +225,7 @@ export function AdminDashboardGrid() {
                 type="button"
                 onClick={() => void t.loadSessionControl()}
                 disabled={t.sessionLoading}
-                className="rounded-full border border-white/25 bg-[#151616] px-3 py-1 text-xs font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-50"
+                className={`${glassPillXs} disabled:opacity-50`}
               >
                 {t.sessionLoading ? '…' : 'Refresh'}
               </button>
@@ -244,7 +258,7 @@ export function AdminDashboardGrid() {
                           type="button"
                           disabled={busy || !canRun || t.emergencyStopBlocking}
                           onClick={() => void t.runSessionAction(row.sessionId, 'run')}
-                          className="rounded-full border border-sky-500/50 px-2 py-1 text-xs text-sky-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:border-gray-600 disabled:text-gray-500"
+                          className={`${glassPillSkySm} disabled:opacity-40`}
                         >
                           Run
                         </button>
@@ -254,7 +268,7 @@ export function AdminDashboardGrid() {
                           onClick={() =>
                             void t.runSessionAction(row.sessionId, onHold ? 'release_hold' : 'hold')
                           }
-                          className="rounded-full border border-violet-500/50 px-2 py-1 text-xs text-violet-200 disabled:opacity-40"
+                          className={`${glassPillAccentSm} disabled:opacity-40`}
                         >
                           {onHold ? 'Unhold' : 'Hold'}
                         </button>
@@ -262,7 +276,7 @@ export function AdminDashboardGrid() {
                           type="button"
                           disabled={busy || row.status === 'completed'}
                           onClick={() => void t.runSessionAction(row.sessionId, 'complete')}
-                          className="rounded-full border border-green-500/50 px-2 py-1 text-xs text-green-300 disabled:opacity-40"
+                          className={`${glassPillSuccessSm} disabled:opacity-40`}
                         >
                           Complete
                         </button>
@@ -270,7 +284,7 @@ export function AdminDashboardGrid() {
                           type="button"
                           disabled={busy || row.status === 'failed'}
                           onClick={() => void t.runSessionAction(row.sessionId, 'fail')}
-                          className="rounded-full border border-amber-500/50 px-2 py-1 text-xs text-amber-200 disabled:opacity-40"
+                          className={`${glassPillWarningSm} disabled:opacity-40`}
                         >
                           Fail
                         </button>
@@ -278,7 +292,7 @@ export function AdminDashboardGrid() {
                           type="button"
                           disabled={busy || row.status !== 'failed'}
                           onClick={() => void t.runSessionAction(row.sessionId, 'in_progress')}
-                          className="rounded-full border border-blue-500/50 px-2 py-1 text-xs text-blue-200 disabled:opacity-40"
+                          className={`${glassPillInfoSm} disabled:opacity-40`}
                         >
                           In progress
                         </button>
@@ -286,7 +300,7 @@ export function AdminDashboardGrid() {
                           type="button"
                           disabled={busy}
                           onClick={() => void t.runSessionAction(row.sessionId, 'delete')}
-                          className="rounded-full border border-red-500/50 px-2 py-1 text-xs text-red-300 disabled:opacity-40"
+                          className={`${glassPillDangerSm} disabled:opacity-40`}
                         >
                           Delete
                         </button>

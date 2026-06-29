@@ -1,15 +1,24 @@
 'use client'
 
+import {
+  glassPillDangerSm,
+  glassPillLg,
+  glassPillLgWide,
+  glassPillMd,
+  glassPillSm,
+  glassPillSuccessSm,
+  glassPillXs,
+} from '@/lib/glass-ui'
 import { useCallback, useEffect, useState } from 'react'
 import { DashboardPanel } from '@/app/dashboard/account/dashboard-panel'
 import { useMember } from '@/hooks/use-member'
 import { memberLevelLabel, type PublicMemberUser } from '@/lib/member-store'
 
 const actionButtonClass =
-  'rounded-full border border-white/25 bg-[#151616] px-4 py-2 text-sm font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-50'
+  `${glassPillMd} disabled:opacity-50`
 
 const modalActionButtonClass =
-  'rounded-full border border-white/25 bg-[#151616] px-4 py-2 text-sm font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-50'
+  `${glassPillMd} disabled:opacity-50`
 
 const fieldClass =
   'w-full rounded-lg border border-gray-600 bg-transparent px-3 py-2 text-sm text-white'

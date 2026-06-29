@@ -164,7 +164,7 @@ export async function PATCH(request: NextRequest) {
 
     await setRequestAdminApprovalPending(id, false)
     await setProjectAdminApprovalPending(id, false)
-    await reconcilePendingScheduleStatus()
+    await reconcilePendingScheduleStatus({ force: true })
     void appendAuditLog({
       kind: 'queue.admin_approval_granted',
       message: `Large project approved by admin: ${req?.target ?? project?.target ?? id}.`,

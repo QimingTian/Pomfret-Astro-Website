@@ -1,5 +1,14 @@
 'use client'
 
+import {
+  glassPillDangerSm,
+  glassPillLg,
+  glassPillLgWide,
+  glassPillMd,
+  glassPillSm,
+  glassPillSuccessSm,
+  glassPillXs,
+} from '@/lib/glass-ui'
 import { useCallback, useEffect, useState } from 'react'
 import { DashboardPanel } from '@/app/dashboard/account/dashboard-panel'
 
@@ -92,7 +101,7 @@ export function ImagingRequestsSection({ className = '' }: { className?: string 
       type="button"
       onClick={() => void load()}
       disabled={loading}
-      className="rounded-full border border-white/25 bg-[#151616] px-3 py-1 text-xs font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-50"
+      className={`${glassPillXs} disabled:opacity-50`}
     >
       {loading ? '…' : 'Refresh'}
     </button>
@@ -126,7 +135,7 @@ export function ImagingRequestsSection({ className = '' }: { className?: string 
                     type="button"
                     disabled={busy || loading}
                     onClick={() => void act('member_access', row.id, 'approve')}
-                    className="rounded-full border border-emerald-500/50 px-3 py-1 text-xs text-emerald-300 disabled:opacity-40"
+                    className={`${glassPillSuccessSm} disabled:opacity-40`}
                   >
                     Approve
                   </button>
@@ -134,7 +143,7 @@ export function ImagingRequestsSection({ className = '' }: { className?: string 
                     type="button"
                     disabled={busy || loading}
                     onClick={() => void act('member_access', row.id, 'reject')}
-                    className="rounded-full border border-red-500/50 px-3 py-1 text-xs text-red-300 disabled:opacity-40"
+                    className={`${glassPillDangerSm} disabled:opacity-40`}
                   >
                     Reject
                   </button>
@@ -160,7 +169,7 @@ export function ImagingRequestsSection({ className = '' }: { className?: string 
                     type="button"
                     disabled={busy || loading}
                     onClick={() => void act('large_project', row.id, 'approve')}
-                    className="rounded-full border border-emerald-500/50 px-3 py-1 text-xs text-emerald-300 disabled:opacity-40"
+                    className={`${glassPillSuccessSm} disabled:opacity-40`}
                   >
                     Approve
                   </button>
@@ -168,7 +177,7 @@ export function ImagingRequestsSection({ className = '' }: { className?: string 
                     type="button"
                     disabled={busy || loading}
                     onClick={() => void act('large_project', row.id, 'reject')}
-                    className="rounded-full border border-red-500/50 px-3 py-1 text-xs text-red-300 disabled:opacity-40"
+                    className={`${glassPillDangerSm} disabled:opacity-40`}
                   >
                     Reject
                   </button>

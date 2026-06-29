@@ -1,9 +1,11 @@
 'use client'
 
+import { glassPillIcon } from '@/lib/glass-ui'
+
 export default function ThemeToggle() {
   return (
     <button
-      className="p-2.5 rounded-full border border-black/10 dark:border-white/15 bg-white/70 dark:bg-white/5 hover:bg-white dark:hover:bg-white/10 transition-all"
+      className={glassPillIcon}
       aria-label="Dark mode enabled"
       title="Dark mode enabled"
       disabled

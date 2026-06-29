@@ -1,5 +1,14 @@
 'use client'
 
+import {
+  glassPillDangerSm,
+  glassPillLg,
+  glassPillLgWide,
+  glassPillMd,
+  glassPillSm,
+  glassPillSuccessSm,
+  glassPillXs,
+} from '@/lib/glass-ui'
 import { useEffect, useRef, useState } from 'react'
 import { DashboardPanel } from '@/app/dashboard/account/dashboard-panel'
 
@@ -124,7 +133,7 @@ export function GallerySubmissionSection({ className = '' }: { className?: strin
             type="button"
             disabled={busy}
             onClick={() => fileInputRef.current?.click()}
-            className="rounded-full border border-white/25 bg-[#151616] px-4 py-2 text-sm font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-50"
+            className={`${glassPillMd} disabled:opacity-50`}
           >
             Choose file
           </button>
@@ -152,7 +161,7 @@ export function GallerySubmissionSection({ className = '' }: { className?: strin
         <button
           type="submit"
           disabled={busy || !file || !description.trim()}
-          className="rounded-full border border-white/25 bg-[#151616] px-4 py-2 text-sm font-medium text-white hover:bg-[#1b1c1c] disabled:opacity-50"
+          className={`${glassPillMd} disabled:opacity-50`}
         >
           {busy ? 'Uploading…' : 'Submit'}
         </button>

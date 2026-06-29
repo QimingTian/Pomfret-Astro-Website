@@ -40,7 +40,7 @@ export async function setQueueSessionOnHold(sessionId: string): Promise<{ ok: tr
     message: `Session placed on hold: ${updated.target} (${sessionId}).`,
     detail: { sessionId, previousStatus: current.status },
   })
-  await reconcilePendingScheduleStatus()
+  await reconcilePendingScheduleStatus({ force: true })
   return { ok: true }
 }
 
@@ -63,7 +63,7 @@ export async function releaseQueueSessionHold(sessionId: string): Promise<{ ok: 
       previousHoldFrom: current.onHoldFromStatus ?? null,
     },
   })
-  await reconcilePendingScheduleStatus()
+  await reconcilePendingScheduleStatus({ force: true })
   return { ok: true }
 }
 
@@ -101,7 +101,7 @@ export async function setProjectNightOnHold(
     message: `Project sub-session placed on hold: ${updated.target} Session ${night.nightIndex} (${nightId}).`,
     detail: { sessionId: nightId, projectId, previousStatus: night.status },
   })
-  await reconcilePendingScheduleStatus()
+  await reconcilePendingScheduleStatus({ force: true })
   return { ok: true }
 }
 
@@ -141,7 +141,7 @@ export async function releaseProjectNightHold(
     message: `Project sub-session hold released: ${updated.target} Session ${night.nightIndex} (${nightId}).`,
     detail: { sessionId: nightId, projectId, restoredStatus: restore },
   })
-  await reconcilePendingScheduleStatus()
+  await reconcilePendingScheduleStatus({ force: true })
   return { ok: true }
 }
 

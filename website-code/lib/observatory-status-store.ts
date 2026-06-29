@@ -12,7 +12,10 @@ import {
 import { OBS_LAT_DEG, OBS_LON_DEG } from '@/lib/target-altitude'
 import { getDaytimeClosedWindowDetail, isWithinDaytimeClosedWindow } from '@/lib/sunrise-window'
 import { isWithinAdminClosedWindow } from '@/lib/admin-closed-window-store'
-import { onObservatoryFinalStatusChanged } from '@/lib/imaging-session-failure'
+import {
+  maybeFailSessionsAfterNinaStopped,
+  onNinaRunningReported,
+} from '@/lib/imaging-session-failure'
 import { emitSiteObservatoryStatus } from '@/lib/imaging/site-events-server'
 import {
   evaluateObservatoryReadyWeather,
@@ -427,15 +430,7 @@ async function persist() {
   void emitSiteObservatoryStatus()
 }
 
-export type GetObservatoryStatusOptions = {
-  /**
-   * When false, skip observatory_left_busy failure side effects.
-   * Agent nina-sequence polls (e.g. ESTOP every 5s while NINA runs) must not fail in-progress sessions.
-   */
-  trackSessionFailure?: boolean
-}
-
-export async function getObservatoryStatus(options?: GetObservatoryStatusOptions): Promise<ObservatoryStatus> {
+export async function getObservatoryStatus(): Promise<ObservatoryStatus> {
   await ensureLoaded()
   await mergeObservatorySnapshotFromKv()
   await refreshLastPollTsFromKv()
@@ -477,13 +472,10 @@ export async function getObservatoryStatus(options?: GetObservatoryStatusOptions
     })
   }
 
-  if (options?.trackSessionFailure !== false) {
-    const ninaReportedBusy = isObservatoryBusyFromNinaReport(now, ninaRunning, ninaRunningReportedAt)
-    try {
-      await onObservatoryFinalStatusChanged(final, { ninaReportedBusy })
-    } catch {
-      // never block status reads
-    }
+  try {
+    await maybeFailSessionsAfterNinaStopped(now)
+  } catch {
+    // never block status reads
   }
 
   return final
@@ -551,6 +543,11 @@ export async function reportObservatoryAgentPulse(input: { ninaRunning: boolean 
   memory().__pomfret_nina_running_reported_at__ = now
   memory().__pomfret_last_agent_seen_ts__ = now
   await persist()
+  try {
+    await onNinaRunningReported(input.ninaRunning, now)
+  } catch {
+    // never block agent pulse
+  }
 }
 
 export function isObservatoryAgentDisconnected(nowMs: number, lastAgentSeenTs: number): boolean {

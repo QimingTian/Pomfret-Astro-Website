@@ -1,5 +1,14 @@
 'use client'
 
+import {
+  glassPillDangerSm,
+  glassPillLg,
+  glassPillLgWide,
+  glassPillMd,
+  glassPillSm,
+  glassPillSuccessSm,
+  glassPillXs,
+} from '@/lib/glass-ui'
 import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AllSkyCameraView from '@/components/AllSkyCameraView'
@@ -275,7 +284,7 @@ function MoonSection() {
             <button
               type="button"
               onClick={() => setOffsetHours(0)}
-              className="rounded-full border border-white/25 bg-[#151616] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#1b1c1c]"
+              className={`${glassPillSm}`}
             >
               Now
             </button>

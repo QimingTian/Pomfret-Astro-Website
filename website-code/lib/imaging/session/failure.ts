@@ -11,39 +11,81 @@ import {
   listBoardEntries,
   type FailedBoardSnapshot,
 } from '@/lib/imaging-session-board'
-import type { ObservatoryStatus } from '@/lib/observatory-status-store'
-import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
+import { kvDel, kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 
 export const SESSION_FAILED_TERMINAL_MESSAGE = 'Session failed -- contact support.'
+
+/** Grace after agent reports NINA stopped before failing in-progress sessions (Session Completed may lag). */
+export const NINA_STOPPED_FAIL_GRACE_MS = 45_000
+
+export const NINA_STOPPED_WITHOUT_COMPLETION_REASON = 'nina_stopped_without_completion'
 
 export function isSessionFailedTerminalLine(text: string): boolean {
   return text.trim() === SESSION_FAILED_TERMINAL_MESSAGE
 }
 
-const LAST_STATUS_KEY = 'observatory-status-last-final'
+const NINA_REPORTED_LAST_KEY = 'observatory-nina-reported-last'
+const NINA_STOPPED_PENDING_FAIL_KEY = 'observatory-nina-stopped-pending-fail'
 
-type LastStatusPayload = { status: ObservatoryStatus; at: string }
+type NinaReportedLastPayload = { running: boolean; at: string }
+type NinaStoppedPendingFailPayload = { at: string }
 
-type GlobalWithLastStatus = typeof globalThis & {
-  __pomfret_observatory_last_final_status__?: ObservatoryStatus
+type GlobalWithNinaFail = typeof globalThis & {
+  __pomfret_nina_reported_last__?: NinaReportedLastPayload
+  __pomfret_nina_stopped_pending_fail__?: NinaStoppedPendingFailPayload
 }
 
-async function readLastFinalStatus(): Promise<ObservatoryStatus | null> {
+async function readNinaReportedLast(): Promise<NinaReportedLastPayload | null> {
   if (kvEnabled()) {
-    const remote = await kvGetJson<LastStatusPayload>(LAST_STATUS_KEY)
-    if (remote && typeof remote.status === 'string') return remote.status
+    const remote = await kvGetJson<NinaReportedLastPayload>(NINA_REPORTED_LAST_KEY)
+    if (remote && typeof remote.running === 'boolean' && typeof remote.at === 'string') return remote
   }
-  const g = globalThis as GlobalWithLastStatus
-  return g.__pomfret_observatory_last_final_status__ ?? null
+  return (globalThis as GlobalWithNinaFail).__pomfret_nina_reported_last__ ?? null
 }
 
-async function writeLastFinalStatus(status: ObservatoryStatus): Promise<void> {
+async function writeNinaReportedLast(running: boolean, atIso: string): Promise<void> {
+  const payload: NinaReportedLastPayload = { running, at: atIso }
   if (kvEnabled()) {
-    const ok = await kvSetJson(LAST_STATUS_KEY, { status, at: new Date().toISOString() })
+    const ok = await kvSetJson(NINA_REPORTED_LAST_KEY, payload)
     if (ok) return
   }
-  const g = globalThis as GlobalWithLastStatus
-  g.__pomfret_observatory_last_final_status__ = status
+  ;(globalThis as GlobalWithNinaFail).__pomfret_nina_reported_last__ = payload
+}
+
+async function readNinaStoppedPendingFail(): Promise<NinaStoppedPendingFailPayload | null> {
+  if (kvEnabled()) {
+    const remote = await kvGetJson<NinaStoppedPendingFailPayload>(NINA_STOPPED_PENDING_FAIL_KEY)
+    if (remote && typeof remote.at === 'string') return remote
+  }
+  return (globalThis as GlobalWithNinaFail).__pomfret_nina_stopped_pending_fail__ ?? null
+}
+
+async function writeNinaStoppedPendingFail(atIso: string): Promise<void> {
+  const payload: NinaStoppedPendingFailPayload = { at: atIso }
+  if (kvEnabled()) {
+    const ok = await kvSetJson(NINA_STOPPED_PENDING_FAIL_KEY, payload)
+    if (ok) return
+  }
+  ;(globalThis as GlobalWithNinaFail).__pomfret_nina_stopped_pending_fail__ = payload
+}
+
+/** Session Completed arrived or NINA relaunched — cancel a pending NINA-stopped failure. */
+export async function clearNinaStoppedPendingFail(): Promise<void> {
+  if (kvEnabled()) {
+    await kvDel(NINA_STOPPED_PENDING_FAIL_KEY)
+  }
+  delete (globalThis as GlobalWithNinaFail).__pomfret_nina_stopped_pending_fail__
+}
+
+export async function hasInProgressImagingSessions(): Promise<boolean> {
+  for (const project of await listProjects()) {
+    if (project.nights.some((n) => n.status === 'in_progress')) return true
+  }
+  const skipIds = await inactiveProjectBoardSkipIds()
+  for (const entry of await listBoardEntries()) {
+    if (entry.status === 'in_progress' && !skipIds.has(entry.id)) return true
+  }
+  return false
 }
 
 async function recordSessionFailure(queueId: string, reason: string): Promise<void> {
@@ -153,38 +195,50 @@ export async function failInProgressBoardSessions(
 }
 
 /**
- * When the observatory leaves Busy (to any non-busy state) while a session is still `in_progress`
- * (no Session Completed POST), treat it as an abort / NINA exit — e.g. ready, weather closed, disconnected.
+ * Agent pulse reported NINA.exe stopped (explicit false after a prior true).
+ * Does not fail immediately — waits for {@link NINA_STOPPED_FAIL_GRACE_MS} so Session Completed can land first.
  */
-export async function onObservatoryFinalStatusChanged(
-  final: ObservatoryStatus,
-  context?: { ninaReportedBusy?: boolean }
-): Promise<void> {
-  const previous = await readLastFinalStatus()
-  // Temporarily disabled: admin email when observatory transitions to disconnected.
-  // if (previous !== 'disconnected' && final === 'disconnected') {
-  //   void sendObservatoryDisconnectedAlertEmail().then((result) => {
-  //     if (!result.sent) {
-  //       return appendAuditLog({
-  //         kind: 'observatory.alert_email',
-  //         message: `Disconnected alert email skipped/failed: ${result.reason ?? 'unknown reason'}`,
-  //         detail: { sent: false, reason: result.reason ?? null, recipients: result.recipients ?? [] },
-  //       })
-  //     }
-  //     return appendAuditLog({
-  //       kind: 'observatory.alert_email',
-  //       message: 'Disconnected alert email sent to observatory administrators.',
-  //       detail: { sent: true, recipients: result.recipients ?? [] },
-  //     })
-  //   })
-  // }
-  if (previous === 'busy_in_use' && final !== 'busy_in_use') {
-    if (context?.ninaReportedBusy === true) {
-      await writeLastFinalStatus('busy_in_use')
-      return
-    }
-    await failInProgressProjectSubSessions('observatory_left_busy')
-    await failInProgressBoardSessions(undefined, 'observatory_left_busy')
+export async function onNinaRunningReported(ninaRunning: boolean, nowMs = Date.now()): Promise<void> {
+  const atIso = new Date(nowMs).toISOString()
+  const previous = await readNinaReportedLast()
+  await writeNinaReportedLast(ninaRunning, atIso)
+
+  if (ninaRunning) {
+    await clearNinaStoppedPendingFail()
+    return
   }
-  await writeLastFinalStatus(final)
+
+  if (previous?.running !== true) return
+
+  if (!(await hasInProgressImagingSessions())) return
+
+  await writeNinaStoppedPendingFail(atIso)
+  await maybeFailSessionsAfterNinaStopped(nowMs)
+}
+
+/**
+ * Apply pending failure once grace elapsed and NINA has not relaunched.
+ * Safe to call from status reads, agent pulse, and session-progress POSTs.
+ */
+export async function maybeFailSessionsAfterNinaStopped(nowMs = Date.now()): Promise<void> {
+  const pending = await readNinaStoppedPendingFail()
+  if (!pending) return
+
+  const pendingMs = Date.parse(pending.at)
+  if (!Number.isFinite(pendingMs) || nowMs - pendingMs < NINA_STOPPED_FAIL_GRACE_MS) return
+
+  const last = await readNinaReportedLast()
+  if (last?.running === true) {
+    await clearNinaStoppedPendingFail()
+    return
+  }
+
+  if (!(await hasInProgressImagingSessions())) {
+    await clearNinaStoppedPendingFail()
+    return
+  }
+
+  await failInProgressProjectSubSessions(NINA_STOPPED_WITHOUT_COMPLETION_REASON)
+  await failInProgressBoardSessions(undefined, NINA_STOPPED_WITHOUT_COMPLETION_REASON)
+  await clearNinaStoppedPendingFail()
 }

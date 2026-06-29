@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { MemberProvider, useMember } from '@/hooks/use-member'
+import { glassPillIcon } from '@/lib/glass-ui'
 
 function accountNavLabel(member: ReturnType<typeof useMember>): string {
   if (member.status !== 'authenticated') return 'Log In'
@@ -51,7 +52,7 @@ function DashboardChrome({ children }: { children: React.ReactNode }) {
               <button
                 type="button"
                 onClick={() => setMenuOpen((v) => !v)}
-                className="md:hidden p-2.5 rounded-full border border-black/10 dark:border-white/15 bg-white/70 dark:bg-white/5"
+                className={`md:hidden ${glassPillIcon}`}
                 aria-label="Toggle navigation"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

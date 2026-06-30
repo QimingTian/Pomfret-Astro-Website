@@ -1,5 +1,11 @@
 import { DSO_SESSION_OVERHEAD_SEC } from '../imaging/session-overhead'
 import {
+  observatoryLocalParts,
+  observatoryTimeZone,
+  observatoryWallTimeOnLocalDateUtc,
+  readObservatoryCoords,
+} from '../observatory-local-time'
+import {
   altitudeSessionCoverageOk,
   currentAltitudeDeg,
   firstAltitudeAllowedTimeMs,
@@ -11,16 +17,26 @@ import {
 } from './sunrise-window'
 import type { WeatherPrediction } from '../weather-client'
 
-export function buildHourKey(at: Date): string {
-  return `${at.getFullYear()}-${at.getMonth()}-${at.getDate()}-${at.getHours()}`
+export function buildHourKey(at: Date, lon?: number): string {
+  const parts = observatoryLocalParts(at, lon)
+  return `${parts.year}-${parts.month}-${parts.day}-${parts.hour}`
 }
 
-export function parseHourKeyToMs(key: string): number | null {
+export function parseHourKeyToMs(key: string, lon?: number): number | null {
   const parts = key.split('-').map((x) => Number(x))
   if (parts.length !== 4) return null
   const [year, month, day, hour] = parts
   if (![year, month, day, hour].every((x) => Number.isFinite(x))) return null
-  return new Date(year, month, day, hour, 0, 0, 0).getTime()
+  const { lon: obsLon } = readObservatoryCoords()
+  return observatoryWallTimeOnLocalDateUtc(year, month, day, hour, 0, 0, lon ?? obsLon).getTime()
+}
+
+function formatObservatoryHourLabel(at: Date, lon: number, lat: number): string {
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone: observatoryTimeZone(lat, lon),
+    hour: 'numeric',
+    hour12: true,
+  }).format(at)
 }
 
 export function computeTonightWindow(now: Date): { startMs: number; endMs: number } {
@@ -91,18 +107,28 @@ export function buildTonightScheduleLayout(
 ): TonightScheduleLayout {
   const now = new Date(scheduleNowMs)
   const strip = getTonightScheduleStrip(now)
+  const { lat, lon } = readObservatoryCoords()
   const start = new Date(strip.windowStartMs)
   const end = new Date(strip.windowEndMs)
 
   const points: TonightHourSlot[] = []
-  const cursor = new Date(start)
-  while (cursor <= end) {
+  let cursor = new Date(start)
+  while (cursor.getTime() < end.getTime()) {
     points.push({
-      label: cursor.toLocaleTimeString([], { hour: 'numeric' }),
-      hourKey: buildHourKey(cursor),
+      label: formatObservatoryHourLabel(cursor, lon, lat),
+      hourKey: buildHourKey(cursor, lon),
       hourStartMs: cursor.getTime(),
     })
-    cursor.setHours(cursor.getHours() + 1)
+    const parts = observatoryLocalParts(cursor, lon)
+    cursor = observatoryWallTimeOnLocalDateUtc(
+      parts.year,
+      parts.month,
+      parts.day,
+      parts.hour + 1,
+      0,
+      0,
+      lon
+    )
   }
 
   const {
@@ -180,11 +206,18 @@ export function buildWeatherBlocks(input: {
   tonightSchedule: TonightScheduleLayout
   readyWeatherHourKeys: string[]
   nightWeatherHourKeys: string[]
+  nightWeatherHourStartsMs?: number[]
   tonightWeatherPrediction: WeatherPrediction
   notPermittedReasonByHourKey: Record<string, Array<'cloud' | 'rain' | 'wind'>>
 }): WeatherRunBlock[] {
-  const { tonightSchedule, readyWeatherHourKeys, nightWeatherHourKeys, tonightWeatherPrediction, notPermittedReasonByHourKey } =
-    input
+  const {
+    tonightSchedule,
+    readyWeatherHourKeys,
+    nightWeatherHourKeys,
+    nightWeatherHourStartsMs = [],
+    tonightWeatherPrediction,
+    notPermittedReasonByHourKey,
+  } = input
 
   const effectiveNightHourKeys =
     nightWeatherHourKeys.length > 0
@@ -193,10 +226,17 @@ export function buildWeatherBlocks(input: {
         ? tonightSchedule.hours.map((h) => h.hourKey)
         : []
 
-  if (effectiveNightHourKeys.length === 0) return []
+  if (effectiveNightHourKeys.length === 0 && nightWeatherHourStartsMs.length === 0) return []
 
   const readyKeySet = new Set(readyWeatherHourKeys)
   const nightKeySet = new Set(effectiveNightHourKeys)
+  const nightMsSet = new Set(
+    nightWeatherHourStartsMs.length > 0
+      ? nightWeatherHourStartsMs
+      : effectiveNightHourKeys
+          .map((key) => parseHourKeyToMs(key))
+          .filter((ms): ms is number => ms != null)
+  )
   const blocks: WeatherRunBlock[] = []
   let runStartMs: number | null = null
   let runEndMsExclusive: number | null = null
@@ -208,7 +248,8 @@ export function buildWeatherBlocks(input: {
   const span = windowEndMs - windowStartMs
 
   for (const slot of tonightSchedule.hours) {
-    if (!nightKeySet.has(slot.hourKey)) {
+    const hasWeather = nightKeySet.has(slot.hourKey) || nightMsSet.has(slot.hourStartMs)
+    if (!hasWeather) {
       if (runStartMs != null && runEndMsExclusive != null && runKind) {
         const clampedEnd = Math.min(runEndMsExclusive, windowEndMs)
         const topPct = ((runStartMs - windowStartMs) / span) * 100

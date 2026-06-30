@@ -58,12 +58,21 @@ export function TonightScheduleTimeline({ weather, sessions }: TonightScheduleTi
     [sessions]
   )
 
+  const weatherHourStartsMs = useMemo(
+    () =>
+      weather?.nightWeatherHourStartsMs ??
+      weather?.hours.map((h) => h.hourStartSec * 1000) ??
+      [],
+    [weather]
+  )
+
   const weatherBlocks = useMemo(
     () =>
       buildWeatherBlocks({
         tonightSchedule,
         readyWeatherHourKeys,
         nightWeatherHourKeys,
+        nightWeatherHourStartsMs: weatherHourStartsMs,
         tonightWeatherPrediction: weather?.prediction ?? 'not_permitted',
         notPermittedReasonByHourKey,
       }),
@@ -71,6 +80,7 @@ export function TonightScheduleTimeline({ weather, sessions }: TonightScheduleTi
       tonightSchedule,
       readyWeatherHourKeys,
       nightWeatherHourKeys,
+      weatherHourStartsMs,
       weather?.prediction,
       notPermittedReasonByHourKey,
     ]

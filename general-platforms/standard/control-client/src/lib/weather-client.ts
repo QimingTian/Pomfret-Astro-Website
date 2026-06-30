@@ -32,6 +32,7 @@ export type TonightWeatherSnapshot = {
   hasAnyPrecipitationTonight: boolean
   readyWeatherHourKeys: string[]
   nightWeatherHourKeys: string[]
+  nightWeatherHourStartsMs: number[]
   notPermittedReasonByHourKey: Record<string, Array<'cloud' | 'rain' | 'wind'>>
   error?: string
 }
@@ -60,6 +61,9 @@ function evaluateHour(
 
 async function fetchOpenMeteoTonight(): Promise<TonightWeatherSnapshot> {
   const { lat, lon } = getObservatoryLocation()
+  const strip = getTonightScheduleStrip()
+  const windowStartSec = Math.floor(strip.windowStartMs / 1000)
+  const windowEndSec = Math.floor(strip.windowEndMs / 1000)
   const url =
     'https://api.open-meteo.com/v1/forecast' +
     `?latitude=${lat}&longitude=${lon}` +
@@ -90,15 +94,13 @@ async function fetchOpenMeteoTonight(): Promise<TonightWeatherSnapshot> {
   const clouds = data.hourly?.cloud_cover ?? []
   const precip = data.hourly?.precipitation_probability ?? []
   const wind = data.hourly?.wind_speed_10m ?? []
-  const sunset = data.daily?.sunset?.[0]
-  const sunrise = data.daily?.sunrise?.[1]
-  if (!sunset || !sunrise || times.length === 0) {
+  if (times.length === 0 || windowEndSec <= windowStartSec) {
     throw new Error('Incomplete forecast window')
   }
 
   const nightIndices: number[] = []
   for (let i = 0; i < times.length; i += 1) {
-    if (times[i] >= sunset && times[i] < sunrise) nightIndices.push(i)
+    if (times[i] >= windowStartSec && times[i] < windowEndSec) nightIndices.push(i)
   }
 
   const hours: WeatherHourCell[] = nightIndices.map((i) => {
@@ -120,7 +122,7 @@ async function fetchOpenMeteoTonight(): Promise<TonightWeatherSnapshot> {
   const readyHours = hours.filter((h) => h.permitted).length
   const hasAnyPrecipitationTonight = hours.some((h) => h.precipProb >= 10)
   const nowSec = Math.floor(Date.now() / 1000)
-  const isNight = nowSec >= sunset && nowSec < sunrise
+  const isNight = nowSec >= windowStartSec && nowSec < windowEndSec
 
   let prediction: WeatherPrediction = 'not_permitted'
   if (isNight) {
@@ -131,6 +133,7 @@ async function fetchOpenMeteoTonight(): Promise<TonightWeatherSnapshot> {
 
   const readyWeatherHourKeys = hours.filter((h) => h.permitted).map((h) => buildHourKey(new Date(h.hourStartSec * 1000)))
   const nightWeatherHourKeys = hours.map((h) => buildHourKey(new Date(h.hourStartSec * 1000)))
+  const nightWeatherHourStartsMs = hours.map((h) => h.hourStartSec * 1000)
   const notPermittedReasonByHourKey: Record<string, Array<'cloud' | 'rain' | 'wind'>> = {}
   for (const h of hours) {
     if (h.permitted) continue
@@ -153,6 +156,7 @@ async function fetchOpenMeteoTonight(): Promise<TonightWeatherSnapshot> {
     hasAnyPrecipitationTonight,
     readyWeatherHourKeys,
     nightWeatherHourKeys,
+    nightWeatherHourStartsMs,
     notPermittedReasonByHourKey,
   }
 }
@@ -160,15 +164,18 @@ async function fetchOpenMeteoTonight(): Promise<TonightWeatherSnapshot> {
 async function fetchHubTonightWeather(): Promise<TonightWeatherSnapshot | null> {
   const tenant = await loadRuntimeTenant()
   const base = tenant.apiBaseUrl
-  if (!base.includes('www.boreanastro.com')) return null
+  if (!base.includes('boreanastro.com')) return null
 
   const strip = getTonightScheduleStrip()
   const scheduleStart = new Date(strip.windowStartMs)
   const scheduleEnd = new Date(strip.windowEndMs)
   const { lat, lon } = getObservatoryLocation()
+  const hubBase = base.includes('boreanastro.com')
+    ? base.replace(/:\/\/([^/]+)/, '://www.boreanastro.com')
+    : base.replace(/\/+$/, '')
 
   const url =
-    `${base.replace(/\/+$/, '')}/api/personal/${encodeURIComponent(tenant.tenantId)}/imaging/tonight-weather-prediction` +
+    `${hubBase.replace(/\/+$/, '')}/api/personal/${encodeURIComponent(tenant.tenantId)}/imaging/tonight-weather-prediction` +
     `?startSec=${Math.floor(scheduleStart.getTime() / 1000)}` +
     `&endSec=${Math.floor(scheduleEnd.getTime() / 1000)}` +
     `&lat=${encodeURIComponent(String(lat))}` +
@@ -219,6 +226,7 @@ async function fetchHubTonightWeather(): Promise<TonightWeatherSnapshot | null> 
     .filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
     .map((sec) => buildHourKey(new Date(sec * 1000)))
   const nightWeatherHourKeys = nightSecs.map((sec) => buildHourKey(new Date(sec * 1000)))
+  const nightWeatherHourStartsMs = nightSecs.map((sec) => sec * 1000)
   const notPermittedReasonByHourKey: Record<string, Array<'cloud' | 'rain' | 'wind'>> = {}
   for (const row of data.notPermittedHourReasons ?? []) {
     if (!row || typeof row !== 'object') continue
@@ -252,6 +260,10 @@ async function fetchHubTonightWeather(): Promise<TonightWeatherSnapshot | null> 
       readyWeatherHourKeys.length > 0 ? readyWeatherHourKeys : (openMeteo?.readyWeatherHourKeys ?? []),
     nightWeatherHourKeys:
       nightWeatherHourKeys.length > 0 ? nightWeatherHourKeys : (openMeteo?.nightWeatherHourKeys ?? []),
+    nightWeatherHourStartsMs:
+      nightWeatherHourStartsMs.length > 0
+        ? nightWeatherHourStartsMs
+        : (openMeteo?.nightWeatherHourStartsMs ?? []),
     notPermittedReasonByHourKey:
       Object.keys(notPermittedReasonByHourKey).length > 0
         ? notPermittedReasonByHourKey
@@ -275,6 +287,7 @@ export async function fetchTonightWeather(): Promise<TonightWeatherSnapshot> {
       hasAnyPrecipitationTonight: false,
       readyWeatherHourKeys: [],
       nightWeatherHourKeys: [],
+      nightWeatherHourStartsMs: [],
       notPermittedReasonByHourKey: {},
       error: ex instanceof Error ? ex.message : 'Weather unavailable',
     }

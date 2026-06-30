@@ -110,7 +110,7 @@ export async function evaluateTonightWeatherPrediction(input: {
     else notPermittedHourReasons.push({ hourStartSec: times[i], reasons })
   }
 
-  const { nauticalDuskUtc, nauticalDawnUtc } = getTonightSchedulingWindow(new Date())
+  const { nauticalDuskUtc, nauticalDawnUtc } = getTonightSchedulingWindow(new Date(), lat, lon)
   const globalGateStartSec = Math.floor(nauticalDuskUtc.getTime() / 1000)
   const globalGateEndSec = Math.floor(nauticalDawnUtc.getTime() / 1000)
 

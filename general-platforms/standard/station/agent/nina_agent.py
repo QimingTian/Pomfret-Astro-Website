@@ -534,7 +534,7 @@ def _wait_agent_wake(timeout_sec: float) -> Optional[str]:
     return None
 
 
-def sleep_between_polls() -> None:
+def sleep_between_polls() -> Optional[str]:
     if _agent_sse_connected_recently():
         timeout = float(SSE_CONNECTED_WAIT_SECONDS)
     else:
@@ -542,14 +542,9 @@ def sleep_between_polls() -> None:
     wake = _wait_agent_wake(timeout)
     if wake == "reconcile":
         try_reconcile_queue_schedule()
-        return
-    if wake is None and not _agent_sse_connected_recently():
+    elif wake is None and not _agent_sse_connected_recently():
         try_reconcile_queue_schedule()
-        return
-    n = int(RECONCILE_EVERY_N_POLLS)
-    if n > 0 and str(RECONCILE_QUEUE_URL).strip():
-        # Legacy reconcile-on-poll (disabled when RECONCILE_EVERY_N_POLLS = 0).
-        pass
+    return wake
 
 
 def kill_nina_process(process: Optional[subprocess.Popen[bytes]] = None) -> None:
@@ -1158,9 +1153,23 @@ def run_loop() -> None:
             if last_pulsed_nina_running is not False and report_agent_pulse(False):
                 last_pulsed_nina_running = False
 
-            if _agent_sse_connected_recently() and not (
-                _wake_sequence.is_set() or _wake_estop.is_set() or _wake_reconcile.is_set()
-            ):
+            estop_content = poll_emergency_stop_sequence()
+            if estop_content is not None:
+                log("Emergency STOP sequence received — launching ESTOP.")
+                launch_content = estop_content
+                while launch_content is not None:
+                    log(
+                        "Launching Emergency STOP sequence."
+                        if is_estop_sequence_content(launch_content)
+                        else "Relaunching after Emergency STOP interrupt."
+                    )
+                    launch_content = handle_sequence_launch(
+                        launch_content,
+                        jobs_dir,
+                        sequence_path,
+                        output_root,
+                        postprocess_queue,
+                    )
                 sleep_between_polls()
                 continue
 
@@ -1183,6 +1192,25 @@ def run_loop() -> None:
                             detail = f" — {body[:500]}"
                     except Exception:
                         pass
+                    estop_content = poll_emergency_stop_sequence()
+                    if estop_content is not None:
+                        log("Emergency STOP active (HTTP 409) — launching ESTOP sequence.")
+                        launch_content = estop_content
+                        while launch_content is not None:
+                            log(
+                                "Launching Emergency STOP sequence."
+                                if is_estop_sequence_content(launch_content)
+                                else "Relaunching after Emergency STOP interrupt."
+                            )
+                            launch_content = handle_sequence_launch(
+                                launch_content,
+                                jobs_dir,
+                                sequence_path,
+                                output_root,
+                                postprocess_queue,
+                            )
+                        sleep_between_polls()
+                        continue
                     log(f"Sequence not ready yet (HTTP 409, server-side gate not met){detail}.")
                     sleep_between_polls()
                     continue

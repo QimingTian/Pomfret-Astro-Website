@@ -1,9 +1,9 @@
 {
   "channel": "stable",
   "station": {
-    "latestVersion": "0.1.8",
-    "downloadUrlWindows": "https://www.boreanastro.com/releases/borean-station-0.1.8-windows-setup.exe",
-    "releaseNotes": "Trust Mozilla CA bundle for Cloudflare/Google Trust certs (observatory Windows lacks GTS root; Let's Encrypt/Pomfret worked). Station UI uses rustls+webpki-roots."
+    "latestVersion": "0.1.9",
+    "downloadUrlWindows": "https://www.boreanastro.com/releases/borean-station-0.1.9-windows-setup.exe",
+    "releaseNotes": "Fix Emergency STOP delivery when SSE is connected (agent polls reliably). Trust Mozilla CA bundle for Cloudflare."
   },
   "control": {
     "latestVersion": "0.1.23",

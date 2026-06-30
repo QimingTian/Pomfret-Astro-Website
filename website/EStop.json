@@ -119,11 +119,27 @@
               },
               "ErrorBehavior": 0,
               "Attempts": 1
+            },
+            {
+              "$id": "18",
+              "$type": "DaleGhent.NINA.GroundStation.HTTP.HttpClient, DaleGhent.NINA.GroundStation",
+              "HttpMethod": 1,
+              "HttpUri": "https://session-progress.invalid/placeholder",
+              "HttpPostContentType": "text/plain",
+              "HttpPostBody": "Dome Closed",
+              "HttpClientDescription": "",
+              "HttpAuthUsername": "",
+              "HttpAuthPassword": "",
+              "Parent": {
+                "$ref": "14"
+              },
+              "ErrorBehavior": 0,
+              "Attempts": 1
             }
           ]
         },
         "Triggers": {
-          "$id": "19",
+          "$id": "20",
           "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Trigger.ISequenceTrigger, NINA.Sequencer]], System.ObjectModel",
           "$values": []
         },
@@ -136,7 +152,7 @@
     ]
   },
   "Triggers": {
-    "$id": "20",
+    "$id": "21",
     "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Trigger.ISequenceTrigger, NINA.Sequencer]], System.ObjectModel",
     "$values": []
   },

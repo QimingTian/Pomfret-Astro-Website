@@ -158,19 +158,28 @@ async function fetchOpenMeteoTonight(): Promise<TonightWeatherSnapshot> {
 }
 
 async function fetchHubTonightWeather(): Promise<TonightWeatherSnapshot | null> {
-  const base = (await loadRuntimeTenant()).apiBaseUrl
+  const tenant = await loadRuntimeTenant()
+  const base = tenant.apiBaseUrl
   if (!base.includes('www.boreanastro.com')) return null
 
   const strip = getTonightScheduleStrip()
   const scheduleStart = new Date(strip.windowStartMs)
   const scheduleEnd = new Date(strip.windowEndMs)
+  const { lat, lon } = getObservatoryLocation()
 
   const url =
-    `${base.replace(/\/+$/, '')}/api/imaging/tonight-weather-prediction` +
+    `${base.replace(/\/+$/, '')}/api/personal/${encodeURIComponent(tenant.tenantId)}/imaging/tonight-weather-prediction` +
     `?startSec=${Math.floor(scheduleStart.getTime() / 1000)}` +
-    `&endSec=${Math.floor(scheduleEnd.getTime() / 1000)}`
+    `&endSec=${Math.floor(scheduleEnd.getTime() / 1000)}` +
+    `&lat=${encodeURIComponent(String(lat))}` +
+    `&lon=${encodeURIComponent(String(lon))}`
 
-  const res = await fetch(url, { headers: { Accept: 'application/json' } })
+  const res = await fetch(url, {
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${tenant.apiSecret}`,
+    },
+  })
   const data = (await res.json().catch(() => ({}))) as {
     ok?: boolean
     prediction?: WeatherPrediction

@@ -1,6 +1,6 @@
 [package]
 name = "station-agent"
-version = "0.1.8"
+version = "0.1.9"
 description = "Borean Astro Personal Station Agent"
 authors = ["Borean Astro"]
 edition = "2021"

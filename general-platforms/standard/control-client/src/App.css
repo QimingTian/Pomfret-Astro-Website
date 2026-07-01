@@ -1683,11 +1683,6 @@
   opacity: 0.85;
 }
 
-.tonight-block-session.tail-marker {
-  transform: translateY(-50%);
-  height: auto;
-}
-
 .tonight-block-closed {
   left: 66.666%;
   right: 0;

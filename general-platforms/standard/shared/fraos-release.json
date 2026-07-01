@@ -6,20 +6,20 @@
     "releaseNotes": "Fix Emergency STOP delivery when SSE is connected (agent polls reliably). Trust Mozilla CA bundle for Cloudflare."
   },
   "control": {
-    "latestVersion": "0.1.24",
-    "downloadUrlWindows": "https://www.boreanastro.com/releases/borean-control-0.1.24-windows-setup.exe",
-    "downloadUrlMac": "https://www.boreanastro.com/releases/borean-control-0.1.24-macos.dmg",
-    "releaseNotes": "Fix tonight schedule weather bar (full 4pm–8am strip, observatory timezone hour keys). Improve hub weather fallback.",
+    "latestVersion": "0.1.25",
+    "downloadUrlWindows": "https://www.boreanastro.com/releases/borean-control-0.1.25-windows-setup.exe",
+    "downloadUrlMac": "https://www.boreanastro.com/releases/borean-control-0.1.25-macos.dmg",
+    "releaseNotes": "Fix Close Dome timeline block to connect flush with sessions (match Pomfret Remote).",
     "editions": {
       "standard": {
-        "downloadUrlWindows": "https://www.boreanastro.com/releases/borean-control-0.1.24-windows-setup.exe",
-        "downloadUrlMac": "https://www.boreanastro.com/releases/borean-control-0.1.24-macos.dmg"
+        "downloadUrlWindows": "https://www.boreanastro.com/releases/borean-control-0.1.25-windows-setup.exe",
+        "downloadUrlMac": "https://www.boreanastro.com/releases/borean-control-0.1.25-macos.dmg"
       },
       "pro": {
-        "downloadUrlMac": "https://www.boreanastro.com/releases/borean-control-pro-0.1.24-macos.dmg"
+        "downloadUrlMac": "https://www.boreanastro.com/releases/borean-control-pro-0.1.25-macos.dmg"
       },
       "max": {
-        "downloadUrlMac": "https://www.boreanastro.com/releases/borean-control-max-0.1.24-macos.dmg"
+        "downloadUrlMac": "https://www.boreanastro.com/releases/borean-control-max-0.1.25-macos.dmg"
       }
     }
   }

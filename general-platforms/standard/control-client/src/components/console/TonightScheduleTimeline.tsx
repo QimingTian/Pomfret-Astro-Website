@@ -236,10 +236,10 @@ export function TonightScheduleTimeline({ weather, sessions }: TonightScheduleTi
             return (
               <div
                 key={`session-${block.id}-${idx}`}
-                className={`tonight-block tonight-block-session${isCloseDome ? ' tail tail-marker' : ''}`}
+                className={`tonight-block tonight-block-session${isCloseDome ? ' tail' : ''}`}
                 style={{
                   top: `${block.topPct}%`,
-                  ...(isCloseDome ? {} : { height: `${Math.max(block.heightPct, 4)}%` }),
+                  height: `${block.heightPct}%`,
                 }}
               >
                 <p>{block.label}</p>

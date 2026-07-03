@@ -473,7 +473,7 @@ def agent_events_reader_loop() -> None:
         return
     url = str(AGENT_EVENTS_URL).strip()
     if not url:
-        log("AGENT_EVENTS_URL not configured; using fallback polling only.")
+        log("AGENT_EVENTS_URL not configured; using polling only.")
         return
     while True:
         try:
@@ -526,7 +526,11 @@ def sleep_between_polls() -> Optional[str]:
             _last_reconcile_mono = now_mono
             try_reconcile_queue_schedule()
     else:
-        timeout = float(FALLBACK_POLL_SECONDS)
+        timeout = float(POLL_SECONDS)
+        now_mono = time.monotonic()
+        if now_mono - _last_reconcile_mono >= RECONCILE_INTERVAL_SEC:
+            _last_reconcile_mono = now_mono
+            try_reconcile_queue_schedule()
     wake = _wait_agent_wake(timeout)
     if wake == "reconcile":
         try_reconcile_queue_schedule()
@@ -1329,7 +1333,8 @@ def run_loop() -> None:
                 postprocess_queue.task_done()
 
     threading.Thread(target=postprocess_worker, name="postprocess-worker", daemon=True).start()
-    threading.Thread(target=agent_events_reader_loop, name="agent-events-sse", daemon=True).start()
+    if AGENT_EVENTS_SSE_ENABLED:
+        threading.Thread(target=agent_events_reader_loop, name="agent-events-sse", daemon=True).start()
 
     log("Agent started.")
     last_pulsed_nina_running: Optional[bool] = None

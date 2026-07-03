@@ -37,6 +37,7 @@ type PollBody = {
   ok?: boolean
   observatory?: SiteStreamObservatoryEvent
   estop?: SiteStreamEstopEvent
+  sessionsTick?: string
 }
 
 /**
@@ -45,6 +46,7 @@ type PollBody = {
 export function useSiteStream(handlers: SiteStreamHandlers, enabled = true): void {
   const handlersRef = useRef(handlers)
   handlersRef.current = handlers
+  const sessionsTickRef = useRef<string | null>(null)
 
   const poll = async () => {
     try {
@@ -57,6 +59,13 @@ export function useSiteStream(handlers: SiteStreamHandlers, enabled = true): voi
       }
       if (body.estop?.type === 'estop') {
         handlersRef.current.onEstop?.(body.estop)
+      }
+      if (typeof body.sessionsTick === 'string') {
+        const prev = sessionsTickRef.current
+        sessionsTickRef.current = body.sessionsTick
+        if (prev !== null && prev !== body.sessionsTick) {
+          handlersRef.current.onSessionsChanged?.({ type: 'sessions_changed', reason: 'poll' })
+        }
       }
     } catch {
       // ignore transient poll errors

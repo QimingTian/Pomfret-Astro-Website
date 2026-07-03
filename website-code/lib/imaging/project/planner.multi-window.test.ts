@@ -212,3 +212,34 @@ test('shouldKeepExistingDeliverableTonight drops scheduled sub when admin closed
   assert.equal(insight.status, 'unscheduled')
   assert.equal(insight.plannedStartIso, null)
 })
+
+test('planTonightSubSessions places future subs after in_progress into later clear weather', () => {
+  const now = new Date('2026-05-17T22:30:00.000Z')
+  const nightKey = getTonightScheduleStrip(now).nightKey
+  const { windowStart, windowEnd } = tonightSchedulingSpan(now)
+  const session1Start = Date.parse('2026-05-17T23:00:00.000Z')
+  const inProgressNight: ProjectNight = {
+    id: 'sub-1',
+    nightIndex: 1,
+    nightKey,
+    status: 'in_progress',
+    plannedStartIso: new Date(session1Start).toISOString(),
+    filterPlansTonight: [{ filterName: 'Red', exposureSeconds: 300, count: 5 }],
+    ninaSequenceJson: '{"mock":true}',
+  }
+  const project: ImagingProject = {
+    ...mockProject(),
+    status: 'in_progress',
+    remainingByFilter: [{ filterName: 'Red', exposureSeconds: 300, countRemaining: 15 }],
+    nights: [inProgressNight],
+  }
+  const clearStart = Date.parse('2026-05-18T03:00:00.000Z')
+  const weather = [{ startMs: clearStart, endMs: windowEnd }]
+  const free = [{ startMs: session1Start + 4 * 3600_000, endMs: windowEnd }]
+  const plans = planTonightSubSessions(project, free, weather, now)
+  assert.ok(plans.length >= 1, 'expected at least one future sub-session')
+  const startMs = Date.parse(plans[0]!.plannedStartIso)
+  assert.ok(startMs >= clearStart, `expected start in clear weather, got ${plans[0]!.plannedStartIso}`)
+  assert.equal(plans[0]!.nightIndex, 2)
+  assert.ok(startMs >= windowStart)
+})

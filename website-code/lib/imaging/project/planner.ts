@@ -13,7 +13,6 @@ import {
   getDeliverableNight,
   getNextPendingProject,
   getProjectById,
-  hasInProgressSessionTonight,
   listProjects,
   nextProjectSessionIndex,
   projectQueueBlockedReason,
@@ -297,6 +296,20 @@ function subtractRemaining(
   })
 }
 
+/** Frames already assigned to tonight's in_progress sub-sessions are not re-planned. */
+function remainingAfterInProgressSubsTonight(
+  project: ImagingProject,
+  nightKey: string,
+  remaining: FilterRemainingRow[]
+): FilterRemainingRow[] {
+  let working = remaining.map((r) => ({ ...r }))
+  for (const n of project.nights) {
+    if (n.nightKey !== nightKey || n.status !== 'in_progress') continue
+    working = subtractRemaining(working, n.filterPlansTonight)
+  }
+  return working
+}
+
 function intersectTimeIntervals(
   a: TimeInterval,
   b: { startMs: number; endMs: number }
@@ -501,7 +514,6 @@ export function shouldKeepExistingDeliverableTonight(
 ): boolean {
   const existing = getDeliverableNight(project, nightKey)
   if (!existing) return false
-  if (hasInProgressSessionTonight(project, nightKey)) return true
 
   const nowMs = now.getTime()
   const window = getTonightSchedulingWindow(now)
@@ -576,7 +588,11 @@ export function planTonightSubSessions(
     return []
   }
 
-  let workingRemaining = project.remainingByFilter.map((r) => ({ ...r }))
+  let workingRemaining = remainingAfterInProgressSubsTonight(
+    project,
+    strip.nightKey,
+    project.remainingByFilter.map((r) => ({ ...r }))
+  )
   let sessionIndex = nextProjectSessionIndex(project)
   const plans: ProjectTonightPlan[] = []
   let workingFree = [...freeIntervals].sort((a, b) => a.startMs - b.startMs)
@@ -672,8 +688,6 @@ function shouldRefreshTonightSubs(project: ImagingProject, nightKey: string): bo
   if (tonight.length === 0) return true
   if (tonight.some((n) => isAdminForceRunActive(n))) return false
   if (tonight.some((n) => n.status === 'on_hold')) return false
-  // Do not reshuffle later `scheduled` subs while one is imaging — avoids Session 2 sliding on the strip.
-  if (hasInProgressSessionTonight(project, nightKey)) return false
   // Re-plan or clear `scheduled` subs when weather changes. in_progress/completed are kept by replaceScheduledSubsForNightKey.
   if (
     tonight.some(
@@ -752,7 +766,6 @@ async function applyTonightPlansOrClearScheduled(
   }
   const project = await getProjectById(projectId)
   if (!project || !hasScheduledSubsTonight(project, nightKey)) return
-  if (hasInProgressSessionTonight(project, nightKey)) return
   const nowMs = now.getTime()
   const window = getTonightSchedulingWindow(now)
   const fullNightFree = [
@@ -994,12 +1007,6 @@ export function plansToScheduledNights(
     const reuse = existingScheduled[i]
     const nightIndex = reuse?.nightIndex ?? nextFreshIndex++
     const nightId = reuse?.id ?? projectNightSubId(project.id, nightIndex)
-    const sameFrames =
-      reuse != null &&
-      filterPlansFingerprint(reuse.filterPlansTonight) === filterPlansFingerprint(plan.filterPlansTonight)
-    const reuseStartMs = reuse?.plannedStartIso ? Date.parse(reuse.plannedStartIso) : NaN
-    const plannedStartIso =
-      sameFrames && Number.isFinite(reuseStartMs) ? reuse.plannedStartIso! : plan.plannedStartIso
     const forceRunReuse = reuse != null && isAdminForceRunActive(reuse)
     if (autoHoldAfterFailed && !forceRunReuse) {
       return {
@@ -1024,7 +1031,10 @@ export function plansToScheduledNights(
       status: 'scheduled' as const,
       filterPlansTonight: plan.filterPlansTonight,
       ninaSequenceJson: buildNightNinaJson(project, nightId, plan.filterPlansTonight),
-      plannedStartIso,
+      plannedStartIso: plan.plannedStartIso,
+      scheduleStripNightKey: null,
+      scheduleBarStartMs: null,
+      scheduleBarEndMs: null,
     }
   })
 

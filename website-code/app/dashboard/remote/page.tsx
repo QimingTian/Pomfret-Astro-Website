@@ -1,5 +1,7 @@
 'use client'
 
+import { PLAN_MOSAIC_DRAFT_KEY, type MosaicDraft } from '@/lib/mosaic/framing-rectangle'
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { MemberAuthPanel } from '@/components/member-auth-panel'
@@ -94,6 +96,7 @@ type ResolvedCatalogObject = {
 }
 
 type ImagingSessionTypeUi = 'dso' | 'variable_star'
+type ProjectModeTri = 'off' | 'on' | 'mosaic'
 type VariableStarLookupSource = 'catalog' | 'simbad'
 type VariableStarFilterUi =
   | 'tonight_observable'
@@ -763,6 +766,7 @@ export default function RemotePage() {
       scheduleBarStartMs?: number | null
       scheduleBarEndMs?: number | null
       projectMode?: boolean
+      mosaicMode?: boolean
       userId?: string | null
       projectFramesTotal?: number
       projectFramesCaptured?: number
@@ -915,7 +919,10 @@ export default function RemotePage() {
   const [catalogLookupError, setCatalogLookupError] = useState<string | null>(null)
   const [catalogLookupResult, setCatalogLookupResult] = useState<ResolvedCatalogObject | null>(null)
   const [sessionType, setSessionType] = useState<ImagingSessionTypeUi>('dso')
-  const [projectMode, setProjectMode] = useState(false)
+  const [projectModeTri, setProjectModeTri] = useState<ProjectModeTri>('off')
+  const [mosaicDraft, setMosaicDraft] = useState<MosaicDraft | null>(null)
+  const projectMode = projectModeTri === 'on' || projectModeTri === 'mosaic'
+  const mosaicMode = projectModeTri === 'mosaic'
   const [nightPickerProjectId, setNightPickerProjectId] = useState<string | null>(null)
   const [nightPickerPurpose, setNightPickerPurpose] = useState<'progress' | 'download' | null>(null)
   const [variableStarCatalog, setVariableStarCatalog] = useState<VariableStarRow[]>([])
@@ -1046,6 +1053,39 @@ export default function RemotePage() {
   useEffect(() => {
     if (typeof window === 'undefined') return
     const params = new URLSearchParams(window.location.search)
+    if (params.get('mosaic') === '1') {
+      try {
+        const raw = sessionStorage.getItem(PLAN_MOSAIC_DRAFT_KEY)
+        if (raw) {
+          const draft = JSON.parse(raw) as MosaicDraft
+          if (draft?.panels?.length) {
+            setMosaicDraft(draft)
+            setProjectModeTri('mosaic')
+            if (draft.targetName) setRequestName(draft.targetName)
+            const center = draft.panels[0]
+            if (center) {
+              applySexagesimalPartsFromRadec(
+                center.raHours,
+                center.decDeg,
+                setRaHourPart,
+                setRaMinutePart,
+                setRaSecondPart,
+                setDecSign,
+                setDecDegreePart,
+                setDecMinutePart,
+                setDecSecondPart,
+              )
+            }
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+      const url = new URL(window.location.href)
+      url.searchParams.delete('mosaic')
+      window.history.replaceState({}, '', url.toString())
+      return
+    }
     const prefillTarget = params.get('prefillTarget')
     const prefillRa = params.get('prefillRa')
     const prefillDec = params.get('prefillDec')
@@ -1103,12 +1143,8 @@ export default function RemotePage() {
     }
 
     void loadStatus()
-    const intervalId = window.setInterval(() => {
-      void loadStatus()
-    }, 60_000)
     return () => {
       mounted = false
-      window.clearInterval(intervalId)
     }
   }, [])
 
@@ -1542,6 +1578,12 @@ export default function RemotePage() {
     member.status === 'authenticated'
   )
 
+  useEffect(() => {
+    if (member.status !== 'authenticated') return
+    const id = window.setInterval(() => void refreshQueueRef.current(), 90_000)
+    return () => window.clearInterval(id)
+  }, [member.status])
+
   const showTonightWeatherHeadline = useMemo(
     () => isBeforeTonightWeatherHeadline(new Date(scheduleNowMs)),
     [scheduleNowMs]
@@ -1734,7 +1776,7 @@ export default function RemotePage() {
   }, [sessionType, variableStarDurationPick?.coordsOk])
 
   useEffect(() => {
-    if (sessionType !== 'dso') setProjectMode(false)
+    if (sessionType !== 'dso') setProjectModeTri('off')
   }, [sessionType])
 
   const scheduleStripItems = useMemo(() => {
@@ -2613,29 +2655,12 @@ export default function RemotePage() {
     const password = resolveSessionPasswordRef.current(sessionId)
     if (!password && !isAdmin && !canAccessSessionIdRef.current(sessionId)) return
 
-    const params = password ? new URLSearchParams({ password }) : new URLSearchParams()
-    const streamUrl = `/api/imaging/queue/${encodeURIComponent(sessionId)}/preview-stream?${params.toString()}`
-    const source = new EventSource(streamUrl)
+    void loadTerminalPreviewRef.current(sessionId, password)
+    const id = window.setInterval(() => {
+      void loadTerminalPreviewRef.current(sessionId, password)
+    }, 15_000)
 
-    source.onmessage = (evt) => {
-      let payload: PreviewStreamEvent | null = null
-      try {
-        payload = JSON.parse(evt.data) as PreviewStreamEvent
-      } catch {
-        return
-      }
-      if (!payload || typeof payload !== 'object' || !('type' in payload)) return
-      if (payload.type === 'ping') return
-      if (payload.type === 'snapshot' || payload.type === 'updated') {
-        void loadTerminalPreviewRef.current(sessionId, password)
-      }
-    }
-
-    source.onerror = () => {}
-
-    return () => {
-      source.close()
-    }
+    return () => window.clearInterval(id)
   }, [terminalSessionId, isAdmin])
 
   useEffect(() => {
@@ -2648,49 +2673,39 @@ export default function RemotePage() {
       return
     }
 
-    const params = password ? new URLSearchParams({ password }) : new URLSearchParams()
-    const streamUrl = `/api/imaging/queue/${encodeURIComponent(sessionId)}/progress-stream?${params.toString()}`
-    const source = new EventSource(streamUrl)
+    const headers: HeadersInit = password ? { 'x-session-password': password } : {}
 
-    source.onopen = () => {
-      setTerminalError(null)
-    }
-
-    source.onmessage = (evt) => {
-      let payload: ProgressStreamEvent | null = null
+    const pollProgress = async () => {
       try {
-        payload = JSON.parse(evt.data) as ProgressStreamEvent
-      } catch {
-        return
-      }
-      if (!payload || typeof payload !== 'object' || !('type' in payload)) return
-      if (payload.type === 'ping') return
-      if (payload.type === 'snapshot') {
-        setTerminalLines(Array.isArray(payload.lines) ? payload.lines : [])
-        setTerminalQueueStatus(typeof payload.queueStatus === 'string' ? payload.queueStatus : null)
-        setTerminalLoading(false)
-        return
-      }
-      if (payload.type === 'status') {
-        setTerminalQueueStatus(payload.queueStatus)
-        if (payload.queueStatus === 'completed') void refreshQueueRef.current()
-        return
-      }
-      if (payload.type === 'line') {
-        setTerminalLines((prev) => {
-          if (prev.some((line) => line.at === payload?.at && line.text === payload?.text)) return prev
-          return [...prev, { at: payload.at, text: payload.text }]
+        const res = await fetch(`/api/imaging/queue/${encodeURIComponent(sessionId)}/progress`, {
+          cache: 'no-store',
+          headers,
         })
+        const data = (await res.json().catch(() => ({}))) as {
+          ok?: boolean
+          lines?: SessionProgressLine[]
+          queueStatus?: string
+          error?: string
+        }
+        if (!res.ok || data.ok !== true) {
+          setTerminalLoading(false)
+          if (typeof data.error === 'string') setTerminalError(data.error)
+          return
+        }
+        setTerminalError(null)
+        setTerminalLines(Array.isArray(data.lines) ? data.lines : [])
+        setTerminalQueueStatus(typeof data.queueStatus === 'string' ? data.queueStatus : null)
+        setTerminalLoading(false)
+        if (data.queueStatus === 'completed') void refreshQueueRef.current()
+      } catch {
+        setTerminalLoading(false)
       }
     }
 
-    source.onerror = () => {
-      setTerminalLoading(false)
-    }
+    void pollProgress()
+    const id = window.setInterval(() => void pollProgress(), 5_000)
 
-    return () => {
-      source.close()
-    }
+    return () => window.clearInterval(id)
   }, [terminalSessionId, isAdmin])
 
   useEffect(() => {
@@ -2808,6 +2823,9 @@ export default function RemotePage() {
         estimatedDurationSeconds,
         sessionType,
         ...(sessionType === 'dso' && projectMode ? { projectMode: true } : {}),
+        ...(sessionType === 'dso' && mosaicMode && mosaicDraft?.panels?.length
+          ? { mosaicMode: true, mosaicPanels: mosaicDraft.panels }
+          : {}),
       }),
     })
     const data = await res.json().catch(() => ({}))
@@ -2828,7 +2846,8 @@ export default function RemotePage() {
     setSessionPassword('')
     setOutputMode('raw_zip')
     setSessionType('dso')
-    setProjectMode(false)
+    setProjectModeTri('off')
+    setMosaicDraft(null)
     setVariableStarBlockHours(1)
     setVariableStarPreviewStar(null)
     setVariableStarLastFoundName(null)
@@ -3014,7 +3033,7 @@ export default function RemotePage() {
 
   function beginEditSession(item: (typeof queueItems)[number]) {
     setEditingSessionId(item.id)
-    setProjectMode(item.projectMode === true)
+    setProjectModeTri(item.mosaicMode === true ? 'mosaic' : item.projectMode === true ? 'on' : 'off')
     setSessionType(item.sessionType === 'variable_star' ? 'variable_star' : 'dso')
     setVariableStarPreviewStar(null)
     setVariableStarLastFoundName(null)
@@ -3400,21 +3419,43 @@ export default function RemotePage() {
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    aria-pressed={!projectMode}
-                    onClick={() => setProjectMode(false)}
-                    className={!projectMode ? glassPillToggleActiveMd : glassPillToggleIdleMd}
+                    aria-pressed={projectModeTri === 'off'}
+                    onClick={() => setProjectModeTri('off')}
+                    className={projectModeTri === 'off' ? glassPillToggleActiveMd : glassPillToggleIdleMd}
                   >
                     Off
                   </button>
                   <button
                     type="button"
-                    aria-pressed={projectMode}
-                    onClick={() => setProjectMode(true)}
-                    className={projectMode ? glassPillToggleActiveMd : glassPillToggleIdleMd}
+                    aria-pressed={projectModeTri === 'on'}
+                    onClick={() => setProjectModeTri('on')}
+                    className={projectModeTri === 'on' ? glassPillToggleActiveMd : glassPillToggleIdleMd}
                   >
                     On
                   </button>
+                  <button
+                    type="button"
+                    aria-pressed={projectModeTri === 'mosaic'}
+                    onClick={() => setProjectModeTri('mosaic')}
+                    className={projectModeTri === 'mosaic' ? glassPillToggleActiveMd : glassPillToggleIdleMd}
+                  >
+                    Mosaic On
+                  </button>
                 </div>
+                {mosaicMode && mosaicDraft?.panels?.length ? (
+                  <div className="rounded-lg border border-white/15 bg-black/20 p-3 text-sm text-white/80">
+                    <p className="font-medium text-white">Mosaic from Plan ({mosaicDraft.panels.length} panels)</p>
+                    <ul className="mt-2 max-h-32 space-y-1 overflow-y-auto text-xs">
+                      {mosaicDraft.panels.map((p) => (
+                        <li key={p.id}>
+                          {p.name}: RA {p.raHours.toFixed(4)}h · Dec {p.decDeg.toFixed(2)}°
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : mosaicMode ? (
+                  <p className="text-xs text-amber-300">Send a mosaic from Plan → Framing first.</p>
+                ) : null}
               </div>
             )}
           </div>

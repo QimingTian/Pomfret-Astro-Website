@@ -11,6 +11,9 @@ const NO_STORE_HEADERS = {
   'Cache-Control': 'private, no-store, no-cache, must-revalidate, max-age=0',
 } as const
 
+const mountPostLastAcceptedAt = new Map<string, number>()
+const MOUNT_POST_MIN_INTERVAL_MS = 2_000
+
 function numOrNull(v: unknown): number | null | undefined {
   if (v === null || v === undefined) return v as undefined
   if (typeof v === 'number' && Number.isFinite(v)) return v
@@ -90,6 +93,19 @@ export async function POST(request: NextRequest) {
   if (!payload) {
     return withImagingCors({ ok: false as const, error: 'Missing boolean "connected"' }, 400, NO_STORE_HEADERS)
   }
+
+  const stationKey = (payload.stationId?.trim() || 'default')
+  const now = Date.now()
+  const lastAccepted = mountPostLastAcceptedAt.get(stationKey) ?? 0
+  if (now - lastAccepted < MOUNT_POST_MIN_INTERVAL_MS) {
+    const cached = await getMountPointingSample(payload.stationId)
+    return withImagingCors(
+      { ok: true as const, receivedAtUtc: cached?.receivedAtUtc ?? new Date().toISOString(), throttled: true as const },
+      200,
+      NO_STORE_HEADERS
+    )
+  }
+  mountPostLastAcceptedAt.set(stationKey, now)
 
   const stored = await setMountPointingSample(payload.stationId, payload)
   return withImagingCors({ ok: true as const, receivedAtUtc: stored.receivedAtUtc }, 200, NO_STORE_HEADERS)

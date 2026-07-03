@@ -214,36 +214,28 @@ export function TelescopeStatusPanel() {
       }
     }
 
-    const source = new EventSource('/api/imaging/mount-pointing/stream')
-
-    source.onmessage = (evt) => {
-      let payload: {
-        type?: string
-        sample?: MountSample | null
-        serverNowUtc?: string
-      } | null = null
+    const pollMount = async () => {
       try {
-        payload = JSON.parse(evt.data) as {
-          type?: string
+        const res = await fetch('/api/imaging/mount-pointing', { cache: 'no-store' })
+        if (!res.ok || !mounted) return
+        const payload = (await res.json()) as {
+          ok?: boolean
           sample?: MountSample | null
           serverNowUtc?: string
         }
+        if (payload.ok !== true) return
+        applySample(payload.sample ?? null, payload.serverNowUtc)
       } catch {
-        return
-      }
-      if (!payload || payload.type === 'ping') return
-      if (payload.type === 'snapshot' || payload.type === 'sample') {
-        applySample(payload.sample, payload.serverNowUtc)
+        if (mounted) applySample(null, undefined)
       }
     }
 
-    source.onerror = () => {
-      if (mounted) applySample(null, undefined)
-    }
+    void pollMount()
+    const pollId = window.setInterval(() => void pollMount(), 3_000)
 
     return () => {
       mounted = false
-      source.close()
+      window.clearInterval(pollId)
     }
   }, [])
 

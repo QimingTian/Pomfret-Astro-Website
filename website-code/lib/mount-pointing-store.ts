@@ -27,6 +27,8 @@ export type StoredMountSample = MountPointingPayload & {
 }
 
 const latestByStation = new Map<string, StoredMountSample>()
+const lastKvPersistAtByStation = new Map<string, number>()
+const MOUNT_KV_PERSIST_MIN_MS = 2_000
 
 function stationKey(stationId: string | undefined | null): string {
   const t = typeof stationId === 'string' ? stationId.trim() : ''
@@ -48,10 +50,14 @@ export async function setMountPointingSample(
     receivedAtUtc,
   }
   latestByStation.set(key, stored)
-  if (kvEnabled()) {
+  const now = Date.now()
+  const lastPersist = lastKvPersistAtByStation.get(key) ?? 0
+  const shouldPersist = now - lastPersist >= MOUNT_KV_PERSIST_MIN_MS
+  if (kvEnabled() && shouldPersist) {
+    lastKvPersistAtByStation.set(key, now)
     await kvSetJson(kvKey(stationId), stored)
+    void emitLiveEvent(liveMountChannel(stationId), { type: 'sample', sample: stored })
   }
-  void emitLiveEvent(liveMountChannel(stationId), { type: 'sample', sample: stored })
   return stored
 }
 

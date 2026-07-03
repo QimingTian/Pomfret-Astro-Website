@@ -46,7 +46,7 @@ namespace PomfretAstro.MountTelemetry {
         public int PostIntervalMilliseconds {
             get => Settings.Default.PostIntervalMilliseconds;
             set {
-                Settings.Default.PostIntervalMilliseconds = Math.Max(250, value);
+                Settings.Default.PostIntervalMilliseconds = Math.Max(2000, value);
                 CoreUtil.SaveSettings(Settings.Default);
                 RaisePropertyChanged();
             }

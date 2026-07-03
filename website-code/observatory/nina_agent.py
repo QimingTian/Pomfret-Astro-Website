@@ -91,6 +91,8 @@ AGENT_EVENTS_URL = (
     if _nina_seq.scheme and _nina_seq.netloc
     else ""
 )
+# Server returns 410 — poll-only saves Vercel Fluid hours on Hobby.
+AGENT_EVENTS_SSE_ENABLED = False
 # Vercel Hobby cannot run sub-daily crons; agent used to trigger reconcile on poll cadence.
 # Reconcile is now pushed via agent-events SSE (or fallback poll below).
 RECONCILE_EVERY_N_POLLS = 0
@@ -430,6 +432,9 @@ _wake_estop = threading.Event()
 _wake_sequence = threading.Event()
 _wake_reconcile = threading.Event()
 
+_last_reconcile_mono = 0.0
+RECONCILE_INTERVAL_SEC = 360.0
+
 
 def _agent_sse_connected_recently() -> bool:
     with _sse_lock:
@@ -463,6 +468,9 @@ def _handle_agent_sse_payload(raw: str) -> None:
 
 
 def agent_events_reader_loop() -> None:
+    if not AGENT_EVENTS_SSE_ENABLED:
+        log("Agent events SSE disabled; using nina-sequence polling only.")
+        return
     url = str(AGENT_EVENTS_URL).strip()
     if not url:
         log("AGENT_EVENTS_URL not configured; using fallback polling only.")
@@ -480,6 +488,11 @@ def agent_events_reader_loop() -> None:
                     data = line[5:].strip()
                     if data:
                         _handle_agent_sse_payload(data)
+        except urllib.error.HTTPError as ex:
+            if ex.code == 410:
+                log("Agent events SSE disabled by server (410); using poll-only mode.")
+                return
+            log(f"Agent events SSE disconnected: HTTP {ex.code}")
         except Exception as ex:
             log(f"Agent events SSE disconnected: {ex}")
         time.sleep(5)
@@ -504,22 +517,28 @@ def _wait_agent_wake(timeout_sec: float) -> Optional[str]:
     return None
 
 
-def sleep_between_polls() -> None:
+def sleep_between_polls() -> Optional[str]:
+    global _last_reconcile_mono
     if _agent_sse_connected_recently():
         timeout = float(SSE_CONNECTED_WAIT_SECONDS)
+        now_mono = time.monotonic()
+        if now_mono - _last_reconcile_mono >= RECONCILE_INTERVAL_SEC:
+            _last_reconcile_mono = now_mono
+            try_reconcile_queue_schedule()
     else:
         timeout = float(FALLBACK_POLL_SECONDS)
     wake = _wait_agent_wake(timeout)
     if wake == "reconcile":
         try_reconcile_queue_schedule()
-        return
+        return "reconcile"
     if wake is None and not _agent_sse_connected_recently():
         try_reconcile_queue_schedule()
-        return
+        return "reconcile"
     n = int(RECONCILE_EVERY_N_POLLS)
     if n > 0 and str(RECONCILE_QUEUE_URL).strip():
         # Legacy reconcile-on-poll (disabled when RECONCILE_EVERY_N_POLLS = 0).
         pass
+    return wake
 
 
 def kill_nina_process(process: Optional[subprocess.Popen[bytes]] = None) -> None:
@@ -1251,6 +1270,25 @@ def handle_sequence_launch(
             power_off_observatory_equipment()
     report_agent_pulse(False)
     if estop_content is not None:
+        # ESTOP kills NINA mid-session; still upload frames captured before interrupt.
+        if not is_estop:
+            new_files = find_new_or_updated_files(before_snapshot, output_root)
+            if new_files and output_mode != OUTPUT_MODE_NONE:
+                postprocess_queue.put(
+                    {
+                        "session_id": session_id,
+                        "run_id": run_id,
+                        "output_mode": output_mode,
+                        "session_filter": session_filter,
+                        "new_files": new_files,
+                        "jobs_dir": str(jobs_dir),
+                        "output_root": str(output_root),
+                    }
+                )
+                log(
+                    f"Emergency STOP interrupted imaging; queued partial upload for {run_id} "
+                    f"({len(new_files)} file(s)); pending jobs: {postprocess_queue.qsize()}."
+                )
         return estop_content
     if is_estop:
         return None
@@ -1326,12 +1364,6 @@ def run_loop() -> None:
                 continue
             if last_pulsed_nina_running is not False and report_agent_pulse(False):
                 last_pulsed_nina_running = False
-
-            if _agent_sse_connected_recently() and not (
-                _wake_sequence.is_set() or _wake_estop.is_set() or _wake_reconcile.is_set()
-            ):
-                sleep_between_polls()
-                continue
 
             try:
                 content = download_bytes(SEQUENCE_JSON_URL)

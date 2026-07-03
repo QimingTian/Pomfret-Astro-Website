@@ -31,9 +31,18 @@ export type SiteStreamHandlers = {
   onEstop?: (event: SiteStreamEstopEvent) => void
 }
 
+/** Poll interval — avoids 24/7 SSE Fluid memory on Vercel Hobby. */
+const SITE_POLL_MS = 45_000
+
+type PollBody = {
+  ok?: boolean
+  observatory?: SiteStreamObservatoryEvent
+  estop?: SiteStreamEstopEvent
+}
+
 /**
- * Single EventSource for site-wide push events (observatory status, session list, ESTOP).
- * Requires a logged-in session cookie. ESTOP events are only sent to admins by the server.
+ * Site-wide observatory / ESTOP updates via short HTTP polls (no long-lived SSE).
+ * Session list changes still rely on explicit refresh or user actions.
  */
 export function useSiteStream(handlers: SiteStreamHandlers, enabled = true): void {
   const handlersRef = useRef(handlers)
@@ -42,32 +51,31 @@ export function useSiteStream(handlers: SiteStreamHandlers, enabled = true): voi
   useEffect(() => {
     if (!enabled) return
 
-    const source = new EventSource('/api/imaging/site-stream')
+    let stopped = false
 
-    source.onmessage = (evt) => {
-      let payload: Record<string, unknown> | null = null
+    const poll = async () => {
       try {
-        payload = JSON.parse(evt.data) as Record<string, unknown>
+        const res = await fetch('/api/imaging/site-poll', { cache: 'no-store', credentials: 'include' })
+        if (!res.ok || stopped) return
+        const body = (await res.json()) as PollBody
+        if (body.ok !== true) return
+        if (body.observatory?.type === 'observatory_status') {
+          handlersRef.current.onObservatoryStatus?.(body.observatory)
+        }
+        if (body.estop?.type === 'estop') {
+          handlersRef.current.onEstop?.(body.estop)
+        }
       } catch {
-        return
-      }
-      if (!payload || payload.type === 'ping') return
-
-      if (payload.type === 'observatory_status') {
-        handlersRef.current.onObservatoryStatus?.(payload as SiteStreamObservatoryEvent)
-        return
-      }
-      if (payload.type === 'sessions_changed') {
-        handlersRef.current.onSessionsChanged?.(payload as SiteStreamSessionsEvent)
-        return
-      }
-      if (payload.type === 'estop') {
-        handlersRef.current.onEstop?.(payload as SiteStreamEstopEvent)
+        // ignore transient poll errors
       }
     }
 
+    void poll()
+    const id = window.setInterval(() => void poll(), SITE_POLL_MS)
+
     return () => {
-      source.close()
+      stopped = true
+      window.clearInterval(id)
     }
   }, [enabled])
 }

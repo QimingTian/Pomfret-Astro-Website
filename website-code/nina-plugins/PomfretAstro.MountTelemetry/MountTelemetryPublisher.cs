@@ -42,7 +42,7 @@ namespace PomfretAstro.MountTelemetry {
             var url = (Settings.Default.ApiEndpoint ?? string.Empty).Trim();
             if (url.Length == 0) return;
 
-            var interval = Math.Max(250, Settings.Default.PostIntervalMilliseconds);
+            var interval = Math.Max(2000, Settings.Default.PostIntervalMilliseconds);
             var now = DateTime.UtcNow;
             lock (_postSync) {
                 if ((now - _lastPostUtc).TotalMilliseconds < interval) return;

@@ -160,6 +160,17 @@ function formatHourMinute(sec: number): string {
   return new Date(sec * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
+function buildHourStartsSec(windowStartSec: number, windowEndSec: number): number[] {
+  if (!Number.isFinite(windowStartSec) || !Number.isFinite(windowEndSec) || windowEndSec <= windowStartSec) {
+    return []
+  }
+  const hours: number[] = []
+  for (let sec = windowStartSec; sec < windowEndSec; sec += 3600) {
+    hours.push(sec)
+  }
+  return hours
+}
+
 /** Local date + time to the minute for the time-travel scrubber hover label. */
 function formatHoverTimeToMinute(sec: number): string {
   const d = new Date(sec * 1000)
@@ -598,22 +609,22 @@ export default function AtlasPage() {
       `/api/imaging/tonight-weather-prediction?startSec=${startSec}&endSec=${endSec}&_=${Date.now()}`,
       { cache: 'no-store' }
     )
-    const data = (await res.json().catch(() => null)) as WeatherPrediction | null
-    if (!data?.ok) return null
-    return data
+    return (await res.json().catch(() => null)) as WeatherPrediction | null
   }, 60_000)
 
+  const { startSec: ribbonStartSec, endSec: ribbonEndSec } = getTonightScheduleWindowSec()
   const readySet = useMemo(() => new Set(weather?.readyHourStartsSec ?? []), [weather?.readyHourStartsSec])
 
-  const nightStartSec = weather?.nightHourStartsSec?.[0]
-  const nightEndSec =
-    weather?.nightHourStartsSec && weather.nightHourStartsSec.length > 0
-      ? (weather.nightHourStartsSec[weather.nightHourStartsSec.length - 1] as number) + 3600
-      : undefined
+  const apiHourStartsSec =
+    weather?.ok === true && Array.isArray(weather.nightHourStartsSec) && weather.nightHourStartsSec.length > 0
+      ? weather.nightHourStartsSec
+      : null
+  const weatherColorsKnown = apiHourStartsSec != null
+  const ribbonHourStartsSec = apiHourStartsSec ?? buildHourStartsSec(ribbonStartSec, ribbonEndSec)
 
   const atlasRibbonAstronomyMarkers = useMemo((): AtlasRibbonAstronomyMarker[] => {
-    if (nightStartSec == null || nightEndSec == null || nightEndSec <= nightStartSec) return []
-    const span = nightEndSec - nightStartSec
+    if (ribbonEndSec <= ribbonStartSec) return []
+    const span = ribbonEndSec - ribbonStartSec
     const now = new Date()
     const { civilDuskUtc, nauticalDuskUtc, astronomicalDarkUtc } = getTonightScheduleEveningAstronomyUtc(now)
     const { civilDawnUtc, nauticalDawnUtc, astronomicalDawnUtc } = getTonightScheduleMorningAstronomyUtc(now)
@@ -626,13 +637,13 @@ export default function AtlasPage() {
       { id: 'civil-dawn', label: 'Civil Dawn', sec: Math.floor(civilDawnUtc.getTime() / 1000) },
     ]
     return raw
-      .map((m) => ({ ...m, frac: (m.sec - nightStartSec) / span }))
+      .map((m) => ({ ...m, frac: (m.sec - ribbonStartSec) / span }))
       .filter((m) => m.frac >= 0 && m.frac <= 1)
       .sort((a, b) => a.frac - b.frac)
-  }, [nightStartSec, nightEndSec, weather])
+  }, [ribbonStartSec, ribbonEndSec])
 
   const handleRibbonClick = (ev: React.MouseEvent<HTMLDivElement> | React.KeyboardEvent<HTMLDivElement>) => {
-    if (!nightStartSec || !nightEndSec) return
+    if (ribbonEndSec <= ribbonStartSec) return
     const stel = getStel()
     const observer = stel?.core?.observer
     if (!observer) return
@@ -641,7 +652,7 @@ export default function AtlasPage() {
     const rect = bar.getBoundingClientRect()
     const clientX = 'clientX' in ev ? ev.clientX : rect.left + rect.width / 2
     const frac = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
-    const whenSec = nightStartSec + frac * (nightEndSec - nightStartSec)
+    const whenSec = ribbonStartSec + frac * (ribbonEndSec - ribbonStartSec)
     const mjd = whenSec / 86400 + 2440587.5 - 2400000.5
     observer.utc = mjd
   }
@@ -825,17 +836,16 @@ export default function AtlasPage() {
         </section>
 
         <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-          {nightStartSec && nightEndSec ? (
-            <div
-              className="relative min-w-0 flex-1 cursor-default pb-5 sm:pb-0"
-              onMouseMove={(e) => {
-                const bar = tonightRibbonBarRef.current
-                if (!bar) return
-                const rect = bar.getBoundingClientRect()
-                setHoverFrac(Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)))
-              }}
-              onMouseLeave={() => setHoverFrac(null)}
-            >
+          <div
+            className="relative min-w-0 flex-1 cursor-default pb-5 sm:pb-0"
+            onMouseMove={(e) => {
+              const bar = tonightRibbonBarRef.current
+              if (!bar) return
+              const rect = bar.getBoundingClientRect()
+              setHoverFrac(Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)))
+            }}
+            onMouseLeave={() => setHoverFrac(null)}
+          >
               <div className="relative w-full">
                 <div className="relative mb-0.5 min-h-[2.25rem] w-full sm:min-h-[2.5rem]">
                   {atlasRibbonAstronomyMarkers.map((m, i) =>
@@ -868,20 +878,24 @@ export default function AtlasPage() {
                   className="relative h-10 w-full cursor-pointer rounded-lg bg-black/40"
                 >
                   <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-lg">
-                    {weather?.nightHourStartsSec?.map((sec) => {
-                      const frac = (sec - nightStartSec) / (nightEndSec - nightStartSec)
-                      const width = 3600 / (nightEndSec - nightStartSec)
-                      const ok = readySet.has(sec)
+                    {ribbonHourStartsSec.map((sec) => {
+                      const frac = (sec - ribbonStartSec) / (ribbonEndSec - ribbonStartSec)
+                      const width = 3600 / (ribbonEndSec - ribbonStartSec)
+                      const colorClass = !weatherColorsKnown
+                        ? 'bg-white/20'
+                        : readySet.has(sec)
+                          ? 'bg-emerald-500/50'
+                          : 'bg-rose-600/50'
                       return (
                         <div
                           key={sec}
-                          className={`absolute top-0 bottom-0 ${ok ? 'bg-emerald-500/50' : 'bg-rose-600/50'}`}
+                          className={`absolute top-0 bottom-0 ${colorClass}`}
                           style={{ left: `${frac * 100}%`, width: `${width * 100}%` }}
                         />
                       )
                     })}
-                    {weather?.nightHourStartsSec?.map((sec) => {
-                      const frac = (sec - nightStartSec) / (nightEndSec - nightStartSec)
+                    {ribbonHourStartsSec.map((sec) => {
+                      const frac = (sec - ribbonStartSec) / (ribbonEndSec - ribbonStartSec)
                       if (frac <= 0) return null
                       return (
                         <div
@@ -893,8 +907,8 @@ export default function AtlasPage() {
                     })}
                   </div>
                   <div className="pointer-events-none absolute inset-x-2 top-1 flex justify-between text-[10px] uppercase tracking-wide text-white/60">
-                    <span>{formatHourMinute(nightStartSec)}</span>
-                    <span>{formatHourMinute(nightEndSec)}</span>
+                    <span>{formatHourMinute(ribbonStartSec)}</span>
+                    <span>{formatHourMinute(ribbonEndSec)}</span>
                   </div>
                   {hoverFrac !== null ? (
                     <div
@@ -909,7 +923,7 @@ export default function AtlasPage() {
                       aria-hidden
                     >
                       {formatHoverTimeToMinute(
-                        nightStartSec + hoverFrac * (nightEndSec - nightStartSec),
+                        ribbonStartSec + hoverFrac * (ribbonEndSec - ribbonStartSec),
                       )}
                     </div>
                   ) : null}
@@ -935,7 +949,6 @@ export default function AtlasPage() {
                 </div>
               </div>
             </div>
-          ) : null}
           <button
             type="button"
             onClick={handleReturnToNow}

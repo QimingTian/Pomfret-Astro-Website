@@ -1,0 +1,19 @@
+---
+description: After website-code changes, commit and deploy to Vercel production
+globs: website-code/**
+alwaysApply: false
+---
+
+# Pomfret website — always publish
+
+When you finish implementing or fixing anything under `website-code/` (unless the user explicitly says not to deploy):
+
+1. Commit only the relevant `website-code/` files with a clear message.
+2. `git push origin HEAD`
+3. Deploy production from `website-code/`: `npm run deploy` (`vercel --prod --yes`)
+
+Report the production URL (https://www.pomfretastro.org) and Vercel inspector link.
+
+Do not wait for the user to say「发布」— treat deploy as part of the task completion for this app.
+
+If Vercel CLI auth fails, retry after login; if Git push auto-deploy fails, still run CLI deploy.

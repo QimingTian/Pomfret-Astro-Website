@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { useAdaptivePoll } from '@/hooks/use-adaptive-poll'
 
 type MountSample = {
   connected?: boolean
@@ -172,15 +173,18 @@ export function TelescopeStatusPanel() {
   const pierRollRef = useRef(0)
   const [connected, setConnected] = useState(false)
   const [trackingEnabled, setTrackingEnabled] = useState<boolean | null>(null)
+  const mountedRef = useRef(true)
 
   useEffect(() => {
-    let mounted = true
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
-    const applySample = (
-      sample: MountSample | null | undefined,
-      serverNowUtc: string | undefined
-    ) => {
-      if (!mounted) return
+  const applySample = useCallback(
+    (sample: MountSample | null | undefined, serverNowUtc: string | undefined) => {
+      if (!mountedRef.current) return
       if (!sample) {
         setConnected(false)
         setTrackingEnabled(null)
@@ -212,32 +216,25 @@ export function TelescopeStatusPanel() {
         y: WEBSITE_Y_OFFSET_DEG,
         z: 0,
       }
-    }
+    },
+    []
+  )
 
-    const pollMount = async () => {
-      try {
-        const res = await fetch('/api/imaging/mount-pointing', { cache: 'no-store' })
-        if (!res.ok || !mounted) return
-        const payload = (await res.json()) as {
-          ok?: boolean
-          sample?: MountSample | null
-          serverNowUtc?: string
-        }
-        if (payload.ok !== true) return
-        applySample(payload.sample ?? null, payload.serverNowUtc)
-      } catch {
-        if (mounted) applySample(null, undefined)
+  useAdaptivePoll('mount', async () => {
+    try {
+      const res = await fetch('/api/imaging/mount-pointing', { cache: 'no-store' })
+      if (!res.ok || !mountedRef.current) return
+      const payload = (await res.json()) as {
+        ok?: boolean
+        sample?: MountSample | null
+        serverNowUtc?: string
       }
+      if (payload.ok !== true) return
+      applySample(payload.sample ?? null, payload.serverNowUtc)
+    } catch {
+      if (mountedRef.current) applySample(null, undefined)
     }
-
-    void pollMount()
-    const pollId = window.setInterval(() => void pollMount(), 3_000)
-
-    return () => {
-      mounted = false
-      window.clearInterval(pollId)
-    }
-  }, [])
+  })
 
   useEffect(() => {
     const host = viewportRef.current

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { MemberAuthPanel } from '@/components/member-auth-panel'
 import { useMember } from '@/hooks/use-member'
+import { useAdaptivePoll } from '@/hooks/use-adaptive-poll'
 import { useSiteStream } from '@/lib/use-site-stream'
 import type { VariableStarRow } from '@/lib/variable-star-catalog'
 import {
@@ -1578,11 +1579,17 @@ export default function RemotePage() {
     member.status === 'authenticated'
   )
 
-  useEffect(() => {
-    if (member.status !== 'authenticated') return
-    const id = window.setInterval(() => void refreshQueueRef.current(), 90_000)
-    return () => window.clearInterval(id)
-  }, [member.status])
+  useAdaptivePoll(
+    'queue',
+    () => {
+      void refreshQueueRef.current()
+    },
+    { enabled: member.status === 'authenticated' }
+  )
+
+  const terminalImagingActive =
+    Boolean(terminalSessionId) &&
+    (terminalQueueStatus === 'in_progress' || terminalQueueStatus === 'scheduled')
 
   const showTonightWeatherHeadline = useMemo(
     () => isBeforeTonightWeatherHeadline(new Date(scheduleNowMs)),
@@ -2649,33 +2656,30 @@ export default function RemotePage() {
   const canAccessSessionIdRef = useRef(canAccessSessionId)
   canAccessSessionIdRef.current = canAccessSessionId
 
-  useEffect(() => {
-    if (!terminalSessionId) return
-    const sessionId = terminalSessionId
-    const password = resolveSessionPasswordRef.current(sessionId)
-    if (!password && !isAdmin && !canAccessSessionIdRef.current(sessionId)) return
-
-    void loadTerminalPreviewRef.current(sessionId, password)
-    const id = window.setInterval(() => {
+  useAdaptivePoll(
+    'preview',
+    () => {
+      if (!terminalSessionId) return
+      const sessionId = terminalSessionId
+      const password = resolveSessionPasswordRef.current(sessionId)
+      if (!password && !isAdmin && !canAccessSessionIdRef.current(sessionId)) return
       void loadTerminalPreviewRef.current(sessionId, password)
-    }, 15_000)
+    },
+    { enabled: Boolean(terminalSessionId), imagingActive: terminalImagingActive }
+  )
 
-    return () => window.clearInterval(id)
-  }, [terminalSessionId, isAdmin])
-
-  useEffect(() => {
-    if (!terminalSessionId) return
-    const sessionId = terminalSessionId
-    const password = resolveSessionPasswordRef.current(sessionId)
-    if (!password && !isAdmin && !canAccessSessionIdRef.current(sessionId)) {
-      setTerminalError('Session password required.')
-      setTerminalLoading(false)
-      return
-    }
-
-    const headers: HeadersInit = password ? { 'x-session-password': password } : {}
-
-    const pollProgress = async () => {
+  useAdaptivePoll(
+    'progress',
+    async () => {
+      if (!terminalSessionId) return
+      const sessionId = terminalSessionId
+      const password = resolveSessionPasswordRef.current(sessionId)
+      if (!password && !isAdmin && !canAccessSessionIdRef.current(sessionId)) {
+        setTerminalError('Session password required.')
+        setTerminalLoading(false)
+        return
+      }
+      const headers: HeadersInit = password ? { 'x-session-password': password } : {}
       try {
         const res = await fetch(`/api/imaging/queue/${encodeURIComponent(sessionId)}/progress`, {
           cache: 'no-store',
@@ -2700,13 +2704,9 @@ export default function RemotePage() {
       } catch {
         setTerminalLoading(false)
       }
-    }
-
-    void pollProgress()
-    const id = window.setInterval(() => void pollProgress(), 5_000)
-
-    return () => window.clearInterval(id)
-  }, [terminalSessionId, isAdmin])
+    },
+    { enabled: Boolean(terminalSessionId), imagingActive: terminalImagingActive }
+  )
 
   useEffect(() => {
     terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' })

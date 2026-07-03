@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { mountTelemetryPostAuthorized } from '@/lib/mount-telemetry-auth'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import { getMountPointingSample, setMountPointingSample, type MountPointingPayload } from '@/lib/mount-pointing-store'
+import { isWithinDaytimeClosedWindow } from '@/lib/sunrise-window'
 
 export const runtime = 'nodejs'
 /** Avoid CDN / disk caching live mount JSON (Chrome often kept a stale GET; Safari did not). */
@@ -12,7 +13,12 @@ const NO_STORE_HEADERS = {
 } as const
 
 const mountPostLastAcceptedAt = new Map<string, number>()
-const MOUNT_POST_MIN_INTERVAL_MS = 2_000
+const MOUNT_POST_MIN_INTERVAL_NIGHT_MS = 2_000
+const MOUNT_POST_MIN_INTERVAL_DAY_MS = 30_000
+
+function mountPostMinIntervalMs(): number {
+  return isWithinDaytimeClosedWindow() ? MOUNT_POST_MIN_INTERVAL_DAY_MS : MOUNT_POST_MIN_INTERVAL_NIGHT_MS
+}
 
 function numOrNull(v: unknown): number | null | undefined {
   if (v === null || v === undefined) return v as undefined
@@ -97,7 +103,8 @@ export async function POST(request: NextRequest) {
   const stationKey = (payload.stationId?.trim() || 'default')
   const now = Date.now()
   const lastAccepted = mountPostLastAcceptedAt.get(stationKey) ?? 0
-  if (now - lastAccepted < MOUNT_POST_MIN_INTERVAL_MS) {
+  const minInterval = mountPostMinIntervalMs()
+  if (now - lastAccepted < minInterval) {
     const cached = await getMountPointingSample(payload.stationId)
     return withImagingCors(
       { ok: true as const, receivedAtUtc: cached?.receivedAtUtc ?? new Date().toISOString(), throttled: true as const },

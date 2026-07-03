@@ -5,9 +5,8 @@ import {
   isObservatoryOverlayStatus,
   type ObservatoryOverlayStatus,
 } from '@/lib/observatory-overlay-status'
+import { useAdaptivePoll } from '@/hooks/use-adaptive-poll'
 import { useSiteStream } from '@/lib/use-site-stream'
-
-const OBSERVATORY_STATUS_POLL_MS = 60_000
 
 type ObservatoryMode = 'manual' | 'auto'
 
@@ -24,7 +23,7 @@ function parseEnvelope(data: unknown): {
   return { mode, status }
 }
 
-/** Authoritative server Observatory Status (GET + SSE). Same value as NINA / Remote header. */
+/** Authoritative server Observatory Status (GET + adaptive poll / SSE). Same value as NINA / Remote header. */
 export function useObservatoryEnvelope(options?: {
   observatoryStatusUrl?: string
   siteStreamEnabled?: boolean
@@ -52,12 +51,9 @@ export function useObservatoryEnvelope(options?: {
 
   useEffect(() => {
     void loadEnvelope()
-    if (!siteStreamEnabled) {
-      const id = window.setInterval(() => void loadEnvelope(), OBSERVATORY_STATUS_POLL_MS)
-      return () => window.clearInterval(id)
-    }
-    return undefined
-  }, [loadEnvelope, siteStreamEnabled])
+  }, [loadEnvelope])
+
+  useAdaptivePoll('observatory', loadEnvelope, { enabled: !siteStreamEnabled })
 
   useSiteStream(
     {

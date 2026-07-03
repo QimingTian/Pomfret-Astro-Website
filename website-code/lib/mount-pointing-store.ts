@@ -2,6 +2,7 @@
 
 import { emitLiveEvent, liveMountChannel } from '@/lib/imaging/live-bus'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
+import { isWithinDaytimeClosedWindow } from '@/lib/sunrise-window'
 
 export type MountPointingPayload = {
   source?: string
@@ -28,7 +29,10 @@ export type StoredMountSample = MountPointingPayload & {
 
 const latestByStation = new Map<string, StoredMountSample>()
 const lastKvPersistAtByStation = new Map<string, number>()
-const MOUNT_KV_PERSIST_MIN_MS = 2_000
+
+function mountKvPersistMinMs(): number {
+  return isWithinDaytimeClosedWindow() ? 30_000 : 2_000
+}
 
 function stationKey(stationId: string | undefined | null): string {
   const t = typeof stationId === 'string' ? stationId.trim() : ''
@@ -52,7 +56,7 @@ export async function setMountPointingSample(
   latestByStation.set(key, stored)
   const now = Date.now()
   const lastPersist = lastKvPersistAtByStation.get(key) ?? 0
-  const shouldPersist = now - lastPersist >= MOUNT_KV_PERSIST_MIN_MS
+  const shouldPersist = now - lastPersist >= mountKvPersistMinMs()
   if (kvEnabled() && shouldPersist) {
     lastKvPersistAtByStation.set(key, now)
     await kvSetJson(kvKey(stationId), stored)

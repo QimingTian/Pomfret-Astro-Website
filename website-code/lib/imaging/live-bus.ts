@@ -19,7 +19,8 @@ type Listener = (payload: unknown) => void
 
 const LIVE_LIST_MAX = 100
 const LIVE_LIST_TTL_SEC = 3600
-const REDIS_TAIL_POLL_MS = 300
+/** Cross-instance SSE tail poll — keep ≥1s to avoid burning Redis commands on Fixed plans. */
+const REDIS_TAIL_POLL_MS = 2_000
 
 type GlobalWithLiveBus = typeof globalThis & {
   __pomfret_live_bus_listeners__?: Map<string, Set<Listener>>

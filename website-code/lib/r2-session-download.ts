@@ -1,4 +1,4 @@
-import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
 import { kvGetJson, kvSetJson } from '@/lib/kv-rest'
@@ -212,6 +212,82 @@ export async function buildSignedPreviewUrl(queueId: string): Promise<string | n
   return getSignedUrl(client, command, { expiresIn: signTtlSec() })
 }
 
+/** One overwrite slot per session — live NINA preview (not final session zip preview). */
+export function livePreviewObjectKey(queueId: string): string {
+  return `${sessionKeyPrefix(queueId)}live-preview.jpg`
+}
+
+async function readObjectBody(
+  command: GetObjectCommand
+): Promise<{ body: Buffer; contentType: string } | null> {
+  if (!r2Enabled()) return null
+  try {
+    const client = createR2Client()
+    const res = await client.send(command)
+    const chunks: Buffer[] = []
+    if (res.Body && typeof (res.Body as AsyncIterable<Uint8Array>)[Symbol.asyncIterator] === 'function') {
+      for await (const chunk of res.Body as AsyncIterable<Uint8Array>) {
+        chunks.push(Buffer.from(chunk))
+      }
+    }
+    const body = Buffer.concat(chunks)
+    if (body.length === 0) return null
+    const contentType = typeof res.ContentType === 'string' && res.ContentType.trim() ? res.ContentType : 'image/jpeg'
+    return { body, contentType }
+  } catch {
+    return null
+  }
+}
+
+export async function putLivePreviewObject(queueId: string, body: Buffer, contentType: string): Promise<boolean> {
+  if (!r2Enabled()) return false
+  const key = livePreviewObjectKey(queueId)
+  if (!isAllowedSessionObjectKey(queueId, key)) return false
+  try {
+    const client = createR2Client()
+    await client.send(
+      new PutObjectCommand({
+        Bucket: r2Bucket(),
+        Key: key,
+        Body: body,
+        ContentType: contentType || 'image/jpeg',
+        CacheControl: 'no-store',
+      })
+    )
+    cacheMap().delete(key)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function readLivePreviewObject(
+  queueId: string
+): Promise<{ body: Buffer; contentType: string } | null> {
+  if (!r2Enabled()) return null
+  const key = livePreviewObjectKey(queueId)
+  if (!isAllowedSessionObjectKey(queueId, key)) return null
+  return readObjectBody(
+    new GetObjectCommand({
+      Bucket: r2Bucket(),
+      Key: key,
+    })
+  )
+}
+
+export async function deleteLivePreviewObject(queueId: string): Promise<void> {
+  if (!r2Enabled()) return
+  const key = livePreviewObjectKey(queueId)
+  if (!isAllowedSessionObjectKey(queueId, key)) return
+  try {
+    const client = createR2Client()
+    await client.send(new DeleteObjectCommand({ Bucket: r2Bucket(), Key: key }))
+  } catch {
+    // ignore cleanup failures
+  }
+  cacheMap().delete(key)
+}
+
 /** Delete the session object from R2 and drop queueId → objectKey mapping (e.g. 48h after user download). */
 export async function deleteR2ObjectForQueueId(queueId: string): Promise<void> {
   if (!r2Enabled()) return
@@ -244,4 +320,5 @@ export async function deleteR2ObjectForQueueId(queueId: string): Promise<void> {
     cache.delete(previewObjectKey)
   }
   await removeR2PreviewObjectKeyMapping(queueId)
+  await deleteLivePreviewObject(queueId)
 }

@@ -1,33 +1,44 @@
 import { kvDel, kvEnabled, kvGetJson, kvIncrFromSeed, kvSetJson } from '@/lib/kv-rest'
+import {
+  deleteLivePreviewObject,
+  putLivePreviewObject,
+  readLivePreviewObject,
+} from '@/lib/r2-session-download'
 
-/** Legacy monolithic map (pre per-queueId keys). Read-only fallback. */
-const LEGACY_KEY = 'imaging-preview-latest'
-const INDEX_KEY = 'imaging-preview-index'
-const MAX_ENTRIES = 50
-
-export type PreviewEntry = {
+/** Tiny KV record — image bytes live in memory + one R2 object per session (overwrite). */
+export type PreviewMeta = {
   imageId: string
   queueId: string
   updatedAt: string
   contentType: string
-  dataBase64: string
-  /** Monotonic count of successful preview uploads for this queueId (for terminal Image n/…). */
   frameNumber?: number
 }
 
-type PreviewIndexRow = { queueId: string; updatedAt: string }
+export type PreviewEntry = PreviewMeta & {
+  dataBase64: string
+}
+
+const LEGACY_BLOB_KEY_PREFIX = 'imaging-preview:'
+const LEGACY_MONOLITH_KEY = 'imaging-preview-latest'
+const LEGACY_INDEX_KEY = 'imaging-preview-index'
+const META_KEY_PREFIX = 'imaging-preview-meta:'
+const FRAME_KEY_PREFIX = 'imaging-preview-frame:'
 
 type GlobalWithPreview = typeof globalThis & {
   __pomfret_imaging_preview_by_queue__?: Record<string, PreviewEntry>
   __pomfret_imaging_preview_frame_by_queue__?: Record<string, number>
 }
 
-function previewKvKey(queueId: string): string {
-  return `imaging-preview:${queueId}`
+function previewMetaKvKey(queueId: string): string {
+  return `${META_KEY_PREFIX}${queueId}`
 }
 
 function previewFrameKvKey(queueId: string): string {
-  return `imaging-preview-frame:${queueId}`
+  return `${FRAME_KEY_PREFIX}${queueId}`
+}
+
+function legacyBlobKvKey(queueId: string): string {
+  return `${LEGACY_BLOB_KEY_PREFIX}${queueId}`
 }
 
 function memoryMap(): Record<string, PreviewEntry> {
@@ -42,24 +53,49 @@ function memoryFrameMap(): Record<string, number> {
   return g.__pomfret_imaging_preview_frame_by_queue__
 }
 
-async function readLegacyEntry(queueId: string): Promise<PreviewEntry | null> {
-  const legacy = await kvGetJson<{ byQueueId?: Record<string, PreviewEntry> }>(LEGACY_KEY)
-  const e = legacy?.byQueueId?.[queueId]
-  return e && e.dataBase64 ? e : null
+function entryFromMetaAndBytes(meta: PreviewMeta, body: Buffer): PreviewEntry {
+  return {
+    ...meta,
+    dataBase64: body.toString('base64'),
+  }
 }
 
-async function readPreviewEntryFromKv(queueId: string): Promise<PreviewEntry | null> {
-  const fromKv = await kvGetJson<PreviewEntry>(previewKvKey(queueId))
-  if (fromKv?.dataBase64) return fromKv
-  return readLegacyEntry(queueId)
+async function readMetaFromKv(queueId: string): Promise<PreviewMeta | null> {
+  const meta = await kvGetJson<PreviewMeta>(previewMetaKvKey(queueId))
+  if (meta?.updatedAt && meta.queueId) return meta
+  return null
 }
 
-/** Seed for first atomic INCR when migrating from frameNumber stored on the preview blob. */
+/** One-time migration: load legacy KV blob into R2/memory, then delete from KV. */
+async function migrateLegacyBlobToMemory(queueId: string): Promise<PreviewEntry | null> {
+  const perQueue = await kvGetJson<PreviewEntry>(legacyBlobKvKey(queueId))
+  if (perQueue?.dataBase64) {
+    memoryMap()[queueId] = perQueue
+    await kvDel(legacyBlobKvKey(queueId))
+    const body = Buffer.from(perQueue.dataBase64, 'base64')
+    await putLivePreviewObject(queueId, body, perQueue.contentType || 'image/jpeg')
+    return perQueue
+  }
+
+  const legacy = await kvGetJson<{ byQueueId?: Record<string, PreviewEntry> }>(LEGACY_MONOLITH_KEY)
+  const fromMonolith = legacy?.byQueueId?.[queueId]
+  if (fromMonolith?.dataBase64) {
+    memoryMap()[queueId] = fromMonolith
+    const body = Buffer.from(fromMonolith.dataBase64, 'base64')
+    await putLivePreviewObject(queueId, body, fromMonolith.contentType || 'image/jpeg')
+    return fromMonolith
+  }
+
+  return null
+}
+
 async function legacyFrameSeed(queueId: string): Promise<number> {
   const mem = memoryMap()[queueId]
   if (mem?.frameNumber != null && mem.frameNumber > 0) return mem.frameNumber
-  const fromKv = await readPreviewEntryFromKv(queueId)
-  return fromKv?.frameNumber ?? 0
+  const meta = await readMetaFromKv(queueId)
+  if (meta?.frameNumber != null && meta.frameNumber > 0) return meta.frameNumber
+  const migrated = await migrateLegacyBlobToMemory(queueId)
+  return migrated?.frameNumber ?? 0
 }
 
 async function nextPreviewFrameNumber(queueId: string): Promise<number> {
@@ -78,21 +114,19 @@ async function nextPreviewFrameNumber(queueId: string): Promise<number> {
   return frameNumber
 }
 
-async function trimPreviewIndex(keepQueueId: string, updatedAt: string): Promise<void> {
-  const prev = (await kvGetJson<PreviewIndexRow[]>(INDEX_KEY)) ?? []
-  const next = [
-    { queueId: keepQueueId, updatedAt },
-    ...prev.filter((r) => r.queueId !== keepQueueId),
-  ]
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-    .slice(0, MAX_ENTRIES)
+async function persistMeta(meta: PreviewMeta): Promise<void> {
+  if (!kvEnabled()) return
+  await kvSetJson(previewMetaKvKey(meta.queueId), meta)
+  await kvDel(legacyBlobKvKey(meta.queueId))
+}
 
-  const dropped = prev.filter((r) => !next.some((n) => n.queueId === r.queueId))
-  await kvSetJson(INDEX_KEY, next)
-  for (const row of dropped) {
-    await kvDel(previewKvKey(row.queueId))
-    await kvDel(previewFrameKvKey(row.queueId))
-  }
+async function readPreviewFromR2(queueId: string, meta: PreviewMeta): Promise<PreviewEntry | null> {
+  const fromR2 = await readLivePreviewObject(queueId)
+  if (!fromR2) return null
+  const entry = entryFromMetaAndBytes(meta, fromR2.body)
+  if (fromR2.contentType) entry.contentType = fromR2.contentType
+  memoryMap()[queueId] = entry
+  return entry
 }
 
 export async function upsertPreviewImage(
@@ -102,23 +136,19 @@ export async function upsertPreviewImage(
   dataBase64: string
 ): Promise<number> {
   const frameNumber = await nextPreviewFrameNumber(queueId)
-  const entry: PreviewEntry = {
+  const meta: PreviewMeta = {
     imageId,
     queueId,
     updatedAt: new Date().toISOString(),
     contentType,
-    dataBase64,
     frameNumber,
   }
+  const body = Buffer.from(dataBase64, 'base64')
+  const entry: PreviewEntry = { ...meta, dataBase64 }
 
   memoryMap()[queueId] = entry
-
-  if (kvEnabled()) {
-    const ok = await kvSetJson(previewKvKey(queueId), entry)
-    if (ok) {
-      await trimPreviewIndex(queueId, entry.updatedAt)
-    }
-  }
+  await putLivePreviewObject(queueId, body, contentType)
+  await persistMeta(meta)
 
   return frameNumber
 }
@@ -127,18 +157,27 @@ export async function getPreviewImage(queueId: string): Promise<PreviewEntry | n
   const mem = memoryMap()[queueId]
   if (mem?.dataBase64) return mem
 
-  const fromKv = await readPreviewEntryFromKv(queueId)
-  if (fromKv) {
-    memoryMap()[queueId] = fromKv
-    return fromKv
+  const meta = await readMetaFromKv(queueId)
+  if (meta) {
+    const fromR2 = await readPreviewFromR2(queueId, meta)
+    if (fromR2) return fromR2
   }
 
-  return null
+  return migrateLegacyBlobToMemory(queueId)
 }
 
 export async function hasPreviewImage(queueId: string): Promise<boolean> {
-  const e = await getPreviewImage(queueId)
-  return Boolean(e && e.dataBase64)
+  const mem = memoryMap()[queueId]
+  if (mem?.dataBase64) return true
+
+  const meta = await readMetaFromKv(queueId)
+  if (meta) return true
+
+  const legacy = await kvGetJson<PreviewEntry>(legacyBlobKvKey(queueId))
+  if (legacy?.dataBase64) return true
+
+  const monolith = await kvGetJson<{ byQueueId?: Record<string, PreviewEntry> }>(LEGACY_MONOLITH_KEY)
+  return Boolean(monolith?.byQueueId?.[queueId]?.dataBase64)
 }
 
 export async function removePreviewImage(queueId: string): Promise<void> {
@@ -147,14 +186,16 @@ export async function removePreviewImage(queueId: string): Promise<void> {
   const frameMem = memoryFrameMap()
   if (queueId in frameMem) delete frameMem[queueId]
 
-  await kvDel(previewKvKey(queueId))
+  await deleteLivePreviewObject(queueId)
+  await kvDel(previewMetaKvKey(queueId))
   await kvDel(previewFrameKvKey(queueId))
+  await kvDel(legacyBlobKvKey(queueId))
 
   if (kvEnabled()) {
-    const prev = (await kvGetJson<PreviewIndexRow[]>(INDEX_KEY)) ?? []
+    const prev = (await kvGetJson<{ queueId: string; updatedAt: string }[]>(LEGACY_INDEX_KEY)) ?? []
     const next = prev.filter((r) => r.queueId !== queueId)
     if (next.length !== prev.length) {
-      await kvSetJson(INDEX_KEY, next)
+      await kvSetJson(LEGACY_INDEX_KEY, next)
     }
   }
 }

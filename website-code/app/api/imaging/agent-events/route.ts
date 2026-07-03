@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
       const keepAlive = setInterval(() => {
         void touchObservatoryPoll()
         enqueue({ type: 'ping' })
-      }, 15000)
+      }, 60_000)
 
       request.signal.addEventListener('abort', () => {
         clearInterval(keepAlive)

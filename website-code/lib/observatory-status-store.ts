@@ -16,7 +16,7 @@ import {
   maybeFailSessionsAfterNinaStopped,
   onNinaRunningReported,
 } from '@/lib/imaging-session-failure'
-import { emitSiteObservatoryStatus } from '@/lib/imaging/site-events-server'
+import { emitLiveEvent } from '@/lib/imaging/live-bus'
 import {
   evaluateObservatoryReadyWeather,
   fetchAscCloud,
@@ -50,6 +50,56 @@ const NINA_RUNNING_STALE_MS = 90_000
 const AGENT_DISCONNECTED_MS = 90_000
 const WEATHER_CACHE_MS = 0
 const AUTO_BASE_CURSOR_KV_KEY = 'observatory-auto-audit-last-base'
+const LAST_PUSHED_STATUS_KV_KEY = 'observatory-last-pushed-final-status'
+const OBSERVATORY_PERSIST_DEBOUNCE_MS = 30_000
+
+let lastObservatoryPersistAt = 0
+
+type GlobalWithPushed = typeof globalThis & {
+  __pomfret_last_pushed_obs_status__?: ObservatoryStatus
+}
+
+export type GetObservatoryStatusOptions = {
+  /** Skip SSE fan-out (used when caller will force-push). */
+  skipLivePush?: boolean
+}
+
+async function readLastPushedObservatoryStatus(): Promise<ObservatoryStatus | undefined> {
+  if (kvEnabled()) {
+    const raw = await kvGetString(LAST_PUSHED_STATUS_KV_KEY)
+    if (raw && isObservatoryStatus(raw)) return raw
+    return undefined
+  }
+  return (globalThis as GlobalWithPushed).__pomfret_last_pushed_obs_status__
+}
+
+async function markLastPushedObservatoryStatus(status: ObservatoryStatus): Promise<void> {
+  if (kvEnabled()) {
+    await kvSetJson(LAST_PUSHED_STATUS_KV_KEY, { status, at: new Date().toISOString() })
+  }
+  ;(globalThis as GlobalWithPushed).__pomfret_last_pushed_obs_status__ = status
+}
+
+/** Push site:observatory SSE when computed final status changes (Auto weather, busy, etc.). */
+async function publishObservatoryStatusLive(
+  status: ObservatoryStatus,
+  mode: ObservatoryMode,
+  force = false
+): Promise<void> {
+  if (!force) {
+    const prev = await readLastPushedObservatoryStatus()
+    if (prev === status) return
+  }
+  await markLastPushedObservatoryStatus(status)
+  void emitLiveEvent('site:observatory', { type: 'observatory_status', mode, status })
+}
+
+/** After persist / admin patch — always fan out latest computed status. */
+export async function forcePushObservatoryStatusLive(): Promise<void> {
+  const mode = await getObservatoryMode()
+  const status = await getObservatoryStatus({ skipLivePush: true })
+  await publishObservatoryStatusLive(status, mode, true)
+}
 const KMH_TO_MS = 1 / 3.6
 let weatherCache:
   | {
@@ -234,6 +284,11 @@ async function maybeLogAutoComputedBaseChange(input: {
   const claimed = await tryClaimAutoBaseCursor(previousCursor, base)
   if (!claimed) return
 
+  if (base === 'ready') {
+    const { emitAgentWakePollSequenceDebounced } = await import('@/lib/imaging/site-events')
+    emitAgentWakePollSequenceDebounced()
+  }
+
   const daytime = getDaytimeClosedWindowDetail(new Date(nowMs))
   const weather = daytime.within ? null : weatherDetailForAudit(nowMs)
 
@@ -359,11 +414,9 @@ async function ensureLoaded() {
 }
 
 /**
- * Re-merge mode / manual status / lastPollTs from KV on every status read when KV is on.
- * Fixes cold starts where ensureLoaded() missed KV once and left defaults (manual + ready),
- * and keeps all serverless instances aligned with the persisted mode.
+ * Single KV read for mode, agent heartbeat, and NINA running flags (was two GETs per call).
  */
-async function mergeObservatorySnapshotFromKv(): Promise<void> {
+async function syncObservatoryFromKv(): Promise<void> {
   if (!kvEnabled()) return
   const remote = await kvGetJson<{
     status?: unknown
@@ -372,15 +425,16 @@ async function mergeObservatorySnapshotFromKv(): Promise<void> {
     lastAgentSeenTs?: unknown
     ninaRunning?: unknown
     ninaRunningReportedAt?: unknown
-  }>(
-    'observatory-status'
-  )
-  if (!remote || (remote.mode !== 'manual' && remote.mode !== 'auto')) return
+  }>('observatory-status')
+  if (!remote) return
 
   const prevPoll = memory().__pomfret_last_poll_ts__ ?? 0
   const prevAgentSeen = memory().__pomfret_last_agent_seen_ts__ ?? 0
   const prevReportedAt = memory().__pomfret_nina_running_reported_at__ ?? 0
-  applyObservatoryPayload(remote)
+
+  if (remote.mode === 'manual' || remote.mode === 'auto') {
+    applyObservatoryPayload(remote)
+  }
   if (typeof remote.lastPollTs === 'number' && Number.isFinite(remote.lastPollTs)) {
     memory().__pomfret_last_poll_ts__ = Math.max(remote.lastPollTs, prevPoll)
   }
@@ -392,17 +446,12 @@ async function mergeObservatorySnapshotFromKv(): Promise<void> {
   }
 }
 
-/** When KV is on, other serverless instances may have advanced lastPollTs — re-read before computing busy. */
-async function refreshLastPollTsFromKv(): Promise<void> {
-  if (!kvEnabled()) return
-  const remote = await kvGetJson<{ lastPollTs?: unknown }>('observatory-status')
-  if (!remote || typeof remote.lastPollTs !== 'number' || !Number.isFinite(remote.lastPollTs)) return
-  const fromKv = remote.lastPollTs
-  const local = memory().__pomfret_last_poll_ts__ ?? 0
-  memory().__pomfret_last_poll_ts__ = Math.max(fromKv, local)
-}
-
-async function persist() {
+async function persist(options?: { force?: boolean }) {
+  const now = Date.now()
+  if (!options?.force && now - lastObservatoryPersistAt < OBSERVATORY_PERSIST_DEBOUNCE_MS) {
+    return
+  }
+  lastObservatoryPersistAt = now
   const payload = {
     mode: currentMode(),
     status: currentManualStatus(),
@@ -414,7 +463,7 @@ async function persist() {
   if (kvEnabled()) {
     const ok = await kvSetJson('observatory-status', payload)
     if (ok) {
-      void emitSiteObservatoryStatus()
+      void forcePushObservatoryStatusLive()
       return
     }
   }
@@ -427,13 +476,14 @@ async function persist() {
     'utf-8'
   )
   await rename(tmp, statusFile)
-  void emitSiteObservatoryStatus()
+  void forcePushObservatoryStatusLive()
 }
 
-export async function getObservatoryStatus(): Promise<ObservatoryStatus> {
+export async function getObservatoryStatus(
+  options?: GetObservatoryStatusOptions
+): Promise<ObservatoryStatus> {
   await ensureLoaded()
-  await mergeObservatorySnapshotFromKv()
-  await refreshLastPollTsFromKv()
+  await syncObservatoryFromKv()
   const mode = currentMode()
   const now = Date.now()
   const lastAgentSeenTs = memory().__pomfret_last_agent_seen_ts__ ?? 0
@@ -478,13 +528,17 @@ export async function getObservatoryStatus(): Promise<ObservatoryStatus> {
     // never block status reads
   }
 
+  if (!options?.skipLivePush) {
+    void publishObservatoryStatusLive(final, mode, false)
+  }
+
   return final
 }
 
 export async function setObservatoryStatus(next: ObservatoryStatus): Promise<ObservatoryStatus> {
   await ensureLoaded()
   memory().__pomfret_manual_status__ = next
-  await persist()
+  await persist({ force: true })
   return next
 }
 
@@ -492,7 +546,7 @@ export async function setObservatoryMode(mode: ObservatoryMode): Promise<Observa
   await ensureLoaded()
   const prev = currentMode()
   memory().__pomfret_mode__ = mode
-  await persist()
+  await persist({ force: true })
   if (prev !== mode) {
     await resetAutoBaseAuditCursor()
   }
@@ -501,14 +555,14 @@ export async function setObservatoryMode(mode: ObservatoryMode): Promise<Observa
 
 export async function getObservatoryMode(): Promise<ObservatoryMode> {
   await ensureLoaded()
-  await mergeObservatorySnapshotFromKv()
+  await syncObservatoryFromKv()
   return currentMode()
 }
 
 /** Agent heartbeat from nina-sequence GET (including ESTOP polls while NINA runs). */
 export async function touchObservatoryPoll(): Promise<void> {
   await ensureLoaded()
-  await mergeObservatorySnapshotFromKv()
+  await syncObservatoryFromKv()
   const now = Date.now()
   memory().__pomfret_last_poll_ts__ = now
   memory().__pomfret_last_agent_seen_ts__ = now
@@ -529,7 +583,7 @@ export function isObservatoryBusyFromNinaReport(
 
 /** Agent pulse says NINA is actively running (fresh report within stale window). */
 export async function isNinaReportedRunningNow(nowMs = Date.now()): Promise<boolean> {
-  await mergeObservatorySnapshotFromKv()
+  await syncObservatoryFromKv()
   const ninaRunning = memory().__pomfret_nina_running__ ?? false
   const ninaRunningReportedAt = memory().__pomfret_nina_running_reported_at__ ?? 0
   return isObservatoryBusyFromNinaReport(nowMs, ninaRunning, ninaRunningReportedAt)
@@ -537,12 +591,13 @@ export async function isNinaReportedRunningNow(nowMs = Date.now()): Promise<bool
 
 export async function reportObservatoryAgentPulse(input: { ninaRunning: boolean }): Promise<void> {
   await ensureLoaded()
-  await mergeObservatorySnapshotFromKv()
+  await syncObservatoryFromKv()
   const now = Date.now()
+  const prevRunning = memory().__pomfret_nina_running__ ?? false
   memory().__pomfret_nina_running__ = input.ninaRunning
   memory().__pomfret_nina_running_reported_at__ = now
   memory().__pomfret_last_agent_seen_ts__ = now
-  await persist()
+  await persist({ force: prevRunning !== input.ninaRunning })
   try {
     await onNinaRunningReported(input.ninaRunning, now)
   } catch {
@@ -557,7 +612,7 @@ export function isObservatoryAgentDisconnected(nowMs: number, lastAgentSeenTs: n
 
 /** True when the NINA agent heartbeat (pulse or nina-sequence poll) was seen within the stale window. */
 export async function isObservatoryAgentConnected(nowMs = Date.now()): Promise<boolean> {
-  await mergeObservatorySnapshotFromKv()
+  await syncObservatoryFromKv()
   const lastAgentSeenTs = memory().__pomfret_last_agent_seen_ts__ ?? 0
   return !isObservatoryAgentDisconnected(nowMs, lastAgentSeenTs)
 }

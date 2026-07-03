@@ -13,7 +13,7 @@ import {
   TONIGHT_OBSERVABLE_MIN_COVERAGE_MS,
   altitudeSessionCoverageOk,
 } from '@/lib/target-altitude'
-import { getTonightScheduleStrip } from '@/lib/schedule-strip'
+import { getTonightScheduleStrip, isBeforeTonightWeatherHeadline } from '@/lib/schedule-strip'
 import {
   getTonightAstronomicalNightWindow,
   getTonightScheduleEveningAstronomyUtc,
@@ -1103,8 +1103,12 @@ export default function RemotePage() {
     }
 
     void loadStatus()
+    const intervalId = window.setInterval(() => {
+      void loadStatus()
+    }, 60_000)
     return () => {
       mounted = false
+      window.clearInterval(intervalId)
     }
   }, [])
 
@@ -1536,6 +1540,11 @@ export default function RemotePage() {
       },
     },
     member.status === 'authenticated'
+  )
+
+  const showTonightWeatherHeadline = useMemo(
+    () => isBeforeTonightWeatherHeadline(new Date(scheduleNowMs)),
+    [scheduleNowMs]
   )
 
   const tonightSchedule = useMemo(() => {
@@ -3243,27 +3252,27 @@ export default function RemotePage() {
           >
             {statusLabel(status)}
           </span>
-          <span className="px-2 text-gray-500 dark:text-gray-500">|</span>
-          Tonight&apos;s weather prediction:{' '}
-          <span
-            className={
-              tonightWeatherPrediction === 'permitted'
-                ? 'text-green-600 dark:text-green-400'
-                : tonightWeatherPrediction === 'unavailable'
-                  ? 'text-gray-500 dark:text-gray-500'
-                : tonightWeatherPrediction === 'loading'
-                  ? 'text-gray-500 dark:text-gray-500'
-                  : 'text-red-600 dark:text-red-400'
-            }
-          >
-            {tonightWeatherPrediction === 'permitted'
-              ? 'Permitted'
-              : tonightWeatherPrediction === 'unavailable'
-                ? 'nighttime now, prediction not available'
-              : tonightWeatherPrediction === 'loading'
-                ? 'Loading...'
-                : 'Not permitted'}
-          </span>
+          {showTonightWeatherHeadline ? (
+            <>
+              <span className="px-2 text-gray-500 dark:text-gray-500">|</span>
+              Tonight&apos;s weather prediction:{' '}
+              <span
+                className={
+                  tonightWeatherPrediction === 'permitted'
+                    ? 'text-green-600 dark:text-green-400'
+                    : tonightWeatherPrediction === 'loading'
+                      ? 'text-gray-500 dark:text-gray-500'
+                      : 'text-red-600 dark:text-red-400'
+                }
+              >
+                {tonightWeatherPrediction === 'permitted'
+                  ? 'Permitted'
+                  : tonightWeatherPrediction === 'loading'
+                    ? 'Loading...'
+                    : 'Not permitted'}
+              </span>
+            </>
+          ) : null}
             </p>
             {statusLoadError && (
               <p className="text-sm text-red-600 dark:text-red-400">{statusLoadError}</p>

@@ -3,6 +3,7 @@ import {
   maybeReconcileQueueWhenScheduleWeatherColumnChanged,
   type ScheduleWeatherColumnPayload,
 } from '@/lib/imaging-queue-weather-column-reconcile'
+import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import {
   evaluateGlobalTonightWeatherPermitted,
@@ -187,7 +188,15 @@ export async function GET(request: Request) {
     }
     const precipitationHitHourStartsSec = precipitationHits.map((hit) => hit.hourStartSec)
 
-    if (isNighttimeNow) {
+    const strip = getTonightScheduleStrip(new Date())
+    const nauticalDuskSec = Math.floor(strip.nauticalDuskMs / 1000)
+    const imagingNightUnderway =
+      Number.isFinite(nauticalDuskSec) &&
+      Number.isFinite(globalGateEndSec) &&
+      nowSec >= nauticalDuskSec &&
+      nowSec < globalGateEndSec
+
+    if (isNighttimeNow || imagingNightUnderway) {
       await reconcileIfScheduleWeatherColumnChanged(windowStartSec, windowEndSec, {
         prediction: 'unavailable',
         hasAnyPrecipitationTonight,

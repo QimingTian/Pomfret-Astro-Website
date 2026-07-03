@@ -85,3 +85,18 @@ export function getTonightScheduleStrip(now = new Date()): TonightScheduleStrip 
     nauticalDuskMs: nauticalDuskUtc.getTime(),
   }
 }
+
+/** Same 4pm→8am window as Remote / Atlas weather ribbon (unix seconds). */
+export function getTonightScheduleWindowSec(now = new Date()): { startSec: number; endSec: number } {
+  const strip = getTonightScheduleStrip(now)
+  return {
+    startSec: Math.floor(strip.windowStartMs / 1000),
+    endSec: Math.floor(strip.windowEndMs / 1000),
+  }
+}
+
+/** Global “Tonight’s weather prediction” headline — only meaningful before nautical dusk. */
+export function isBeforeTonightWeatherHeadline(now = new Date()): boolean {
+  const strip = getTonightScheduleStrip(now)
+  return now.getTime() < strip.nauticalDuskMs
+}

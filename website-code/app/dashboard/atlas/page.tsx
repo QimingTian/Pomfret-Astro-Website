@@ -6,6 +6,7 @@ import {
   getTonightScheduleMorningAstronomyUtc,
   OBSERVATORY_TIME_ZONE,
 } from '@/lib/sunrise-window'
+import { getTonightScheduleWindowSec } from '@/lib/schedule-strip'
 import { computeFovOverlayRotationDeg } from '@/lib/fov-overlay'
 import {
   glassPillMd,
@@ -592,8 +593,13 @@ export default function AtlasPage() {
   const canSendToRemote = stelReady && (trackingTarget !== null || cameraFrameProfile !== null)
 
   const weather = usePolling<WeatherPrediction | null>(async () => {
-    const res = await fetch(`/api/imaging/tonight-weather-prediction?_=${Date.now()}`, { cache: 'no-store' })
+    const { startSec, endSec } = getTonightScheduleWindowSec()
+    const res = await fetch(
+      `/api/imaging/tonight-weather-prediction?startSec=${startSec}&endSec=${endSec}&_=${Date.now()}`,
+      { cache: 'no-store' }
+    )
     const data = (await res.json().catch(() => null)) as WeatherPrediction | null
+    if (!data?.ok) return null
     return data
   }, 60_000)
 

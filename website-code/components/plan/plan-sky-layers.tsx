@@ -1,13 +1,9 @@
 'use client'
 
-import {
-  glassPillToggleActiveInverted,
-  glassPillToggleIdleSm,
-} from '@/lib/glass-ui'
+import { planLayerLink, planLayerLinkActive } from '@/lib/glass-ui'
 import type { ImagingRigEntry } from '@/lib/imaging/equipment/use-imaging-rigs'
 
-const layerPillClass = (active: boolean) =>
-  active ? glassPillToggleActiveInverted : glassPillToggleIdleSm
+const layerBtnClass = (active: boolean) => (active ? planLayerLinkActive : planLayerLink)
 
 export type LayerKey = 'landscapes' | 'atmosphere' | 'dsos' | 'dss' | 'azimuthal' | 'equatorial'
 
@@ -24,42 +20,41 @@ export const LAYER_ORDER: LayerKey[] = ['landscapes', 'atmosphere', 'dsos', 'dss
 
 type Props = {
   layers: Record<LayerKey, boolean>
-  nightMode: boolean
   alt30OverlayOn: boolean
   orbitOverlayOn: boolean
   stelReady: boolean
   /** Equal spacing above Framing mosaic divider. */
   padBottom?: boolean
+  /** Rig pills only in Framing mode. */
+  showRigs?: boolean
   rigs?: ImagingRigEntry[]
   selectedRigIndex?: number
   onSelectRig?: (index: number) => void
   onToggleLayer: (k: LayerKey) => void
-  onToggleNightMode: () => void
   onToggleAlt30: () => void
   onToggleOrbit: () => void
 }
 
 export function PlanSkyLayers({
   layers,
-  nightMode,
   alt30OverlayOn,
   orbitOverlayOn,
   stelReady,
   padBottom = false,
+  showRigs = false,
   rigs = [],
   selectedRigIndex = 0,
   onSelectRig,
   onToggleLayer,
-  onToggleNightMode,
   onToggleAlt30,
   onToggleOrbit,
 }: Props) {
   return (
     <section
       aria-label="Sky layers and equipment"
-      className={`flex flex-wrap justify-center gap-2${padBottom ? ' pb-4' : ''}`}
+      className={`flex flex-wrap justify-center gap-x-4 gap-y-1${padBottom ? ' pb-4' : ''}`}
     >
-      {rigs.length > 1
+      {showRigs && rigs.length > 1
         ? rigs.map((rig) => {
             const active = rig.index === selectedRigIndex
             return (
@@ -68,7 +63,7 @@ export function PlanSkyLayers({
                 type="button"
                 aria-pressed={active}
                 onClick={() => onSelectRig?.(rig.index)}
-                className={layerPillClass(active)}
+                className={layerBtnClass(active)}
               >
                 {rig.label}
               </button>
@@ -84,7 +79,7 @@ export function PlanSkyLayers({
             onClick={() => onToggleLayer(k)}
             disabled={!stelReady}
             aria-pressed={active}
-            className={layerPillClass(active)}
+            className={layerBtnClass(active)}
           >
             {LAYER_LABELS[k]}
           </button>
@@ -92,19 +87,11 @@ export function PlanSkyLayers({
       })}
       <button
         type="button"
-        onClick={onToggleNightMode}
-        aria-pressed={nightMode}
-        className={layerPillClass(nightMode)}
-      >
-        Night mode
-      </button>
-      <button
-        type="button"
         onClick={onToggleAlt30}
         aria-pressed={alt30OverlayOn}
         disabled={!stelReady}
         title="Show altitude 30° ring"
-        className={layerPillClass(alt30OverlayOn)}
+        className={layerBtnClass(alt30OverlayOn)}
       >
         Alt 30°
       </button>
@@ -114,7 +101,7 @@ export function PlanSkyLayers({
         aria-pressed={orbitOverlayOn}
         disabled={!stelReady}
         title="Show solid orbit track for the selected object"
-        className={layerPillClass(orbitOverlayOn)}
+        className={layerBtnClass(orbitOverlayOn)}
       >
         Orbit
       </button>

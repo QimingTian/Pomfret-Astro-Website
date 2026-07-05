@@ -1,8 +1,13 @@
 'use client'
 
+import type { ReactNode } from 'react'
+
 type SegmentOption<T extends string> = {
   value: T
-  label: string
+  label?: string
+  icon?: ReactNode
+  /** Per-segment title when using icons only. */
+  title?: string
 }
 
 type Props<T extends string> = {
@@ -48,13 +53,15 @@ export function PlanGlassSegmentSwitch<T extends string>({
             type="button"
             disabled={disabled}
             aria-pressed={active}
+            aria-label={o.label ?? o.title}
+            title={o.title ?? o.label}
             onClick={() => onChange(o.value)}
             className={`relative z-[1] flex items-center justify-center rounded-full px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed ${
               active ? 'text-white' : 'glass-pill-idle border-transparent bg-transparent text-white/70 hover:text-white'
             }`}
             style={{ minWidth: `${minWidthRem}rem` }}
           >
-            {o.label}
+            {o.icon ?? o.label}
           </button>
         )
       })}

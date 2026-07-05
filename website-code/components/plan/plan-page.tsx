@@ -256,6 +256,7 @@ export default function PlanPage() {
   const [deletePanelId, setDeletePanelId] = useState(1)
   const prevPlanModeRef = useRef<PlanMode>(planMode)
   const frameOffsetRef = useRef({ x: 0, y: 0 })
+  const frameDragStartScreenOffsetRef = useRef({ x: 0, y: 0 })
   const frameDragRef = useRef<{ active: boolean; lastX: number; lastY: number }>({
     active: false,
     lastX: 0,
@@ -271,7 +272,6 @@ export default function PlanPage() {
     azimuthal: false,
     equatorial: false,
   })
-  const [nightMode, setNightMode] = useState(false)
   const [hoverFrac, setHoverFrac] = useState<number | null>(null)
 
   const [searchQuery, setSearchQuery] = useState('')
@@ -395,6 +395,12 @@ export default function PlanPage() {
     const w = iframe.clientWidth || 800
     const vFovDeg = (fov * 180) / Math.PI
     const hFovDeg = vFovDeg * (w / h)
+    const rot =
+      computeFovOverlayRotationDeg(
+        stel as import('@/lib/fov-overlay').FovOverlayStel,
+        overlayRotationDeg(equipment),
+      ) ?? overlayRotationDeg(equipment)
+    const viewportRotationDeg = rot - overlayRotationDeg(equipment)
     return calculateMosaicPanels({
       centerRaHours: centerRa,
       centerDecDeg: centerDec,
@@ -407,7 +413,8 @@ export default function PlanPage() {
       viewportHeightPx: h,
       viewportHFovDeg: hFovDeg,
       viewportVFovDeg: vFovDeg,
-      viewportRotationDeg: 0,
+      viewportRotationDeg,
+      previousRotationDeg: overlayRotationDeg(equipment),
     })
   }, [
     planMode,
@@ -437,6 +444,11 @@ export default function PlanPage() {
       return null
     }
   }, [getStel])
+
+  const getMosaicCenterRaDec = useCallback((): { raHours: number; decDeg: number } | null => {
+    if (skyLocked && boresight) return boresight
+    return getViewCenterRaDec()
+  }, [skyLocked, boresight, getViewCenterRaDec])
 
   const getViewportMetrics = useCallback(() => {
     const stel = getStel()
@@ -508,6 +520,7 @@ export default function PlanPage() {
     useSensorLayout: !customMosaic,
     gridLayout,
     getViewCenterRaDec,
+    getMosaicCenterRaDec,
   })
 
   const gridPanelGroupDraggable = !customMosaic && skyLocked && framingUsePanelOverlays
@@ -581,29 +594,33 @@ export default function PlanPage() {
   ])
 
   const commitFrameOffset = useCallback(() => {
-    const off = frameOffsetRef.current
-    if (off.x === 0 && off.y === 0) return
-    const center = boresight ?? getViewCenterRaDec()
-    if (!center) return
-    const stel = getStel()
-    const fov = stel?.core?.fov ?? 0.1
-    const iframe = iframeRef.current
-    const h = iframe?.clientHeight ?? 520
-    const scale = h / fov
-    const decRad = (center.decDeg * Math.PI) / 180
-    const dRa = (-off.x / scale) * Math.cos(decRad)
-    const dDec = off.y / scale
-    const newRa = (((center.raHours + (dRa * 12) / Math.PI) % 24) + 24) % 24
-    const newDec = Math.max(-90, Math.min(90, center.decDeg + (dDec * 180) / Math.PI))
-    setBoresight({ raHours: newRa, decDeg: newDec })
-    frameOffsetRef.current = { x: 0, y: 0 }
-  }, [boresight, getViewCenterRaDec, getStel])
+    const start = frameDragStartScreenOffsetRef.current
+    const current = frameOffsetRef.current
+    const delta = { x: current.x - start.x, y: current.y - start.y }
+    if (delta.x === 0 && delta.y === 0) return
+    const metrics = getViewportMetrics()
+    const viewCenter = getViewCenterRaDec()
+    if (!metrics || !viewCenter) return
+    const base = boresight ?? viewCenter
+    const next = panelScreenOffsetToRaDec(
+      base.raHours,
+      base.decDeg,
+      delta.x,
+      delta.y,
+      metrics.rot,
+      metrics.arcsec.x,
+      metrics.arcsec.y,
+    )
+    setBoresight({ raHours: next.raHours, decDeg: next.decDeg })
+    frameDragStartScreenOffsetRef.current = { ...current }
+  }, [boresight, getViewCenterRaDec, getViewportMetrics])
 
   const handleFramePointerDown = useCallback(
     (e: React.PointerEvent) => {
       if (!skyLocked) return
       e.stopPropagation()
       e.currentTarget.setPointerCapture(e.pointerId)
+      frameDragStartScreenOffsetRef.current = { ...frameOffsetRef.current }
       frameDragRef.current = { active: true, lastX: e.clientX, lastY: e.clientY }
     },
     [skyLocked],
@@ -694,6 +711,12 @@ export default function PlanPage() {
     }
     prevPlanModeRef.current = planMode
   }, [planMode])
+
+  useEffect(() => {
+    if (skyLocked) return
+    frameOffsetRef.current = { x: 0, y: 0 }
+    frameDragStartScreenOffsetRef.current = { x: 0, y: 0 }
+  }, [skyLocked])
 
   const commitCustomPanelPosition = useCallback(
     (panelId: number) => {
@@ -1168,16 +1191,15 @@ export default function PlanPage() {
 
         <PlanSkyLayers
           layers={layers}
-          nightMode={nightMode}
           alt30OverlayOn={alt30OverlayOn}
           orbitOverlayOn={orbitOverlayOn}
           stelReady={stelReady}
           padBottom={planMode === 'framing'}
+          showRigs={planMode === 'framing'}
           rigs={rigs}
           selectedRigIndex={selectedRigIndex}
           onSelectRig={setSelectedRigIndex}
           onToggleLayer={toggleLayer}
-          onToggleNightMode={() => setNightMode((v) => !v)}
           onToggleAlt30={() => setAlt30OverlayOn((v) => !v)}
           onToggleOrbit={() => setOrbitOverlayOn((v) => !v)}
         />
@@ -1220,15 +1242,6 @@ export default function PlanPage() {
           onDeletePanel={handleDeleteCustomPanel}
         />
       </div>
-      {/* Stellarium-Web-style night mode: #ff2200 with mix-blend-mode:multiply over the whole
-       * viewport. pointer-events:none keeps pills/ribbon/nav clickable through the tint. */}
-      {nightMode && (
-        <div
-          aria-hidden="true"
-          className="pointer-events-none fixed inset-0 z-[1000]"
-          style={{ background: '#ff2200', mixBlendMode: 'multiply' }}
-        />
-      )}
     </div>
   )
 }

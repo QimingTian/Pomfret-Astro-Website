@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import './globals.css'
 import { ThemeProvider } from '@/components/ThemeProvider'
+import { NightModeProvider } from '@/components/night-mode-provider'
 
 export const metadata: Metadata = {
   title: 'Pomfret Astro',
@@ -38,7 +39,7 @@ export default function RootLayout({
     <html lang="en" className="dark" suppressHydrationWarning>
       <body>
         <ThemeProvider>
-          {children}
+          <NightModeProvider>{children}</NightModeProvider>
         </ThemeProvider>
       </body>
     </html>

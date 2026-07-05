@@ -369,4 +369,45 @@ h3 {
   .glass-pill-icon:hover:not(:disabled) {
     background: rgba(255, 255, 255, 0.1);
   }
+
+  /* Ghost glass pill — transparent at rest, liquid glass pill on hover (nav + plan layers) */
+  .glass-pill-ghost.glass-pill {
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    color: rgba(0, 0, 0, 0.65);
+  }
+
+  .glass-pill-ghost.glass-pill:hover:not(:disabled) {
+    background: var(--hover-bg, rgba(0, 0, 0, 0.05));
+    border-color: var(--glass-border-bright, rgba(0, 0, 0, 0.1));
+    box-shadow: var(--lg-bezel);
+    color: rgba(0, 0, 0, 0.9);
+  }
+
+  .dark .glass-pill-ghost.glass-pill {
+    color: #9da0a7;
+  }
+
+  .dark .glass-pill-ghost.glass-pill:hover:not(:disabled) {
+    background: var(--hover-bg);
+    border-color: var(--glass-border-bright);
+    backdrop-filter: blur(8px) saturate(160%);
+    -webkit-backdrop-filter: blur(8px) saturate(160%);
+    color: #ffffff;
+  }
+
+  .glass-pill-ghost-active.glass-pill {
+    color: rgba(0, 0, 0, 0.9);
+  }
+
+  .dark .glass-pill-ghost-active.glass-pill {
+    color: #ffffff;
+  }
+
+  .dark .glass-pill-ghost-active.glass-pill:hover:not(:disabled) {
+    box-shadow: var(--lg-bezel), var(--lg-rim);
+  }
 }

@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { MemberProvider, useMember } from '@/hooks/use-member'
-import { glassPillIcon } from '@/lib/glass-ui'
+import { NightModeToggle } from '@/components/night-mode-toggle'
+import { glassNavLink, glassNavLinkActive, glassNavLinkMobile, glassPillIcon } from '@/lib/glass-ui'
 
 function accountNavLabel(member: ReturnType<typeof useMember>): string {
   if (member.status !== 'authenticated') return 'Log In'
@@ -48,7 +49,7 @@ function DashboardChrome({ children }: { children: React.ReactNode }) {
       <header className="sticky top-0 z-50 border-b border-black/10 dark:border-white/10 bg-white/75 dark:bg-[#09090a] backdrop-blur-xl">
         <div className="mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-10">
           <div className="h-20 flex items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 sm:gap-3">
               <button
                 type="button"
                 onClick={() => setMenuOpen((v) => !v)}
@@ -64,24 +65,23 @@ function DashboardChrome({ children }: { children: React.ReactNode }) {
               </Link>
             </div>
 
-            <nav className="hidden md:flex items-center gap-2">
-              {navItems.map((item) => {
-                const isActive = pathname === item.href
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`inline-flex items-center px-4 py-2 rounded-full text-sm transition-all ${
-                      isActive
-                        ? 'text-black dark:text-white'
-                        : 'text-black/70 dark:text-gray-400 hover:bg-black/5 dark:hover:bg-white/10 hover:text-black dark:hover:text-white'
-                    }`}
-                  >
-                    <span className="font-medium">{item.label}</span>
-                  </Link>
-                )
-              })}
-            </nav>
+            <div className="flex items-center gap-2">
+              <nav className="hidden md:flex items-center gap-2">
+                {navItems.map((item) => {
+                  const isActive = pathname === item.href
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={isActive ? glassNavLinkActive : glassNavLink}
+                    >
+                      <span>{item.label}</span>
+                    </Link>
+                  )
+                })}
+              </nav>
+              <NightModeToggle />
+            </div>
           </div>
         </div>
 
@@ -95,11 +95,7 @@ function DashboardChrome({ children }: { children: React.ReactNode }) {
                     key={item.href}
                     href={item.href}
                     onClick={() => setMenuOpen(false)}
-                    className={`flex items-center px-3 py-2.5 rounded-xl ${
-                      isActive
-                        ? 'text-black dark:text-white'
-                        : 'text-black/75 dark:text-gray-400 hover:bg-black/5 dark:hover:bg-white/10 hover:text-black dark:hover:text-white'
-                    }`}
+                    className={isActive ? `${glassNavLinkMobile} glass-pill-ghost-active` : glassNavLinkMobile}
                   >
                     <span>{item.label}</span>
                   </Link>

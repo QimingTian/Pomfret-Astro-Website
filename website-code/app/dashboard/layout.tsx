@@ -36,7 +36,7 @@ function DashboardChrome({ children }: { children: React.ReactNode }) {
 
   const navItems = [
     { href: '/dashboard/weather', label: 'Weather' },
-    { href: '/dashboard/atlas', label: 'Atlas' },
+    { href: '/dashboard/plan', label: 'Plan' },
     { href: '/dashboard/remote', label: 'Remote' },
     { href: '/dashboard/gallery', label: 'Gallery' },
     { href: '/dashboard/contact', label: 'Team' },

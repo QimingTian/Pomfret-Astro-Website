@@ -181,6 +181,22 @@
       return [0, 1, 2, 3].map(function (i) { return Number(a[i]).toPrecision(6) }).join(', ')
     }
 
+    function pomfretVec3Mag (a) {
+      if (!a || a.length < 3) return 0
+      return Math.hypot(Number(a[0]) || 0, Number(a[1]) || 0, Number(a[2]) || 0)
+    }
+
+    function pomfretTryProperMotionFromJson (js, rows) {
+      if (!js || typeof js !== 'object') return
+      var pmRa = js.pm_ra != null ? js.pm_ra : (js.pmRA != null ? js.pmRA : js.pmra)
+      var pmDec = js.pm_de != null ? js.pm_de : (js.pmDE != null ? js.pmDE : js.pmdec)
+      if (pmRa == null && pmDec == null) return
+      var parts = []
+      if (pmRa != null && isFinite(Number(pmRa))) parts.push('μRA ' + Number(pmRa).toFixed(2) + ' mas/yr')
+      if (pmDec != null && isFinite(Number(pmDec))) parts.push('μDec ' + Number(pmDec).toFixed(2) + ' mas/yr')
+      if (parts.length) rows.push({ label: 'Proper motion', value: parts.join(', ') })
+    }
+
     function pomfretMjdToUtcHint (mjd) {
       try {
         var jd = mjd + 2400000.5
@@ -249,8 +265,9 @@
         if (pv && pv.length >= 4) {
           rows.push({ label: 'Position (ICRF)', value: pomfretFmtVec4(pv) })
         }
-        if (vv && vv.length >= 4) {
-          rows.push({ label: 'Velocity', value: pomfretFmtVec4(vv) })
+        /* Engine returns [0,0,0,*] for catalog stars/DSOs with no space velocity. */
+        if (vv && vv.length >= 4 && pomfretVec3Mag(vv) > 1e-12) {
+          rows.push({ label: 'Velocity (ICRF, AU/d)', value: pomfretFmtVec4(vv) })
         }
         return
       }
@@ -278,9 +295,7 @@
           return
         }
         var obs = core.observer
-        try {
-          if (typeof sel.getInfo === 'function') sel.getInfo('radec')
-        } catch (_) {}
+        pomfretSyncObs(sel, obs)
         var id = ''
         try {
           id = String(sel.id != null ? sel.id : '')
@@ -327,6 +342,7 @@
               }
             }
             var blob = typeof js === 'object' && js !== null ? JSON.stringify(js, null, 2) : String(js)
+            if (typeof js === 'object' && js !== null) pomfretTryProperMotionFromJson(js, rows)
             if (blob.length > 4000) blob = blob.slice(0, 4000) + '\n…'
             rows.push({ label: 'Catalog / engine metadata (JSON)', value: blob })
           }
@@ -358,6 +374,20 @@
     var pomfretTrajTimer = null
     var pomfretShowAlt30 = false
     var pomfretShowOrbit = false
+    var pomfretFramingEnabled = false
+    var pomfretSkyLocked = true
+
+    function pomfretApplyFramingMode () {
+      try {
+        var core = stel.core
+        if (!core) return
+        if (pomfretFramingEnabled) {
+          try { canvas.style.pointerEvents = pomfretSkyLocked ? 'none' : 'auto' } catch (_) {}
+        } else {
+          try { canvas.style.pointerEvents = 'auto' } catch (_) {}
+        }
+      } catch (err) { console.warn('[pomfret-stellarium] framing mode failed', err) }
+    }
 
     function pomfretEnsureLayer () {
       if (pomfretOverlayLayer) return pomfretOverlayLayer
@@ -573,6 +603,12 @@
     function pomfretOnAtlasOverlayMessage (data) {
       if (!data || typeof data !== 'object') return
       if (data.source !== 'pomfret-atlas') return
+      if (data.type === 'set-framing-mode') {
+        pomfretFramingEnabled = data.enabled === true
+        pomfretSkyLocked = data.skyLocked === true
+        pomfretApplyFramingMode()
+        return
+      }
       if (data.type === 'overlay-alt30') {
         pomfretShowAlt30 = data.visible === true
         if (pomfretShowAlt30) pomfretInstallAlt30()

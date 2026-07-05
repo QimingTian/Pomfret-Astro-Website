@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 
 import { useAdaptivePoll } from '@/hooks/use-adaptive-poll'
 
@@ -35,18 +35,25 @@ export type SiteStreamHandlers = {
 
 type PollBody = {
   ok?: boolean
+  imagingActive?: boolean
   observatory?: SiteStreamObservatoryEvent
   estop?: SiteStreamEstopEvent
   sessionsTick?: string
 }
 
+export type SiteStreamState = {
+  /** Server: any in-progress session or NINA reported running. */
+  siteImagingActive: boolean
+}
+
 /**
- * Site-wide observatory / ESTOP via adaptive HTTP polls (slow by day, faster at night).
+ * Site-wide observatory / ESTOP via adaptive HTTP polls (slow by day, faster at night when imaging).
  */
-export function useSiteStream(handlers: SiteStreamHandlers, enabled = true): void {
+export function useSiteStream(handlers: SiteStreamHandlers, enabled = true): SiteStreamState {
   const handlersRef = useRef(handlers)
   handlersRef.current = handlers
   const sessionsTickRef = useRef<string | null>(null)
+  const [siteImagingActive, setSiteImagingActive] = useState(false)
 
   const poll = async () => {
     try {
@@ -54,6 +61,9 @@ export function useSiteStream(handlers: SiteStreamHandlers, enabled = true): voi
       if (!res.ok) return
       const body = (await res.json()) as PollBody
       if (body.ok !== true) return
+      if (typeof body.imagingActive === 'boolean') {
+        setSiteImagingActive(body.imagingActive)
+      }
       if (body.observatory?.type === 'observatory_status') {
         handlersRef.current.onObservatoryStatus?.(body.observatory)
       }
@@ -72,5 +82,7 @@ export function useSiteStream(handlers: SiteStreamHandlers, enabled = true): voi
     }
   }
 
-  useAdaptivePoll('site', poll, { enabled })
+  useAdaptivePoll('site', poll, { enabled, imagingActive: siteImagingActive })
+
+  return { siteImagingActive }
 }

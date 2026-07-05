@@ -1,28 +1,17 @@
 'use client'
 
 import type { CSSProperties } from 'react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMember } from '@/hooks/use-member'
-import { useSiteStream } from '@/lib/use-site-stream'
+import { useObservatoryEnvelope } from '@/hooks/use-observatory-envelope'
 import { useAppStore } from '@/lib/store'
 import MJPEGStream from '@/components/MJPEGStream'
 import { allSkyCameraStatusUrl } from '@/lib/asc-cloud'
-
-type ObservatoryApiStatus =
-  | 'ready'
-  | 'busy_in_use'
-  | 'disconnected'
-  | 'closed_weather_not_permitted'
-  | 'closed_daytime'
-  | 'closed_observatory_maintenance'
-
-function observatoryStatusLabel(status: ObservatoryApiStatus | null): string {
-  if (!status) return '—'
-  if (status === 'ready') return 'Ready'
-  if (status === 'busy_in_use') return 'Busy'
-  if (status === 'disconnected') return 'Disconnected'
-  return 'Closed'
-}
+import { fetchOpenMeteoCurrentWeather } from '@/lib/open-meteo-current'
+import {
+  observatoryOverlayStatusIsRed,
+  observatoryOverlayStatusLabel,
+} from '@/lib/observatory-overlay-status'
 
 function formatOverlayDateTime(d: Date): string {
   return d.toLocaleString(undefined, {
@@ -91,18 +80,18 @@ export default function AllSkyCameraView() {
   const member = useMember()
   const controller = useAppStore((s) => s.controllers.find((c) => c.roles.includes('cameras')))
   const streamURL = controller?.apiClient?.getStreamURL()
-  const weather = useAppStore((s) => s.weather)
+  const { serverStatus: observatoryStatus } = useObservatoryEnvelope({
+    siteStreamEnabled: member.status === 'authenticated',
+  })
 
   // Start `now` as null so SSR and first client paint match; populate after mount.
   const [now, setNow] = useState<Date | null>(null)
   const [lastFrameAt, setLastFrameAt] = useState<Date | null>(null)
-  const [obsStatus, setObsStatus] = useState<ObservatoryApiStatus | null>(null)
   const [cloudPct, setCloudPct] = useState<number | null>(null)
   const [raining, setRaining] = useState<boolean | null>(null)
-
-  const windKmh = weather.windSpeed ?? null
-  const tempC = weather.temperatureC ?? null
-  const humidityPct = weather.humidityPercent ?? null
+  const [windKmh, setWindKmh] = useState<number | null>(null)
+  const [tempC, setTempC] = useState<number | null>(null)
+  const [humidityPct, setHumidityPct] = useState<number | null>(null)
 
   useEffect(() => {
     setNow(new Date())
@@ -110,42 +99,17 @@ export default function AllSkyCameraView() {
     return () => window.clearInterval(id)
   }, [])
 
-  const loadObservatory = useCallback(async () => {
-    try {
-      const res = await fetch('/api/imaging/observatory-status')
-      const data = (await res.json()) as { ok?: boolean; status?: string }
-      if (res.ok && data?.ok && typeof data.status === 'string') {
-        setObsStatus(data.status as ObservatoryApiStatus)
-      } else {
-        setObsStatus(null)
-      }
-    } catch {
-      setObsStatus(null)
-    }
-  }, [])
-
   useEffect(() => {
-    void loadObservatory()
-  }, [loadObservatory])
-
-  useSiteStream(
-    {
-      onObservatoryStatus: (event) => {
-        const next = event.status
-        if (
-          next === 'ready' ||
-          next === 'busy_in_use' ||
-          next === 'disconnected' ||
-          next === 'closed_weather_not_permitted' ||
-          next === 'closed_daytime' ||
-          next === 'closed_observatory_maintenance'
-        ) {
-          setObsStatus(next)
-        }
-      },
-    },
-    member.status === 'authenticated'
-  )
+    const loadWeather = async () => {
+      const wx = await fetchOpenMeteoCurrentWeather()
+      setWindKmh(wx.windSpeedKmh)
+      setTempC(wx.temperatureC)
+      setHumidityPct(wx.humidityPercent)
+    }
+    void loadWeather()
+    const id = window.setInterval(() => void loadWeather(), 60_000)
+    return () => window.clearInterval(id)
+  }, [])
 
   useEffect(() => {
     const statusUrl = resolveAllSkyStatusUrl(streamURL)
@@ -219,8 +183,8 @@ export default function AllSkyCameraView() {
   }, [streamURL])
 
   const overlay = useMemo(() => {
-    const obsText = observatoryStatusLabel(obsStatus)
-    const obsValueRed = obsText === 'Busy' || obsText === 'Closed' || obsText === 'Disconnected'
+    const obsText = observatoryOverlayStatusLabel(observatoryStatus)
+    const obsValueRed = observatoryOverlayStatusIsRed(observatoryStatus)
 
     const cloudText =
       cloudPct != null && Number.isFinite(cloudPct) ? `${Math.round(cloudPct)}%` : '—'
@@ -303,7 +267,7 @@ export default function AllSkyCameraView() {
         </p>
       </div>
     )
-  }, [now, lastFrameAt, obsStatus, cloudPct, windKmh, tempC, humidityPct, raining])
+  }, [now, lastFrameAt, observatoryStatus, cloudPct, windKmh, tempC, humidityPct, raining])
 
   return (
     <div className="flex h-full flex-col">

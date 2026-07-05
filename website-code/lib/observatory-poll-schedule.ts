@@ -9,7 +9,10 @@ export type ObservatoryPollKind =
   | 'observatory'
 
 type PollOptions = {
-  /** Session terminal is showing an in-progress imaging queue row. */
+  /**
+   * Observatory is actively imaging: any queue row in progress/claimed, or NINA reported running.
+   * Also used for terminal progress/preview when the open session is imaging.
+   */
   imagingActive?: boolean
   /** `document.visibilityState === 'hidden'` */
   pageHidden?: boolean
@@ -42,8 +45,10 @@ export function msUntilObservatoryPhaseChange(now = new Date()): number {
 }
 
 const DAY_MS = 20 * 60_000
-const NIGHT_SITE_MS = 30_000
-const NIGHT_QUEUE_MS = 60_000
+const NIGHT_SITE_MS = 45_000
+const NIGHT_SITE_IMAGING_MS = 10_000
+const NIGHT_QUEUE_MS = 45_000
+const NIGHT_QUEUE_IMAGING_MS = 10_000
 const NIGHT_MOUNT_MS = 2_000
 const NIGHT_PROGRESS_MS = 2_500
 const NIGHT_PROGRESS_IMAGING_MS = 2_000
@@ -68,10 +73,10 @@ export function observatoryPollIntervalMs(
   switch (kind) {
     case 'site':
     case 'observatory':
-      base = night ? NIGHT_SITE_MS : DAY_MS
+      base = night ? (imaging ? NIGHT_SITE_IMAGING_MS : NIGHT_SITE_MS) : DAY_MS
       break
     case 'queue':
-      base = night ? NIGHT_QUEUE_MS : DAY_MS
+      base = night ? (imaging ? NIGHT_QUEUE_IMAGING_MS : NIGHT_QUEUE_MS) : DAY_MS
       break
     case 'mount':
       base = night ? NIGHT_MOUNT_MS : DAY_MS

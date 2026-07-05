@@ -10,6 +10,7 @@ import { GalleryRequestsSection } from '@/app/dashboard/admin/gallery-requests-s
 import { ImagingRequestsSection } from '@/app/dashboard/admin/imaging-requests-section'
 import { AllMembersSection } from '@/app/dashboard/admin/all-members-section'
 import { AllSkyCameraControlPanel } from '@/app/dashboard/admin/allsky-camera-control-panel'
+import { ImagingEquipmentSection } from '@/components/admin/imaging-equipment-section'
 import { statusOptions, useAdminTools } from '@/app/dashboard/admin/use-admin-tools'
 import {
   glassPillSkySm,
@@ -317,6 +318,10 @@ export function AdminDashboardGrid() {
       <AccountFullBleedRule />
 
       <AllSkyCameraControlPanel />
+
+      <AccountFullBleedRule />
+
+      <ImagingEquipmentSection />
 
       <AccountFullBleedRule />
 

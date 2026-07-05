@@ -9,6 +9,10 @@ test('observatoryPollIntervalMs is much slower by day than at night', () => {
   assert.equal(isObservatoryNight(day), false)
   assert.equal(isObservatoryNight(night), true)
   assert.ok(observatoryPollIntervalMs('site', {}, day) > observatoryPollIntervalMs('site', {}, night))
+  assert.equal(observatoryPollIntervalMs('site', {}, night), 45_000)
+  assert.equal(observatoryPollIntervalMs('site', { imagingActive: true }, night), 10_000)
+  assert.equal(observatoryPollIntervalMs('queue', {}, night), 45_000)
+  assert.equal(observatoryPollIntervalMs('queue', { imagingActive: true }, night), 10_000)
   assert.ok(observatoryPollIntervalMs('progress', { imagingActive: true }, night) <= 2_500)
 })
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { PLAN_MOSAIC_DRAFT_KEY, type MosaicDraft } from '@/lib/mosaic/framing-rectangle'
+import { PLAN_MOSAIC_DRAFT_KEY, type MosaicDraft, type MosaicPanel } from '@/lib/mosaic/framing-rectangle'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -699,6 +699,34 @@ function parseCoordsFromFormParts(
   }
 }
 
+function buildMosaicPanel(id: number, raHours: number, decDeg: number): MosaicPanel {
+  return {
+    id,
+    raHours,
+    decDeg,
+    positionAngleDeg: 0,
+    name: `Panel ${id}`,
+    screenDeltaXPx: 0,
+    screenDeltaYPx: 0,
+  }
+}
+
+function mosaicDraftFromCoords(
+  panels: MosaicPanel[],
+  targetName: string,
+  centerRaHours: number,
+  centerDecDeg: number,
+  equipmentSnapshot: unknown = null,
+): MosaicDraft {
+  return {
+    targetName,
+    panels,
+    equipmentSnapshot,
+    centerRaHours,
+    centerDecDeg,
+  }
+}
+
 
 
 export default function RemotePage() {
@@ -922,6 +950,7 @@ export default function RemotePage() {
   const [sessionType, setSessionType] = useState<ImagingSessionTypeUi>('dso')
   const [projectModeTri, setProjectModeTri] = useState<ProjectModeTri>('off')
   const [mosaicDraft, setMosaicDraft] = useState<MosaicDraft | null>(null)
+  const [selectedMosaicPanelId, setSelectedMosaicPanelId] = useState(1)
   const projectMode = projectModeTri === 'on' || projectModeTri === 'mosaic'
   const mosaicMode = projectModeTri === 'mosaic'
   const [nightPickerProjectId, setNightPickerProjectId] = useState<string | null>(null)
@@ -1062,6 +1091,7 @@ export default function RemotePage() {
           if (draft?.panels?.length) {
             setMosaicDraft(draft)
             setProjectModeTri('mosaic')
+            setSelectedMosaicPanelId(draft.panels[0]?.id ?? 1)
             if (draft.targetName) setRequestName(draft.targetName)
             const center = draft.panels[0]
             if (center) {
@@ -1113,6 +1143,130 @@ export default function RemotePage() {
     url.searchParams.delete('prefillDec')
     window.history.replaceState({}, '', url.toString())
   }, [])
+
+  const enableMosaicMode = useCallback(() => {
+    setProjectModeTri('mosaic')
+    setMosaicDraft((prev) => {
+      if (prev?.panels?.length) return prev
+      const coords = parseCoordsFromFormParts(
+        raHourPart,
+        raMinutePart,
+        raSecondPart,
+        decSign,
+        decDegreePart,
+        decMinutePart,
+        decSecondPart,
+      )
+      const ra = coords.ok ? coords.raHours : 0
+      const dec = coords.ok ? coords.decDeg : 0
+      return mosaicDraftFromCoords([buildMosaicPanel(1, ra, dec)], requestName.trim() || 'Mosaic target', ra, dec)
+    })
+    setSelectedMosaicPanelId(1)
+  }, [raHourPart, raMinutePart, raSecondPart, decSign, decDegreePart, decMinutePart, decSecondPart, requestName])
+
+  const selectMosaicPanel = useCallback(
+    (id: number) => {
+      setSelectedMosaicPanelId(id)
+      const panel = mosaicDraft?.panels.find((p) => p.id === id)
+      if (!panel) return
+      applySexagesimalPartsFromRadec(
+        panel.raHours,
+        panel.decDeg,
+        setRaHourPart,
+        setRaMinutePart,
+        setRaSecondPart,
+        setDecSign,
+        setDecDegreePart,
+        setDecMinutePart,
+        setDecSecondPart,
+      )
+    },
+    [mosaicDraft],
+  )
+
+  const addMosaicPanel = useCallback(() => {
+    const coords = parseCoordsFromFormParts(
+      raHourPart,
+      raMinutePart,
+      raSecondPart,
+      decSign,
+      decDegreePart,
+      decMinutePart,
+      decSecondPart,
+    )
+    const ra = coords.ok ? coords.raHours : 0
+    const dec = coords.ok ? coords.decDeg : 0
+    const nextId = (mosaicDraft?.panels.reduce((max, p) => Math.max(max, p.id), 0) ?? 0) + 1
+    const panel = buildMosaicPanel(nextId, ra, dec)
+    setMosaicDraft((prev) =>
+      mosaicDraftFromCoords(
+        [...(prev?.panels ?? []), panel],
+        prev?.targetName ?? (requestName.trim() || 'Mosaic target'),
+        prev?.centerRaHours ?? ra,
+        prev?.centerDecDeg ?? dec,
+        prev?.equipmentSnapshot ?? null,
+      ),
+    )
+    setSelectedMosaicPanelId(nextId)
+    applySexagesimalPartsFromRadec(
+      panel.raHours,
+      panel.decDeg,
+      setRaHourPart,
+      setRaMinutePart,
+      setRaSecondPart,
+      setDecSign,
+      setDecDegreePart,
+      setDecMinutePart,
+      setDecSecondPart,
+    )
+  }, [
+    mosaicDraft,
+    raHourPart,
+    raMinutePart,
+    raSecondPart,
+    decSign,
+    decDegreePart,
+    decMinutePart,
+    decSecondPart,
+    requestName,
+  ])
+
+  useEffect(() => {
+    if (!mosaicMode || !mosaicDraft?.panels?.length) return
+    const coords = parseCoordsFromFormParts(
+      raHourPart,
+      raMinutePart,
+      raSecondPart,
+      decSign,
+      decDegreePart,
+      decMinutePart,
+      decSecondPart,
+    )
+    if (!coords.ok) return
+    setMosaicDraft((prev) => {
+      if (!prev) return prev
+      const panel = prev.panels.find((p) => p.id === selectedMosaicPanelId)
+      if (!panel) return prev
+      if (panel.raHours === coords.raHours && panel.decDeg === coords.decDeg) return prev
+      return {
+        ...prev,
+        panels: prev.panels.map((p) =>
+          p.id === selectedMosaicPanelId ? { ...p, raHours: coords.raHours, decDeg: coords.decDeg } : p,
+        ),
+      }
+    })
+  }, [
+    mosaicMode,
+    selectedMosaicPanelId,
+    raHourPart,
+    raMinutePart,
+    raSecondPart,
+    decSign,
+    decDegreePart,
+    decMinutePart,
+    decSecondPart,
+    mosaicDraft?.panels.length,
+  ])
 
   useEffect(() => {
     if (!variableStarListSelection) return
@@ -1556,7 +1710,7 @@ export default function RemotePage() {
   const refreshQueueRef = useRef(refreshQueue)
   refreshQueueRef.current = refreshQueue
 
-  useSiteStream(
+  const { siteImagingActive } = useSiteStream(
     {
       onObservatoryStatus: (event) => {
         const next = event.status
@@ -1579,12 +1733,25 @@ export default function RemotePage() {
     member.status === 'authenticated'
   )
 
+  const queueImagingActive = useMemo(
+    () =>
+      queueItems.some(
+        (item) =>
+          item.status === 'in_progress' ||
+          (item.nights?.some((night) => night.status === 'in_progress') ?? false)
+      ),
+    [queueItems]
+  )
+
   useAdaptivePoll(
     'queue',
     () => {
       void refreshQueueRef.current()
     },
-    { enabled: member.status === 'authenticated' }
+    {
+      enabled: member.status === 'authenticated',
+      imagingActive: siteImagingActive || queueImagingActive,
+    }
   )
 
   const terminalImagingActive =
@@ -3436,26 +3603,12 @@ export default function RemotePage() {
                   <button
                     type="button"
                     aria-pressed={projectModeTri === 'mosaic'}
-                    onClick={() => setProjectModeTri('mosaic')}
+                    onClick={enableMosaicMode}
                     className={projectModeTri === 'mosaic' ? glassPillToggleActiveMd : glassPillToggleIdleMd}
                   >
                     Mosaic On
                   </button>
                 </div>
-                {mosaicMode && mosaicDraft?.panels?.length ? (
-                  <div className="rounded-lg border border-white/15 bg-black/20 p-3 text-sm text-white/80">
-                    <p className="font-medium text-white">Mosaic from Plan ({mosaicDraft.panels.length} panels)</p>
-                    <ul className="mt-2 max-h-32 space-y-1 overflow-y-auto text-xs">
-                      {mosaicDraft.panels.map((p) => (
-                        <li key={p.id}>
-                          {p.name}: RA {p.raHours.toFixed(4)}h · Dec {p.decDeg.toFixed(2)}°
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : mosaicMode ? (
-                  <p className="text-xs text-amber-300">Send a mosaic from Plan → Framing first.</p>
-                ) : null}
               </div>
             )}
           </div>
@@ -3593,27 +3746,52 @@ export default function RemotePage() {
                 <VariableStarPreviewCharts star={variableStarPreviewStar} />
               </div>
             ) : (
-              <div className="flex flex-wrap items-end gap-2">
-                <label className="min-w-[12rem] flex-1 basis-[min(100%,20rem)] space-y-1">
-                  <span className="text-sm font-medium text-white">Catalog Target Search</span>
-                  <input
-                    type="text"
-                    value={catalogQuery}
-                    onChange={(e) => setCatalogQuery(e.target.value)}
-                    placeholder="Try M31, NGC 7000, IC 434, M42..."
-                    className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
-                  />
-                </label>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleCatalogLookup()
-                  }}
-                  disabled={catalogLookupLoading}
-                  className={`${glassPillMd} disabled:opacity-60`}
-                >
-                  {catalogLookupLoading ? 'Searching...' : 'Search Target'}
-                </button>
+              <div className="space-y-3">
+                {mosaicMode ? (
+                  <div className="space-y-2">
+                    <span className="text-sm font-medium text-white">Mosaic</span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {(mosaicDraft?.panels ?? []).map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          aria-pressed={selectedMosaicPanelId === p.id}
+                          onClick={() => selectMosaicPanel(p.id)}
+                          className={
+                            selectedMosaicPanelId === p.id ? glassPillToggleActiveMd : glassPillToggleIdleMd
+                          }
+                        >
+                          {p.name}
+                        </button>
+                      ))}
+                      <button type="button" onClick={addMosaicPanel} className={glassPillMd}>
+                        Add Panel
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+                <div className="flex flex-wrap items-end gap-2">
+                  <label className="min-w-[12rem] flex-1 basis-[min(100%,20rem)] space-y-1">
+                    <span className="text-sm font-medium text-white">Catalog Target Search</span>
+                    <input
+                      type="text"
+                      value={catalogQuery}
+                      onChange={(e) => setCatalogQuery(e.target.value)}
+                      placeholder="Try M31, NGC 7000, IC 434, M42..."
+                      className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleCatalogLookup()
+                    }}
+                    disabled={catalogLookupLoading}
+                    className={`${glassPillMd} disabled:opacity-60`}
+                  >
+                    {catalogLookupLoading ? 'Searching...' : 'Search Target'}
+                  </button>
+                </div>
               </div>
             )}
             {catalogLookupError && <p className="text-sm text-red-400">{catalogLookupError}</p>}

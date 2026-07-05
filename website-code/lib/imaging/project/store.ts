@@ -17,6 +17,14 @@ export type FilterRemainingRow = {
   countRemaining: number
 }
 
+export type MosaicPanel = {
+  id: number
+  raHours: number
+  decDeg: number
+  positionAngleDeg: number
+  name: string
+}
+
 /** One imaging chunk (sub-session); `nightIndex` is a global session number across the project. */
 export type ProjectNight = {
   id: string
@@ -28,15 +36,15 @@ export type ProjectNight = {
   plannedStartIso?: string | null
   completedAt?: string
   failedAt?: string
-  /** Set when NINA has pulled this sub-session JSON (same role as queue consume for normal sessions). */
   ninaDeliveredAt?: string
   scheduleStripNightKey?: string | null
   scheduleBarStartMs?: number | null
   scheduleBarEndMs?: number | null
-  /** Admin force-run: do not replace/clear this sub-session until this instant (ISO). */
   adminForceRunUntilIso?: string | null
-  /** Night status before admin placed this sub-session on hold. */
   onHoldFromStatus?: 'planned' | 'scheduled'
+  /** Mosaic: panel number (1-based) for display Session {p}-{s}. */
+  mosaicPanelIndex?: number
+  mosaicSubIndex?: number
 }
 
 export type ImagingProject = {
@@ -49,7 +57,6 @@ export type ImagingProject = {
   raHours: number
   decDeg: number
   outputMode: 'raw_zip' | 'stacked_master' | 'none'
-  /** Camera cooling setpoint chosen at submit time; applied to every sub-session's NINA JSON. */
   cameraCoolingTempC?: number
   filterPlansTotal: FilterPlanRow[]
   remainingByFilter: FilterRemainingRow[]
@@ -60,12 +67,120 @@ export type ImagingProject = {
   sessionPasswordHash?: string
   userId?: string
   estimatedDurationSeconds?: number
-  /** Set after first NINA consume; queue row is removed. */
   onBoard?: boolean
-  /** When the entire project finished (all nights done or project failed). */
   completedAt?: string
-  /** Total project duration >30h; blocked from scheduling until admin approves. */
   adminApprovalPending?: boolean
+  mosaicMode?: boolean
+  mosaicPanels?: MosaicPanel[]
+  /** Per-panel filter progress (parallel to mosaicPanels). Enables cross-panel moon-aware scheduling. */
+  mosaicRemainingByPanel?: FilterRemainingRow[][]
+  /** @deprecated Mosaic interleaving uses mosaicRemainingByPanel; kept for legacy reads. */
+  activePanelIndex?: number
+}
+
+/** Display label for project sub-sessions (mosaic uses Panel-Sub form). */
+export function projectSessionDisplayLabel(night: Pick<ProjectNight, 'nightIndex' | 'mosaicPanelIndex' | 'mosaicSubIndex'>): string {
+  if (night.mosaicPanelIndex != null && night.mosaicSubIndex != null) {
+    return `Session ${night.mosaicPanelIndex}-${night.mosaicSubIndex}`
+  }
+  return `Session ${night.nightIndex}`
+}
+
+export function projectTargetCoordsForPanel(
+  project: ImagingProject,
+  panelIndex1Based: number,
+): {
+  raHours: number
+  decDeg: number
+  positionAngleDeg?: number
+} {
+  if (project.mosaicMode && project.mosaicPanels && project.mosaicPanels.length > 0) {
+    const panelIdx = Math.max(0, Math.min(project.mosaicPanels.length - 1, panelIndex1Based - 1))
+    const panel = project.mosaicPanels[panelIdx] ?? project.mosaicPanels[0]!
+    return {
+      raHours: panel.raHours,
+      decDeg: panel.decDeg,
+      positionAngleDeg: panel.positionAngleDeg,
+    }
+  }
+  return { raHours: project.raHours, decDeg: project.decDeg }
+}
+
+export function projectTargetCoords(project: ImagingProject): {
+  raHours: number
+  decDeg: number
+  positionAngleDeg?: number
+} {
+  if (project.mosaicMode && project.mosaicPanels && project.mosaicPanels.length > 0) {
+    const firstOpen = firstMosaicPanelWithRemaining(project)
+    if (firstOpen != null) return projectTargetCoordsForPanel(project, firstOpen)
+    return projectTargetCoordsForPanel(project, 1)
+  }
+  return { raHours: project.raHours, decDeg: project.decDeg }
+}
+
+function cloneFilterRemaining(rows: FilterRemainingRow[]): FilterRemainingRow[] {
+  return rows.map((r) => ({ ...r }))
+}
+
+function filterPlansToRemaining(plans: FilterPlanRow[]): FilterRemainingRow[] {
+  return plans.map((p) => ({
+    filterName: p.filterName,
+    exposureSeconds: p.exposureSeconds,
+    countRemaining: p.count,
+  }))
+}
+
+/** Per-panel remaining rows; migrates legacy activePanelIndex + global remainingByFilter. */
+export function ensureMosaicPanelRemaining(project: ImagingProject): FilterRemainingRow[][] {
+  if (!project.mosaicMode || !project.mosaicPanels?.length) return []
+  if (
+    project.mosaicRemainingByPanel &&
+    project.mosaicRemainingByPanel.length === project.mosaicPanels.length
+  ) {
+    return project.mosaicRemainingByPanel.map((rows) => cloneFilterRemaining(rows))
+  }
+  const active = project.activePanelIndex ?? 1
+  return project.mosaicPanels.map((_, i) => {
+    const panelNum = i + 1
+    if (panelNum < active) {
+      return filterPlansToRemaining(project.filterPlansTotal).map((r) => ({ ...r, countRemaining: 0 }))
+    }
+    if (panelNum === active) return cloneFilterRemaining(project.remainingByFilter)
+    return filterPlansToRemaining(project.filterPlansTotal)
+  })
+}
+
+export function remainingFramesForPanel(project: ImagingProject, panelIndex1Based: number): number {
+  const rows = ensureMosaicPanelRemaining(project)[panelIndex1Based - 1]
+  if (!rows) return 0
+  return rows.reduce((s, r) => s + Math.max(0, r.countRemaining), 0)
+}
+
+export function firstMosaicPanelWithRemaining(project: ImagingProject): number | null {
+  if (!project.mosaicMode || !project.mosaicPanels?.length) return null
+  for (let i = 0; i < project.mosaicPanels.length; i++) {
+    if (remainingFramesForPanel(project, i + 1) > 0) return i + 1
+  }
+  return null
+}
+
+export function sumRemainingByFilterAcrossPanels(
+  panelRemaining: FilterRemainingRow[][],
+): FilterRemainingRow[] {
+  if (panelRemaining.length === 0) return []
+  const names = panelRemaining[0]!.map((r) => r.filterName)
+  return names.map((filterName, fi) => {
+    const exposureSeconds =
+      panelRemaining.find((rows) => rows[fi]?.filterName === filterName)?.[fi]?.exposureSeconds ??
+      panelRemaining[0]![fi]!.exposureSeconds
+    let countRemaining = 0
+    for (const rows of panelRemaining) {
+      const row = rows.find((r) => r.filterName === filterName)
+      countRemaining += Math.max(0, row?.countRemaining ?? 0)
+    }
+    return { filterName, exposureSeconds, countRemaining }
+  })
 }
 
 const KEY = 'imaging-projects'
@@ -375,6 +490,12 @@ export async function hasBlockingInProgressProject(
 }
 
 export function remainingFramesTotal(project: ImagingProject): number {
+  if (project.mosaicMode && project.mosaicPanels?.length) {
+    return ensureMosaicPanelRemaining(project).reduce(
+      (sum, rows) => sum + rows.reduce((s, r) => s + Math.max(0, r.countRemaining), 0),
+      0,
+    )
+  }
   return project.remainingByFilter.reduce((sum, r) => sum + Math.max(0, r.countRemaining), 0)
 }
 
@@ -408,6 +529,8 @@ export type CreateImagingProjectInput = {
   email?: string | null
   sessionPasswordHash?: string
   userId?: string
+  mosaicMode?: boolean
+  mosaicPanels?: MosaicPanel[]
 }
 
 export async function createImagingProject(input: CreateImagingProjectInput): Promise<ImagingProject> {
@@ -417,6 +540,10 @@ export async function createImagingProject(input: CreateImagingProjectInput): Pr
     exposureSeconds: p.exposureSeconds,
     countRemaining: p.count,
   }))
+  const mosaicRemainingByPanel =
+    input.mosaicMode && input.mosaicPanels?.length
+      ? input.mosaicPanels.map(() => remainingByFilter.map((r) => ({ ...r })))
+      : undefined
   const project: ImagingProject = {
     id: input.id,
     projectMode: true,
@@ -438,6 +565,14 @@ export async function createImagingProject(input: CreateImagingProjectInput): Pr
     ...(input.userId ? { userId: input.userId } : {}),
     estimatedDurationSeconds: input.estimatedDurationSeconds,
     onBoard: false,
+    ...(input.mosaicMode
+      ? {
+          mosaicMode: true,
+          mosaicPanels: input.mosaicPanels,
+          mosaicRemainingByPanel,
+          activePanelIndex: 1,
+        }
+      : {}),
   }
   const all = await readProjects()
   const without = all.filter((p) => p.id !== project.id)
@@ -521,6 +656,7 @@ export async function patchProject(
       | 'onBoard'
       | 'updatedAt'
       | 'completedAt'
+      | 'activePanelIndex'
     >
   >
 ): Promise<ImagingProject | undefined> {
@@ -552,13 +688,18 @@ export async function patchProject(
 export function buildNightNinaJson(
   project: ImagingProject,
   nightId: string,
-  filterPlansTonight: FilterPlanRow[]
+  filterPlansTonight: FilterPlanRow[],
+  mosaicPanelIndex?: number,
 ): string {
   const first = filterPlansTonight[0]
   if (!first) throw new Error('No filter plans for tonight')
+  const coords =
+    mosaicPanelIndex != null
+      ? projectTargetCoordsForPanel(project, mosaicPanelIndex)
+      : projectTargetCoords(project)
   return buildNinaSequenceJson({
-    raHoursDecimal: project.raHours,
-    decDegDecimal: project.decDeg,
+    raHoursDecimal: coords.raHours,
+    decDegDecimal: coords.decDeg,
     filterName: first.filterName,
     exposureSeconds: first.exposureSeconds,
     exposureCount: first.count,
@@ -763,7 +904,9 @@ export async function markNightCompleted(
   if (!night) return undefined
 
   const completedAt = new Date().toISOString()
-  const remainingByFilter = project.remainingByFilter.map((r) => {
+  const mosaicPanelIndex = night.mosaicPanelIndex
+
+  let remainingByFilter = project.remainingByFilter.map((r) => {
     const shot = night.filterPlansTonight.find((p) => p.filterName === r.filterName)
     if (!shot) return r
     return {
@@ -771,19 +914,49 @@ export async function markNightCompleted(
       countRemaining: Math.max(0, r.countRemaining - shot.count),
     }
   })
+  let mosaicRemainingByPanel = project.mosaicRemainingByPanel
+
+  if (
+    project.mosaicMode === true &&
+    project.mosaicPanels &&
+    project.mosaicPanels.length > 0 &&
+    mosaicPanelIndex != null
+  ) {
+    const panelRem = ensureMosaicPanelRemaining(project)
+    const pi = mosaicPanelIndex - 1
+    if (panelRem[pi]) {
+      panelRem[pi] = panelRem[pi]!.map((r) => {
+        const shot = night.filterPlansTonight.find((p) => p.filterName === r.filterName)
+        if (!shot) return r
+        return {
+          ...r,
+          countRemaining: Math.max(0, r.countRemaining - shot.count),
+        }
+      })
+    }
+    mosaicRemainingByPanel = panelRem
+    remainingByFilter = sumRemainingByFilterAcrossPanels(panelRem)
+  }
 
   const nights = project.nights.map((n) =>
     n.id === nightSubId ? { ...n, status: 'completed' as const, completedAt } : n
   )
 
-  const framesLeft = remainingByFilter.reduce((s, r) => s + r.countRemaining, 0)
+  const framesLeft = remainingFramesTotal({
+    ...project,
+    remainingByFilter,
+    mosaicRemainingByPanel,
+  })
   const projectCompleted = framesLeft === 0
+  const nextRemaining = remainingByFilter
+
   const status: ProjectStatus = projectCompleted ? 'completed' : 'in_progress'
 
   const updated = await patchProject(projectId, {
     nights,
-    remainingByFilter,
+    remainingByFilter: nextRemaining,
     status,
+    ...(project.mosaicMode ? { mosaicRemainingByPanel, activePanelIndex: firstMosaicPanelWithRemaining({ ...project, mosaicRemainingByPanel }) ?? project.activePanelIndex } : {}),
     ...(projectCompleted ? { completedAt } : {}),
   })
   if (!updated) return undefined

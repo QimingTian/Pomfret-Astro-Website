@@ -243,3 +243,53 @@ test('planTonightSubSessions places future subs after in_progress into later cle
   assert.equal(plans[0]!.nightIndex, 2)
   assert.ok(startMs >= windowStart)
 })
+
+function mosaicShoInterleaveProject(): ImagingProject {
+  // Panel 1: only OIII left; moon blocks O at this field on 2026-06-01 night.
+  // Panel 2: S still to shoot; field is moon-friendlier for narrowband tonight.
+  const p = mockProject()
+  p.mosaicMode = true
+  p.mosaicPanels = [
+    { id: 1, raHours: 17.23, decDeg: 50, positionAngleDeg: 0, name: 'Panel 1' },
+    { id: 2, raHours: 12.7, decDeg: 12, positionAngleDeg: 0, name: 'Panel 2' },
+  ]
+  p.filterPlansTotal = [
+    { filterName: 'S', exposureSeconds: 300, count: 5 },
+    { filterName: 'H', exposureSeconds: 300, count: 5 },
+    { filterName: 'O', exposureSeconds: 300, count: 5 },
+  ]
+  p.mosaicRemainingByPanel = [
+    [
+      { filterName: 'S', exposureSeconds: 300, countRemaining: 0 },
+      { filterName: 'H', exposureSeconds: 300, countRemaining: 0 },
+      { filterName: 'O', exposureSeconds: 300, countRemaining: 5 },
+    ],
+    [
+      { filterName: 'S', exposureSeconds: 300, countRemaining: 5 },
+      { filterName: 'H', exposureSeconds: 300, countRemaining: 5 },
+      { filterName: 'O', exposureSeconds: 300, countRemaining: 5 },
+    ],
+  ]
+  p.remainingByFilter = [
+    { filterName: 'S', exposureSeconds: 300, countRemaining: 5 },
+    { filterName: 'H', exposureSeconds: 300, countRemaining: 5 },
+    { filterName: 'O', exposureSeconds: 300, countRemaining: 10 },
+  ]
+  return p
+}
+
+test('planTonightSubSessions interleaves mosaic panels when moon blocks active panel filter', () => {
+  const project = mosaicShoInterleaveProject()
+  const now = new Date('2026-06-01T01:00:00.000Z')
+  const { windowStart, windowEnd } = tonightSchedulingSpan(now)
+  const weather = [{ startMs: windowStart, endMs: windowEnd }]
+  const free = [{ startMs: windowStart, endMs: windowEnd }]
+  const plans = planTonightSubSessions(project, free, weather, now)
+  assert.ok(plans.length >= 1, 'expected at least one schedulable mosaic sub-session')
+  const first = plans[0]!
+  assert.equal(first.mosaicPanelIndex, 2, 'Panel 1 O is moon-blocked; scheduler should start Panel 2')
+  assert.ok(
+    first.filterPlansTonight.some((f) => f.filterName === 'S' || f.filterName === 'H'),
+    'Panel 2 session should shoot moon-OK SHO filters',
+  )
+})

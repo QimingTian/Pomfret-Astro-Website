@@ -124,10 +124,26 @@ function parseIndexCsv(text: string): VariableStarRow[] {
   return out
 }
 
+async function readCatalogCsv(): Promise<string> {
+  const candidates = [
+    path.join(process.cwd(), 'Variables', 'index.csv'),
+    path.join(process.cwd(), '..', 'Variables', 'index.csv'),
+  ]
+  for (const csvPath of candidates) {
+    try {
+      return await readFile(csvPath, 'utf-8')
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e
+    }
+  }
+  throw new Error(
+    'Variable star catalog missing (Variables/index.csv). Ensure it is deployed and included in outputFileTracingIncludes.',
+  )
+}
+
 export async function loadVariableStarCatalog(): Promise<VariableStarRow[]> {
   if (cache) return cache
-  const csvPath = path.join(process.cwd(), 'Variables', 'index.csv')
-  const raw = await readFile(csvPath, 'utf-8')
+  const raw = await readCatalogCsv()
   cache = parseIndexCsv(raw)
   return cache
 }

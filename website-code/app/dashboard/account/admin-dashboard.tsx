@@ -10,10 +10,9 @@ import { AccountPageHeader } from '@/app/dashboard/account/account-page-header'
 import { AccountInfoSection } from '@/app/dashboard/account/account-info-section'
 import type { PublicMemberUser } from '@/lib/member-store'
 import {
-  glassPillDangerLg,
+  glassPillDangerMd,
   glassPillDangerWide,
   glassPillMd,
-  glassPillXl,
 } from '@/lib/glass-ui'
 
 type EmergencyStopPhase = 'idle' | 'stopping' | 'stopped'
@@ -26,7 +25,7 @@ type EmergencyStopStatus = {
   canArm: boolean
 }
 
-const emergencyStopPillClass = `${glassPillDangerWide} bg-red-950/80`
+const emergencyStopPillClass = `${glassPillDangerWide} overflow-hidden bg-red-950/80`
 
 function emergencyStopButtonLabel(status: EmergencyStopStatus): string {
   if (status.phase === 'stopping') return 'STOPPING'
@@ -76,6 +75,12 @@ function EmergencyStopButton() {
   useEffect(() => {
     void refreshStatus()
   }, [refreshStatus])
+
+  useEffect(() => {
+    if (status.phase !== 'stopping') return
+    const id = window.setInterval(() => void refreshStatus(), 2000)
+    return () => window.clearInterval(id)
+  }, [refreshStatus, status.phase])
 
   useSiteStream(
     {
@@ -138,7 +143,7 @@ function EmergencyStopButton() {
           onClick={() => setShowConfirm(true)}
         >
           <div
-            className="absolute inset-y-0 left-0 bg-red-600 transition-[width] duration-500 ease-out"
+            className="absolute inset-y-0 left-0 rounded-full bg-red-600 transition-[width] duration-500 ease-out"
             style={{ width: `${status.progress}%` }}
             aria-hidden
           />
@@ -167,7 +172,7 @@ function EmergencyStopButton() {
               <button
                 type="button"
                 disabled={pending}
-                className={`${glassPillDangerLg} disabled:opacity-60`}
+                className={`${glassPillDangerMd} whitespace-nowrap disabled:opacity-60`}
                 onClick={() => void confirmEmergencyStop()}
               >
                 Confirm ESTOP
@@ -175,7 +180,7 @@ function EmergencyStopButton() {
               <button
                 type="button"
                 disabled={pending}
-                className={`${glassPillXl} disabled:opacity-60`}
+                className={`${glassPillMd} whitespace-nowrap disabled:opacity-60`}
                 onClick={() => setShowConfirm(false)}
               >
                 Cancel

@@ -208,7 +208,11 @@ export async function POST(request: NextRequest) {
       typeof b.estimatedDurationSeconds === 'number' && Number.isFinite(b.estimatedDurationSeconds)
         ? b.estimatedDurationSeconds
         : undefined,
-    projectMode: b.projectMode === true,
+    projectMode: b.projectMode === true || b.mosaicMode === true,
+    mosaicMode: b.mosaicMode === true,
+    mosaicPanels: Array.isArray(b.mosaicPanels)
+      ? (b.mosaicPanels as CreateImagingInput['mosaicPanels'])
+      : undefined,
     userId: auth.user.id,
   }
 
@@ -256,6 +260,7 @@ export async function POST(request: NextRequest) {
       email: result.email,
       ...(result.sessionPasswordHash ? { sessionPasswordHash: result.sessionPasswordHash } : {}),
       ...(result.userId ? { userId: result.userId } : {}),
+      ...(result.mosaicMode ? { mosaicMode: true, mosaicPanels: result.mosaicPanels } : {}),
     })
   }
 

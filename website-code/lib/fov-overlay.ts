@@ -27,18 +27,37 @@ function icrfUnit(raRad: number, decRad: number): number[] {
 
 /**
  * On-screen rotation (CSS degrees, clockwise) for a camera frame whose sensor "up" edge sits at
- * `positionAngleDeg` east of celestial north at the current boresight. Null if the engine isn't ready.
+ * `positionAngleDeg` east of celestial north at the boresight (or optional sky position).
  */
 export function computeFovOverlayRotationDeg(
   stel: FovOverlayStel | null,
   positionAngleDeg: number,
+  raHours?: number,
+  decDeg?: number,
 ): number | null {
   const obs = stel?.core?.observer
   if (!stel || !obs || !stel.convertFrame || !stel.c2s) return null
   try {
-    const centerIcrf = stel.convertFrame(obs, 'VIEW', 'ICRF', [0, 0, -1, 0])
-    const [raRad, decRad] = stel.c2s(centerIcrf)
-    if (!Number.isFinite(raRad) || !Number.isFinite(decRad)) return null
+    let raRad: number
+    let decRad: number
+    let centerIcrf: number[]
+
+    if (
+      raHours != null &&
+      decDeg != null &&
+      Number.isFinite(raHours) &&
+      Number.isFinite(decDeg)
+    ) {
+      raRad = (raHours * Math.PI) / 12
+      decRad = decDeg * DEG
+      centerIcrf = icrfUnit(raRad, decRad)
+    } else {
+      centerIcrf = stel.convertFrame(obs, 'VIEW', 'ICRF', [0, 0, -1, 0])
+      const c2s = stel.c2s(centerIcrf)
+      raRad = c2s[0]
+      decRad = c2s[1]
+      if (!Number.isFinite(raRad) || !Number.isFinite(decRad)) return null
+    }
 
     const step = 0.25 * DEG
     const decN = Math.min(decRad + step, 89.999 * DEG)

@@ -25,6 +25,10 @@ import {
   type FilterRemainingRow,
   type ImagingProject,
   type ProjectNight,
+  projectTargetCoords,
+  projectTargetCoordsForPanel,
+  ensureMosaicPanelRemaining,
+  remainingFramesForPanel,
 } from '@/lib/imaging-project-store'
 import { projectAltitudeHoldIntervals } from '@/lib/imaging-project-altitude-hold'
 import { DSO_SESSION_OVERHEAD_SEC } from '@/lib/imaging-session-overhead'
@@ -46,6 +50,14 @@ import {
 } from '@/lib/tonight-weather-gate'
 import { moonFilterSessionOk, normalizeFilterName } from '@/lib/moon-avoidance'
 
+type SkyCoords = { raHours: number; decDeg: number }
+
+function resolveSkyCoords(project: ImagingProject, sky?: SkyCoords): SkyCoords {
+  if (sky) return sky
+  const c = projectTargetCoords(project)
+  return { raHours: c.raHours, decDeg: c.decDeg }
+}
+
 export type ProjectTonightPlan = {
   nightKey: string
   nightIndex: number
@@ -54,6 +66,8 @@ export type ProjectTonightPlan = {
   plannedEndIso: string
   durationSeconds: number
   scheduleReasons: string[]
+  mosaicPanelIndex?: number
+  mosaicSubIndex?: number
 }
 
 const SESSION_OVERHEAD_MS = DSO_SESSION_OVERHEAD_SEC * 1000
@@ -102,6 +116,7 @@ function buildProjectSubSessionScheduleReasons(input: {
   nowMs: number
   windowStartMs: number
   deadlineMs: number
+  mosaicPanelIndex?: number
 }): string[] {
   const {
     project,
@@ -130,20 +145,25 @@ function buildProjectSubSessionScheduleReasons(input: {
   const frameTotal = finalPlans.reduce((s, p) => s + p.count, 0)
   reasons.push(`Frames in this session: ${frameParts.join(', ')} (${frameTotal} exposure(s) total).`)
 
-  const moonBlocked = moonBlockedFiltersForWindow(project, workingRemainingBefore, placedStart, placedEnd)
+  const sky = input.mosaicPanelIndex != null
+    ? projectTargetCoordsForPanel(project, input.mosaicPanelIndex)
+    : projectTargetCoords(project)
+
+  const moonBlocked = moonBlockedFiltersForWindow(
+    project,
+    workingRemainingBefore,
+    placedStart,
+    placedEnd,
+    { raHours: sky.raHours, decDeg: sky.decDeg },
+  )
   if (moonBlocked.length > 0) {
     reasons.push(
       `Moon avoidance: filter(s) ${moonBlocked.join(', ')} skipped for this run (Moon too close); their frames carry to a later night/window.`
     )
   }
 
-  const altAtStart = currentAltitudeDeg(project.raHours, project.decDeg, new Date(placedStart))
-  const riseAt = firstAltitudeAllowedTimeMs(
-    project.raHours,
-    project.decDeg,
-    cursorMs,
-    planningEndMs
-  )
+  const altAtStart = currentAltitudeDeg(sky.raHours, sky.decDeg, new Date(placedStart))
+  const riseAt = firstAltitudeAllowedTimeMs(sky.raHours, sky.decDeg, cursorMs, planningEndMs)
   if (riseAt != null && riseAt > placedStart + 60_000) {
     reasons.push(
       `Start at ${formatScheduleEt(placedStart)} ET: target reaches 30° altitude at ${formatScheduleEt(riseAt)} ET (now ${altAtStart.toFixed(1)}° at start).`
@@ -162,7 +182,13 @@ function buildProjectSubSessionScheduleReasons(input: {
   }
 
   const virtualProject: ImagingProject = { ...project, remainingByFilter: workingRemainingBefore }
-  const maxPack = planTonightFilterFrames(virtualProject, cursorMs, planningEndMs, workingRemainingBefore)
+  const maxPack = planTonightFilterFrames(
+    virtualProject,
+    cursorMs,
+    planningEndMs,
+    workingRemainingBefore,
+    { raHours: sky.raHours, decDeg: sky.decDeg },
+  )
   const maxFrames = maxPack.filterPlansTonight.reduce((s, p) => s + p.count, 0)
   if (frameTotal < maxFrames) {
     reasons.push(
@@ -186,7 +212,10 @@ function buildProjectSubSessionScheduleReasons(input: {
     durationMs > 0
       ? (weatherPermittedCoverageMs(weatherPermittedIntervals, placedStart, placedEnd) / durationMs) * 100
       : 0
-  const altPct = durationMs > 0 ? (altitudeAllowedCoverageMs(project.raHours, project.decDeg, placedStart, placedEnd) / durationMs) * 100 : 0
+  const altPct =
+    durationMs > 0
+      ? (altitudeAllowedCoverageMs(sky.raHours, sky.decDeg, placedStart, placedEnd) / durationMs) * 100
+      : 0
   reasons.push(
     `Coverage checks: weather-permitted ${weatherPct.toFixed(0)}% (≥80% required), target ≥30° ${altPct.toFixed(0)}% (100% required).`
   )
@@ -207,9 +236,11 @@ export function planTonightFilterFrames(
   project: ImagingProject,
   usableStartMs: number,
   usableEndMs: number,
-  remainingByFilter?: FilterRemainingRow[]
+  remainingByFilter?: FilterRemainingRow[],
+  sky?: SkyCoords,
 ): { filterPlansTonight: FilterPlanRow[]; durationMs: number } {
   const remaining = remainingByFilter ?? project.remainingByFilter
+  const coords = resolveSkyCoords(project, sky)
   const filterPlansTonight: FilterPlanRow[] = []
   let cursorMs = usableStartMs
 
@@ -220,7 +251,7 @@ export function planTonightFilterFrames(
 
     // Skip filters that fail moon avoidance for THIS window. Leftover time is not
     // backfilled with this filter; its frames carry to a later night/window.
-    if (!moonFilterSessionOk(total.filterName, project.raHours, project.decDeg, usableStartMs, usableEndMs)) {
+    if (!moonFilterSessionOk(total.filterName, coords.raHours, coords.decDeg, usableStartMs, usableEndMs)) {
       continue
     }
 
@@ -250,13 +281,15 @@ function moonBlockedFiltersForWindow(
   project: ImagingProject,
   remaining: FilterRemainingRow[],
   startMs: number,
-  endMs: number
+  endMs: number,
+  sky?: SkyCoords,
 ): string[] {
+  const coords = resolveSkyCoords(project, sky)
   const blocked: string[] = []
   for (const total of project.filterPlansTotal) {
     const row = remaining.find((r) => r.filterName === total.filterName)
     if ((row?.countRemaining ?? 0) <= 0) continue
-    if (!moonFilterSessionOk(total.filterName, project.raHours, project.decDeg, startMs, endMs)) {
+    if (!moonFilterSessionOk(total.filterName, coords.raHours, coords.decDeg, startMs, endMs)) {
       blocked.push(normalizeFilterName(total.filterName) || total.filterName)
     }
   }
@@ -300,14 +333,30 @@ function subtractRemaining(
 function remainingAfterInProgressSubsTonight(
   project: ImagingProject,
   nightKey: string,
-  remaining: FilterRemainingRow[]
+  remaining: FilterRemainingRow[],
+  mosaicPanelIndex?: number,
 ): FilterRemainingRow[] {
   let working = remaining.map((r) => ({ ...r }))
   for (const n of project.nights) {
     if (n.nightKey !== nightKey || n.status !== 'in_progress') continue
+    if (mosaicPanelIndex != null && n.mosaicPanelIndex !== mosaicPanelIndex) continue
     working = subtractRemaining(working, n.filterPlansTonight)
   }
   return working
+}
+
+function mosaicSubBaseForPanel(project: ImagingProject, panelIndex: number): number {
+  return (
+    project.nights.filter(
+      (n) =>
+        n.mosaicPanelIndex === panelIndex &&
+        (n.status === 'completed' ||
+          n.status === 'in_progress' ||
+          n.status === 'scheduled' ||
+          n.status === 'failed' ||
+          n.status === 'on_hold'),
+    ).length + 1
+  )
 }
 
 function intersectTimeIntervals(
@@ -384,8 +433,10 @@ function findPlacementStart(
   weatherPermittedIntervals: TimeInterval[],
   nowMs: number,
   windowStartMs: number,
-  deadlineMs: number
+  deadlineMs: number,
+  sky?: SkyCoords,
 ): number | null {
+  const coords = resolveSkyCoords(project, sky)
   const createdMs = Number.isFinite(Date.parse(project.createdAt))
     ? Date.parse(project.createdAt)
     : nowMs
@@ -398,17 +449,17 @@ function findPlacementStart(
     for (let cand = baselineStartMs; cand <= lastStartMs; cand += PLACEMENT_STEP_MS) {
       let startMs = cand
       const riseAt = firstAltitudeAllowedTimeMs(
-        project.raHours,
-        project.decDeg,
+        coords.raHours,
+        coords.decDeg,
         startMs,
-        Math.min(interval.endMs, deadlineMs)
+        Math.min(interval.endMs, deadlineMs),
       )
       if (riseAt == null) continue
       startMs = riseAt
       const endMs = startMs + durationMs
       if (endMs > interval.endMs || endMs > deadlineMs) continue
       if (!weatherCoverageOk(weatherPermittedIntervals, startMs, endMs, 0.8)) continue
-      if (!altitudeSessionCoverageOk(project.raHours, project.decDeg, startMs, endMs)) continue
+      if (!altitudeSessionCoverageOk(coords.raHours, coords.decDeg, startMs, endMs)) continue
       return startMs
     }
   }
@@ -425,13 +476,16 @@ function placeSubSessionInFreeWindow(
   weatherPermittedIntervals: TimeInterval[],
   nowMs: number,
   windowStartMs: number,
-  deadlineMs: number
+  deadlineMs: number,
+  sky?: SkyCoords,
 ): { finalPlans: FilterPlanRow[]; placedStart: number; actualDurationMs: number } | null {
+  const coords = resolveSkyCoords(virtualProject, sky)
   let { filterPlansTonight: draftPlans } = planTonightFilterFrames(
     virtualProject,
     cursorMs,
     planningEndMs,
-    workingRemaining
+    workingRemaining,
+    coords,
   )
   if (draftPlans.length === 0) return null
 
@@ -444,7 +498,8 @@ function placeSubSessionInFreeWindow(
       weatherPermittedIntervals,
       nowMs,
       windowStartMs,
-      deadlineMs
+      deadlineMs,
+      coords,
     )
     if (startMs == null) {
       const shrunk = shrinkFilterPlansByOneFrame(draftPlans)
@@ -457,7 +512,8 @@ function placeSubSessionInFreeWindow(
       virtualProject,
       startMs,
       Math.min(startMs + durationMs, planningEndMs, deadlineMs),
-      workingRemaining
+      workingRemaining,
+      coords,
     )
     if (finalPlans.length === 0) {
       const shrunk = shrinkFilterPlansByOneFrame(draftPlans)
@@ -474,7 +530,8 @@ function placeSubSessionInFreeWindow(
       weatherPermittedIntervals,
       nowMs,
       windowStartMs,
-      deadlineMs
+      deadlineMs,
+      coords,
     )
     const placedStart = refinedStart ?? startMs
     return {
@@ -568,6 +625,148 @@ export function projectTonightScheduleInsight(
   }
 }
 
+/** Mosaic: moon-aware cross-panel scheduling — when Panel 1's next filter is moon-blocked, try other panels. */
+function planMosaicInterleavedSubSessions(
+  project: ImagingProject,
+  freeIntervals: Array<{ startMs: number; endMs: number }>,
+  weatherPermittedIntervals: TimeInterval[],
+  now = new Date(),
+): ProjectTonightPlan[] {
+  const panelCount = project.mosaicPanels!.length
+  const nowMs = now.getTime()
+  const window = getTonightSchedulingWindow(now)
+  const windowStartMs = window.nauticalDuskUtc.getTime()
+  const deadlineMs = window.nauticalDawnUtc.getTime()
+  const strip = getTonightScheduleStrip(now)
+  const minWindowMs = minExposureMs(project) + SESSION_OVERHEAD_MS
+
+  if (!hasSchedulableFreeTonight(freeIntervals, weatherPermittedIntervals, windowStartMs, deadlineMs, minWindowMs)) {
+    return []
+  }
+
+  const panelRemaining = ensureMosaicPanelRemaining(project).map((rows, i) =>
+    remainingAfterInProgressSubsTonight(project, strip.nightKey, rows.map((r) => ({ ...r })), i + 1),
+  )
+
+  const mosaicSubNext = new Map<number, number>()
+  const nextMosaicSubIndex = (panelIndex: number): number => {
+    if (!mosaicSubNext.has(panelIndex)) {
+      mosaicSubNext.set(panelIndex, mosaicSubBaseForPanel(project, panelIndex))
+    }
+    const n = mosaicSubNext.get(panelIndex)!
+    mosaicSubNext.set(panelIndex, n + 1)
+    return n
+  }
+
+  let sessionIndex = nextProjectSessionIndex(project)
+  const plans: ProjectTonightPlan[] = []
+  let workingFree = [...freeIntervals].sort((a, b) => a.startMs - b.startMs)
+  let globalCursorMs = Math.max(nowMs, windowStartMs)
+
+  const totalFramesLeft = () =>
+    panelRemaining.reduce(
+      (sum, rows) => sum + rows.reduce((s, r) => s + Math.max(0, r.countRemaining), 0),
+      0,
+    )
+
+  while (totalFramesLeft() > 0) {
+    let best: {
+      panelIndex: number
+      finalPlans: FilterPlanRow[]
+      placedStart: number
+      actualDurationMs: number
+      cursorMs: number
+      planningEndMs: number
+      remainingBefore: FilterRemainingRow[]
+    } | null = null
+
+    for (let pi = 0; pi < panelCount; pi++) {
+      const panelIndex = pi + 1
+      const workingRemaining = panelRemaining[pi]!
+      const framesLeft = workingRemaining.reduce((s, r) => s + r.countRemaining, 0)
+      if (framesLeft <= 0) continue
+
+      const sky = projectTargetCoordsForPanel(project, panelIndex)
+      const virtualProject: ImagingProject = { ...project, remainingByFilter: workingRemaining }
+
+      for (const free of workingFree) {
+        const cursorMs = Math.max(free.startMs, globalCursorMs)
+        const planningEndMs = Math.min(free.endMs, deadlineMs)
+        if (planningEndMs - cursorMs < minWindowMs) continue
+
+        const placed = placeSubSessionInFreeWindow(
+          virtualProject,
+          [{ startMs: cursorMs, endMs: free.endMs }],
+          cursorMs,
+          planningEndMs,
+          workingRemaining,
+          weatherPermittedIntervals,
+          nowMs,
+          windowStartMs,
+          deadlineMs,
+          { raHours: sky.raHours, decDeg: sky.decDeg },
+        )
+        if (!placed) continue
+
+        const frameCount = placed.finalPlans.reduce((s, p) => s + p.count, 0)
+        const pick =
+          !best ||
+          placed.placedStart < best.placedStart ||
+          (placed.placedStart === best.placedStart && frameCount > best.finalPlans.reduce((s, p) => s + p.count, 0))
+        if (pick) {
+          best = {
+            panelIndex,
+            ...placed,
+            cursorMs,
+            planningEndMs,
+            remainingBefore: workingRemaining.map((r) => ({ ...r })),
+          }
+        }
+      }
+    }
+
+    if (!best) break
+
+    const { panelIndex, finalPlans, placedStart, actualDurationMs, cursorMs, planningEndMs, remainingBefore } =
+      best
+    const placedEnd = placedStart + actualDurationMs
+
+    plans.push({
+      nightKey: strip.nightKey,
+      nightIndex: sessionIndex++,
+      filterPlansTonight: finalPlans,
+      plannedStartIso: new Date(placedStart).toISOString(),
+      plannedEndIso: new Date(placedEnd).toISOString(),
+      durationSeconds: tonightDurationSecondsFromPlans(finalPlans),
+      scheduleReasons: buildProjectSubSessionScheduleReasons({
+        project,
+        cursorMs,
+        planningEndMs,
+        placedStart,
+        placedEnd,
+        finalPlans,
+        workingRemainingBefore: remainingBefore,
+        weatherPermittedIntervals,
+        nowMs,
+        windowStartMs,
+        deadlineMs,
+        mosaicPanelIndex: panelIndex,
+      }),
+      mosaicPanelIndex: panelIndex,
+      mosaicSubIndex: nextMosaicSubIndex(panelIndex),
+    })
+
+    panelRemaining[panelIndex - 1] = subtractRemaining(panelRemaining[panelIndex - 1]!, finalPlans)
+    workingFree = subtractOccupiedFromFree(workingFree, {
+      startMs: placedStart,
+      endMs: placedEnd,
+    })
+    globalCursorMs = Math.max(globalCursorMs, placedEnd)
+  }
+
+  return plans
+}
+
 /** One sub-session plan per schedulable free interval tonight (global session indices). */
 export function planTonightSubSessions(
   project: ImagingProject,
@@ -576,6 +775,10 @@ export function planTonightSubSessions(
   now = new Date()
 ): ProjectTonightPlan[] {
   if (remainingFramesTotal(project) <= 0) return []
+
+  if (project.mosaicMode && project.mosaicPanels && project.mosaicPanels.length > 0) {
+    return planMosaicInterleavedSubSessions(project, freeIntervals, weatherPermittedIntervals, now)
+  }
 
   const nowMs = now.getTime()
   const window = getTonightSchedulingWindow(now)
@@ -847,9 +1050,9 @@ export function explainWhyNoPlansTonight(
     }
 
     const durationMs = tonightDurationSecondsFromPlans(draftPlans) * 1000
-    const riseAt = firstAltitudeAllowedTimeMs(project.raHours, project.decDeg, cursorMs, planningEndMs)
+    const riseAt = firstAltitudeAllowedTimeMs(projectTargetCoords(project).raHours, projectTargetCoords(project).decDeg, cursorMs, planningEndMs)
     if (riseAt == null) {
-      const altAtStart = currentAltitudeDeg(project.raHours, project.decDeg, new Date(cursorMs))
+      const altAtStart = currentAltitudeDeg(projectTargetCoords(project).raHours, projectTargetCoords(project).decDeg, new Date(cursorMs))
       reasons.push(
         `${label}: target stays below 30° altitude (about ${altAtStart.toFixed(0)}° at interval start).`
       )
@@ -1016,12 +1219,19 @@ export function plansToScheduledNights(
         status: 'on_hold' as const,
         onHoldFromStatus: 'scheduled' as const,
         filterPlansTonight: plan.filterPlansTonight,
-        ninaSequenceJson: buildNightNinaJson(project, nightId, plan.filterPlansTonight),
+        ninaSequenceJson: buildNightNinaJson(
+          project,
+          nightId,
+          plan.filterPlansTonight,
+          plan.mosaicPanelIndex,
+        ),
         plannedStartIso: null,
         adminForceRunUntilIso: null,
         scheduleStripNightKey: null,
         scheduleBarStartMs: null,
         scheduleBarEndMs: null,
+        ...(plan.mosaicPanelIndex != null ? { mosaicPanelIndex: plan.mosaicPanelIndex } : {}),
+        ...(plan.mosaicSubIndex != null ? { mosaicSubIndex: plan.mosaicSubIndex } : {}),
       }
     }
     return {
@@ -1030,11 +1240,18 @@ export function plansToScheduledNights(
       nightIndex,
       status: 'scheduled' as const,
       filterPlansTonight: plan.filterPlansTonight,
-      ninaSequenceJson: buildNightNinaJson(project, nightId, plan.filterPlansTonight),
+      ninaSequenceJson: buildNightNinaJson(
+        project,
+        nightId,
+        plan.filterPlansTonight,
+        plan.mosaicPanelIndex,
+      ),
       plannedStartIso: plan.plannedStartIso,
       scheduleStripNightKey: null,
       scheduleBarStartMs: null,
       scheduleBarEndMs: null,
+      ...(plan.mosaicPanelIndex != null ? { mosaicPanelIndex: plan.mosaicPanelIndex } : {}),
+      ...(plan.mosaicSubIndex != null ? { mosaicSubIndex: plan.mosaicSubIndex } : {}),
     }
   })
 
@@ -1045,7 +1262,12 @@ export function plansToScheduledNights(
     if (subs[i]!.nightIndex > expected) {
       subs[i]!.nightIndex = expected
       subs[i]!.id = projectNightSubId(project.id, expected)
-      subs[i]!.ninaSequenceJson = buildNightNinaJson(project, subs[i]!.id, subs[i]!.filterPlansTonight)
+      subs[i]!.ninaSequenceJson = buildNightNinaJson(
+        project,
+        subs[i]!.id,
+        subs[i]!.filterPlansTonight,
+        subs[i]!.mosaicPanelIndex,
+      )
     }
   }
 

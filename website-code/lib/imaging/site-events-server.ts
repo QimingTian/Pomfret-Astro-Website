@@ -1,16 +1,9 @@
 import { emitLiveEvent } from '@/lib/imaging/live-bus'
-import {
-  getEmergencyStopPublicState,
-} from '@/lib/imaging-emergency-stop'
-import {
-  getObservatoryMode,
-  getObservatoryStatus,
-  isObservatoryAgentConnected,
-} from '@/lib/observatory-status-store'
+import { getEmergencyStopPublicState } from '@/lib/imaging-emergency-stop'
+import { forcePushObservatoryStatusLive, isObservatoryAgentConnected } from '@/lib/observatory-status-store'
 
 export async function emitSiteObservatoryStatus(): Promise<void> {
-  const [mode, status] = await Promise.all([getObservatoryMode(), getObservatoryStatus()])
-  void emitLiveEvent('site:observatory', { type: 'observatory_status', mode, status })
+  await forcePushObservatoryStatusLive()
 }
 
 export async function emitSiteEstop(): Promise<void> {

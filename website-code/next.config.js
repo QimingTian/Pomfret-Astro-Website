@@ -48,7 +48,10 @@ const nextConfig = {
       './Variable Star Sequence.json',
       './End Night Session.json',
       './EStop.json',
+      './Variables/index.csv',
     ],
+    '/api/imaging/variable-stars': ['./Variables/index.csv'],
+    '/api/imaging/variable-star-lookup': ['./Variables/index.csv'],
   },
 }
 

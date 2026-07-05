@@ -1,4 +1,5 @@
 import { appendAuditLog } from '@/lib/imaging-audit-log'
+import { maybeWakeAgentForDueScheduledSessions } from '@/lib/imaging/agent-due-session-wake'
 import { emitSiteSessionsChanged } from '@/lib/imaging/site-events'
 import { compactStaleProjectBoardRows } from '@/lib/imaging-project-store'
 import { purgeExpiredProjectAssets } from '@/lib/imaging-project-retention'
@@ -30,6 +31,7 @@ export async function runImagingScheduleMaintenance(): Promise<void> {
   if (boardNeedsBar.length > 0) {
     await Promise.all(boardNeedsBar.map((b) => boardEnsureScheduleBarForTerminal(b.id)))
   }
+  await maybeWakeAgentForDueScheduledSessions()
   emitSiteSessionsChanged('maintenance')
 }
 

@@ -1,6 +1,11 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import {
+  isObservatoryOverlayStatus,
+  observatoryOverlayStatusLabel,
+  type ObservatoryOverlayStatus,
+} from "../lib/observatory-overlay-status"
 
 const STREAM_URL =
   process.env.NEXT_PUBLIC_CAMERA_STREAM_URL ??
@@ -8,20 +13,6 @@ const STREAM_URL =
 const OBSERVATORY_STATUS_URL =
   process.env.NEXT_PUBLIC_OBSERVATORY_STATUS_URL ??
   "https://www.pomfretastro.org/api/imaging/observatory-status"
-
-type ObservatoryApiStatus =
-  | "ready"
-  | "busy_in_use"
-  | "closed_weather_not_permitted"
-  | "closed_daytime"
-  | "closed_observatory_maintenance"
-
-function observatoryStatusLabel(status: ObservatoryApiStatus | null): string {
-  if (!status) return "—"
-  if (status === "ready") return "Ready"
-  if (status === "busy_in_use") return "Busy"
-  return "Closed"
-}
 
 function formatOverlayDateTime(d: Date): string {
   return d.toLocaleString(undefined, {
@@ -46,7 +37,12 @@ function allSkyCameraStatusUrl(streamUrl: string): string | null {
 
 function valueClass(label: string, value: string): string {
   if (value === "—") return "overlay-value overlay-value-green"
-  if (label === "Observatory Status" && (value === "Busy" || value === "Closed")) return "overlay-value overlay-value-red"
+  if (
+    label === "Observatory Status" &&
+    (value === "Busy" || value === "Closed" || value === "Disconnected")
+  ) {
+    return "overlay-value overlay-value-red"
+  }
   if (label === "Cloud" && value.endsWith("%")) {
     const n = Number(value.replace("%", ""))
     return Number.isFinite(n) && n > 20 ? "overlay-value overlay-value-red" : "overlay-value overlay-value-green"
@@ -59,6 +55,9 @@ function valueClass(label: string, value: string): string {
     const n = Number(value.replace("%", ""))
     return Number.isFinite(n) && n > 90 ? "overlay-value overlay-value-red" : "overlay-value overlay-value-green"
   }
+  if (label === "Raining") {
+    return value === "True" ? "overlay-value overlay-value-red" : "overlay-value overlay-value-green"
+  }
   return "overlay-value overlay-value-green"
 }
 
@@ -66,11 +65,13 @@ export default function HomePage() {
   const [src, setSrc] = useState(STREAM_URL)
   const [now, setNow] = useState(() => new Date())
   const [lastFrameAt, setLastFrameAt] = useState<Date | null>(null)
-  const [obsStatus, setObsStatus] = useState<ObservatoryApiStatus | null>(null)
+  const [obsMode, setObsMode] = useState<"manual" | "auto" | null>(null)
+  const [serverObsStatus, setServerObsStatus] = useState<ObservatoryOverlayStatus | null>(null)
   const [cloudPct, setCloudPct] = useState<number | null>(null)
   const [windKmh, setWindKmh] = useState<number | null>(null)
   const [tempC, setTempC] = useState<number | null>(null)
   const [humidityPct, setHumidityPct] = useState<number | null>(null)
+  const [raining, setRaining] = useState<boolean | null>(null)
 
   useEffect(() => {
     const sep = STREAM_URL.includes("?") ? "&" : "?"
@@ -86,34 +87,37 @@ export default function HomePage() {
     const loadObservatory = async () => {
       try {
         const res = await fetch(OBSERVATORY_STATUS_URL, { cache: "no-store" })
-        const data = (await res.json()) as { ok?: boolean; status?: string }
-        if (res.ok && data?.ok && typeof data.status === "string") {
-          setObsStatus(data.status as ObservatoryApiStatus)
+        const data = (await res.json()) as { ok?: boolean; mode?: string; status?: string }
+        if (res.ok && data?.ok) {
+          if (data.mode === "manual" || data.mode === "auto") setObsMode(data.mode)
+          if (typeof data.status === "string" && isObservatoryOverlayStatus(data.status)) {
+            setServerObsStatus(data.status)
+          } else {
+            setServerObsStatus(null)
+          }
         } else {
-          setObsStatus(null)
+          setServerObsStatus(null)
         }
       } catch {
-        setObsStatus(null)
+        setServerObsStatus(null)
       }
     }
 
     const loadWeather = async () => {
       try {
         const res = await fetch(
-          "https://api.open-meteo.com/v1/forecast?latitude=41.9159&longitude=-71.9626&current=temperature_2m,relative_humidity_2m,cloud_cover,wind_speed_10m&timezone=auto",
+          "https://api.open-meteo.com/v1/forecast?latitude=41.9159&longitude=-71.9626&current=temperature_2m,relative_humidity_2m,wind_speed_10m&timezone=auto",
           { cache: "no-store" }
         )
         const data = (await res.json()) as {
           current?: {
             temperature_2m?: number
             relative_humidity_2m?: number
-            cloud_cover?: number
             wind_speed_10m?: number
           }
         }
         const c = data.current
         if (!c) {
-          setCloudPct(null)
           setWindKmh(null)
           setTempC(null)
           setHumidityPct(null)
@@ -125,10 +129,8 @@ export default function HomePage() {
             ? c.relative_humidity_2m
             : null
         )
-        setCloudPct(typeof c.cloud_cover === "number" && Number.isFinite(c.cloud_cover) ? c.cloud_cover : null)
         setWindKmh(typeof c.wind_speed_10m === "number" && Number.isFinite(c.wind_speed_10m) ? c.wind_speed_10m : null)
       } catch {
-        setCloudPct(null)
         setWindKmh(null)
         setTempC(null)
         setHumidityPct(null)
@@ -138,7 +140,7 @@ export default function HomePage() {
     void loadObservatory()
     void loadWeather()
     const obsId = window.setInterval(() => void loadObservatory(), 60_000)
-    const wxId = window.setInterval(() => void loadWeather(), 300_000)
+    const wxId = window.setInterval(() => void loadWeather(), 60_000)
     return () => {
       window.clearInterval(obsId)
       window.clearInterval(wxId)
@@ -159,9 +161,35 @@ export default function HomePage() {
         })
         if (!res.ok || cancelled) return
         const data = (await res.json()) as {
-          sensors?: { allSkyCam?: { lastStreamFrameIso?: string | null } }
+          sensors?: {
+            allSkyCam?: {
+              mode?: string
+              autoMode?: boolean
+              lastStreamFrameIso?: string | null
+              lastAutoFrameIso?: string | null
+              ascCloud?: {
+                cloudCoverPercent?: number | null
+                rain?: { detected?: boolean } | null
+              }
+            }
+          }
         }
-        const iso = data?.sensors?.allSkyCam?.lastStreamFrameIso
+        const cam = data?.sensors?.allSkyCam
+        const ascCloud = cam?.ascCloud?.cloudCoverPercent
+        if (typeof ascCloud === "number" && Number.isFinite(ascCloud) && !cancelled) {
+          setCloudPct(ascCloud)
+        }
+        const rainDetected = cam?.ascCloud?.rain?.detected
+        if (!cancelled) {
+          setRaining(typeof rainDetected === "boolean" ? rainDetected : null)
+        }
+        const iso =
+          cam?.mode === "auto" ||
+          cam?.mode === "half_hour" ||
+          cam?.mode === "hour" ||
+          cam?.autoMode
+            ? cam?.lastAutoFrameIso ?? cam?.lastStreamFrameIso
+            : cam?.lastStreamFrameIso
         if (typeof iso === "string" && iso.length > 0 && !cancelled) {
           const d = new Date(iso)
           if (!Number.isNaN(d.getTime())) setLastFrameAt(d)
@@ -180,11 +208,12 @@ export default function HomePage() {
   }, [])
 
   const overlayRows = useMemo(() => {
-    const obsText = observatoryStatusLabel(obsStatus)
+    const obsText = observatoryOverlayStatusLabel(serverObsStatus)
     const cloudText = cloudPct != null && Number.isFinite(cloudPct) ? `${Math.round(cloudPct)}%` : "—"
     const windText = windKmh != null && Number.isFinite(windKmh) ? `${windKmh.toFixed(0)} km/h` : "—"
     const tempText = tempC != null && Number.isFinite(tempC) ? `${tempC.toFixed(1)}°C` : "—"
     const humText = humidityPct != null && Number.isFinite(humidityPct) ? `${Math.round(humidityPct)}%` : "—"
+    const rainingText = raining === true ? "True" : raining === false ? "False" : "—"
     return [
       ["Current Time", formatOverlayDateTime(now)],
       ["ASC View Last Updated", lastFrameAt ? formatOverlayDateTime(lastFrameAt) : "—"],
@@ -193,8 +222,9 @@ export default function HomePage() {
       ["Wind", windText],
       ["Temperature", tempText],
       ["Humidity", humText],
+      ["Raining", rainingText],
     ]
-  }, [now, lastFrameAt, obsStatus, cloudPct, windKmh, tempC, humidityPct])
+  }, [now, lastFrameAt, serverObsStatus, cloudPct, windKmh, tempC, humidityPct, raining])
 
   return (
     <main>

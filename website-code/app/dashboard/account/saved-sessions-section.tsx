@@ -90,7 +90,7 @@ export function SavedSessionsSection({
               </div>
               <Link
                 href={buildRemoteRunSavedSessionUrl(s.id)}
-                className="shrink-0 ${glassPillSm}"
+                className={`shrink-0 ${glassPillSm}`}
               >
                 Run this session
               </Link>

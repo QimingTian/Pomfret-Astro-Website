@@ -63,6 +63,14 @@ export interface ImagingRequest {
   sequenceTemplate?: 'dso' | 'variable_star'
   /** Multi-night DSO project; queue row is consumed on first NINA delivery only. */
   projectMode?: boolean
+  mosaicMode?: boolean
+  mosaicPanels?: Array<{
+    id: number
+    raHours: number
+    decDeg: number
+    positionAngleDeg: number
+    name: string
+  }>
   /** Member who submitted this session (new sessions). */
   userId?: string
   /** Large project mode (>30h total) awaiting admin approval before scheduling. */
@@ -434,8 +442,16 @@ export interface CreateImagingInput {
   sequenceTemplate?: 'dso' | 'variable_star'
   /** Variable star: total seconds = (N×0.5 h block) + variable-star session overhead; validated when `sequenceTemplate` is `variable_star`. */
   estimatedDurationSeconds?: number
-  /** DSO multi-night project: skip single-night duration / ideal-night feasibility checks. */
+  /** Multi-night DSO project: skip single-night duration / ideal-night feasibility checks. */
   projectMode?: boolean
+  mosaicMode?: boolean
+  mosaicPanels?: Array<{
+    id: number
+    raHours: number
+    decDeg: number
+    positionAngleDeg: number
+    name: string
+  }>
 }
 
 function targetLabelFromCoords(raHours: number, decDeg: number): string {
@@ -500,8 +516,9 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
 
   const sequenceTemplate: 'dso' | 'variable_star' =
     input.sequenceTemplate === 'variable_star' ? 'variable_star' : 'dso'
+  const mosaicMode = sequenceTemplate === 'dso' && input.mosaicMode === true
   const projectMode =
-    sequenceTemplate === 'dso' && input.projectMode === true
+    sequenceTemplate === 'dso' && (input.projectMode === true || mosaicMode)
   const filterRaw =
     sequenceTemplate === 'variable_star'
       ? 'G'
@@ -713,6 +730,9 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
     ...(sessionPasswordHash ? { sessionPasswordHash } : {}),
     sequenceTemplate,
     ...(projectMode ? { projectMode: true as const } : {}),
+    ...(mosaicMode && Array.isArray(input.mosaicPanels) && input.mosaicPanels.length > 0
+      ? { mosaicMode: true as const, mosaicPanels: input.mosaicPanels }
+      : {}),
     ...(userId ? { userId } : {}),
   }
 

@@ -445,11 +445,6 @@ export default function PlanPage() {
     }
   }, [getStel])
 
-  const getMosaicCenterRaDec = useCallback((): { raHours: number; decDeg: number } | null => {
-    if (skyLocked && boresight) return boresight
-    return getViewCenterRaDec()
-  }, [skyLocked, boresight, getViewCenterRaDec])
-
   const getViewportMetrics = useCallback(() => {
     const stel = getStel()
     const fov = stel?.core?.fov
@@ -520,7 +515,6 @@ export default function PlanPage() {
     useSensorLayout: !customMosaic,
     gridLayout,
     getViewCenterRaDec,
-    getMosaicCenterRaDec,
   })
 
   const gridPanelGroupDraggable = !customMosaic && skyLocked && framingUsePanelOverlays

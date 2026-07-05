@@ -33,8 +33,6 @@ type Options = {
   gridLayout?: GridLayoutParams | null
   /** Boresight / view center for custom panel sky position (parallactic rotation). */
   getViewCenterRaDec?: () => { raHours: number; decDeg: number } | null
-  /** Grid mosaic center (locked boresight or live view center). */
-  getMosaicCenterRaDec?: () => { raHours: number; decDeg: number } | null
 }
 
 export function useCameraFrameProfile(
@@ -104,62 +102,14 @@ function applyFrameTransform(
 
 function panelSkyPosition(
   panel: MosaicPanel,
-  panelIndex: number,
-  useSensorLayout: boolean,
   drag: { x: number; y: number },
   boresightRotDeg: number,
   getViewCenterRaDec: (() => { raHours: number; decDeg: number } | null) | undefined,
-  getMosaicCenterRaDec: (() => { raHours: number; decDeg: number } | null) | undefined,
   viewportWidthPx: number,
   viewportHeightPx: number,
   hFovDeg: number,
   vFovDeg: number,
-  gridLayout: GridLayoutParams | null | undefined,
-  equipment: ImagingEquipment | null,
-  vFovRad: number,
 ): { raHours: number; decDeg: number } | null {
-  if (useSensorLayout) {
-    const center = getMosaicCenterRaDec?.() ?? getViewCenterRaDec?.()
-    if (!center) return { raHours: panel.raHours, decDeg: panel.decDeg }
-
-    let layoutDeltaXPx = panel.layoutDeltaXPx
-    let layoutDeltaYPx = panel.layoutDeltaYPx
-    if (
-      (layoutDeltaXPx == null || layoutDeltaYPx == null) &&
-      gridLayout &&
-      equipment
-    ) {
-      const hPanels = Math.max(1, Math.round(gridLayout.horizontalPanels))
-      const col = panelIndex % hPanels
-      const row = Math.floor(panelIndex / hPanels)
-      const layout = computeGridPanelLayoutDeltaPx(
-        col,
-        row,
-        gridLayout,
-        equipment,
-        viewportWidthPx,
-        viewportHeightPx,
-        vFovRad,
-      )
-      layoutDeltaXPx = layout.layoutDeltaXPx
-      layoutDeltaYPx = layout.layoutDeltaYPx
-    }
-    if (layoutDeltaXPx == null || layoutDeltaYPx == null) {
-      return { raHours: panel.raHours, decDeg: panel.decDeg }
-    }
-
-    const screen = layoutDeltaToScreenDelta(layoutDeltaXPx, layoutDeltaYPx, boresightRotDeg)
-    const arcsec = viewportArcsecPerPixel(viewportWidthPx, viewportHeightPx, hFovDeg, vFovDeg)
-    return panelScreenOffsetToRaDec(
-      center.raHours,
-      center.decDeg,
-      screen.x + drag.x,
-      screen.y + drag.y,
-      boresightRotDeg,
-      arcsec.x,
-      arcsec.y,
-    )
-  }
   const center = getViewCenterRaDec?.()
   if (!center) return { raHours: panel.raHours, decDeg: panel.decDeg }
   const arcsec = viewportArcsecPerPixel(viewportWidthPx, viewportHeightPx, hFovDeg, vFovDeg)
@@ -189,7 +139,6 @@ export function useCameraFrameOverlay({
   useSensorLayout = true,
   gridLayout = null,
   getViewCenterRaDec,
-  getMosaicCenterRaDec,
 }: Options): CameraFrameProfile | null {
   const profile = useCameraFrameProfile(enabled, equipment)
 
@@ -226,31 +175,31 @@ export function useCameraFrameOverlay({
               h,
               fov,
             )
-            const sky = panelSkyPosition(
-              panel,
-              panelIndex,
-              useSensorLayout,
-              drag,
-              boresightRotDeg,
-              getViewCenterRaDec,
-              getMosaicCenterRaDec,
-              w,
-              h,
-              hFovDeg,
-              vFovDeg,
-              gridLayout,
-              equipment,
-              fov,
-            )
-            const panelRotDeg =
-              (sky &&
-                computeFovOverlayRotationDeg(
-                  stel,
-                  profile.positionAngleDeg,
-                  sky.raHours,
-                  sky.decDeg,
-                )) ??
-              boresightRotDeg
+            // Grid: rigid mosaic — one field rotation (reference / center panel); panel
+            // positions already account for PA via shiftCoordinatesPixels in calculateMosaicPanels.
+            // Custom: parallactic rotation at each panel's own sky position.
+            let panelRotDeg = boresightRotDeg
+            if (!useSensorLayout) {
+              const sky = panelSkyPosition(
+                panel,
+                drag,
+                boresightRotDeg,
+                getViewCenterRaDec,
+                w,
+                h,
+                hFovDeg,
+                vFovDeg,
+              )
+              panelRotDeg =
+                (sky &&
+                  computeFovOverlayRotationDeg(
+                    stel,
+                    profile.positionAngleDeg,
+                    sky.raHours,
+                    sky.decDeg,
+                  )) ??
+                boresightRotDeg
+            }
             applyFrameTransform(el, profile, scale, offset, panelRotDeg)
           }
         } else {
@@ -276,7 +225,6 @@ export function useCameraFrameOverlay({
     gridLayout,
     equipment,
     getViewCenterRaDec,
-    getMosaicCenterRaDec,
   ])
 
   return profile

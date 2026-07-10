@@ -1,6 +1,7 @@
 import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { maybeWakeAgentForDueScheduledSessions } from '@/lib/imaging/agent-due-session-wake'
 import { emitSiteSessionsChanged } from '@/lib/imaging/site-events'
+import { triggerWeatherSafetyEmergencyStopCheck } from '@/lib/imaging/weather-safety-estop'
 import { compactStaleProjectBoardRows } from '@/lib/imaging-project-store'
 import { purgeExpiredProjectAssets } from '@/lib/imaging-project-retention'
 import { boardEnsureScheduleBarForTerminal, boardPurgeCompletedOlderThan, listBoardEntries } from '@/lib/imaging-session-board'
@@ -13,6 +14,8 @@ const RETENTION_MS = 48 * 60 * 60 * 1000
 /** Reconcile schedules, compact stale board rows, backfill schedule bars. */
 export async function runImagingScheduleMaintenance(): Promise<void> {
   await reconcilePendingScheduleStatus()
+  // Backup weather-safety poll (ASC rain / site precip / 20 km thunderstorm approach).
+  triggerWeatherSafetyEmergencyStopCheck()
   const prunedBoardIds = await compactStaleProjectBoardRows()
   for (const id of prunedBoardIds) {
     void appendAuditLog({

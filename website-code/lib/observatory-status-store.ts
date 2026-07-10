@@ -167,6 +167,12 @@ async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
       ascModelPhase: ascCloud?.modelPhase ?? null,
       ascLastError: ascCloud?.lastError ?? null,
     }
+    if (rainDetected || !weatherAllowed) {
+      // ASC rain / closed weather while imaging → auto ESTOP (no-op if idle).
+      void import('@/lib/imaging/weather-safety-estop').then((m) =>
+        m.triggerWeatherSafetyEmergencyStopCheck()
+      )
+    }
     return weatherAllowed
   } catch {
     weatherCache = {
@@ -181,6 +187,9 @@ async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
       ascModelPhase: null,
       ascLastError: null,
     }
+    void import('@/lib/imaging/weather-safety-estop').then((m) =>
+      m.triggerWeatherSafetyEmergencyStopCheck()
+    )
     return false
   }
 }

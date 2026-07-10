@@ -6,6 +6,7 @@ import {
   imagingUnauthorized,
   withImagingCors,
 } from '@/lib/imaging-queue-auth'
+import { triggerWeatherSafetyEmergencyStopCheck } from '@/lib/imaging/weather-safety-estop'
 import { reportObservatoryAgentPulse } from '@/lib/observatory-status-store'
 
 export const runtime = 'nodejs'
@@ -36,5 +37,9 @@ export async function POST(request: NextRequest) {
   }
 
   await reportObservatoryAgentPulse({ ninaRunning })
+  // Primary weather-safety path while NINA is actively imaging.
+  if (ninaRunning) {
+    triggerWeatherSafetyEmergencyStopCheck()
+  }
   return withImagingCors({ ok: true as const, ninaRunning })
 }

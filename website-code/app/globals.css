@@ -173,7 +173,7 @@ h3 {
 .dark .boxed-fields textarea {
   border: 1px solid rgba(255, 255, 255, 0.3) !important;
   border-bottom: 1px solid rgba(255, 255, 255, 0.3) !important;
-  border-radius: 0.5rem !important;
+  border-radius: 9999px !important; /* match glass-pill capsule radius */
 }
 
 .dark .boxed-fields input:focus,

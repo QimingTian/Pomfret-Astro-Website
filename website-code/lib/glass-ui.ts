@@ -45,7 +45,10 @@ export const glassPillFullWidthMd = `${base} w-full px-3 py-2 text-center text-s
 
 /** Form fields — same 9999px radius as glass pills. */
 export const glassTextField =
-  'w-full rounded-full border border-gray-300 bg-transparent px-3 py-2 text-sm dark:border-gray-600 dark:bg-transparent'
+  'w-full appearance-none rounded-full border border-gray-300 bg-transparent px-3 py-2 text-sm dark:border-gray-600 dark:bg-transparent'
+
+/** Cards / panels / session rows — site surface radius (1rem via Tailwind theme). */
+export const glassSurface = 'rounded-lg'
 
 /** Ghost glass pill — text at rest, liquid glass pill on hover */
 const ghostLink =

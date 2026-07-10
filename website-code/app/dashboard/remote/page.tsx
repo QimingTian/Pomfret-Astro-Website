@@ -3704,7 +3704,7 @@ export default function RemotePage() {
                         const row = variableStarCatalog.find((s) => s.name === v)
                         if (row) applyVariableStarCatalogRow(row, 'catalog')
                       }}
-                      className={`box-border h-10 w-full rounded-full border border-gray-300 dark:border-gray-600 bg-[#151616] px-3 py-2 text-center text-sm leading-normal ${
+                      className={`box-border h-10 w-full appearance-none rounded-full border border-gray-300 dark:border-gray-600 bg-[#151616] px-3 py-2 text-center text-sm leading-normal ${
                         variableStarListSelection ? 'text-white' : 'text-gray-400'
                       }`}
                       style={{ textAlignLast: 'center' }}
@@ -3899,7 +3899,7 @@ export default function RemotePage() {
               <select
                 value={decSign}
                 onChange={(e) => setDecSign(e.target.value)}
-                className="w-full rounded-full border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
+                className="w-full appearance-none rounded-full border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
               >
                 <option value="+">+</option>
                 <option value="-">-</option>
@@ -4938,7 +4938,7 @@ export default function RemotePage() {
                 <select
                   value={runModalName}
                   onChange={(e) => setRunModalName(e.target.value)}
-                  className="w-full rounded-full border border-gray-600 bg-transparent px-3 py-2 text-sm text-white"
+                  className="w-full appearance-none rounded-full border border-gray-600 bg-transparent px-3 py-2 text-sm text-white"
                 >
                   <option value="">Select…</option>
                   {cloudSavedSessions.map((s) => (

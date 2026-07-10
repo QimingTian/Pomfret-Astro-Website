@@ -14,8 +14,18 @@ module.exports = {
         'apple-blue': '#000000',
         'apple-blue-hover': '#000000',
       },
+      // Site-wide surface radius (cards, panels, modals, session rows).
+      // Controls (pills / inputs) keep using rounded-full → 9999px.
+      borderRadius: {
+        sm: '1rem',
+        DEFAULT: '1rem',
+        md: '1rem',
+        lg: '1rem',
+        xl: '1rem',
+        '2xl': '1rem',
+        '3xl': '1rem',
+      },
     },
   },
   plugins: [],
 }
-

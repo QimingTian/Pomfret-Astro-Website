@@ -176,6 +176,17 @@ h3 {
   border-radius: 9999px !important; /* match glass-pill capsule radius */
 }
 
+/* Native <select> ignores radius unless appearance is cleared (Dec +/- etc.). */
+.dark .boxed-fields select {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23ffffff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 8l4 4 4-4'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 0.65rem center !important;
+  background-size: 0.9rem 0.9rem !important;
+  padding-right: 1.75rem !important;
+}
+
 .dark .boxed-fields input:focus,
 .dark .boxed-fields select:focus,
 .dark .boxed-fields textarea:focus {

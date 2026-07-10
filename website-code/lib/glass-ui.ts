@@ -43,6 +43,10 @@ export const glassPillIcon = `${base} glass-pill-icon p-2.5`
 export const glassPillFullWidthSm = `${base} w-full px-3 py-2 text-sm font-medium text-white`
 export const glassPillFullWidthMd = `${base} w-full px-3 py-2 text-center text-sm font-medium text-white`
 
+/** Form fields — same 9999px radius as glass pills. */
+export const glassTextField =
+  'w-full rounded-full border border-gray-300 bg-transparent px-3 py-2 text-sm dark:border-gray-600 dark:bg-transparent'
+
 /** Ghost glass pill — text at rest, liquid glass pill on hover */
 const ghostLink =
   `${base} glass-pill-ghost inline-flex items-center justify-center font-medium disabled:cursor-not-allowed disabled:opacity-40`

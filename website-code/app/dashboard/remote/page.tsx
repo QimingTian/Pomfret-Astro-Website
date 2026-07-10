@@ -3630,7 +3630,7 @@ export default function RemotePage() {
                   ? 'e.g. AW UMa Session 1'
                   : 'e.g. M31 LRGB Session 1'
               }
-              className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
+              className="w-full rounded-full border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
             />
           </label>
           <div className="sm:col-span-2 space-y-3">
@@ -3643,7 +3643,7 @@ export default function RemotePage() {
                       <button
                         type="button"
                         onClick={() => setVariableStarFilterDropdownOpen((prev) => !prev)}
-                        className={`box-border flex h-10 w-full items-center justify-center rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-sm leading-normal dark:border-gray-600 ${
+                        className={`box-border flex h-10 w-full items-center justify-center rounded-full border border-gray-300 bg-transparent px-3 py-2 text-sm leading-normal dark:border-gray-600 ${
                           variableStarFilterSelection.length === 0 ? 'text-gray-400' : 'text-white'
                         }`}
                       >
@@ -3652,7 +3652,7 @@ export default function RemotePage() {
                           : `${variableStarFilterSelection.length} Filter${variableStarFilterSelection.length > 1 ? 's' : ''} Selected`}
                       </button>
                       {variableStarFilterDropdownOpen && (
-                        <div className="absolute z-20 mt-1 w-full rounded-lg border border-gray-300 bg-[#151616] p-2 text-sm dark:border-gray-600">
+                        <div className="absolute z-20 mt-1 w-full rounded-2xl border border-gray-300 bg-[#151616] p-2 text-sm dark:border-gray-600">
                           {([
                             { value: 'tonight_observable', label: 'Tonight Observable' },
                             { value: 'high_priority', label: 'High Priority' },
@@ -3704,7 +3704,7 @@ export default function RemotePage() {
                         const row = variableStarCatalog.find((s) => s.name === v)
                         if (row) applyVariableStarCatalogRow(row, 'catalog')
                       }}
-                      className={`box-border h-10 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-[#151616] px-3 py-2 text-center text-sm leading-normal ${
+                      className={`box-border h-10 w-full rounded-full border border-gray-300 dark:border-gray-600 bg-[#151616] px-3 py-2 text-center text-sm leading-normal ${
                         variableStarListSelection ? 'text-white' : 'text-gray-400'
                       }`}
                       style={{ textAlignLast: 'center' }}
@@ -3739,7 +3739,7 @@ export default function RemotePage() {
                         void handleCatalogLookup()
                       }}
                       placeholder="e.g. RR Lyr"
-                      className="box-border h-10 w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent px-3 py-2 text-sm leading-normal dark:bg-transparent"
+                      className="box-border h-10 w-full rounded-full border border-gray-300 dark:border-gray-600 bg-transparent px-3 py-2 text-sm leading-normal dark:bg-transparent"
                     />
                   </label>
                 </div>
@@ -3778,7 +3778,7 @@ export default function RemotePage() {
                       value={catalogQuery}
                       onChange={(e) => setCatalogQuery(e.target.value)}
                       placeholder="Try M31, NGC 7000, IC 434, M42..."
-                      className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
+                      className="w-full rounded-full border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
                     />
                   </label>
                   <button
@@ -3871,7 +3871,7 @@ export default function RemotePage() {
                 value={raHourPart}
                 onChange={(e) => setRaHourPart(e.target.value)}
                 placeholder="Hour"
-                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
+                className="w-full rounded-full border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
               />
               <input
                 required
@@ -3880,7 +3880,7 @@ export default function RemotePage() {
                 value={raMinutePart}
                 onChange={(e) => setRaMinutePart(e.target.value)}
                 placeholder="Min"
-                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
+                className="w-full rounded-full border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
               />
               <input
                 required
@@ -3889,7 +3889,7 @@ export default function RemotePage() {
                 value={raSecondPart}
                 onChange={(e) => setRaSecondPart(e.target.value)}
                 placeholder="Sec"
-                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
+                className="w-full rounded-full border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
               />
             </div>
           </div>
@@ -3899,7 +3899,7 @@ export default function RemotePage() {
               <select
                 value={decSign}
                 onChange={(e) => setDecSign(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
+                className="w-full rounded-full border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
               >
                 <option value="+">+</option>
                 <option value="-">-</option>
@@ -3911,7 +3911,7 @@ export default function RemotePage() {
                 value={decDegreePart}
                 onChange={(e) => setDecDegreePart(e.target.value)}
                 placeholder="Deg"
-                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
+                className="w-full rounded-full border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
               />
               <input
                 required
@@ -3920,7 +3920,7 @@ export default function RemotePage() {
                 value={decMinutePart}
                 onChange={(e) => setDecMinutePart(e.target.value)}
                 placeholder="Min"
-                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
+                className="w-full rounded-full border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
               />
               <input
                 required
@@ -3929,7 +3929,7 @@ export default function RemotePage() {
                 value={decSecondPart}
                 onChange={(e) => setDecSecondPart(e.target.value)}
                 placeholder="Sec"
-                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
+                className="w-full rounded-full border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
               />
             </div>
           </div>
@@ -4027,7 +4027,7 @@ export default function RemotePage() {
                                 prev.map((x) => (x.filterName === plan.filterName ? { ...x, count: e.target.value } : x))
                               )
                             }
-                            className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent px-3 py-2 text-sm"
+                            className="w-full rounded-full border border-gray-300 dark:border-gray-600 bg-transparent px-3 py-2 text-sm"
                           />
 
                           <input
@@ -4042,7 +4042,7 @@ export default function RemotePage() {
                                 )
                               )
                             }
-                            className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent px-3 py-2 text-sm"
+                            className="w-full rounded-full border border-gray-300 dark:border-gray-600 bg-transparent px-3 py-2 text-sm"
                           />
                         </div>
                       )
@@ -4763,7 +4763,7 @@ export default function RemotePage() {
                 type="password"
                 value={authPassword}
                 onChange={(e) => setAuthPassword(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
+                className="w-full rounded-full border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
               />
             </label>
             {authError && <p className="text-sm text-red-400">{authError}</p>}
@@ -4836,7 +4836,7 @@ export default function RemotePage() {
                     type="password"
                     value={deletePassword}
                     onChange={(e) => setDeletePassword(e.target.value)}
-                    className="w-full rounded-lg border border-gray-600 bg-transparent px-3 py-2 text-sm text-white placeholder:text-gray-500"
+                    className="w-full rounded-full border border-gray-600 bg-transparent px-3 py-2 text-sm text-white placeholder:text-gray-500"
                   />
                 </label>
               )
@@ -4879,7 +4879,7 @@ export default function RemotePage() {
                 type="text"
                 value={saveModalName}
                 onChange={(e) => setSaveModalName(e.target.value)}
-                className="w-full rounded-lg border border-gray-600 bg-transparent px-3 py-2 text-sm text-white placeholder:text-gray-500"
+                className="w-full rounded-full border border-gray-600 bg-transparent px-3 py-2 text-sm text-white placeholder:text-gray-500"
               />
             </label>
             {saveModalError && <p className="text-sm text-red-400">{saveModalError}</p>}
@@ -4938,7 +4938,7 @@ export default function RemotePage() {
                 <select
                   value={runModalName}
                   onChange={(e) => setRunModalName(e.target.value)}
-                  className="w-full rounded-lg border border-gray-600 bg-transparent px-3 py-2 text-sm text-white"
+                  className="w-full rounded-full border border-gray-600 bg-transparent px-3 py-2 text-sm text-white"
                 >
                   <option value="">Select…</option>
                   {cloudSavedSessions.map((s) => (
@@ -4955,7 +4955,7 @@ export default function RemotePage() {
                 type="text"
                 value={runModalName}
                 onChange={(e) => setRunModalName(e.target.value)}
-                className="w-full rounded-lg border border-gray-600 bg-transparent px-3 py-2 text-sm text-white placeholder:text-gray-500"
+                className="w-full rounded-full border border-gray-600 bg-transparent px-3 py-2 text-sm text-white placeholder:text-gray-500"
               />
             </label>
             {runModalError && <p className="text-sm text-red-400">{runModalError}</p>}

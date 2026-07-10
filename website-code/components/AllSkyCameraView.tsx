@@ -7,6 +7,7 @@ import { useObservatoryEnvelope } from '@/hooks/use-observatory-envelope'
 import { useAppStore } from '@/lib/store'
 import MJPEGStream from '@/components/MJPEGStream'
 import { allSkyCameraStatusUrl } from '@/lib/asc-cloud'
+import { moonPhaseInfo } from '@/lib/moon-avoidance'
 import { fetchOpenMeteoCurrentWeather } from '@/lib/open-meteo-current'
 import {
   observatoryOverlayStatusIsRed,
@@ -22,6 +23,14 @@ function formatOverlayDateTime(d: Date): string {
     minute: '2-digit',
     second: '2-digit',
   })
+}
+
+/** Format ASC photo exposure (microseconds) for the overlay. */
+export function formatAscExposureUs(exposureUs: number): string {
+  if (!Number.isFinite(exposureUs) || exposureUs < 0) return '—'
+  if (exposureUs >= 1_000_000) return `${(exposureUs / 1_000_000).toFixed(2)} s`
+  if (exposureUs >= 1_000) return `${(exposureUs / 1_000).toFixed(exposureUs >= 10_000 ? 0 : 1)} ms`
+  return `${Math.round(exposureUs)} μs`
 }
 
 /** Same host as MJPEG: camera_service GET /status or GET /camera/status. */
@@ -87,9 +96,12 @@ export default function AllSkyCameraView() {
   // Start `now` as null so SSR and first client paint match; populate after mount.
   const [now, setNow] = useState<Date | null>(null)
   const [lastFrameAt, setLastFrameAt] = useState<Date | null>(null)
+  const [exposureUs, setExposureUs] = useState<number | null>(null)
+  const [gain, setGain] = useState<number | null>(null)
   const [cloudPct, setCloudPct] = useState<number | null>(null)
   const [raining, setRaining] = useState<boolean | null>(null)
   const [windKmh, setWindKmh] = useState<number | null>(null)
+  const [windGustKmh, setWindGustKmh] = useState<number | null>(null)
   const [tempC, setTempC] = useState<number | null>(null)
   const [humidityPct, setHumidityPct] = useState<number | null>(null)
 
@@ -103,6 +115,7 @@ export default function AllSkyCameraView() {
     const loadWeather = async () => {
       const wx = await fetchOpenMeteoCurrentWeather()
       setWindKmh(wx.windSpeedKmh)
+      setWindGustKmh(wx.windGustKmh)
       setTempC(wx.temperatureC)
       setHumidityPct(wx.humidityPercent)
     }
@@ -115,6 +128,8 @@ export default function AllSkyCameraView() {
     const statusUrl = resolveAllSkyStatusUrl(streamURL)
     if (!statusUrl) {
       setLastFrameAt(null)
+      setExposureUs(null)
+      setGain(null)
       setCloudPct(null)
       setRaining(null)
       return
@@ -135,6 +150,12 @@ export default function AllSkyCameraView() {
               autoMode?: boolean
               lastStreamFrameIso?: string | null
               lastAutoFrameIso?: string | null
+              exposureUs?: number | null
+              gain?: number | null
+              autoModeTargetGain?: number | null
+              autoTuning?: {
+                photoExposureUs?: number | null
+              } | null
               ascCloud?: {
                 cloudCoverPercent?: number | null
                 rain?: {
@@ -157,6 +178,25 @@ export default function AllSkyCameraView() {
         if (!cancelled) {
           setRaining(typeof rainDetected === 'boolean' ? rainDetected : null)
         }
+
+        const expRaw =
+          typeof cam?.exposureUs === 'number' && Number.isFinite(cam.exposureUs)
+            ? cam.exposureUs
+            : typeof cam?.autoTuning?.photoExposureUs === 'number' &&
+                Number.isFinite(cam.autoTuning.photoExposureUs)
+              ? cam.autoTuning.photoExposureUs
+              : null
+        const gainRaw =
+          typeof cam?.gain === 'number' && Number.isFinite(cam.gain)
+            ? cam.gain
+            : typeof cam?.autoModeTargetGain === 'number' && Number.isFinite(cam.autoModeTargetGain)
+              ? cam.autoModeTargetGain
+              : null
+        if (!cancelled) {
+          setExposureUs(expRaw)
+          setGain(gainRaw)
+        }
+
         const iso =
           cam?.mode === 'auto' ||
             cam?.mode === 'half_hour' ||
@@ -186,6 +226,15 @@ export default function AllSkyCameraView() {
     const obsText = observatoryOverlayStatusLabel(observatoryStatus)
     const obsValueRed = observatoryOverlayStatusIsRed(observatoryStatus)
 
+    const exposureGainText =
+      exposureUs != null && gain != null
+        ? `${formatAscExposureUs(exposureUs)} / gain ${Math.round(gain)}`
+        : exposureUs != null
+          ? `${formatAscExposureUs(exposureUs)} / gain —`
+          : gain != null
+            ? `— / gain ${Math.round(gain)}`
+            : '—'
+
     const cloudText =
       cloudPct != null && Number.isFinite(cloudPct) ? `${Math.round(cloudPct)}%` : '—'
     const cloudValueRed = cloudPct != null && Number.isFinite(cloudPct) && cloudPct > 20
@@ -194,6 +243,11 @@ export default function AllSkyCameraView() {
       windKmh != null && Number.isFinite(windKmh) ? `${windKmh.toFixed(0)} km/h` : '—'
     const windValueRed = windKmh != null && Number.isFinite(windKmh) && windKmh > 36
 
+    const windGustText =
+      windGustKmh != null && Number.isFinite(windGustKmh) ? `${windGustKmh.toFixed(0)} km/h` : '—'
+    const windGustValueRed =
+      windGustKmh != null && Number.isFinite(windGustKmh) && windGustKmh > 36
+
     const tempText = tempC != null && Number.isFinite(tempC) ? `${tempC.toFixed(1)}°C` : '—'
 
     const humText =
@@ -201,6 +255,9 @@ export default function AllSkyCameraView() {
     const humValueRed = humidityPct != null && Number.isFinite(humidityPct) && humidityPct > 90
 
     const rainingText = raining === true ? 'True' : raining === false ? 'False' : '—'
+
+    const moonIllumPct = now ? Math.round(moonPhaseInfo(now).illumination * 100) : null
+    const moonIllumText = moonIllumPct != null ? `${moonIllumPct}%` : '—'
 
     const dashClass = overlayValueGreen
 
@@ -217,6 +274,12 @@ export default function AllSkyCameraView() {
           <span className={overlayTitleClass}>ASC View Last Updated: </span>
           <span className={lastFrameAt ? overlayValueGreen : dashClass}>
             {lastFrameAt ? formatOverlayDateTime(lastFrameAt) : '—'}
+          </span>
+        </p>
+        <p className="break-words">
+          <span className={overlayTitleClass}>ASC Exposure &amp; Gain: </span>
+          <span className={exposureGainText === '—' ? dashClass : overlayValueGreen}>
+            {exposureGainText}
           </span>
         </p>
         <p className="break-words">
@@ -239,6 +302,12 @@ export default function AllSkyCameraView() {
           <span className={overlayTitleClass}>Wind: </span>
           <span className={windText === '—' ? dashClass : overlayValueClass(windValueRed)}>
             {windText}
+          </span>
+        </p>
+        <p className="break-words">
+          <span className={overlayTitleClass}>Wind Gust: </span>
+          <span className={windGustText === '—' ? dashClass : overlayValueClass(windGustValueRed)}>
+            {windGustText}
           </span>
         </p>
         <p className="break-words">
@@ -265,9 +334,25 @@ export default function AllSkyCameraView() {
             {rainingText}
           </span>
         </p>
+        <p className="break-words">
+          <span className={overlayTitleClass}>Moon Illumination: </span>
+          <span className={moonIllumText === '—' ? dashClass : overlayValueGreen}>{moonIllumText}</span>
+        </p>
       </div>
     )
-  }, [now, lastFrameAt, observatoryStatus, cloudPct, windKmh, tempC, humidityPct, raining])
+  }, [
+    now,
+    lastFrameAt,
+    exposureUs,
+    gain,
+    observatoryStatus,
+    cloudPct,
+    windKmh,
+    windGustKmh,
+    tempC,
+    humidityPct,
+    raining,
+  ])
 
   return (
     <div className="flex h-full flex-col">

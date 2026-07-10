@@ -4,12 +4,13 @@ export type OpenMeteoCurrentWeather = {
   temperatureC: number | null
   humidityPercent: number | null
   windSpeedKmh: number | null
+  windGustKmh: number | null
 }
 
 export function openMeteoCurrentWeatherUrl(): string {
   return (
     `https://api.open-meteo.com/v1/forecast?latitude=${OBS_LAT_DEG}&longitude=${OBS_LON_DEG}` +
-    '&current=temperature_2m,relative_humidity_2m,wind_speed_10m&timezone=auto'
+    '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_gusts_10m&timezone=auto'
   )
 }
 
@@ -21,11 +22,12 @@ export async function fetchOpenMeteoCurrentWeather(): Promise<OpenMeteoCurrentWe
         temperature_2m?: number
         relative_humidity_2m?: number
         wind_speed_10m?: number
+        wind_gusts_10m?: number
       }
     }
     const c = data.current
     if (!c) {
-      return { temperatureC: null, humidityPercent: null, windSpeedKmh: null }
+      return { temperatureC: null, humidityPercent: null, windSpeedKmh: null, windGustKmh: null }
     }
     return {
       temperatureC:
@@ -40,8 +42,12 @@ export async function fetchOpenMeteoCurrentWeather(): Promise<OpenMeteoCurrentWe
         typeof c.wind_speed_10m === 'number' && Number.isFinite(c.wind_speed_10m)
           ? c.wind_speed_10m
           : null,
+      windGustKmh:
+        typeof c.wind_gusts_10m === 'number' && Number.isFinite(c.wind_gusts_10m)
+          ? c.wind_gusts_10m
+          : null,
     }
   } catch {
-    return { temperatureC: null, humidityPercent: null, windSpeedKmh: null }
+    return { temperatureC: null, humidityPercent: null, windSpeedKmh: null, windGustKmh: null }
   }
 }

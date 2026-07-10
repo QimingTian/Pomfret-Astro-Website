@@ -1185,6 +1185,9 @@ def _status_payload():
                 'lastStreamFrameIso': camera_state.get('stream_last_frame_iso'),
                 'lastAutoFrameIso': camera_state.get('last_auto_frame_iso'),
                 'fault': camera_state['error'],
+                # Live photo exposure (μs) + gain for Weather ASC overlay / admin.
+                'exposureUs': camera_state.get('exposure'),
+                'gain': camera_state.get('gain'),
                 'gainMin': camera_state.get('gain_min', 0),
                 'gainMax': camera_state.get('gain_max', 500),
                 'autoExposureBrightness': auto_state.get('last_brightness_mean'),

@@ -8,22 +8,18 @@ import {
   updateEmergencyStopHeldSessionIds,
 } from '@/lib/imaging-emergency-stop'
 import { applyEmergencyStopHolds } from '@/lib/imaging-emergency-stop-holds'
-import { computeSiteImagingActive } from '@/lib/imaging/site-imaging-active'
 import {
   clearNinaStoppedPendingFail,
   failInProgressBoardSessions,
   failInProgressProjectSubSessions,
 } from '@/lib/imaging-session-failure'
-import { listBoardEntries } from '@/lib/imaging-session-board'
-import { listAll } from '@/lib/imaging-queue-store'
-import { listProjects } from '@/lib/imaging-project-store'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
-import { isNinaReportedRunningNow } from '@/lib/observatory-status-store'
+import { isObservatoryNight } from '@/lib/observatory-poll-schedule'
 import { OBS_LAT_DEG, OBS_LON_DEG } from '@/lib/target-altitude'
 
 /** Lead-time ring for thunderstorm approach (≈30–60 min at typical summer storm speeds). */
 export const STORM_APPROACH_RADIUS_KM = 20
-/** Match tonight weather gate precip hard-block. */
+/** Kept for tests / callers; site precip is no longer an auto-ESTOP trigger. */
 export const PRECIP_ESTOP_THRESHOLD = 10
 export const WEATHER_SAFETY_DEBOUNCE_MS = 45_000
 
@@ -31,7 +27,7 @@ const DEBOUNCE_KV_KEY = 'imaging-weather-safety-estop-last-arm'
 const EARTH_RADIUS_KM = 6371
 const THUNDERSTORM_CODES = new Set([95, 96, 99])
 
-export type WeatherSafetyThreatKind = 'asc_rain' | 'site_precip_forecast' | 'storm_approach'
+export type WeatherSafetyThreatKind = 'asc_rain' | 'storm_approach'
 
 export type WeatherSafetyThreat = {
   kind: WeatherSafetyThreatKind
@@ -41,7 +37,7 @@ export type WeatherSafetyThreat = {
 
 export type WeatherSafetyArmResult = {
   armed: boolean
-  skipped?: 'no_threat' | 'not_imaging' | 'already_blocking' | 'debounced' | 'error'
+  skipped?: 'no_threat' | 'daytime' | 'already_blocking' | 'debounced' | 'error'
   threat?: WeatherSafetyThreat
   queueId?: string
 }
@@ -132,47 +128,28 @@ function currentAndNextHourSamples(
     }
   }
   if (!current && !next && sorted.length > 0) {
-    // Past last sample start but still within last hour window
     const last = sorted[sorted.length - 1]!
     if (nowSec < last.timeSec + 3600) current = last
   }
   return { current, next }
 }
 
-/** Pure threat picker from already-fetched ASC + forecast samples (testable). */
+/**
+ * Night auto-ESTOP threats: ASC rain and/or 20 km thunderstorm approach.
+ * Site precip forecast is intentionally not an ESTOP trigger.
+ */
 export function pickWeatherSafetyThreat(input: {
   ascRainDetected: boolean
-  siteHours: ForecastHourSample[]
   ringLocations: LocationForecast[]
   nowSec?: number
-  precipThreshold?: number
 }): WeatherSafetyThreat | null {
   const nowSec = input.nowSec ?? Math.floor(Date.now() / 1000)
-  const precipThreshold = input.precipThreshold ?? PRECIP_ESTOP_THRESHOLD
 
   if (input.ascRainDetected) {
     return {
       kind: 'asc_rain',
-      reason: 'ASC AI detected rain while a session is in progress.',
+      reason: 'ASC AI detected rain during nautical night (dusk→dawn).',
       detail: { ascRainDetected: true },
-    }
-  }
-
-  const site = currentAndNextHourSamples(input.siteHours, nowSec)
-  for (const label of ['current', 'next'] as const) {
-    const hour = site[label]
-    if (hour && precipThreatAtOrAbove(hour.precipProbability, precipThreshold)) {
-      return {
-        kind: 'site_precip_forecast',
-        reason: `Site forecast ${label} hour precipitation probability ${hour.precipProbability}% (≥${precipThreshold}%).`,
-        detail: {
-          hour: label,
-          precipProbability: hour.precipProbability,
-          weatherCode: hour.weatherCode,
-          hourStartSec: hour.timeSec,
-          threshold: precipThreshold,
-        },
-      }
     }
   }
 
@@ -197,7 +174,7 @@ export function pickStormApproachThreat(input: {
       if (!isThunderstormWeatherCode(hour.weatherCode)) continue
       return {
         kind: 'storm_approach',
-        reason: `Thunderstorm weather code ${hour.weatherCode} within ${STORM_APPROACH_RADIUS_KM} km (${label} hour, ~${loc.distanceKm.toFixed(0)} km away).`,
+        reason: `Thunderstorm weather code ${hour.weatherCode} within ${STORM_APPROACH_RADIUS_KM} km during nautical night (${label} hour, ~${loc.distanceKm.toFixed(0)} km away).`,
         detail: {
           hour: label,
           weatherCode: hour.weatherCode,
@@ -256,10 +233,7 @@ function parseOpenMeteoMulti(
   return out
 }
 
-async function fetchRingForecasts(): Promise<{
-  siteHours: ForecastHourSample[]
-  ringLocations: LocationForecast[]
-} | null> {
+async function fetchRingForecasts(): Promise<LocationForecast[] | null> {
   const points = ringSampleCoordinates(OBS_LAT_DEG, OBS_LON_DEG, STORM_APPROACH_RADIUS_KM, 8)
   const lats = points.map((p) => p.lat.toFixed(4)).join(',')
   const lons = points.map((p) => p.lon.toFixed(4)).join(',')
@@ -273,28 +247,23 @@ async function fetchRingForecasts(): Promise<{
     const res = await fetch(url, { cache: 'no-store' })
     if (!res.ok) return null
     const data = (await res.json()) as unknown
-    const locations = parseOpenMeteoMulti(
+    return parseOpenMeteoMulti(
       data,
       points.map((p) => ({ lat: p.lat, lon: p.lon, distanceKm: p.distanceKm }))
     )
-    const site = locations.find((l) => l.distanceKm === 0) ?? locations[0]
-    return {
-      siteHours: site?.hours ?? [],
-      ringLocations: locations,
-    }
   } catch {
     return null
   }
 }
 
 export async function evaluateWeatherSafetyThreat(): Promise<WeatherSafetyThreat | null> {
-  const [ascCloud, forecasts] = await Promise.all([fetchAscCloud(), fetchRingForecasts()])
+  const [ascCloud, ringLocations] = await Promise.all([fetchAscCloud(), fetchRingForecasts()])
   const ascRainDetected = ascCloud?.rain?.detected === true
-  if (!forecasts) {
+  if (!ringLocations) {
     if (ascRainDetected) {
       return {
         kind: 'asc_rain',
-        reason: 'ASC AI detected rain while a session is in progress.',
+        reason: 'ASC AI detected rain during nautical night (dusk→dawn).',
         detail: { ascRainDetected: true, forecastUnavailable: true },
       }
     }
@@ -302,8 +271,7 @@ export async function evaluateWeatherSafetyThreat(): Promise<WeatherSafetyThreat
   }
   return pickWeatherSafetyThreat({
     ascRainDetected,
-    siteHours: forecasts.siteHours,
-    ringLocations: forecasts.ringLocations,
+    ringLocations,
   })
 }
 
@@ -316,24 +284,14 @@ export type StormApproachStatus = {
 
 /** UI + ESTOP share this: Open-Meteo ring at {@link STORM_APPROACH_RADIUS_KM}. */
 export async function evaluateStormApproachStatus(): Promise<StormApproachStatus | null> {
-  const forecasts = await fetchRingForecasts()
-  if (!forecasts) return null
-  const threat = pickStormApproachThreat({ ringLocations: forecasts.ringLocations })
+  const ringLocations = await fetchRingForecasts()
+  if (!ringLocations) return null
+  const threat = pickStormApproachThreat({ ringLocations })
   return {
     safe: threat == null,
     radiusKm: STORM_APPROACH_RADIUS_KM,
     threat,
   }
-}
-
-async function isImagingActiveNow(): Promise<boolean> {
-  const [queueRows, boardRows, projects, ninaRunning] = await Promise.all([
-    listAll(),
-    listBoardEntries(),
-    listProjects(),
-    isNinaReportedRunningNow(),
-  ])
-  return computeSiteImagingActive({ queueRows, boardRows, projects, ninaRunning })
 }
 
 async function readDebounceMs(): Promise<number> {
@@ -395,6 +353,7 @@ async function armWeatherSafetyEmergencyStop(
       heldSessionIds,
       failedProjectSubSessions: failedSubs,
       failedBoardSessions: failedBoard,
+      gate: 'nautical_night',
     }),
   })
 
@@ -402,8 +361,8 @@ async function armWeatherSafetyEmergencyStop(
 }
 
 /**
- * If a weather/storm threat exists and imaging is active, arm the same ESTOP path as admin.
- * Safe to call frequently (debounce + blocking + single-flight).
+ * During nautical night (dusk→dawn), arm ESTOP on ASC rain and/or 20 km thunderstorm.
+ * Daytime is a no-op (dome closed after end-night at dawn). Ignores session in-progress.
  */
 export async function maybeArmWeatherSafetyEmergencyStop(): Promise<WeatherSafetyArmResult> {
   const g = globalThis as GlobalWithWeatherSafety
@@ -413,6 +372,9 @@ export async function maybeArmWeatherSafetyEmergencyStop(): Promise<WeatherSafet
 
   const run = (async (): Promise<WeatherSafetyArmResult> => {
     try {
+      if (!isObservatoryNight()) {
+        return { armed: false, skipped: 'daytime' }
+      }
       if (await isEmergencyStopBlocking()) {
         return { armed: false, skipped: 'already_blocking' }
       }
@@ -420,14 +382,10 @@ export async function maybeArmWeatherSafetyEmergencyStop(): Promise<WeatherSafet
       if (Date.now() - lastArm < WEATHER_SAFETY_DEBOUNCE_MS) {
         return { armed: false, skipped: 'debounced' }
       }
-      if (!(await isImagingActiveNow())) {
-        return { armed: false, skipped: 'not_imaging' }
-      }
       const threat = await evaluateWeatherSafetyThreat()
       if (!threat) {
         return { armed: false, skipped: 'no_threat' }
       }
-      // Re-check after network I/O
       if (await isEmergencyStopBlocking()) {
         return { armed: false, skipped: 'already_blocking', threat }
       }

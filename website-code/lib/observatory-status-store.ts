@@ -167,12 +167,10 @@ async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
       ascModelPhase: ascCloud?.modelPhase ?? null,
       ascLastError: ascCloud?.lastError ?? null,
     }
-    if (rainDetected || !weatherAllowed) {
-      // ASC rain / closed weather while imaging → auto ESTOP (no-op if idle).
-      void import('@/lib/imaging/weather-safety-estop').then((m) =>
-        m.triggerWeatherSafetyEmergencyStopCheck()
-      )
-    }
+    // Night weather-safety (ASC rain / thunder); daytime no-ops inside the check.
+    void import('@/lib/imaging/weather-safety-estop').then((m) =>
+      m.triggerWeatherSafetyEmergencyStopCheck()
+    )
     return weatherAllowed
   } catch {
     weatherCache = {

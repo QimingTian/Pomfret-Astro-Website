@@ -37,9 +37,7 @@ export async function POST(request: NextRequest) {
   }
 
   await reportObservatoryAgentPulse({ ninaRunning })
-  // Primary weather-safety path while NINA is actively imaging.
-  if (ninaRunning) {
-    triggerWeatherSafetyEmergencyStopCheck()
-  }
+  // Night weather-safety (ASC rain / 20 km thunder); daytime no-ops inside the check.
+  triggerWeatherSafetyEmergencyStopCheck()
   return withImagingCors({ ok: true as const, ninaRunning })
 }

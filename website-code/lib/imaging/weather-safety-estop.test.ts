@@ -33,7 +33,6 @@ test('ringSampleCoordinates includes center plus N bearings at radius', () => {
     assert.ok(Math.abs(p.distanceKm - STORM_APPROACH_RADIUS_KM) < 1e-9)
     assert.ok(Number.isFinite(p.lat) && Number.isFinite(p.lon))
   }
-  // North sample should be roughly +radius in latitude
   const north = points.find((p) => p.bearingDeg === 0 && p.distanceKm > 0)
   assert.ok(north)
   assert.ok(north!.lat > 41.9159)
@@ -43,47 +42,31 @@ test('pickWeatherSafetyThreat prefers ASC rain', () => {
   const nowSec = Date.parse('2026-07-10T02:30:00.000Z') / 1000
   const threat = pickWeatherSafetyThreat({
     ascRainDetected: true,
-    siteHours: [
-      { timeSec: nowSec - 1800, precipProbability: 0, weatherCode: 0 },
-      { timeSec: nowSec + 1800, precipProbability: 0, weatherCode: 0 },
-    ],
     ringLocations: [],
     nowSec,
   })
   assert.equal(threat?.kind, 'asc_rain')
 })
 
-test('pickWeatherSafetyThreat flags site current-hour precip >= 10%', () => {
+test('pickWeatherSafetyThreat ignores site precip-only (not an ESTOP trigger)', () => {
   const hourStart = Date.parse('2026-07-10T02:00:00.000Z') / 1000
   const nowSec = hourStart + 10 * 60
   const threat = pickWeatherSafetyThreat({
     ascRainDetected: false,
-    siteHours: [
-      { timeSec: hourStart, precipProbability: 20, weatherCode: 3 },
-      { timeSec: hourStart + 3600, precipProbability: 0, weatherCode: 0 },
+    ringLocations: [
+      {
+        lat: 41.9,
+        lon: -71.96,
+        distanceKm: 0,
+        hours: [
+          { timeSec: hourStart, precipProbability: 80, weatherCode: 61 },
+          { timeSec: hourStart + 3600, precipProbability: 50, weatherCode: 61 },
+        ],
+      },
     ],
-    ringLocations: [],
     nowSec,
   })
-  assert.equal(threat?.kind, 'site_precip_forecast')
-  assert.equal(threat?.detail.hour, 'current')
-  assert.equal(threat?.detail.precipProbability, 20)
-})
-
-test('pickWeatherSafetyThreat flags site next-hour precip >= 10%', () => {
-  const hourStart = Date.parse('2026-07-10T02:00:00.000Z') / 1000
-  const nowSec = hourStart + 10 * 60
-  const threat = pickWeatherSafetyThreat({
-    ascRainDetected: false,
-    siteHours: [
-      { timeSec: hourStart, precipProbability: 0, weatherCode: 0 },
-      { timeSec: hourStart + 3600, precipProbability: 15, weatherCode: 61 },
-    ],
-    ringLocations: [],
-    nowSec,
-  })
-  assert.equal(threat?.kind, 'site_precip_forecast')
-  assert.equal(threat?.detail.hour, 'next')
+  assert.equal(threat, null)
 })
 
 test('pickWeatherSafetyThreat flags thunderstorm on 20 km ring', () => {
@@ -102,10 +85,6 @@ test('pickWeatherSafetyThreat flags thunderstorm on 20 km ring', () => {
   ]
   const threat = pickWeatherSafetyThreat({
     ascRainDetected: false,
-    siteHours: [
-      { timeSec: hourStart, precipProbability: 0, weatherCode: 0 },
-      { timeSec: hourStart + 3600, precipProbability: 0, weatherCode: 0 },
-    ],
     ringLocations,
     nowSec,
   })
@@ -122,10 +101,6 @@ test('pickWeatherSafetyThreat returns null when clear', () => {
   const nowSec = hourStart + 5 * 60
   const threat = pickWeatherSafetyThreat({
     ascRainDetected: false,
-    siteHours: [
-      { timeSec: hourStart, precipProbability: 5, weatherCode: 2 },
-      { timeSec: hourStart + 3600, precipProbability: 0, weatherCode: 1 },
-    ],
     ringLocations: [
       {
         lat: 42.1,

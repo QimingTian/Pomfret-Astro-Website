@@ -570,7 +570,16 @@ export function shouldKeepExistingDeliverableTonight(
   now = new Date()
 ): boolean {
   const existing = getDeliverableNight(project, nightKey)
-  if (!existing) return false
+  if (!existing?.plannedStartIso) return false
+
+  const startMs = Date.parse(existing.plannedStartIso)
+  if (!Number.isFinite(startMs)) return false
+  const endMs = startMs + tonightDurationSecondsFromPlans(existing.filterPlansTonight) * 1000
+  if (endMs <= startMs) return false
+
+  // Existing block must still sit inside this project's free slice (FIFO / altitude holds).
+  const stillInFree = freeIntervals.some((iv) => startMs >= iv.startMs && endMs <= iv.endMs)
+  if (!stillInFree) return false
 
   const nowMs = now.getTime()
   const window = getTonightSchedulingWindow(now)
@@ -969,16 +978,10 @@ async function applyTonightPlansOrClearScheduled(
   }
   const project = await getProjectById(projectId)
   if (!project || !hasScheduledSubsTonight(project, nightKey)) return
-  const nowMs = now.getTime()
-  const window = getTonightSchedulingWindow(now)
-  const fullNightFree = [
-    {
-      startMs: Math.max(nowMs, window.nauticalDuskUtc.getTime()),
-      endMs: window.nauticalDawnUtc.getTime(),
-    },
-  ]
-  // Keep existing subs when weather still permits tonight — not when this project's FIFO slice is temporarily full.
-  if (shouldKeepExistingDeliverableTonight(project, fullNightFree, weatherPermittedIntervals, nightKey, now)) {
+  // Use this project's FIFO free slice (not the full night). Otherwise a later project
+  // keeps an overlapping slot that an earlier project already claimed when weather is
+  // still open somewhere tonight.
+  if (shouldKeepExistingDeliverableTonight(project, freeIntervals, weatherPermittedIntervals, nightKey, now)) {
     return
   }
   await replaceScheduledSubsForNightKey(projectId, nightKey, [], {
@@ -1483,7 +1486,9 @@ export async function reconcileActiveInProgressProjectTonight(
 
   const activeFree = subtractInProgressSubsTonight(active, freeIntervals, nightKey)
   await reconcileOneProjectTonight(active, activeFree, weatherPermittedIntervals, nightKey, now)
-  return active
+  // Re-read after persist so callers subtract the newly scheduled tonight subs (stale
+  // `active` still has pre-reconcile nights and lets the next FIFO project double-book).
+  return (await getProjectById(active.id)) ?? active
 }
 
 /** Reconcile in-progress project own subs only; queue FIFO runs in reconcilePendingScheduleStatus. */

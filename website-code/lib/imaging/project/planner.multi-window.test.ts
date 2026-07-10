@@ -213,6 +213,42 @@ test('shouldKeepExistingDeliverableTonight drops scheduled sub when admin closed
   assert.equal(insight.plannedStartIso, null)
 })
 
+test('shouldKeepExistingDeliverableTonight drops overlap when FIFO free no longer covers the slot', () => {
+  const now = new Date('2026-05-30T22:00:00.000Z')
+  const nightKey = getTonightScheduleStrip(now).nightKey
+  const plannedStartIso = '2026-05-31T01:00:00.000Z'
+  const startMs = Date.parse(plannedStartIso)
+  const scheduledNight: ProjectNight = {
+    id: 'sub-1',
+    nightIndex: 1,
+    nightKey,
+    status: 'scheduled',
+    plannedStartIso,
+    filterPlansTonight: [{ filterName: 'OIII', exposureSeconds: 300, count: 13 }],
+    ninaSequenceJson: '{"mock":true}',
+  }
+  const project: ImagingProject = {
+    ...mockProject(),
+    id: 'proj-fix',
+    target: 'Epic Mosaic Part III Fix',
+    status: 'pending',
+    nights: [scheduledNight],
+    remainingByFilter: [{ filterName: 'OIII', exposureSeconds: 300, countRemaining: 40 }],
+  }
+  const { windowStart, windowEnd } = tonightSchedulingSpan(now)
+  // Earlier in-progress project already claimed dusk→01:30; only late free remains.
+  const fifoFree = [{ startMs: startMs + 2 * 3600_000, endMs: windowEnd }]
+  const weatherOpen = [{ startMs: windowStart, endMs: windowEnd }]
+
+  assert.equal(
+    shouldKeepExistingDeliverableTonight(project, fifoFree, weatherOpen, nightKey, now),
+    false
+  )
+  const insight = projectTonightScheduleInsight(project, [], fifoFree, weatherOpen, nightKey, now)
+  assert.equal(insight.status, 'unscheduled')
+  assert.equal(insight.plannedStartIso, null)
+})
+
 test('planTonightSubSessions places future subs after in_progress into later clear weather', () => {
   const now = new Date('2026-05-17T22:30:00.000Z')
   const nightKey = getTonightScheduleStrip(now).nightKey

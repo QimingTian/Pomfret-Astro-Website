@@ -164,9 +164,20 @@ export async function reconcilePendingScheduleStatus(options?: ReconcileSchedule
       deadlineMs,
       nowMs
     )
+    // Fresh store read after active reconcile — reserve any tonight project subs already
+    // persisted (in-progress project Session N) before FIFO plans the next pending project.
+    const projectsAfterActive = await listProjects()
+    for (const occ of collectTonightProjectSubSessionOccupancy(
+      projectsAfterActive,
+      nightKey,
+      windowStartMs,
+      deadlineMs
+    )) {
+      fifoFree = subtractOccupiedFromFree(fifoFree, { startMs: occ.startMs, endMs: occ.endMs })
+    }
     let projectSubSessions = [
       ...collectTonightProjectSubSessionOccupancy(
-        await listProjects(),
+        projectsAfterActive,
         nightKey,
         windowStartMs,
         deadlineMs

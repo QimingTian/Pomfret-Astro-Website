@@ -10,7 +10,11 @@ function rowsIncludeImagingActive(rows: ReadonlyArray<StatusRow> | undefined): b
   return rows?.some((row) => queueStatusIsImagingActive(row.status)) ?? false
 }
 
-/** True when any session is in progress or the agent reports NINA is running. */
+/**
+ * True when a real imaging session is active or the agent reports NINA is running.
+ * Project-level `in_progress` alone does not count — multi-night projects stay
+ * `in_progress` between nights / daytime; only a night (sub-session) does.
+ */
 export function computeSiteImagingActive(input: {
   queueRows: ReadonlyArray<StatusRow>
   boardRows?: ReadonlyArray<StatusRow>
@@ -20,13 +24,7 @@ export function computeSiteImagingActive(input: {
   if (input.ninaRunning) return true
   if (rowsIncludeImagingActive(input.queueRows)) return true
   if (rowsIncludeImagingActive(input.boardRows)) return true
-  if (
-    input.projects?.some(
-      (project) =>
-        queueStatusIsImagingActive(project.status) ||
-        rowsIncludeImagingActive(project.nights)
-    )
-  ) {
+  if (input.projects?.some((project) => rowsIncludeImagingActive(project.nights))) {
     return true
   }
   return false

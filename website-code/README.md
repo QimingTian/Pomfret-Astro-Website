@@ -605,7 +605,7 @@ nina_agent.py                # root launcher → observatory/
 
 **Emergency STOP:** Admin `POST /api/imaging/emergency-stop` → next agent poll returns kill/close-dome JSON. While NINA reports imaging **in progress**, the poll serves ESTOP only (no competing session delivery). Dome-closed progress marks **STOPPED** in KV (`imaging-emergency-stop`).
 
-**Weather safety auto-ESTOP:** While imaging is active (`in_progress` or agent `ninaRunning`), the same ESTOP path arms automatically when (1) ASC AI detects rain, (2) site Open-Meteo current **or** next hour `precipitation_probability ≥ 10%`, or (3) a thunderstorm (`weather_code` 95/96/99) appears on a **20 km** ring around Pomfret. Hooks: agent-pulse, observatory weather refresh, schedule maintenance. Idle nights still use Closed--Weather / schedule hard-block only (no auto-ESTOP). Weather ASC overlay **Thunderstorm Detection** (Safe/Unsafe) reads the same ring via `GET /api/weather/storm-approach`.
+**Weather safety auto-ESTOP:** While a real session is active (queue/board/`project.nights` `in_progress`/`claimed`, or agent `ninaRunning`) — **not** merely a multi-night project whose top-level status is `in_progress` — the same ESTOP path arms automatically when (1) ASC AI detects rain, (2) site Open-Meteo current **or** next hour `precipitation_probability ≥ 10%`, or (3) a thunderstorm (`weather_code` 95/96/99) appears on a **20 km** ring around Pomfret. Hooks: agent-pulse, observatory weather refresh, schedule maintenance. Idle / daytime with only a parked in-progress project does not auto-ESTOP. Weather ASC overlay **Thunderstorm Detection** (Safe/Unsafe) reads the same ring via `GET /api/weather/storm-approach`.
 
 ---
 

@@ -46,6 +46,22 @@ test('computeSiteImagingActive is true for NINA, queue, board, or project nights
     true
   )
   assert.equal(
+    computeSiteImagingActive({
+      queueRows: [],
+      projects: [{ status: 'in_progress', nights: [{ status: 'scheduled' }] }],
+      ninaRunning: false,
+    }),
+    false
+  )
+  assert.equal(
+    computeSiteImagingActive({
+      queueRows: [],
+      projects: [{ status: 'in_progress', nights: [] }],
+      ninaRunning: false,
+    }),
+    false
+  )
+  assert.equal(
     computeSiteImagingActive({ queueRows: [], ninaRunning: true }),
     true
   )

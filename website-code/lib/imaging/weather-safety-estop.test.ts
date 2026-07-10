@@ -4,6 +4,7 @@ import {
   PRECIP_ESTOP_THRESHOLD,
   STORM_APPROACH_RADIUS_KM,
   isThunderstormWeatherCode,
+  pickStormApproachThreat,
   pickWeatherSafetyThreat,
   precipThreatAtOrAbove,
   ringSampleCoordinates,
@@ -88,28 +89,32 @@ test('pickWeatherSafetyThreat flags site next-hour precip >= 10%', () => {
 test('pickWeatherSafetyThreat flags thunderstorm on 20 km ring', () => {
   const hourStart = Date.parse('2026-07-10T02:00:00.000Z') / 1000
   const nowSec = hourStart + 5 * 60
+  const ringLocations = [
+    {
+      lat: 42.1,
+      lon: -71.96,
+      distanceKm: STORM_APPROACH_RADIUS_KM,
+      hours: [
+        { timeSec: hourStart, precipProbability: 40, weatherCode: 95 },
+        { timeSec: hourStart + 3600, precipProbability: 10, weatherCode: 3 },
+      ],
+    },
+  ]
   const threat = pickWeatherSafetyThreat({
     ascRainDetected: false,
     siteHours: [
       { timeSec: hourStart, precipProbability: 0, weatherCode: 0 },
       { timeSec: hourStart + 3600, precipProbability: 0, weatherCode: 0 },
     ],
-    ringLocations: [
-      {
-        lat: 42.1,
-        lon: -71.96,
-        distanceKm: STORM_APPROACH_RADIUS_KM,
-        hours: [
-          { timeSec: hourStart, precipProbability: 40, weatherCode: 95 },
-          { timeSec: hourStart + 3600, precipProbability: 10, weatherCode: 3 },
-        ],
-      },
-    ],
+    ringLocations,
     nowSec,
   })
   assert.equal(threat?.kind, 'storm_approach')
   assert.equal(threat?.detail.weatherCode, 95)
   assert.equal(threat?.detail.distanceKm, STORM_APPROACH_RADIUS_KM)
+  const stormOnly = pickStormApproachThreat({ ringLocations, nowSec })
+  assert.equal(stormOnly?.kind, 'storm_approach')
+  assert.equal(stormOnly?.detail.weatherCode, 95)
 })
 
 test('pickWeatherSafetyThreat returns null when clear', () => {

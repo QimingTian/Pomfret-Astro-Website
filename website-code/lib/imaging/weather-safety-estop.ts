@@ -176,6 +176,18 @@ export function pickWeatherSafetyThreat(input: {
     }
   }
 
+  return pickStormApproachThreat({
+    ringLocations: input.ringLocations,
+    nowSec,
+  })
+}
+
+/** Same 20 km Open-Meteo ring + WMO thunder codes used by weather-safety ESTOP. */
+export function pickStormApproachThreat(input: {
+  ringLocations: LocationForecast[]
+  nowSec?: number
+}): WeatherSafetyThreat | null {
+  const nowSec = input.nowSec ?? Math.floor(Date.now() / 1000)
   for (const loc of input.ringLocations) {
     if (loc.distanceKm <= 0) continue
     const { current, next } = currentAndNextHourSamples(loc.hours, nowSec)
@@ -199,7 +211,6 @@ export function pickWeatherSafetyThreat(input: {
       }
     }
   }
-
   return null
 }
 
@@ -294,6 +305,25 @@ export async function evaluateWeatherSafetyThreat(): Promise<WeatherSafetyThreat
     siteHours: forecasts.siteHours,
     ringLocations: forecasts.ringLocations,
   })
+}
+
+export type StormApproachStatus = {
+  /** false when a thunderstorm code is on the approach ring (current/next hour). */
+  safe: boolean
+  radiusKm: number
+  threat: WeatherSafetyThreat | null
+}
+
+/** UI + ESTOP share this: Open-Meteo ring at {@link STORM_APPROACH_RADIUS_KM}. */
+export async function evaluateStormApproachStatus(): Promise<StormApproachStatus | null> {
+  const forecasts = await fetchRingForecasts()
+  if (!forecasts) return null
+  const threat = pickStormApproachThreat({ ringLocations: forecasts.ringLocations })
+  return {
+    safe: threat == null,
+    radiusKm: STORM_APPROACH_RADIUS_KM,
+    threat,
+  }
 }
 
 async function isImagingActiveNow(): Promise<boolean> {

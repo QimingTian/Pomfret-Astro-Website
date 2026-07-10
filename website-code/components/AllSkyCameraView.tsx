@@ -104,6 +104,8 @@ export default function AllSkyCameraView() {
   const [windGustKmh, setWindGustKmh] = useState<number | null>(null)
   const [tempC, setTempC] = useState<number | null>(null)
   const [humidityPct, setHumidityPct] = useState<number | null>(null)
+  /** null = unknown / fetch failed; true = Safe; false = Unsafe (20 km ring). */
+  const [stormSafe, setStormSafe] = useState<boolean | null>(null)
 
   useEffect(() => {
     setNow(new Date())
@@ -122,6 +124,26 @@ export default function AllSkyCameraView() {
     void loadWeather()
     const id = window.setInterval(() => void loadWeather(), 60_000)
     return () => window.clearInterval(id)
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    const loadStorm = async () => {
+      try {
+        const res = await fetch('/api/weather/storm-approach', { cache: 'no-store' })
+        const data = (await res.json()) as { safe?: boolean }
+        if (cancelled) return
+        setStormSafe(res.ok && typeof data.safe === 'boolean' ? data.safe : null)
+      } catch {
+        if (!cancelled) setStormSafe(null)
+      }
+    }
+    void loadStorm()
+    const id = window.setInterval(() => void loadStorm(), 60_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
   }, [])
 
   useEffect(() => {
@@ -339,6 +361,20 @@ export default function AllSkyCameraView() {
           <span className={overlayTitleClass}>Moon Illumination: </span>
           <span className={moonIllumText === '—' ? dashClass : overlayValueGreen}>{moonIllumText}</span>
         </p>
+        <p className="break-words">
+          <span className={overlayTitleClass}>Thunderstorm Detection: </span>
+          <span
+            className={
+              stormSafe == null
+                ? dashClass
+                : stormSafe
+                  ? overlayValueGreen
+                  : overlayValueRed
+            }
+          >
+            {stormSafe == null ? '—' : stormSafe ? 'Safe' : 'Unsafe'}
+          </span>
+        </p>
       </div>
     )
   }, [
@@ -353,6 +389,7 @@ export default function AllSkyCameraView() {
     tempC,
     humidityPct,
     raining,
+    stormSafe,
   ])
 
   return (

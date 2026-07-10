@@ -91,33 +91,30 @@ export default function NOAAGoesCloudMap() {
   }, [currentPath])
 
   return (
-    <div>
-      <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-4">Cloud Map</h1>
-      <div
-        className="relative w-full rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-800 aspect-[4/3]"
-      >
-        <MapFrameTimeOverlay timeLabel={frameTimeLabel} />
-        {loading && !imageSrc ? (
-          <p className="absolute inset-0 flex items-center justify-center text-sm text-gray-500">
-            Loading cloud map…
-          </p>
-        ) : null}
-        {error ? (
-          <p className="absolute inset-0 flex items-center justify-center px-4 text-center text-sm text-red-400">
-            {error}
-          </p>
-        ) : null}
-        {imageSrc ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img
-            key={currentPath}
-            src={imageSrc}
-            alt="NOAA GOES-East CONUS GeoColor cloud animation"
-            className="absolute inset-0 h-full w-full object-cover"
-            style={{ transform: 'scale(2)', transformOrigin: '100% 0%' }}
-          />
-        ) : null}
-      </div>
+    <div
+      className="relative w-full overflow-hidden rounded-lg bg-gray-200 aspect-[4/3] dark:bg-gray-800"
+    >
+      <MapFrameTimeOverlay title="Cloud Map" timeLabel={frameTimeLabel} />
+      {loading && !imageSrc ? (
+        <p className="absolute inset-0 flex items-center justify-center text-sm text-gray-500">
+          Loading cloud map…
+        </p>
+      ) : null}
+      {error ? (
+        <p className="absolute inset-0 flex items-center justify-center px-4 text-center text-sm text-red-400">
+          {error}
+        </p>
+      ) : null}
+      {imageSrc ? (
+        /* eslint-disable-next-line @next/next/no-img-element */
+        <img
+          key={currentPath}
+          src={imageSrc}
+          alt="NOAA GOES-East CONUS GeoColor cloud animation"
+          className="absolute inset-0 h-full w-full object-cover"
+          style={{ transform: 'scale(2)', transformOrigin: '100% 0%' }}
+        />
+      ) : null}
     </div>
   )
 }

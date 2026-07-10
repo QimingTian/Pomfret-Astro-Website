@@ -266,6 +266,7 @@ export default function AllSkyCameraView() {
         className="pointer-events-none absolute left-0 top-0 z-10 max-w-[min(100%,min(92vw,28rem))] space-y-0.5 px-2.5 py-1.5 text-left text-[0.8rem] leading-tight sm:space-y-1 sm:px-3 sm:py-2 sm:text-[0.9375rem] sm:leading-snug"
         style={overlayTextShadowStyle}
       >
+        <p className="break-words font-semibold text-white">All Sky Camera</p>
         <p className="break-words">
           <span className={overlayTitleClass}>Current Time: </span>
           <span className={overlayValueClass(false)}>{now ? formatOverlayDateTime(now) : '—'}</span>
@@ -356,10 +357,7 @@ export default function AllSkyCameraView() {
 
   return (
     <div className="flex h-full flex-col">
-      <h1 className="mb-6 text-2xl font-semibold text-apple-dark dark:text-white">
-        All Sky Camera
-      </h1>
-      <div className="min-h-0 flex-1 pb-4 sm:pb-8">
+      <div className="min-h-0 flex-1">
         {!controller ? (
           <div className={`${streamAreaClass} min-h-[400px]`}>
             {overlay}

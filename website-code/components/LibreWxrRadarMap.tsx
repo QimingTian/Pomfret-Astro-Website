@@ -164,20 +164,16 @@ export default function LibreWxrRadarMap() {
   }, [frames, frameIndex])
 
   return (
-    <div>
-      <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-4">Precipitation Radar</h1>
-
-      <div
-        className="relative w-full rounded-lg overflow-hidden bg-[#1a1a1a] librewxr-radar-map aspect-[4/3]"
-      >
-        <MapFrameTimeOverlay timeLabel={frameTimeLabel} />
-        <div ref={containerRef} className="absolute inset-0 z-0 h-full w-full" />
-        {(loading || error) && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/50 text-sm text-white px-4 text-center">
-            {loading ? 'Loading radar…' : error}
-          </div>
-        )}
-      </div>
+    <div
+      className="relative w-full overflow-hidden rounded-lg bg-[#1a1a1a] librewxr-radar-map aspect-[4/3]"
+    >
+      <MapFrameTimeOverlay title="Precipitation Radar" timeLabel={frameTimeLabel} />
+      <div ref={containerRef} className="absolute inset-0 z-0 h-full w-full" />
+      {(loading || error) && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/50 text-sm text-white px-4 text-center">
+          {loading ? 'Loading radar…' : error}
+        </div>
+      )}
     </div>
   )
 }

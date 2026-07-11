@@ -1,16 +1,16 @@
 ---
-description: After website-code changes, commit and deploy to Vercel production
-globs: website-code/**
+description: After Pomfret website changes, commit and deploy to Vercel production
+globs: "{app,components,lib,hooks,middleware.ts,next.config.js,package.json}/**"
 alwaysApply: false
 ---
 
 # Pomfret website — always publish
 
-When you finish implementing or fixing anything under `website-code/` (unless the user explicitly says not to deploy):
+When you finish implementing or fixing anything in this Pomfret Astro website repo (unless the user explicitly says not to deploy):
 
-1. Commit only the relevant `website-code/` files with a clear message.
+1. Commit only the relevant app files with a clear message.
 2. `git push origin HEAD`
-3. Deploy production from `website-code/`: `npm run deploy` (`vercel --prod --yes`)
+3. Deploy production from repo root: `npm run deploy` (`vercel --prod --yes`)
 
 Report the production URL (https://www.pomfretastro.org) and Vercel inspector link.
 

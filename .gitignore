@@ -1,51 +1,50 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
 
-# --- website-code (Next.js app) ---
-website-code/node_modules/
-website-code/.pnp
-website-code/.pnp.js
-website-code/.next/
-website-code/out/
-website-code/build/
-website-code/coverage/
-website-code/.data/
-website-code/*.tsbuildinfo
-website-code/next-env.d.ts
-website-code/.vercel
-website-code/.env*.local
-website-code/.env.vercel.check
-website-code/audit-log-*.csv
-website-code/pomfret-astro*.json
-website-code/*-service-account*.json
-website-code/.local-private/
-website-code/observatory/SSH-ACCESS.local.md
-website-code/public/DJI_0149.MP4
-website-code/public/DJI_0149 frames/
-website-code/public/gallery/Thumbs.db
+# testing
+/coverage
 
-# --- third-party (local upstream clones — not deployed) ---
-third-party/nina/
-third-party/siril-1.4.2/
-third-party/ExoPlanets/
-third-party/emsdk/
-third-party/stellarium-web-engine/
-third-party/Pomfret Astro Special Event/
+# next.js
+/.next/
+/out/
+/build
 
-# --- general-platforms (Tauri / GP apps) ---
-general-platforms/**/node_modules/
-general-platforms/**/dist/
-general-platforms/**/.next/
-general-platforms/**/src-tauri/target/
-general-platforms/standard/build-config/tenant.json
-general-platforms/**/dist-ci/
-general-platforms/standard/website/public/releases/*.dmg
-general-platforms/standard/website/public/releases/*.exe
-
-# --- shared ---
+# misc
 .DS_Store
 *.pem
-__pycache__/
-*.py[cod]
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# env & secrets — never commit
+.env
+.env*.local
+.env.vercel.check
+.env.vercel.prod
+.env.vercel.tmp
+.env.vercel.*
+*-service-account*.json
+pomfret-astro*.json
+.local-private/
+observatory/SSH-ACCESS.local.md
+
+# logs / local data
+audit-log-*.csv
+.data/
+*.tsbuildinfo
+next-env.d.ts
+
+# vercel
+.vercel
+
+# large / local media
+public/DJI_0149.MP4
+public/DJI_0149 frames/
+public/gallery/Thumbs.db
+
+# python
+__pycache__/
+*.py[cod]
+.venv/

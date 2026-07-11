@@ -1,6 +1,0 @@
-{
-  "tenantId": "dev-local",
-  "apiBaseUrl": "http://127.0.0.1:7841",
-  "apiSecret": "dev-local-secret",
-  "displayName": "Development"
-}

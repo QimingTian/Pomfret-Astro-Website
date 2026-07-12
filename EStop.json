@@ -139,7 +139,7 @@
             {
               "$id": "19",
               "$type": "NINA.DiscordAlert.DiscordAlertSequenceItems.DiscordMessageInstruction, Discord Alert",
-              "Text": "Dome Closed | Tonight Finished",
+              "Text": "ESTOPPED",
               "Parent": {
                 "$ref": "14"
               },

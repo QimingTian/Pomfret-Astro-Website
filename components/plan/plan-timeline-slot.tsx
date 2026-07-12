@@ -38,6 +38,8 @@ type Props = {
   customPanels: MosaicPanel[]
   deletePanelId: number
   onDeletePanelIdChange: (id: number) => void
+  selectedPanelCoords: { raHours: number; decDeg: number } | null
+  onSelectedPanelCoords: (raHours: number, decDeg: number) => void
   onDeletePanel: () => void
 }
 
@@ -74,6 +76,8 @@ export function PlanTimelineSlot({
   customPanels,
   deletePanelId,
   onDeletePanelIdChange,
+  selectedPanelCoords,
+  onSelectedPanelCoords,
   onDeletePanel,
 }: Props) {
   const slotRef = useRef<HTMLDivElement>(null)
@@ -185,6 +189,8 @@ export function PlanTimelineSlot({
           customPanels={customPanels}
           deletePanelId={deletePanelId}
           onDeletePanelIdChange={onDeletePanelIdChange}
+          selectedPanelCoords={selectedPanelCoords}
+          onSelectedPanelCoords={onSelectedPanelCoords}
           onDeletePanel={onDeletePanel}
         />
       </div>

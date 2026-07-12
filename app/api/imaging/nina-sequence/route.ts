@@ -58,6 +58,11 @@ import { getAdminClosedWindowAt } from '@/lib/admin-closed-window-store'
 import { tryDeliverActiveAdminForceRun } from '@/lib/imaging/admin-force-run'
 import { isEmergencyStopBlocking } from '@/lib/imaging-emergency-stop'
 import { tryDeliverEmergencyStop } from '@/lib/imaging/session/estop-delivery'
+import {
+  END_NIGHT_DISCORD_AFTER_SESSIONS,
+  END_NIGHT_DISCORD_DAWN,
+  patchNinaDiscordMessageText,
+} from '@/lib/imaging/nina-discord-message'
 import endNightTemplate from '@/End Night Session.json'
 
 export const runtime = 'nodejs'
@@ -294,14 +299,22 @@ async function deliverProjectSubSessionJson(
   })
 }
 
-function endNightSequenceJson(queueId: string): string {
+function endNightSequenceJson(
+  queueId: string,
+  trigger: 'after_sessions' | 'dawn',
+): string {
   const root = structuredClone(END_NIGHT_TEMPLATE) as Record<string, unknown>
   root['PomfretAstro'] = {
     QueueId: queueId,
     SessionType: 'end_night',
+    EndNightTrigger: trigger,
     SessionProgressHint:
       'POST JSON to /api/imaging/session-progress with { "queueId": "<QueueId>", ... }',
   }
+  patchNinaDiscordMessageText(
+    root,
+    trigger === 'dawn' ? END_NIGHT_DISCORD_DAWN : END_NIGHT_DISCORD_AFTER_SESSIONS,
+  )
   return JSON.stringify(root, null, 2)
 }
 
@@ -510,7 +523,7 @@ export async function GET(request: NextRequest) {
 
     if (afterSessionsEligible && !(await wasEndNightAfterSessionsSent(nightKey))) {
       const queueId = `end-night-${nightKey}`
-      const payload = endNightSequenceJson(queueId)
+      const payload = endNightSequenceJson(queueId, 'after_sessions')
       await markEndNightAfterSessionsSent(nightKey)
       void logEndNightDelivered({ nightKey, queueId, trigger: 'after_sessions' })
       return new NextResponse(payload, {
@@ -525,7 +538,7 @@ export async function GET(request: NextRequest) {
 
     if (nowMs >= nauticalDawnMs && !(await wasEndNightDawnSent(nightKey))) {
       const queueId = `end-night-${nightKey}-dawn`
-      const payload = endNightSequenceJson(queueId)
+      const payload = endNightSequenceJson(queueId, 'dawn')
       await markEndNightDawnSent(nightKey)
       void logEndNightDelivered({ nightKey, queueId, trigger: 'nautical_dawn' })
       return new NextResponse(payload, {

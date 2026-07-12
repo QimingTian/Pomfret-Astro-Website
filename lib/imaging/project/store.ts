@@ -169,18 +169,22 @@ export function sumRemainingByFilterAcrossPanels(
   panelRemaining: FilterRemainingRow[][],
 ): FilterRemainingRow[] {
   if (panelRemaining.length === 0) return []
-  const names = panelRemaining[0]!.map((r) => r.filterName)
-  return names.map((filterName, fi) => {
-    const exposureSeconds =
-      panelRemaining.find((rows) => rows[fi]?.filterName === filterName)?.[fi]?.exposureSeconds ??
-      panelRemaining[0]![fi]!.exposureSeconds
-    let countRemaining = 0
-    for (const rows of panelRemaining) {
-      const row = rows.find((r) => r.filterName === filterName)
-      countRemaining += Math.max(0, row?.countRemaining ?? 0)
+  const byFilter = new Map<string, FilterRemainingRow>()
+  for (const rows of panelRemaining) {
+    for (const row of rows) {
+      const prev = byFilter.get(row.filterName)
+      if (!prev) {
+        byFilter.set(row.filterName, {
+          filterName: row.filterName,
+          exposureSeconds: row.exposureSeconds,
+          countRemaining: Math.max(0, row.countRemaining),
+        })
+      } else {
+        prev.countRemaining += Math.max(0, row.countRemaining)
+      }
     }
-    return { filterName, exposureSeconds, countRemaining }
-  })
+  }
+  return Array.from(byFilter.values())
 }
 
 const KEY = 'imaging-projects'
@@ -531,18 +535,53 @@ export type CreateImagingProjectInput = {
   userId?: string
   mosaicMode?: boolean
   mosaicPanels?: MosaicPanel[]
+  /** Parallel to mosaicPanels — each panel may have its own filter/exposure plan. */
+  mosaicFilterPlansByPanel?: FilterPlanRow[][]
+}
+
+function aggregateFilterPlansTotal(panelPlans: FilterPlanRow[][]): FilterPlanRow[] {
+  const byKey = new Map<string, FilterPlanRow>()
+  for (const plans of panelPlans) {
+    for (const p of plans) {
+      const key = `${p.filterName}\0${p.exposureSeconds}`
+      const prev = byKey.get(key)
+      if (!prev) {
+        byKey.set(key, { ...p })
+      } else {
+        prev.count += p.count
+      }
+    }
+  }
+  return Array.from(byKey.values())
 }
 
 export async function createImagingProject(input: CreateImagingProjectInput): Promise<ImagingProject> {
   const ts = new Date().toISOString()
-  const remainingByFilter: FilterRemainingRow[] = input.filterPlans.map((p) => ({
+  const perPanelPlans =
+    input.mosaicMode &&
+    input.mosaicPanels?.length &&
+    input.mosaicFilterPlansByPanel?.length === input.mosaicPanels.length
+      ? input.mosaicFilterPlansByPanel
+      : null
+  const filterPlansTotal = perPanelPlans
+    ? aggregateFilterPlansTotal(perPanelPlans)
+    : input.filterPlans.map((p) => ({ ...p }))
+  const remainingByFilter: FilterRemainingRow[] = filterPlansTotal.map((p) => ({
     filterName: p.filterName,
     exposureSeconds: p.exposureSeconds,
     countRemaining: p.count,
   }))
   const mosaicRemainingByPanel =
     input.mosaicMode && input.mosaicPanels?.length
-      ? input.mosaicPanels.map(() => remainingByFilter.map((r) => ({ ...r })))
+      ? perPanelPlans
+        ? perPanelPlans.map((plans) =>
+            plans.map((p) => ({
+              filterName: p.filterName,
+              exposureSeconds: p.exposureSeconds,
+              countRemaining: p.count,
+            })),
+          )
+        : input.mosaicPanels.map(() => remainingByFilter.map((r) => ({ ...r })))
       : undefined
   const project: ImagingProject = {
     id: input.id,
@@ -555,8 +594,10 @@ export async function createImagingProject(input: CreateImagingProjectInput): Pr
     decDeg: input.decDeg,
     outputMode: input.outputMode,
     ...(input.cameraCoolingTempC != null ? { cameraCoolingTempC: input.cameraCoolingTempC } : {}),
-    filterPlansTotal: input.filterPlans.map((p) => ({ ...p })),
-    remainingByFilter,
+    filterPlansTotal,
+    remainingByFilter: perPanelPlans
+      ? sumRemainingByFilterAcrossPanels(mosaicRemainingByPanel ?? [])
+      : remainingByFilter,
     nights: [],
     firstName: input.firstName ?? null,
     lastName: input.lastName ?? null,

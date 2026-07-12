@@ -1,14 +1,15 @@
 'use client'
 
-import { useEffect, useMemo, type RefObject } from 'react'
-import { computeFovOverlayRotationDeg, type FovOverlayStel } from '@/lib/fov-overlay'
+import { useEffect, useMemo, useRef, type RefObject } from 'react'
+import {
+  computeFovOverlayRotationDeg,
+  raDecToScreenDelta,
+  screenDeltaToRaDec,
+  type FovOverlayStel,
+} from '@/lib/fov-overlay'
 import { computeFov, overlayRotationDeg, type ImagingEquipment } from '@/lib/imaging/equipment/equipment'
 import { computeGridPanelLayoutDeltaPx, type GridLayoutParams } from '@/lib/mosaic/calculate-mosaic-panels'
-import {
-  layoutDeltaToScreenDelta,
-  panelScreenOffsetToRaDec,
-  viewportArcsecPerPixel,
-} from '@/lib/mosaic/panel-coordinates'
+import { layoutDeltaToScreenDelta } from '@/lib/mosaic/panel-coordinates'
 import type { MosaicPanel } from '@/lib/mosaic/framing-rectangle'
 
 const DEG2RAD = Math.PI / 180
@@ -21,6 +22,8 @@ export type CameraFrameProfile = {
 
 type FrameOffsetRef = RefObject<{ x: number; y: number }>
 
+export type CustomDragVisual = { panelId: number; x: number; y: number }
+
 type Options = {
   enabled: boolean
   equipment: ImagingEquipment | null
@@ -32,14 +35,17 @@ type Options = {
   mosaicOverlayRefs?: RefObject<Map<number, HTMLDivElement>>
   mosaicPanels?: MosaicPanel[]
   isMosaic?: boolean
-  /** Grid: sensor layout deltas from mosaic center; custom: screen deltas. */
+  /** Grid: sensor layout from mosaic center. Custom: see getCustomDragVisual. */
   useSensorLayout?: boolean
   gridLayout?: GridLayoutParams | null
-  /** Grid Lock: sky position of the accumulated screen offset (same path as Custom panels). */
+  /** Grid: committed mosaic center for layout rotation (must be stable — never live inverse). */
   getGridScreenSkyCenter?: () => { raHours: number; decDeg: number } | null
-  /** Grid Lock drag: panels derived from live center without waiting for React commit. */
-  getGridDisplayPanels?: () => MosaicPanel[]
   getViewCenterRaDec?: () => { raHours: number; decDeg: number } | null
+  /**
+   * Custom drag/pin visual in screen pixels, read from a ref each frame.
+   * Avoids React state lag that desyncs the cursor from the frame.
+   */
+  getCustomDragVisual?: () => CustomDragVisual | null
 }
 
 export function useCameraFrameProfile(
@@ -75,11 +81,7 @@ function panelScreenOffset(
 
   let layoutDeltaXPx = panel.layoutDeltaXPx
   let layoutDeltaYPx = panel.layoutDeltaYPx
-  if (
-    (layoutDeltaXPx == null || layoutDeltaYPx == null) &&
-    gridLayout &&
-    equipment
-  ) {
+  if ((layoutDeltaXPx == null || layoutDeltaYPx == null) && gridLayout && equipment) {
     const hPanels = Math.max(1, Math.round(gridLayout.horizontalPanels))
     const col = panelIndex % hPanels
     const row = Math.floor(panelIndex / hPanels)
@@ -120,30 +122,6 @@ function applyFrameTransform(
   el.style.transform = `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) rotate(${rotationDeg}deg)`
 }
 
-function panelSkyPosition(
-  panel: MosaicPanel,
-  drag: { x: number; y: number },
-  boresightRotDeg: number,
-  getViewCenterRaDec: (() => { raHours: number; decDeg: number } | null) | undefined,
-  viewportWidthPx: number,
-  viewportHeightPx: number,
-  hFovDeg: number,
-  vFovDeg: number,
-): { raHours: number; decDeg: number } | null {
-  const center = getViewCenterRaDec?.()
-  if (!center) return { raHours: panel.raHours, decDeg: panel.decDeg }
-  const arcsec = viewportArcsecPerPixel(viewportWidthPx, viewportHeightPx, hFovDeg, vFovDeg)
-  return panelScreenOffsetToRaDec(
-    center.raHours,
-    center.decDeg,
-    panel.screenDeltaXPx + drag.x,
-    panel.screenDeltaYPx + drag.y,
-    boresightRotDeg,
-    arcsec.x,
-    arcsec.y,
-  )
-}
-
 /** Borean Atlas camera-frame RAF loop — drives overlay size + parallactic rotation. */
 export function useCameraFrameOverlay({
   enabled,
@@ -159,10 +137,12 @@ export function useCameraFrameOverlay({
   useSensorLayout = true,
   gridLayout = null,
   getGridScreenSkyCenter,
-  getGridDisplayPanels,
   getViewCenterRaDec,
+  getCustomDragVisual,
 }: Options): CameraFrameProfile | null {
   const profile = useCameraFrameProfile(enabled, equipment)
+  const mosaicPanelsRef = useRef(mosaicPanels)
+  mosaicPanelsRef.current = mosaicPanels
 
   useEffect(() => {
     if (!profile || !stelReady) return
@@ -176,15 +156,13 @@ export function useCameraFrameOverlay({
       if (typeof fov === 'number' && fov > 0) {
         const scale = h / fov
         const drag = frameOffsetRef?.current ?? { x: 0, y: 0 }
-        const vFovDeg = (fov * 180) / Math.PI
-        const hFovDeg = vFovDeg * (w / h)
         const boresightRotDeg =
           computeFovOverlayRotationDeg(stel, profile.positionAngleDeg) ?? profile.positionAngleDeg
+        // Grid: translate the whole mosaic in screen space only (stable, no live inverse).
         const mosaicCenterScreen = useSensorLayout ? drag : { x: 0, y: 0 }
-        const layoutSkyCenter =
-          useSensorLayout
-            ? (getGridScreenSkyCenter?.() ?? getViewCenterRaDec?.() ?? null)
-            : null
+        const layoutSkyCenter = useSensorLayout
+          ? (getGridScreenSkyCenter?.() ?? getViewCenterRaDec?.() ?? null)
+          : null
         const layoutRotDeg =
           layoutSkyCenter && useSensorLayout
             ? (computeFovOverlayRotationDeg(
@@ -194,30 +172,75 @@ export function useCameraFrameOverlay({
                 layoutSkyCenter.decDeg,
               ) ?? boresightRotDeg)
             : boresightRotDeg
+        const customDrag = !useSensorLayout ? (getCustomDragVisual?.() ?? null) : null
 
         if (isMosaic && mosaicOverlayRefs?.current) {
-          const panels =
-            useSensorLayout && getGridDisplayPanels
-              ? getGridDisplayPanels()
-              : (mosaicPanels ?? [])
+          // Always committed panels — never live-recomputed RAs while drawing (that caused Grid sway).
+          const panels = mosaicPanelsRef.current ?? []
           for (const [id, el] of Array.from(mosaicOverlayRefs.current.entries())) {
             const panelIndex = panels.findIndex((p) => p.id === id)
             const panel = panelIndex >= 0 ? panels[panelIndex] : undefined
             if (!panel) continue
-            const offset = panelScreenOffset(
-              panel,
-              panelIndex,
-              layoutRotDeg,
-              mosaicCenterScreen,
-              useSensorLayout,
-              gridLayout,
-              equipment,
-              w,
-              h,
-              fov,
-            )
+
+            let offset: { x: number; y: number }
             let panelRotDeg = boresightRotDeg
-            if (useSensorLayout) {
+
+            if (!useSensorLayout) {
+              if (customDrag && customDrag.panelId === panel.id) {
+                // Drag/pin: ref pixels track the pointer 1:1.
+                offset = { x: customDrag.x, y: customDrag.y }
+                // Rotation from the dragged screen point (locked sky), not stale panel RA.
+                const viewCenter = getViewCenterRaDec?.() ?? null
+                const dragSky = screenDeltaToRaDec(
+                  stel,
+                  customDrag.x,
+                  customDrag.y,
+                  h,
+                  fov,
+                  viewCenter,
+                )
+                panelRotDeg =
+                  (dragSky &&
+                    computeFovOverlayRotationDeg(
+                      stel,
+                      profile.positionAngleDeg,
+                      dragSky.raHours,
+                      dragSky.decDeg,
+                    )) ??
+                  computeFovOverlayRotationDeg(
+                    stel,
+                    profile.positionAngleDeg,
+                    panel.raHours,
+                    panel.decDeg,
+                  ) ??
+                  boresightRotDeg
+              } else {
+                offset =
+                  raDecToScreenDelta(stel, panel.raHours, panel.decDeg, h, fov) ?? {
+                    x: panel.screenDeltaXPx,
+                    y: panel.screenDeltaYPx,
+                  }
+                panelRotDeg =
+                  computeFovOverlayRotationDeg(
+                    stel,
+                    profile.positionAngleDeg,
+                    panel.raHours,
+                    panel.decDeg,
+                  ) ?? boresightRotDeg
+              }
+            } else {
+              offset = panelScreenOffset(
+                panel,
+                panelIndex,
+                layoutRotDeg,
+                mosaicCenterScreen,
+                useSensorLayout,
+                gridLayout,
+                equipment,
+                w,
+                h,
+                fov,
+              )
               panelRotDeg =
                 computeFovOverlayRotationDeg(
                   stel,
@@ -225,34 +248,28 @@ export function useCameraFrameOverlay({
                   panel.raHours,
                   panel.decDeg,
                 ) ?? layoutRotDeg
-            } else {
-              const sky = panelSkyPosition(
-                panel,
-                drag,
-                boresightRotDeg,
-                getViewCenterRaDec,
-                w,
-                h,
-                hFovDeg,
-                vFovDeg,
-              )
-              panelRotDeg =
-                (sky &&
-                  computeFovOverlayRotationDeg(
-                    stel,
-                    profile.positionAngleDeg,
-                    sky.raHours,
-                    sky.decDeg,
-                  )) ??
-                boresightRotDeg
             }
             applyFrameTransform(el, profile, scale, offset, panelRotDeg)
           }
         } else {
           const el = overlayRef.current
           if (el) {
+            // 1×1 Grid: locked sky = fixed image. Rotation from THIS screen offset's sky,
+            // not stale/corrupt boresight — same pixels ⇒ same angle every time.
+            const viewCenter = getViewCenterRaDec?.() ?? layoutSkyCenter
+            const frameSky =
+              Math.hypot(drag.x, drag.y) < 0.5
+                ? viewCenter
+                : screenDeltaToRaDec(stel, drag.x, drag.y, h, fov, viewCenter)
             const rotDeg =
-              layoutSkyCenter && useSensorLayout ? layoutRotDeg : boresightRotDeg
+              (frameSky &&
+                computeFovOverlayRotationDeg(
+                  stel,
+                  profile.positionAngleDeg,
+                  frameSky.raHours,
+                  frameSky.decDeg,
+                )) ??
+              (layoutSkyCenter && useSensorLayout ? layoutRotDeg : boresightRotDeg)
             applyFrameTransform(el, profile, scale, mosaicCenterScreen, rotDeg)
           }
         }
@@ -270,13 +287,12 @@ export function useCameraFrameOverlay({
     frameOffsetRef,
     mosaicOverlayRefs,
     isMosaic,
-    mosaicPanels,
     useSensorLayout,
     gridLayout,
     equipment,
     getGridScreenSkyCenter,
-    getGridDisplayPanels,
     getViewCenterRaDec,
+    getCustomDragVisual,
   ])
 
   return profile

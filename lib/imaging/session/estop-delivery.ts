@@ -38,7 +38,10 @@ export async function tryDeliverEmergencyStop(): Promise<NextResponse | null> {
   const marked = await markEmergencyStopDelivered(state.queueId)
   if (!marked) return null
 
-  const payload = estopSequenceJson(state.queueId)
+  const payload = estopSequenceJson(state.queueId, {
+    requestedByUserId: state.requestedByUserId,
+    requestedByUsername: state.requestedByUsername,
+  })
   void appendAuditLog({
     kind: 'emergency_stop',
     message: `Emergency STOP sequence delivered to NINA agent (${state.queueId})${emergencyStopTriggeredBySuffix(state)}.`,

@@ -14,7 +14,7 @@ const RETENTION_MS = 48 * 60 * 60 * 1000
 /** Reconcile schedules, compact stale board rows, backfill schedule bars. */
 export async function runImagingScheduleMaintenance(): Promise<void> {
   await reconcilePendingScheduleStatus()
-  // Backup weather-safety poll (nautical night: ASC rain / 20 km thunderstorm).
+  // Backup weather-safety poll (nautical night: thunder / precip>20% / ASC rain detected≥99%).
   triggerWeatherSafetyEmergencyStopCheck()
   const prunedBoardIds = await compactStaleProjectBoardRows()
   for (const id of prunedBoardIds) {

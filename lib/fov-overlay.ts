@@ -49,7 +49,14 @@ function viewCenterRaDec(stel: FovOverlayStel): { raHours: number; decDeg: numbe
   }
 }
 
-/** Pixel offset of a sky point from the current view boresight (engine VIEW frame). */
+/**
+ * Pixel offset of a sky point from the current view boresight (engine VIEW frame).
+ *
+ * VIEW looks along −Z. Screen uses only VIEW x/y (with CSS Y flip). Points behind
+ * the camera (VIEW z with opposite sign to the boresight) must return null — otherwise
+ * the same screen (x,y) maps to two RA/Decs (front vs back of the unit sphere), and
+ * any inverse that scores by forward pixel error cannot tell them apart.
+ */
 export function raDecToScreenDelta(
   stel: FovOverlayStel | null,
   raHours: number,
@@ -64,6 +71,9 @@ export function raDecToScreenDelta(
     const viewCenterIcrf = stel.convertFrame(obs, 'VIEW', 'ICRF', [0, 0, -1, 0])
     const centerView = stel.convertFrame(obs, 'ICRF', 'VIEW', viewCenterIcrf)
     const targetView = stel.convertFrame(obs, 'ICRF', 'VIEW', icrfUnitFromHours(raHours, decDeg))
+    // Boresight is [0,0,−1]; visible sky has the same VIEW-z sign (negative).
+    const lookZ = centerView[2] ?? -1
+    if (!Number.isFinite(targetView[2]) || targetView[2]! * lookZ <= 0) return null
     const scale = viewportHeightPx / fovRad
     return {
       x: (targetView[0]! - centerView[0]!) * scale,
@@ -75,7 +85,7 @@ export function raDecToScreenDelta(
   }
 }
 
-/** Closed-form inverse of {@link raDecToScreenDelta} (VIEW ray + CSS Y flip). */
+/** Closed-form inverse of {@link raDecToScreenDelta} (front-hemisphere VIEW ray + CSS Y flip). */
 function screenDeltaToRaDecClosed(
   stel: FovOverlayStel,
   screenDeltaX: number,
@@ -98,24 +108,13 @@ function screenDeltaToRaDecClosed(
       tv1 /= r * 1.0001
       r2 = tv0 * tv0 + tv1 * tv1
     }
-    const cz = centerView[2] ?? -1
-    const primaryZ = cz <= 0 ? -1 : 1
-    let best: { raHours: number; decDeg: number } | null = null
-    let bestErr = Infinity
-    for (const zSign of [primaryZ, -primaryZ]) {
-      const tv2 = zSign * Math.sqrt(Math.max(0, 1 - r2))
-      const vIcrf = stel.convertFrame(obs, 'VIEW', 'ICRF', [tv0, tv1, tv2, 0])
-      const cand = icrfToRaDec(stel, vIcrf)
-      if (!cand) continue
-      const got = raDecToScreenDelta(stel, cand.raHours, cand.decDeg, viewportHeightPx, fovRad)
-      if (!got) continue
-      const err = Math.hypot(got.x - screenDeltaX, got.y - screenDeltaY)
-      if (err < bestErr) {
-        bestErr = err
-        best = cand
-      }
-    }
-    return best
+    // Only the front hemisphere. Trying ±z used to “succeed” for both because forward
+    // ignored z — that picked the antipode (e.g. 20h/+44° ↔ 08h/−44°).
+    const lookZ = centerView[2] ?? -1
+    const zSign = lookZ <= 0 ? -1 : 1
+    const tv2 = zSign * Math.sqrt(Math.max(0, 1 - r2))
+    const vIcrf = stel.convertFrame(obs, 'VIEW', 'ICRF', [tv0, tv1, tv2, 0])
+    return icrfToRaDec(stel, vIcrf)
   } catch {
     return null
   }
@@ -298,7 +297,7 @@ function observerAnglesForRaDec(
   }
 }
 
-/** Inverse of {@link raDecToScreenDelta} — closed form + Newton polish. */
+/** Inverse of {@link raDecToScreenDelta} — front-hemisphere closed form + Newton polish. */
 export function screenDeltaToRaDec(
   stel: FovOverlayStel | null,
   screenDeltaX: number,
@@ -315,9 +314,8 @@ export function screenDeltaToRaDec(
   if (Math.hypot(screenDeltaX, screenDeltaY) < 1e-6) return center
 
   const closed = screenDeltaToRaDecClosed(stel, screenDeltaX, screenDeltaY, viewportHeightPx, fovRad)
-  if (closed) {
-    const err =
-      screenDeltaForwardErrorPx(
+  const closedErr = closed
+    ? (screenDeltaForwardErrorPx(
         stel,
         closed.raHours,
         closed.decDeg,
@@ -325,26 +323,14 @@ export function screenDeltaToRaDec(
         screenDeltaY,
         viewportHeightPx,
         fovRad,
-      ) ?? Infinity
-    if (err < 0.5) return closed
-  }
+      ) ?? Infinity)
+    : Infinity
+  if (closed && closedErr < 0.5) return closed
 
   const seeds: Array<{ raHours: number; decDeg: number }> = []
   if (closed) seeds.push(closed)
   if (seed) seeds.push(seed)
   seeds.push(center)
-
-  const seedErr = seed
-    ? screenDeltaForwardErrorPx(
-        stel,
-        seed.raHours,
-        seed.decDeg,
-        screenDeltaX,
-        screenDeltaY,
-        viewportHeightPx,
-        fovRad,
-      ) ?? Infinity
-    : Infinity
 
   let best: { raHours: number; decDeg: number } | null = null
   let bestErr = Infinity
@@ -381,22 +367,8 @@ export function screenDeltaToRaDec(
     }
   }
 
-  if (best && bestErr < 1) return best
-  if (closed) {
-    const err =
-      screenDeltaForwardErrorPx(
-        stel,
-        closed.raHours,
-        closed.decDeg,
-        screenDeltaX,
-        screenDeltaY,
-        viewportHeightPx,
-        fovRad,
-      ) ?? Infinity
-    if (err < 0.5) return closed
-  }
   if (best && bestErr < 5) return best
-  if (best && Number.isFinite(seedErr) && bestErr < seedErr * 0.85) return best
+  if (closed && closedErr < 20) return closed
   return null
 }
 

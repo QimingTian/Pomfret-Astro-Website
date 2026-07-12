@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import {
   getTonightScheduleEveningAstronomyUtc,
   getTonightScheduleMorningAstronomyUtc,
@@ -10,12 +11,10 @@ import { getTonightScheduleWindowSec } from '@/lib/schedule-strip'
 import { useCameraFrameOverlay } from '@/lib/imaging/equipment/use-camera-frame-overlay'
 import { overlayRotationDeg } from '@/lib/imaging/equipment/equipment'
 import { useImagingRigs } from '@/lib/imaging/equipment/useEquipment'
-import { computeFovOverlayRotationDeg } from '@/lib/fov-overlay'
+import { computeFovOverlayRotationDeg, raDecToScreenDelta, screenDeltaToRaDec } from '@/lib/fov-overlay'
 import { calculateMosaicPanels } from '@/lib/mosaic/calculate-mosaic-panels'
 import {
   defaultPositionAngleDeg,
-  panelScreenOffsetToRaDec,
-  viewportArcsecPerPixel,
 } from '@/lib/mosaic/panel-coordinates'
 import { PLAN_MOSAIC_DRAFT_KEY } from '@/lib/mosaic/framing-rectangle'
 import type { MosaicPanel } from '@/lib/mosaic/framing-rectangle'
@@ -259,7 +258,15 @@ export default function PlanPage() {
   const [customMosaic, setCustomMosaic] = useState(false)
   const [customPanels, setCustomPanels] = useState<MosaicPanel[]>([])
   const customPanelIdRef = useRef(1)
-  const customPanelDragRef = useRef<{ panelId: number; lastX: number; lastY: number } | null>(null)
+  const customPanelDragRef = useRef<{
+    panelId: number
+    lastX: number
+    lastY: number
+    x: number
+    y: number
+  } | null>(null)
+  /** Failed commit: keep overlay on these screen pixels until next drag. */
+  const customScreenPinRef = useRef<{ panelId: number; x: number; y: number } | null>(null)
   const [deletePanelId, setDeletePanelId] = useState(1)
   const prevPlanModeRef = useRef<PlanMode>(planMode)
   const frameOffsetRef = useRef({ x: 0, y: 0 })
@@ -483,46 +490,28 @@ export default function PlanPage() {
     }
   }, [getStel])
 
-  const getViewportMetrics = useCallback(() => {
-    const stel = getStel()
-    const fov = stel?.core?.fov
-    const iframe = iframeRef.current
-    if (!stel || typeof fov !== 'number' || !iframe || !equipment) return null
-    const h = iframe.clientHeight || 520
-    const w = iframe.clientWidth || 800
-    const vFovDeg = (fov * 180) / Math.PI
-    const hFovDeg = vFovDeg * (w / h)
-    const rot =
-      computeFovOverlayRotationDeg(
-        stel as import('@/lib/fov-overlay').FovOverlayStel,
-        overlayRotationDeg(equipment),
-      ) ?? overlayRotationDeg(equipment)
-    return {
-      w,
-      h,
-      hFovDeg,
-      vFovDeg,
-      rot,
-      arcsec: viewportArcsecPerPixel(w, h, hFovDeg, vFovDeg),
-    }
-  }, [getStel, equipment])
-
   const panelCoordsFromScreenOffset = useCallback(
-    (screenDeltaXPx: number, screenDeltaYPx: number) => {
-      const center = getViewCenterRaDec()
-      const metrics = getViewportMetrics()
-      if (!center || !metrics) return null
-      return panelScreenOffsetToRaDec(
-        center.raHours,
-        center.decDeg,
-        screenDeltaXPx,
-        screenDeltaYPx,
-        metrics.rot,
-        metrics.arcsec.x,
-        metrics.arcsec.y,
-      )
+    (screenDeltaXPx: number, screenDeltaYPx: number, seed?: { raHours: number; decDeg: number } | null) => {
+      const stel = getStel() as import('@/lib/fov-overlay').FovOverlayStel | null
+      const fov = stel?.core?.fov
+      const iframe = iframeRef.current
+      const h = iframe?.clientHeight ?? 0
+      if (!stel || typeof fov !== 'number' || fov <= 0 || h <= 0) return null
+      return screenDeltaToRaDec(stel, screenDeltaXPx, screenDeltaYPx, h, fov, seed)
     },
-    [getViewCenterRaDec, getViewportMetrics],
+    [getStel],
+  )
+
+  const panelScreenOffsetFromRaDec = useCallback(
+    (raHours: number, decDeg: number) => {
+      const stel = getStel() as import('@/lib/fov-overlay').FovOverlayStel | null
+      const fov = stel?.core?.fov
+      const iframe = iframeRef.current
+      const h = iframe?.clientHeight ?? 0
+      if (!stel || typeof fov !== 'number' || fov <= 0 || h <= 0) return null
+      return raDecToScreenDelta(stel, raHours, decDeg, h, fov)
+    },
+    [getStel],
   )
 
   const gridLayout = useMemo(
@@ -538,14 +527,19 @@ export default function PlanPage() {
     [customMosaic, horizontalPanels, verticalPanels, horizontalOverlapPercent, verticalOverlapPercent],
   )
 
-  const getGridScreenSkyCenter = useCallback((): { raHours: number; decDeg: number } | null => {
-    const offset = frameOffsetRef.current
-    if (offset.x !== 0 || offset.y !== 0) {
-      return panelCoordsFromScreenOffset(offset.x, offset.y)
-    }
-    // Offset 0: mosaic metadata is boresight-centered — must match layout rotation center.
+  const getGridBoresightCenter = useCallback((): { raHours: number; decDeg: number } | null => {
     return boresightRef.current ?? boresight ?? getViewCenterRaDec()
-  }, [boresight, panelCoordsFromScreenOffset, getViewCenterRaDec])
+  }, [boresight, getViewCenterRaDec])
+
+  /** Live center while dragging Grid — labels only. Overlay must NOT use this for draw. */
+  const getGridScreenSkyCenter = useCallback((): { raHours: number; decDeg: number } | null => {
+    if (frameDragRef.current.active) {
+      const offset = frameOffsetRef.current
+      const seed = getGridBoresightCenter()
+      return panelCoordsFromScreenOffset(offset.x, offset.y, seed) ?? seed
+    }
+    return getGridBoresightCenter()
+  }, [getGridBoresightCenter, panelCoordsFromScreenOffset])
 
   const resetFrameScreenOffset = useCallback(() => {
     frameOffsetRef.current = { x: 0, y: 0 }
@@ -576,6 +570,7 @@ export default function PlanPage() {
     getGridDisplayPanels,
     panelCoordsFromScreenOffset,
     frameDragRef,
+    frameOffsetRef,
     customPanelDragRef,
     boresightRef,
   })
@@ -590,6 +585,7 @@ export default function PlanPage() {
     getGridDisplayPanels,
     panelCoordsFromScreenOffset,
     frameDragRef,
+    frameOffsetRef,
     customPanelDragRef,
     boresightRef,
   }
@@ -607,13 +603,13 @@ export default function PlanPage() {
         next = {
           kind: 'mosaic',
           panels: d.customPanels.map((p) => {
-            // Same model as Grid: stored sky coords while idle; live only while dragging.
+            // Labels: live engine coords from screenDelta while dragging; stored RA when idle.
             if (dragging && dragging.panelId === p.id) {
               const coords =
-                d.panelCoordsFromScreenOffset(p.screenDeltaXPx, p.screenDeltaYPx) ?? {
+                d.panelCoordsFromScreenOffset(dragging.x, dragging.y, {
                   raHours: p.raHours,
                   decDeg: p.decDeg,
-                }
+                }) ?? { raHours: p.raHours, decDeg: p.decDeg }
               return { id: p.id, name: p.name || `Panel ${p.id}`, center: coords }
             }
             return {
@@ -636,11 +632,15 @@ export default function PlanPage() {
           })),
         }
       } else {
+        const offset = d.frameOffsetRef.current
+        const atViewCenter = !offset || Math.hypot(offset.x, offset.y) < 0.5
         next = {
           kind: 'frame',
           center: d.frameDragRef.current.active
             ? (d.getGridScreenSkyCenter() ?? d.getViewCenterRaDec())
-            : (d.boresightRef.current ?? d.getViewCenterRaDec()),
+            : atViewCenter
+              ? d.getViewCenterRaDec()
+              : (d.boresightRef.current ?? d.getViewCenterRaDec()),
         }
       }
 
@@ -671,9 +671,10 @@ export default function PlanPage() {
     isMosaic: framingUsePanelOverlays,
     useSensorLayout: !customMosaic,
     gridLayout,
-    getGridScreenSkyCenter: customMosaic ? undefined : getGridScreenSkyCenter,
-    getGridDisplayPanels: customMosaic ? undefined : getGridDisplayPanels,
+    // Stable boresight only — never live engine inverse (that made Grid vibrate while dragging).
+    getGridScreenSkyCenter: customMosaic ? undefined : getGridBoresightCenter,
     getViewCenterRaDec,
+    getCustomDragVisual: () => customPanelDragRef.current ?? customScreenPinRef.current,
   })
 
   const gridPanelGroupDraggable =
@@ -682,7 +683,10 @@ export default function PlanPage() {
   const getLiveFramingPanelsForSend = useCallback((): MosaicPanel[] => {
     if (customMosaic) {
       return customPanels.map((p) => {
-        const coords = panelCoordsFromScreenOffset(p.screenDeltaXPx, p.screenDeltaYPx)
+        const coords = panelCoordsFromScreenOffset(p.screenDeltaXPx, p.screenDeltaYPx, {
+          raHours: p.raHours,
+          decDeg: p.decDeg,
+        })
         return coords ? { ...p, raHours: coords.raHours, decDeg: coords.decDeg } : p
       })
     }
@@ -697,23 +701,18 @@ export default function PlanPage() {
     const current = frameOffsetRef.current
     const delta = { x: current.x - start.x, y: current.y - start.y }
     if (delta.x === 0 && delta.y === 0) return
-    const metrics = getViewportMetrics()
-    const viewCenter = getViewCenterRaDec()
-    if (!metrics || !viewCenter) return
-    const next = panelScreenOffsetToRaDec(
-      viewCenter.raHours,
-      viewCenter.decDeg,
-      current.x,
-      current.y,
-      metrics.rot,
-      metrics.arcsec.x,
-      metrics.arcsec.y,
-    )
+    const view = getViewCenterRaDec()
+    const seed = view ?? boresightRef.current
+    const next = panelCoordsFromScreenOffset(current.x, current.y, seed)
+    if (!next) {
+      frameDragStartScreenOffsetRef.current = { ...current }
+      return
+    }
     const committed = { raHours: next.raHours, decDeg: next.decDeg }
     boresightRef.current = committed
     setBoresight(committed)
     frameDragStartScreenOffsetRef.current = { ...current }
-  }, [getViewCenterRaDec, getViewportMetrics])
+  }, [getViewCenterRaDec, panelCoordsFromScreenOffset])
 
   const handleFramePointerDown = useCallback((e: React.PointerEvent) => {
     if (planMode !== 'framing') return
@@ -770,14 +769,29 @@ export default function PlanPage() {
     const n = customPanels.length
     const screenDeltaXPx = ((n % 3) - 1) * 48
     const screenDeltaYPx = (Math.floor(n / 3) - (n > 0 ? 0 : 0)) * 48
-    const coords = panelCoordsFromScreenOffset(screenDeltaXPx, screenDeltaYPx)
     const center = getViewCenterRaDec()
+    const coords = panelCoordsFromScreenOffset(screenDeltaXPx, screenDeltaYPx, center)
+    // Reject wrong-branch inverses on add (same failure mode as Panel 3 → 09h/−45°).
+    let raHours = center?.raHours ?? 0
+    let decDeg = center?.decDeg ?? 0
+    if (coords && center) {
+      const dRaH = Math.abs(coords.raHours - center.raHours)
+      const dRaWrapped = Math.min(dRaH, 24 - dRaH) * 15
+      const dDec = Math.abs(coords.decDeg - center.decDeg)
+      if (dRaWrapped <= 20 && dDec <= 20) {
+        raHours = coords.raHours
+        decDeg = coords.decDeg
+      }
+    } else if (coords) {
+      raHours = coords.raHours
+      decDeg = coords.decDeg
+    }
     setCustomPanels((prev) => [
       ...prev,
       {
         id,
-        raHours: coords?.raHours ?? center?.raHours ?? 0,
-        decDeg: coords?.decDeg ?? center?.decDeg ?? 0,
+        raHours,
+        decDeg,
         positionAngleDeg: defaultPositionAngleDeg(null, overlayRotationDeg(equipment), 0),
         name: `Panel ${id}`,
         screenDeltaXPx,
@@ -793,6 +807,32 @@ export default function PlanPage() {
       return next.length > 0 ? next : prev
     })
   }, [deletePanelId])
+
+  const selectedPanelCoords = useMemo(() => {
+    if (!customMosaic) return null
+    const panel = customPanels.find((p) => p.id === deletePanelId)
+    if (!panel) return null
+    return { raHours: panel.raHours, decDeg: panel.decDeg }
+  }, [customMosaic, customPanels, deletePanelId])
+
+  const handleSelectedPanelCoords = useCallback(
+    (raHours: number, decDeg: number) => {
+      const offset = panelScreenOffsetFromRaDec(raHours, decDeg)
+      setCustomPanels((prev) =>
+        prev.map((p) => {
+          if (p.id !== deletePanelId) return p
+          return {
+            ...p,
+            raHours,
+            decDeg,
+            screenDeltaXPx: offset?.x ?? p.screenDeltaXPx,
+            screenDeltaYPx: offset?.y ?? p.screenDeltaYPx,
+          }
+        }),
+      )
+    },
+    [deletePanelId, panelScreenOffsetFromRaDec],
+  )
 
   useEffect(() => {
     if (!customMosaic) return
@@ -824,24 +864,76 @@ export default function PlanPage() {
   }, [planMode, customMosaic, getViewCenterRaDec, resetFrameScreenOffset, clearSkyTracking])
 
   const commitCustomPanelPosition = useCallback(
-    (panelId: number) => {
+    (panelId: number, screenX: number, screenY: number): boolean => {
+      let ok = false
       setCustomPanels((prev) =>
         prev.map((p) => {
           if (p.id !== panelId) return p
-          const coords = panelCoordsFromScreenOffset(p.screenDeltaXPx, p.screenDeltaYPx)
+          const coords = panelCoordsFromScreenOffset(screenX, screenY, {
+            raHours: p.raHours,
+            decDeg: p.decDeg,
+          })
           if (!coords) return p
-          return { ...p, raHours: coords.raHours, decDeg: coords.decDeg }
+          const view = getViewCenterRaDec()
+          if (view) {
+            const dRaH = Math.abs(coords.raHours - view.raHours)
+            const dRaWrapped = Math.min(dRaH, 24 - dRaH) * 15
+            const dDec = Math.abs(coords.decDeg - view.decDeg)
+            if (dRaWrapped > 35 || dDec > 35) return p
+          }
+          // Keep the exact drop pixels — do not re-sync from engine (avoids release nudge).
+          ok = true
+          return {
+            ...p,
+            raHours: coords.raHours,
+            decDeg: coords.decDeg,
+            screenDeltaXPx: screenX,
+            screenDeltaYPx: screenY,
+          }
         }),
       )
+      return ok
     },
-    [panelCoordsFromScreenOffset],
+    [panelCoordsFromScreenOffset, getViewCenterRaDec],
   )
 
-  const handleCustomPanelPointerDown = useCallback((panelId: number, e: React.PointerEvent) => {
-    e.stopPropagation()
-    e.currentTarget.setPointerCapture(e.pointerId)
-    customPanelDragRef.current = { panelId, lastX: e.clientX, lastY: e.clientY }
-  }, [])
+  const handleCustomPanelPointerDown = useCallback(
+    (panelId: number, e: React.PointerEvent) => {
+      e.stopPropagation()
+      e.currentTarget.setPointerCapture(e.pointerId)
+      customScreenPinRef.current = null
+      const panel = customPanels.find((p) => p.id === panelId)
+      const fromState = {
+        x: panel?.screenDeltaXPx ?? 0,
+        y: panel?.screenDeltaYPx ?? 0,
+      }
+      const fromEngine =
+        panel != null ? panelScreenOffsetFromRaDec(panel.raHours, panel.decDeg) : null
+      // If stored RA is corrupt, engine origin jumps away from the visible box.
+      // Prefer engine only when it agrees with the current screenDelta (or state is ~0).
+      const stateIsEmpty = Math.hypot(fromState.x, fromState.y) < 1
+      const engineAgrees =
+        fromEngine != null &&
+        (stateIsEmpty ||
+          Math.hypot(fromEngine.x - fromState.x, fromEngine.y - fromState.y) < 80)
+      const origin = engineAgrees && fromEngine ? fromEngine : fromState
+      customPanelDragRef.current = {
+        panelId,
+        lastX: e.clientX,
+        lastY: e.clientY,
+        x: origin.x,
+        y: origin.y,
+      }
+      setCustomPanels((prev) =>
+        prev.map((p) =>
+          p.id === panelId
+            ? { ...p, screenDeltaXPx: origin.x, screenDeltaYPx: origin.y }
+            : p,
+        ),
+      )
+    },
+    [customPanels, panelScreenOffsetFromRaDec],
+  )
 
   const handleCustomPanelPointerMove = useCallback((e: React.PointerEvent) => {
     const drag = customPanelDragRef.current
@@ -850,10 +942,13 @@ export default function PlanPage() {
     const dy = e.clientY - drag.lastY
     drag.lastX = e.clientX
     drag.lastY = e.clientY
+    drag.x += dx
+    drag.y += dy
+    // Keep React state in sync for labels/commit; visual follows the ref.
     setCustomPanels((prev) =>
       prev.map((p) =>
         p.id === drag.panelId
-          ? { ...p, screenDeltaXPx: p.screenDeltaXPx + dx, screenDeltaYPx: p.screenDeltaYPx + dy }
+          ? { ...p, screenDeltaXPx: drag.x, screenDeltaYPx: drag.y }
           : p,
       ),
     )
@@ -862,8 +957,13 @@ export default function PlanPage() {
   const handleCustomPanelPointerUp = useCallback(() => {
     const drag = customPanelDragRef.current
     if (!drag) return
+    const { panelId, x, y } = drag
+    let ok = false
+    flushSync(() => {
+      ok = commitCustomPanelPosition(panelId, x, y)
+    })
     customPanelDragRef.current = null
-    commitCustomPanelPosition(drag.panelId)
+    customScreenPinRef.current = ok ? null : { panelId, x, y }
   }, [commitCustomPanelPosition])
 
   /* Continuous re-centering fallback used when the engine has no catalog
@@ -926,6 +1026,15 @@ export default function PlanPage() {
     setSearchLoading(true)
     setSearchError(null)
 
+    const syncFramingBoresight = (raHours: number, decDeg: number) => {
+      if (planMode !== 'framing') return
+      const next = { raHours, decDeg }
+      boresightRef.current = next
+      setBoresight(next)
+      frameOffsetRef.current = { x: 0, y: 0 }
+      frameDragStartScreenOffsetRef.current = { x: 0, y: 0 }
+    }
+
     const lockEngineObj = (obj: NonNullable<SweObj>, name: string): boolean => {
       try {
         if (!stel.pointAndLock) return false
@@ -952,6 +1061,7 @@ export default function PlanPage() {
         }
         trackingSourceRef.current = 'engine-lock'
         setTrackingTarget({ name, raHours, decDeg })
+        syncFramingBoresight(raHours, decDeg)
         return true
       } catch {
         return false
@@ -1005,9 +1115,16 @@ export default function PlanPage() {
       raHours: resolved.raHours,
       decDeg: resolved.decDeg,
     })
+    if (planMode === 'framing') {
+      const next = { raHours: resolved.raHours, decDeg: resolved.decDeg }
+      boresightRef.current = next
+      setBoresight(next)
+      frameOffsetRef.current = { x: 0, y: 0 }
+      frameDragStartScreenOffsetRef.current = { x: 0, y: 0 }
+    }
     if (stel.core) stel.core.fov = (5 * Math.PI) / 180
     setSearchLoading(false)
-  }, [searchQuery, getStel])
+  }, [searchQuery, getStel, planMode])
 
   const handleSendToRemote = useCallback(() => {
     const stel = getStel()
@@ -1306,6 +1423,8 @@ export default function PlanPage() {
           customPanels={customPanels}
           deletePanelId={deletePanelId}
           onDeletePanelIdChange={setDeletePanelId}
+          selectedPanelCoords={selectedPanelCoords}
+          onSelectedPanelCoords={handleSelectedPanelCoords}
           onDeletePanel={handleDeleteCustomPanel}
         />
       </div>

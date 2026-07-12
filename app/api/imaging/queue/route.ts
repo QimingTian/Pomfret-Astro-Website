@@ -213,6 +213,9 @@ export async function POST(request: NextRequest) {
     mosaicPanels: Array.isArray(b.mosaicPanels)
       ? (b.mosaicPanels as CreateImagingInput['mosaicPanels'])
       : undefined,
+    mosaicFilterPlansByPanel: Array.isArray(b.mosaicFilterPlansByPanel)
+      ? (b.mosaicFilterPlansByPanel as CreateImagingInput['mosaicFilterPlansByPanel'])
+      : undefined,
     userId: auth.user.id,
   }
 
@@ -260,7 +263,15 @@ export async function POST(request: NextRequest) {
       email: result.email,
       ...(result.sessionPasswordHash ? { sessionPasswordHash: result.sessionPasswordHash } : {}),
       ...(result.userId ? { userId: result.userId } : {}),
-      ...(result.mosaicMode ? { mosaicMode: true, mosaicPanels: result.mosaicPanels } : {}),
+      ...(result.mosaicMode
+        ? {
+            mosaicMode: true,
+            mosaicPanels: result.mosaicPanels,
+            ...(result.mosaicFilterPlansByPanel
+              ? { mosaicFilterPlansByPanel: result.mosaicFilterPlansByPanel }
+              : {}),
+          }
+        : {}),
     })
   }
 

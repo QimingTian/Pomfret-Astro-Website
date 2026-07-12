@@ -59,7 +59,6 @@ import {
 } from '@/lib/glass-ui'
 
 const jsonHeaders: HeadersInit = { 'Content-Type': 'application/json' }
-const STACKED_MASTER_REQUIRED_EXPOSURE_SECONDS = 600
 const VARIABLE_STAR_SESSION_OVERHEAD_HOURS = VARIABLE_STAR_SESSION_OVERHEAD_SEC / 3600
 /** Pomfret Astro calibration library (Google Drive). */
 const POMFRET_CALIBRATION_LIBRARY_DRIVE_URL =
@@ -711,6 +710,12 @@ function buildMosaicPanel(id: number, raHours: number, decDeg: number): MosaicPa
   }
 }
 
+type FilterPlanFormRow = { filterName: string; count: string; exposureSeconds: string }
+
+function cloneFilterPlanForms(plans: FilterPlanFormRow[]): FilterPlanFormRow[] {
+  return plans.map((p) => ({ ...p }))
+}
+
 function mosaicDraftFromCoords(
   panels: MosaicPanel[],
   targetName: string,
@@ -826,7 +831,13 @@ export default function RemotePage() {
   const [deletePassword, setDeletePassword] = useState('')
   const [deleteSubmitting, setDeleteSubmitting] = useState(false)
 
-  const [filterPlans, setFilterPlans] = useState<Array<{ filterName: string; count: string; exposureSeconds: string }>>([])
+  const [filterPlans, setFilterPlans] = useState<FilterPlanFormRow[]>([])
+  /** Mosaic: each panel keeps its own filter/exposure rows; `filterPlans` edits the selected panel. */
+  const [panelFilterPlansById, setPanelFilterPlansById] = useState<Record<number, FilterPlanFormRow[]>>({})
+  const panelFilterPlansByIdRef = useRef(panelFilterPlansById)
+  panelFilterPlansByIdRef.current = panelFilterPlansById
+  const filterPlansRef = useRef(filterPlans)
+  filterPlansRef.current = filterPlans
   const [requestName, setRequestName] = useState('')
   const [raHourPart, setRaHourPart] = useState('')
   const [raMinutePart, setRaMinutePart] = useState('')
@@ -951,6 +962,8 @@ export default function RemotePage() {
   const [projectModeTri, setProjectModeTri] = useState<ProjectModeTri>('off')
   const [mosaicDraft, setMosaicDraft] = useState<MosaicDraft | null>(null)
   const [selectedMosaicPanelId, setSelectedMosaicPanelId] = useState(1)
+  const selectedMosaicPanelIdRef = useRef(selectedMosaicPanelId)
+  selectedMosaicPanelIdRef.current = selectedMosaicPanelId
   const projectMode = projectModeTri === 'on' || projectModeTri === 'mosaic'
   const mosaicMode = projectModeTri === 'mosaic'
   const [nightPickerProjectId, setNightPickerProjectId] = useState<string | null>(null)
@@ -1093,6 +1106,12 @@ export default function RemotePage() {
             setProjectModeTri('mosaic')
             setSelectedMosaicPanelId(draft.panels[0]?.id ?? 1)
             if (draft.targetName) setRequestName(draft.targetName)
+            const seed = cloneFilterPlanForms(filterPlansRef.current)
+            const byId: Record<number, FilterPlanFormRow[]> = {}
+            for (const p of draft.panels) {
+              byId[p.id] = cloneFilterPlanForms(seed)
+            }
+            setPanelFilterPlansById(byId)
             const center = draft.panels[0]
             if (center) {
               applySexagesimalPartsFromRadec(
@@ -1162,11 +1181,23 @@ export default function RemotePage() {
       return mosaicDraftFromCoords([buildMosaicPanel(1, ra, dec)], requestName.trim() || 'Mosaic target', ra, dec)
     })
     setSelectedMosaicPanelId(1)
+    setPanelFilterPlansById((prev) => {
+      if (Object.keys(prev).length > 0) return prev
+      return { 1: cloneFilterPlanForms(filterPlansRef.current) }
+    })
   }, [raHourPart, raMinutePart, raSecondPart, decSign, decDegreePart, decMinutePart, decSecondPart, requestName])
 
   const selectMosaicPanel = useCallback(
     (id: number) => {
+      if (id === selectedMosaicPanelIdRef.current) return
+      const flushed = {
+        ...panelFilterPlansByIdRef.current,
+        [selectedMosaicPanelIdRef.current]: cloneFilterPlanForms(filterPlansRef.current),
+      }
+      setPanelFilterPlansById(flushed)
       setSelectedMosaicPanelId(id)
+      const loaded = flushed[id]
+      setFilterPlans(loaded ? cloneFilterPlanForms(loaded) : [])
       const panel = mosaicDraft?.panels.find((p) => p.id === id)
       if (!panel) return
       applySexagesimalPartsFromRadec(
@@ -1198,6 +1229,12 @@ export default function RemotePage() {
     const dec = coords.ok ? coords.decDeg : 0
     const nextId = (mosaicDraft?.panels.reduce((max, p) => Math.max(max, p.id), 0) ?? 0) + 1
     const panel = buildMosaicPanel(nextId, ra, dec)
+    const flushed = {
+      ...panelFilterPlansByIdRef.current,
+      [selectedMosaicPanelIdRef.current]: cloneFilterPlanForms(filterPlansRef.current),
+      [nextId]: cloneFilterPlanForms(filterPlansRef.current),
+    }
+    setPanelFilterPlansById(flushed)
     setMosaicDraft((prev) =>
       mosaicDraftFromCoords(
         [...(prev?.panels ?? []), panel],
@@ -1208,6 +1245,7 @@ export default function RemotePage() {
       ),
     )
     setSelectedMosaicPanelId(nextId)
+    setFilterPlans(cloneFilterPlanForms(flushed[nextId] ?? []))
     applySexagesimalPartsFromRadec(
       panel.raHours,
       panel.decDeg,
@@ -1575,9 +1613,8 @@ export default function RemotePage() {
             decDeg:
               typeof x.decDeg === 'number' && Number.isFinite(x.decDeg) ? x.decDeg : null,
             outputMode: (() => {
-              if (x.outputMode === 'raw_zip' || x.outputMode === 'stacked_master' || x.outputMode === 'none') {
-                return x.outputMode as 'raw_zip' | 'stacked_master' | 'none'
-              }
+              if (x.outputMode === 'none') return 'none' as const
+              if (x.outputMode === 'raw_zip' || x.outputMode === 'stacked_master') return 'raw_zip' as const
               return undefined
             })(),
             cameraCoolingTempC:
@@ -2011,20 +2048,39 @@ export default function RemotePage() {
 
   const dsoEstimatedDurationPreviewSeconds = useMemo(() => {
     if (sessionType !== 'dso') return null
-    if (filterPlans.length === 0) return null
-    const normalized: Array<{ filterName: string; count: number; exposureSeconds: number }> = []
-    for (const plan of filterPlans) {
-      const filterName = plan.filterName.trim()
-      const frames = Math.round(Number(plan.count))
-      const exposure = Math.round(Number(plan.exposureSeconds))
-      if (!filterName) return null
-      if (!Number.isFinite(frames) || frames < 1 || frames > 500) return null
-      if (!Number.isFinite(exposure) || exposure < 1 || exposure > 3600) return null
-      if (outputMode === 'stacked_master' && exposure !== STACKED_MASTER_REQUIRED_EXPOSURE_SECONDS) return null
-      normalized.push({ filterName, count: frames, exposureSeconds: exposure })
+    const normalize = (plans: FilterPlanFormRow[]) => {
+      const normalized: Array<{ filterName: string; count: number; exposureSeconds: number }> = []
+      for (const plan of plans) {
+        const filterName = plan.filterName.trim()
+        const frames = Math.round(Number(plan.count))
+        const exposure = Math.round(Number(plan.exposureSeconds))
+        if (!filterName) return null
+        if (!Number.isFinite(frames) || frames < 1 || frames > 500) return null
+        if (!Number.isFinite(exposure) || exposure < 1 || exposure > 3600) return null
+        normalized.push({ filterName, count: frames, exposureSeconds: exposure })
+      }
+      return normalized
     }
+    if (mosaicMode && mosaicDraft?.panels?.length) {
+      const flushed = {
+        ...panelFilterPlansById,
+        [selectedMosaicPanelId]: cloneFilterPlanForms(filterPlans),
+      }
+      let total = 0
+      for (const panel of mosaicDraft.panels) {
+        const plans = flushed[panel.id] ?? []
+        if (plans.length === 0) return null
+        const normalized = normalize(plans)
+        if (!normalized) return null
+        total += estimateDurationSecondsFromPlans(normalized)
+      }
+      return total
+    }
+    if (filterPlans.length === 0) return null
+    const normalized = normalize(filterPlans)
+    if (!normalized) return null
     return estimateDurationSecondsFromPlans(normalized)
-  }, [sessionType, filterPlans, outputMode])
+  }, [sessionType, filterPlans, mosaicMode, mosaicDraft, panelFilterPlansById, selectedMosaicPanelId])
 
   const canSaveRemoteSessionSpec = useMemo(() => {
     if (!imagingAccess.ok) return false
@@ -2056,7 +2112,6 @@ export default function RemotePage() {
       if (!filterName) return false
       if (!Number.isFinite(frames) || frames < 1 || frames > 500) return false
       if (!Number.isFinite(exposure) || exposure < 1 || exposure > 3600) return false
-      if (outputMode === 'stacked_master' && exposure !== STACKED_MASTER_REQUIRED_EXPOSURE_SECONDS) return false
     }
     return true
   }, [
@@ -2074,7 +2129,6 @@ export default function RemotePage() {
     variableStarDurationPick,
     variableStarBlockHours,
     filterPlans,
-    outputMode,
   ])
 
   const captureRemoteSavedForm = useCallback((): RemoteSavedSessionFormV1 => {
@@ -2089,7 +2143,7 @@ export default function RemotePage() {
       decMinutePart,
       decSecondPart,
       sessionPassword,
-      outputMode,
+      outputMode: outputMode === 'none' ? 'none' : 'raw_zip',
       cameraCoolingTempC,
       filterPlans: filterPlans.map((p) => ({ ...p })),
       variableStarBlockHours,
@@ -2131,7 +2185,7 @@ export default function RemotePage() {
       setDecMinutePart(form.decMinutePart)
       setDecSecondPart(form.decSecondPart)
       setSessionPassword(form.sessionPassword)
-      setOutputMode(form.outputMode)
+      setOutputMode(form.outputMode === 'none' ? 'none' : 'raw_zip')
       if (form.cameraCoolingTempC === 0 || form.cameraCoolingTempC === -10) {
         setCameraCoolingTempC(form.cameraCoolingTempC)
       }
@@ -2900,36 +2954,70 @@ export default function RemotePage() {
     whenClosedBehavior: 'reject' | 'queue_until_ready',
     coords: { raHours: number; decDeg: number }
   ) {
-    if (sessionType !== 'variable_star' && filterPlans.length === 0) {
-      setSubmitError('Select at least one filter.')
-      return
-    }
-    const normalizedPlans: Array<{ filterName: string; count: number; exposureSeconds: number }> = []
-    if (sessionType === 'variable_star') {
-      normalizedPlans.push({ filterName: 'G', count: 1, exposureSeconds: 30 })
-    } else {
-      for (const plan of filterPlans) {
+    const normalizeFormPlans = (
+      plans: FilterPlanFormRow[],
+      panelLabel?: string,
+    ): Array<{ filterName: string; count: number; exposureSeconds: number }> | null => {
+      const out: Array<{ filterName: string; count: number; exposureSeconds: number }> = []
+      for (const plan of plans) {
         const filterName = plan.filterName.trim()
         const frames = Math.round(Number(plan.count))
         const exposure = Math.round(Number(plan.exposureSeconds))
+        const where = panelLabel ? ` (${panelLabel})` : ''
         if (!filterName) {
-          setSubmitError('Filter name is required for each row.')
-          return
+          setSubmitError(`Filter name is required for each row${where}.`)
+          return null
         }
         if (!Number.isFinite(frames) || frames < 1 || frames > 500) {
-          setSubmitError(`Frame count for ${filterName} must be between 1 and 500.`)
-          return
+          setSubmitError(`Frame count for ${filterName}${where} must be between 1 and 500.`)
+          return null
         }
         if (!Number.isFinite(exposure) || exposure < 1 || exposure > 3600) {
-          setSubmitError(`Exposure for ${filterName} must be between 1 and 3600 seconds.`)
-          return
+          setSubmitError(`Exposure for ${filterName}${where} must be between 1 and 3600 seconds.`)
+          return null
         }
-        if (outputMode === 'stacked_master' && exposure !== STACKED_MASTER_REQUIRED_EXPOSURE_SECONDS) {
-          setSubmitError('600s is required for stacked master mode.')
-          return
-        }
-        normalizedPlans.push({ filterName, count: frames, exposureSeconds: exposure })
+        out.push({ filterName, count: frames, exposureSeconds: exposure })
       }
+      return out
+    }
+
+    let normalizedPlans: Array<{ filterName: string; count: number; exposureSeconds: number }> = []
+    let mosaicFilterPlansByPanel:
+      | Array<Array<{ filterName: string; count: number; exposureSeconds: number }>>
+      | undefined
+
+    if (sessionType === 'variable_star') {
+      normalizedPlans = [{ filterName: 'G', count: 1, exposureSeconds: 30 }]
+    } else if (mosaicMode && mosaicDraft?.panels?.length) {
+      const flushed = {
+        ...panelFilterPlansByIdRef.current,
+        [selectedMosaicPanelIdRef.current]: cloneFilterPlanForms(filterPlansRef.current),
+      }
+      setPanelFilterPlansById(flushed)
+      mosaicFilterPlansByPanel = []
+      for (const panel of mosaicDraft.panels) {
+        const formPlans = flushed[panel.id] ?? []
+        if (formPlans.length === 0) {
+          setSubmitError(`Select at least one filter for ${panel.name}.`)
+          return
+        }
+        const normalized = normalizeFormPlans(formPlans, panel.name)
+        if (!normalized) return
+        mosaicFilterPlansByPanel.push(normalized)
+      }
+      normalizedPlans = mosaicFilterPlansByPanel.flat()
+      if (normalizedPlans.length === 0) {
+        setSubmitError('Select at least one filter.')
+        return
+      }
+    } else {
+      if (filterPlans.length === 0) {
+        setSubmitError('Select at least one filter.')
+        return
+      }
+      const normalized = normalizeFormPlans(filterPlans)
+      if (!normalized) return
+      normalizedPlans = normalized
     }
     const firstPlan = normalizedPlans[0]
     if (!loggedInContact?.email) {
@@ -2961,7 +3049,9 @@ export default function RemotePage() {
     const estimatedDurationSeconds =
       sessionType === 'variable_star'
         ? Math.round((variableStarBlockHours + VARIABLE_STAR_SESSION_OVERHEAD_HOURS) * 3600)
-        : estimateDurationSecondsFromPlans(normalizedPlans)
+        : mosaicFilterPlansByPanel
+          ? mosaicFilterPlansByPanel.reduce((sum, plans) => sum + estimateDurationSecondsFromPlans(plans), 0)
+          : estimateDurationSecondsFromPlans(normalizedPlans)
 
     const endpoint = editingSessionId ? `/api/imaging/queue/${encodeURIComponent(editingSessionId)}` : '/api/imaging/queue'
     const editCredential = editingSessionId ? sessionPasswords[editingSessionId] ?? '' : ''
@@ -2985,13 +3075,17 @@ export default function RemotePage() {
         decDeg: coords.decDeg,
         whenClosedBehavior,
         ...(isLoggedIn && !sessionPassword.trim() ? {} : { sessionPassword }),
-        outputMode,
+        outputMode: outputMode === 'none' ? 'none' : 'raw_zip',
         cameraCoolingTempC,
         estimatedDurationSeconds,
         sessionType,
         ...(sessionType === 'dso' && projectMode ? { projectMode: true } : {}),
         ...(sessionType === 'dso' && mosaicMode && mosaicDraft?.panels?.length
-          ? { mosaicMode: true, mosaicPanels: mosaicDraft.panels }
+          ? {
+              mosaicMode: true,
+              mosaicPanels: mosaicDraft.panels,
+              ...(mosaicFilterPlansByPanel ? { mosaicFilterPlansByPanel } : {}),
+            }
           : {}),
       }),
     })
@@ -3002,6 +3096,7 @@ export default function RemotePage() {
     }
 
     setFilterPlans([])
+    setPanelFilterPlansById({})
     setRequestName('')
     setRaHourPart('')
     setRaMinutePart('')
@@ -3241,7 +3336,7 @@ export default function RemotePage() {
     } else {
       setVariableStarBlockHours(1)
     }
-    setOutputMode(item.outputMode ?? 'raw_zip')
+    setOutputMode(item.outputMode === 'none' ? 'none' : 'raw_zip')
     if (item.cameraCoolingTempC === 0 || item.cameraCoolingTempC === -10) {
       setCameraCoolingTempC(item.cameraCoolingTempC)
     }
@@ -3533,6 +3628,7 @@ export default function RemotePage() {
                 onClick={() => {
                   setSessionType('dso')
                   setFilterPlans([])
+                  setPanelFilterPlansById({})
                   setCatalogQuery('')
                   setVariableStarPreviewStar(null)
                   setVariableStarLastFoundName(null)
@@ -3975,7 +4071,12 @@ export default function RemotePage() {
           )}
           {sessionType === 'dso' && (
             <div className="sm:col-span-2 grid gap-3">
-              <span className="text-sm font-medium text-white">Filters *</span>
+              <span className="text-sm font-medium text-white">
+                Filters *
+                {mosaicMode
+                  ? ` · ${(mosaicDraft?.panels.find((p) => p.id === selectedMosaicPanelId)?.name ?? `Panel ${selectedMosaicPanelId}`)}`
+                  : ''}
+              </span>
               <div className="flex flex-wrap gap-2">
                 {FILTER_OPTIONS.map((option) => {
                   const selected = filterPlans.some((x) => x.filterName === option.value)
@@ -4039,7 +4140,6 @@ export default function RemotePage() {
                             type="text"
                             inputMode="decimal"
                             value={plan.exposureSeconds}
-                            placeholder="600s is required for stacked master mode"
                             onChange={(e) =>
                               setFilterPlans((prev) =>
                                 prev.map((x) =>
@@ -4068,15 +4168,6 @@ export default function RemotePage() {
                 >
                   Raw ZIP
                 </button>
-                {sessionType !== 'variable_star' && (
-                  <button
-                    type="button"
-                    onClick={() => setOutputMode('stacked_master')}
-                    className={outputMode === 'stacked_master' ? glassPillToggleActive : glassPillToggleIdle}
-                  >
-                    Stacked Master
-                  </button>
-                )}
                 <button
                   type="button"
                   onClick={() => setOutputMode('none')}

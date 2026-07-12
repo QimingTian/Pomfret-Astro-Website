@@ -19,15 +19,17 @@ import { OBS_LAT_DEG, OBS_LON_DEG } from '@/lib/target-altitude'
 
 /** Lead-time ring for thunderstorm approach (≈30–60 min at typical summer storm speeds). */
 export const STORM_APPROACH_RADIUS_KM = 20
-/** Kept for tests / callers; site precip is no longer an auto-ESTOP trigger. */
-export const PRECIP_ESTOP_THRESHOLD = 10
+/** Open-Meteo site current-hour precip probability must be strictly above this (%) to ESTOP. */
+export const PRECIP_ESTOP_THRESHOLD = 20
+/** ASC rain confidence (0–1) threshold; ESTOP only when detected=true AND confidence >= this. */
+export const ASC_RAIN_CONFIDENCE_ESTOP_THRESHOLD = 0.99
 export const WEATHER_SAFETY_DEBOUNCE_MS = 45_000
 
 const DEBOUNCE_KV_KEY = 'imaging-weather-safety-estop-last-arm'
 const EARTH_RADIUS_KM = 6371
 const THUNDERSTORM_CODES = new Set([95, 96, 99])
 
-export type WeatherSafetyThreatKind = 'asc_rain' | 'storm_approach'
+export type WeatherSafetyThreatKind = 'storm_approach' | 'site_precip' | 'asc_rain'
 
 export type WeatherSafetyThreat = {
   kind: WeatherSafetyThreatKind
@@ -64,11 +66,22 @@ export function isThunderstormWeatherCode(code: number): boolean {
   return Number.isFinite(code) && THUNDERSTORM_CODES.has(Math.round(code))
 }
 
-export function precipThreatAtOrAbove(
+/** True when precip probability is strictly greater than the ESTOP threshold (default 20%). */
+export function precipThreatAbove(
   precipProbability: number,
   threshold = PRECIP_ESTOP_THRESHOLD
 ): boolean {
-  return Number.isFinite(precipProbability) && precipProbability >= threshold
+  return Number.isFinite(precipProbability) && precipProbability > threshold
+}
+
+/** ASC rain ESTOP only when detected=true AND confidence >= threshold (ignore high confidence with detected=false). */
+export function ascRainThreat(
+  rain: { detected?: boolean; confidence?: number | null } | null | undefined,
+  threshold = ASC_RAIN_CONFIDENCE_ESTOP_THRESHOLD
+): boolean {
+  if (rain?.detected !== true) return false
+  const confidence = rain.confidence
+  return typeof confidence === 'number' && Number.isFinite(confidence) && confidence >= threshold
 }
 
 /** Bearing 0° = north; returns points on a circle plus the center. */
@@ -135,28 +148,73 @@ function currentAndNextHourSamples(
 }
 
 /**
- * Night auto-ESTOP threats: ASC rain and/or 20 km thunderstorm approach.
- * Site precip forecast is intentionally not an ESTOP trigger.
+ * Night auto-ESTOP threats (any one fires):
+ * 1) 20 km thunderstorm approach (Unsafe)
+ * 2) Open-Meteo site current-hour precip probability > 20%
+ * 3) ASC rain detected=true AND confidence >= 99%
  */
 export function pickWeatherSafetyThreat(input: {
-  ascRainDetected: boolean
+  ascRainDetected?: boolean
+  ascRainConfidence?: number | null
   ringLocations: LocationForecast[]
   nowSec?: number
 }): WeatherSafetyThreat | null {
   const nowSec = input.nowSec ?? Math.floor(Date.now() / 1000)
 
-  if (input.ascRainDetected) {
-    return {
-      kind: 'asc_rain',
-      reason: 'ASC AI detected rain during nautical night (dusk→dawn).',
-      detail: { ascRainDetected: true },
-    }
-  }
-
-  return pickStormApproachThreat({
+  const storm = pickStormApproachThreat({
     ringLocations: input.ringLocations,
     nowSec,
   })
+  if (storm) return storm
+
+  const precip = pickSitePrecipThreat({
+    ringLocations: input.ringLocations,
+    nowSec,
+  })
+  if (precip) return precip
+
+  if (
+    ascRainThreat({
+      detected: input.ascRainDetected,
+      confidence: input.ascRainConfidence,
+    })
+  ) {
+    return {
+      kind: 'asc_rain',
+      reason: `ASC AI detected rain with confidence ${(input.ascRainConfidence! * 100).toFixed(1)}% >= ${ASC_RAIN_CONFIDENCE_ESTOP_THRESHOLD * 100}% during nautical night (dusk→dawn).`,
+      detail: {
+        ascRainDetected: true,
+        ascRainConfidence: input.ascRainConfidence,
+        threshold: ASC_RAIN_CONFIDENCE_ESTOP_THRESHOLD,
+      },
+    }
+  }
+
+  return null
+}
+
+/** Site (observatory) current-hour Open-Meteo precip probability > {@link PRECIP_ESTOP_THRESHOLD}. */
+export function pickSitePrecipThreat(input: {
+  ringLocations: LocationForecast[]
+  nowSec?: number
+}): WeatherSafetyThreat | null {
+  const nowSec = input.nowSec ?? Math.floor(Date.now() / 1000)
+  const site = input.ringLocations.find((loc) => loc.distanceKm <= 0)
+  if (!site) return null
+  const { current } = currentAndNextHourSamples(site.hours, nowSec)
+  if (!current || !precipThreatAbove(current.precipProbability)) return null
+  return {
+    kind: 'site_precip',
+    reason: `Open-Meteo site precip probability ${current.precipProbability}% > ${PRECIP_ESTOP_THRESHOLD}% for the current hour during nautical night.`,
+    detail: {
+      precipProbability: current.precipProbability,
+      threshold: PRECIP_ESTOP_THRESHOLD,
+      hourStartSec: current.timeSec,
+      weatherCode: current.weatherCode,
+      lat: site.lat,
+      lon: site.lon,
+    },
+  }
 }
 
 /** Same 20 km Open-Meteo ring + WMO thunder codes used by weather-safety ESTOP. */
@@ -259,18 +317,25 @@ async function fetchRingForecasts(): Promise<LocationForecast[] | null> {
 export async function evaluateWeatherSafetyThreat(): Promise<WeatherSafetyThreat | null> {
   const [ascCloud, ringLocations] = await Promise.all([fetchAscCloud(), fetchRingForecasts()])
   const ascRainDetected = ascCloud?.rain?.detected === true
+  const ascRainConfidence = ascCloud?.rain?.confidence
   if (!ringLocations) {
-    if (ascRainDetected) {
+    if (ascRainThreat({ detected: ascRainDetected, confidence: ascRainConfidence })) {
       return {
         kind: 'asc_rain',
-        reason: 'ASC AI detected rain during nautical night (dusk→dawn).',
-        detail: { ascRainDetected: true, forecastUnavailable: true },
+        reason: `ASC AI detected rain with confidence ${(ascRainConfidence! * 100).toFixed(1)}% >= ${ASC_RAIN_CONFIDENCE_ESTOP_THRESHOLD * 100}% during nautical night (dusk→dawn).`,
+        detail: {
+          ascRainDetected: true,
+          ascRainConfidence,
+          threshold: ASC_RAIN_CONFIDENCE_ESTOP_THRESHOLD,
+          forecastUnavailable: true,
+        },
       }
     }
     return null
   }
   return pickWeatherSafetyThreat({
     ascRainDetected,
+    ascRainConfidence,
     ringLocations,
   })
 }
@@ -361,8 +426,8 @@ async function armWeatherSafetyEmergencyStop(
 }
 
 /**
- * During nautical night (dusk→dawn), arm ESTOP on ASC rain and/or 20 km thunderstorm.
- * Daytime is a no-op (dome closed after end-night at dawn). Ignores session in-progress.
+ * During nautical night (dusk→dawn), arm ESTOP on thunderstorm Unsafe, site precip >20%,
+ * or ASC rain detected with confidence >=99%. Daytime is a no-op. Ignores session in-progress.
  */
 export async function maybeArmWeatherSafetyEmergencyStop(): Promise<WeatherSafetyArmResult> {
   const g = globalThis as GlobalWithWeatherSafety

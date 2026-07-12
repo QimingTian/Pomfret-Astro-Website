@@ -71,6 +71,7 @@ export interface ImagingRequest {
     positionAngleDeg: number
     name: string
   }>
+  mosaicFilterPlansByPanel?: Array<Array<{ filterName: string; exposureSeconds: number; count: number }>>
   /** Member who submitted this session (new sessions). */
   userId?: string
   /** Large project mode (>30h total) awaiting admin approval before scheduling. */
@@ -451,6 +452,8 @@ export interface CreateImagingInput {
     positionAngleDeg: number
     name: string
   }>
+  /** Parallel to mosaicPanels when each panel has its own filter plan. */
+  mosaicFilterPlansByPanel?: Array<Array<{ filterName: string; exposureSeconds: number; count: number }>>
 }
 
 function targetLabelFromCoords(raHours: number, decDeg: number): string {
@@ -730,7 +733,14 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
     sequenceTemplate,
     ...(projectMode ? { projectMode: true as const } : {}),
     ...(mosaicMode && Array.isArray(input.mosaicPanels) && input.mosaicPanels.length > 0
-      ? { mosaicMode: true as const, mosaicPanels: input.mosaicPanels }
+      ? {
+          mosaicMode: true as const,
+          mosaicPanels: input.mosaicPanels,
+          ...(Array.isArray(input.mosaicFilterPlansByPanel) &&
+          input.mosaicFilterPlansByPanel.length === input.mosaicPanels.length
+            ? { mosaicFilterPlansByPanel: input.mosaicFilterPlansByPanel }
+            : {}),
+        }
       : {}),
     ...(userId ? { userId } : {}),
   }

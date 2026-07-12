@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  ASC_RAIN_CONFIDENCE_ESTOP_THRESHOLD,
   PRECIP_ESTOP_THRESHOLD,
   STORM_APPROACH_RADIUS_KM,
+  ascRainThreat,
   isThunderstormWeatherCode,
+  pickSitePrecipThreat,
   pickStormApproachThreat,
   pickWeatherSafetyThreat,
-  precipThreatAtOrAbove,
+  precipThreatAbove,
   ringSampleCoordinates,
 } from './weather-safety-estop'
 
@@ -18,11 +21,24 @@ test('isThunderstormWeatherCode accepts WMO thunder codes only', () => {
   assert.equal(isThunderstormWeatherCode(3), false)
 })
 
-test('precipThreatAtOrAbove matches gate threshold', () => {
-  assert.equal(precipThreatAtOrAbove(10), true)
-  assert.equal(precipThreatAtOrAbove(9.9), false)
-  assert.equal(precipThreatAtOrAbove(20, PRECIP_ESTOP_THRESHOLD), true)
-  assert.equal(precipThreatAtOrAbove(Number.NaN), false)
+test('precipThreatAbove is strict greater-than threshold', () => {
+  assert.equal(precipThreatAbove(20), false)
+  assert.equal(precipThreatAbove(20.1), true)
+  assert.equal(precipThreatAbove(21, PRECIP_ESTOP_THRESHOLD), true)
+  assert.equal(precipThreatAbove(Number.NaN), false)
+})
+
+test('ascRainThreat requires detected=true AND confidence >=99%', () => {
+  assert.equal(ascRainThreat({ detected: true, confidence: 0.99 }), true)
+  assert.equal(ascRainThreat({ detected: true, confidence: 0.989 }), false)
+  assert.equal(ascRainThreat({ detected: false, confidence: 1 }), false)
+  assert.equal(ascRainThreat({ detected: true, confidence: 1 }), true)
+  assert.equal(ascRainThreat({ detected: undefined, confidence: 1 }), false)
+  assert.equal(ascRainThreat(null), false)
+  assert.equal(
+    ascRainThreat({ detected: true, confidence: ASC_RAIN_CONFIDENCE_ESTOP_THRESHOLD }),
+    true
+  )
 })
 
 test('ringSampleCoordinates includes center plus N bearings at radius', () => {
@@ -38,32 +54,126 @@ test('ringSampleCoordinates includes center plus N bearings at radius', () => {
   assert.ok(north!.lat > 41.9159)
 })
 
-test('pickWeatherSafetyThreat prefers ASC rain', () => {
-  const nowSec = Date.parse('2026-07-10T02:30:00.000Z') / 1000
+test('pickWeatherSafetyThreat prefers thunderstorm over precip and ASC', () => {
+  const hourStart = Date.parse('2026-07-10T02:00:00.000Z') / 1000
+  const nowSec = hourStart + 5 * 60
   const threat = pickWeatherSafetyThreat({
     ascRainDetected: true,
-    ringLocations: [],
+    ascRainConfidence: 0.995,
+    ringLocations: [
+      {
+        lat: 41.9,
+        lon: -71.96,
+        distanceKm: 0,
+        hours: [{ timeSec: hourStart, precipProbability: 80, weatherCode: 61 }],
+      },
+      {
+        lat: 42.1,
+        lon: -71.96,
+        distanceKm: STORM_APPROACH_RADIUS_KM,
+        hours: [{ timeSec: hourStart, precipProbability: 40, weatherCode: 95 }],
+      },
+    ],
     nowSec,
   })
-  assert.equal(threat?.kind, 'asc_rain')
+  assert.equal(threat?.kind, 'storm_approach')
 })
 
-test('pickWeatherSafetyThreat ignores site precip-only (not an ESTOP trigger)', () => {
+test('pickWeatherSafetyThreat flags site precip >20% when no storm', () => {
   const hourStart = Date.parse('2026-07-10T02:00:00.000Z') / 1000
   const nowSec = hourStart + 10 * 60
   const threat = pickWeatherSafetyThreat({
     ascRainDetected: false,
+    ascRainConfidence: 0.5,
     ringLocations: [
       {
         lat: 41.9,
         lon: -71.96,
         distanceKm: 0,
         hours: [
-          { timeSec: hourStart, precipProbability: 80, weatherCode: 61 },
-          { timeSec: hourStart + 3600, precipProbability: 50, weatherCode: 61 },
+          { timeSec: hourStart, precipProbability: 21, weatherCode: 61 },
+          { timeSec: hourStart + 3600, precipProbability: 5, weatherCode: 61 },
         ],
       },
     ],
+    nowSec,
+  })
+  assert.equal(threat?.kind, 'site_precip')
+  assert.equal(threat?.detail.precipProbability, 21)
+})
+
+test('pickWeatherSafetyThreat ignores site precip at exactly 20%', () => {
+  const hourStart = Date.parse('2026-07-10T02:00:00.000Z') / 1000
+  const nowSec = hourStart + 10 * 60
+  const threat = pickWeatherSafetyThreat({
+    ascRainDetected: false,
+    ascRainConfidence: 0.5,
+    ringLocations: [
+      {
+        lat: 41.9,
+        lon: -71.96,
+        distanceKm: 0,
+        hours: [{ timeSec: hourStart, precipProbability: 20, weatherCode: 61 }],
+      },
+    ],
+    nowSec,
+  })
+  assert.equal(threat, null)
+})
+
+test('pickSitePrecipThreat only uses observatory center current hour', () => {
+  const hourStart = Date.parse('2026-07-10T02:00:00.000Z') / 1000
+  const nowSec = hourStart + 5 * 60
+  const threat = pickSitePrecipThreat({
+    ringLocations: [
+      {
+        lat: 42.1,
+        lon: -71.96,
+        distanceKm: STORM_APPROACH_RADIUS_KM,
+        hours: [{ timeSec: hourStart, precipProbability: 90, weatherCode: 61 }],
+      },
+      {
+        lat: 41.9,
+        lon: -71.96,
+        distanceKm: 0,
+        hours: [{ timeSec: hourStart, precipProbability: 25, weatherCode: 61 }],
+      },
+    ],
+    nowSec,
+  })
+  assert.equal(threat?.kind, 'site_precip')
+  assert.equal(threat?.detail.precipProbability, 25)
+})
+
+test('pickWeatherSafetyThreat flags ASC rain when detected and confidence >=99%', () => {
+  const nowSec = Date.parse('2026-07-10T02:30:00.000Z') / 1000
+  const threat = pickWeatherSafetyThreat({
+    ascRainDetected: true,
+    ascRainConfidence: 0.99,
+    ringLocations: [],
+    nowSec,
+  })
+  assert.equal(threat?.kind, 'asc_rain')
+  assert.equal(threat?.detail.ascRainConfidence, 0.99)
+})
+
+test('pickWeatherSafetyThreat ignores high ASC confidence when detected=false', () => {
+  const nowSec = Date.parse('2026-07-10T02:30:00.000Z') / 1000
+  const threat = pickWeatherSafetyThreat({
+    ascRainDetected: false,
+    ascRainConfidence: 1,
+    ringLocations: [],
+    nowSec,
+  })
+  assert.equal(threat, null)
+})
+
+test('pickWeatherSafetyThreat ignores ASC rain below 99% even when detected', () => {
+  const nowSec = Date.parse('2026-07-10T02:30:00.000Z') / 1000
+  const threat = pickWeatherSafetyThreat({
+    ascRainDetected: true,
+    ascRainConfidence: 0.989,
+    ringLocations: [],
     nowSec,
   })
   assert.equal(threat, null)
@@ -85,6 +195,7 @@ test('pickWeatherSafetyThreat flags thunderstorm on 20 km ring', () => {
   ]
   const threat = pickWeatherSafetyThreat({
     ascRainDetected: false,
+    ascRainConfidence: 0.5,
     ringLocations,
     nowSec,
   })
@@ -101,7 +212,17 @@ test('pickWeatherSafetyThreat returns null when clear', () => {
   const nowSec = hourStart + 5 * 60
   const threat = pickWeatherSafetyThreat({
     ascRainDetected: false,
+    ascRainConfidence: 0.5,
     ringLocations: [
+      {
+        lat: 41.9,
+        lon: -71.96,
+        distanceKm: 0,
+        hours: [
+          { timeSec: hourStart, precipProbability: 10, weatherCode: 61 },
+          { timeSec: hourStart + 3600, precipProbability: 0, weatherCode: 0 },
+        ],
+      },
       {
         lat: 42.1,
         lon: -71.96,

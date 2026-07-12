@@ -1,4 +1,9 @@
 import estopTemplate from '@/EStop.json'
+import {
+  ESTOP_DISCORD_MANUAL,
+  ESTOP_DISCORD_WEATHER_SAFETY,
+  patchNinaDiscordMessageText,
+} from '@/lib/imaging/nina-discord-message'
 
 const ESTOP_TEMPLATE = estopTemplate as Record<string, unknown>
 
@@ -27,7 +32,33 @@ function patchEstopHttpPost(root: Record<string, unknown>, queueId: string): voi
   walk(root)
 }
 
-export function estopSequenceJson(queueId: string): string {
+export function isWeatherSafetyEmergencyStopActor(input: {
+  requestedByUserId?: string | null
+  requestedByUsername?: string | null
+}): boolean {
+  const userId = typeof input.requestedByUserId === 'string' ? input.requestedByUserId.trim() : ''
+  const username =
+    typeof input.requestedByUsername === 'string' ? input.requestedByUsername.trim() : ''
+  return userId === 'weather-safety-auto' || username === 'weather-safety-auto'
+}
+
+export function estopDiscordMessageForState(input: {
+  requestedByUserId?: string | null
+  requestedByUsername?: string | null
+}): string {
+  return isWeatherSafetyEmergencyStopActor(input)
+    ? ESTOP_DISCORD_WEATHER_SAFETY
+    : ESTOP_DISCORD_MANUAL
+}
+
+export function estopSequenceJson(
+  queueId: string,
+  options?: {
+    requestedByUserId?: string | null
+    requestedByUsername?: string | null
+    discordText?: string
+  },
+): string {
   const root = structuredClone(ESTOP_TEMPLATE) as Record<string, unknown>
   root.Name = 'Emergency Stop'
   root.PomfretAstro = {
@@ -38,5 +69,9 @@ export function estopSequenceJson(queueId: string): string {
       'POST to /api/imaging/session-progress with queueId when dome is closed to clear ESTOP.',
   }
   patchEstopHttpPost(root, queueId)
+  patchNinaDiscordMessageText(
+    root,
+    options?.discordText ?? estopDiscordMessageForState(options ?? {}),
+  )
   return JSON.stringify(root, null, 2)
 }

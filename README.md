@@ -1,14 +1,15 @@
 # Pomfret Astro — System Guide
 
-> **Single source of truth** for the Pomfret Olmsted Observatory remote-imaging website.
+> **v6.0.0** — First fully stable major release after Plan / mosaic / weather-safety. No known open bugs at publish time.
 
-**Live site:** [https://www.pomfretastro.org](https://www.pomfretastro.org)
+**Live site:** [https://www.pomfretastro.org](https://www.pomfretastro.org)  
+**Release:** [v6.0.0](https://github.com/QimingTian/Pomfret-Astro-Website/releases/tag/v6.0.0)
 
 | Part | Who it is for | What it covers |
 |------|---------------|----------------|
-| **I — User manual** | New members | Every page, button, and status label — what to click and what you see |
-| **II — Operator runbook** | Student operators | Night checklist, admin tools, common failures |
-| **III — Technical reference** | Developers | Scheduling logic, architecture, repo layout, deployment |
+| **I — User manual** | New members | Every page, button, and status label |
+| **II — Operator runbook** | Student operators | Night checklist, admin tools, failures |
+| **III — Technical reference** | Developers | Scheduling, architecture, deployment |
 | **Appendix** | Developers | HTTP API and route map |
 
 ---
@@ -20,7 +21,7 @@
 1. [Create an account & sign in](#1-create-an-account--sign-in)
 2. [Top navigation bar](#2-top-navigation-bar)
 3. [Weather page](#3-weather-page)
-4. [Atlas page](#4-atlas-page)
+4. [Plan page (Atlas + Framing)](#4-plan-page-atlas--framing)
 5. [Remote page (main imaging UI)](#5-remote-page-main-imaging-ui)
 6. [Gallery, Team, Account](#6-gallery-team-account)
 7. [Typical member workflow](#7-typical-member-workflow)
@@ -36,8 +37,8 @@
 
 12. [System architecture](#12-system-architecture)
 13. [Autonomous scheduler](#13-autonomous-scheduler)
-14. [Project Mode & Variable Star](#14-project-mode--variable-star)
-15. [NINA agent & observatory scripts](#15-nina-agent--observatory-scripts)
+14. [Project Mode, Mosaic & Variable Star](#14-project-mode-mosaic--variable-star)
+15. [NINA agent, end night & ESTOP](#15-nina-agent-end-night--estop)
 16. [All-sky camera & auto tuning](#16-all-sky-camera--auto-tuning)
 17. [Repository layout & `lib/imaging`](#17-repository-layout--libimaging)
 18. [Environment variables & deployment](#18-environment-variables--deployment)
@@ -58,11 +59,11 @@ You **request** imaging on the website; the observatory computer and NINA **exec
 ## 1. Create an account & sign in
 
 1. Open [pomfretastro.org](https://www.pomfretastro.org).
-2. Click **Log In** (top-right nav shows your username when signed in; before login it says **Log In**).
-3. Use **Sign up** with email, username (3–32 characters), name, and password (≥ 8 characters).
+2. Click **Log In** (top-right shows your username when signed in).
+3. **Sign up** with email, username (3–32 characters), name, and password (≥ 8 characters).
 4. After signup you land on **Remote** — that is where you submit sessions.
 
-**Guests** can browse Weather, Atlas, Gallery, Team, and view Remote (schedule + session list). **Submitting, editing, progress, and download require a logged-in account.**
+**Guests** can browse Weather, Plan, Gallery, Team, and view Remote (schedule + session list). **Submitting, editing, progress, and download require a logged-in account.**
 
 ---
 
@@ -71,50 +72,70 @@ You **request** imaging on the website; the observatory computer and NINA **exec
 | Nav button | Page | What you get |
 |------------|------|--------------|
 | **Pomfret Astro** (logo) | Welcome | Intro video |
-| **Weather** | `/dashboard/weather` | Local conditions, satellite cloud map, moon, all-sky camera |
-| **Atlas** | `/dashboard/atlas` | Interactive sky map (Stellarium); plan targets and send coordinates to Remote |
-| **Remote** | `/dashboard/remote` | **Submit sessions, see tonight’s schedule, monitor runs, download data** |
-| **Gallery** | `/dashboard/gallery` | Showcase images from past work |
-| **Team** | `/dashboard/contact` | Staff photos and email contacts |
-| **Log In** / **your username** | `/dashboard/account` | Profile, saved templates, history; admins see extra controls |
+| **Weather** | `/dashboard/weather` | Conditions, satellite, radar, moon, all-sky camera |
+| **Plan** | `/dashboard/plan` | **Atlas** sky map + **Framing** (NINA-style FOV / mosaic) |
+| **Remote** | `/dashboard/remote` | Submit sessions, tonight’s schedule, monitor runs, download |
+| **Gallery** | `/dashboard/gallery` | Showcase images |
+| **Team** | `/dashboard/contact` | Staff contacts |
+| **Log In** / **username** | `/dashboard/account` | Profile, templates, history; admins see extra controls |
 
 ---
 
 ## 3. Weather page
 
-**What this page tells you:** “Is it cloudy / windy / humid right now at Pomfret?” — useful for your own planning. The **scheduler uses separate hourly rules** (see Part III); this page is not the exact gate the robot uses.
+**What this page tells you:** conditions at Pomfret right now. The **scheduler uses separate hourly rules** (Part III); this page is not the exact robot gate.
 
 | Section | Information |
 |---------|-------------|
-| **Metric cards** | Temperature, apparent temperature, humidity, cloud cover %, wind speed, wind gust (Open-Meteo, Pomfret CT) |
-| **Cloud Map** | NOAA GOES-East animated CONUS cloud imagery (auto-refreshes ~every 10 min) |
-| **Precipitation radar** | LibreWXR past radar + nowcast over Pomfret (proxied; optional self-host via `LIBREWXR_API_BASE_URL`) |
-| **Moon** | Phase photo (NASA), illumination %, altitude, rise/set; drag timeline to see other times |
-| **All-sky camera** | Live fisheye view of the observatory sky (same stream family as the mobile webapp) |
+| **Metric cards** | Temperature, humidity, cloud %, wind / gust (Open-Meteo) |
+| **Cloud Map** | NOAA GOES-East CONUS (≈10 min refresh) |
+| **Precipitation radar** | LibreWXR past radar + nowcast (proxied) |
+| **Moon** | Phase, illumination, altitude, rise/set |
+| **All-sky camera** | Live fisheye + ASC overlays (cloud AI, exposure/gain, wind gust, moon illumination, **Thunderstorm Detection** Safe/Unsafe from the shared 20 km ring) |
+
+UI uses unified pill / 1rem corner radius site-wide (v6).
 
 ---
 
-## 4. Atlas page
+## 4. Plan page (Atlas + Framing)
 
-**What this page is for:** Pick a target in the sky, see if it fits your telescope’s field of view, and optionally **Send to Remote** with coordinates filled in. Atlas does **not** submit a session by itself.
+**Plan** replaces the old Atlas-only page. Switch **Atlas | Framing** at the top.
+
+### Atlas mode
+
+Pick a target, inspect FOV overlays, preview tonight’s weather ribbon. Does **not** submit a session by itself.
 
 | Control | What it does |
 |---------|--------------|
-| **Sky search box** | Type an object name (e.g. `M31`); press Enter — resolves via catalog API and centers the map |
-| **Click object on sky** | Selection info panel shows name, type, magnitude, coordinates |
-| **Telescope dropdown** | Overlays camera frame for **TOA 106**, **SeeStar S30 Pro**, **Dwarf 3**, or **Dwarf Mini** |
-| **Layer toggles** | Ground, atmosphere, deep-sky objects, DSS imagery, azimuthal / equatorial grids |
-| **30° altitude ring** | Shows where the scheduler’s minimum target altitude is (same geometry as Remote) |
-| **Orbit track** | Solid path of selected object across tonight |
-| **Tonight schedule ribbon** | Same twilight / weather bands as Remote (read-only preview) |
-| **Send to Remote** | Opens Remote with target name and RA/Dec prefilled |
-| **Now** | Reset sky time to current moment |
+| **Sky search** | Object name → catalog resolve → center map |
+| **Click object** | Name, type, mag, coordinates |
+| **Telescope dropdown** | Camera frame for observatory / portable scopes |
+| **Layer toggles** | Ground, atmosphere, DSO, DSS, grids |
+| **30° altitude ring** | Scheduler minimum altitude |
+| **Orbit track** | Selected object tonight |
+| **Tonight schedule ribbon** | Same twilight / weather bands as Remote |
+| **Send to Remote** | Prefills Remote with name + RA/Dec |
+
+### Framing mode
+
+NINA Framing Assistant–style planning on a **locked** sky:
+
+| Mode | Behavior |
+|------|----------|
+| **Grid** | Sensor-aligned mosaic (H×V, overlap %). Whole mosaic drags as one; field rotation is rigid |
+| **Custom** | Add/drag individual panels; each panel uses parallactic rotation at its sky position |
+
+**v6 framing engine (stable):**
+
+- Idle draw uses Stellarium **VIEW** projection so the yellow box sits on the correct stars for the labeled RA/Dec
+- Drag uses screen pixels (smooth); pointer-up commits with a corrected **front-hemisphere** inverse (no antipodal RA flips)
+- Frame-center coordinates match NINA for the same on-sky placement
+
+**Send** from Framing carries the mosaic draft into Remote with **Mosaic On** (`?mosaic=1`).
 
 ---
 
 ## 5. Remote page (main imaging UI)
-
-Remote is four panels. The page auto-refreshes queue, observatory status, weather prediction, and mount pointing while it stays open.
 
 ```
 ┌─────────────────────────────┬─────────────────────────────┐
@@ -122,211 +143,125 @@ Remote is four panels. The page auto-refreshes queue, observatory status, weathe
 │  (submit form)              │  (timeline)                 │
 ├─────────────────────────────┼─────────────────────────────┤
 │  Current Sessions           │  Telescope Status           │
-│  (your queue + actions)     │  (dome status + 3D mount)   │
+│  (queue + actions)          │  (dome + 3D mount)          │
 └─────────────────────────────┴─────────────────────────────┘
 ```
 
-### 5.1 Observatory status line (top of form)
+The page uses **adaptive HTTP polling** (slower by day, faster at night) — not long-lived SSE.
 
-Shows one of:
+### 5.1 Observatory status
 
-| Label | Meaning for you |
-|-------|-----------------|
-| **Ready** | Observatory accepting new work tonight |
-| **Busy -- In Use** | A sequence is running (or NINA has not polled recently) |
-| **Closed -- Weather Not Permitted** | Auto mode: forecast fails the global weather gate |
-| **Closed -- Daytime** | Sun up (between nautical dawn and dusk) |
-| **Closed -- Observatory Maintenance** | Admin closed window active |
+| Label | Meaning |
+|-------|---------|
+| **Ready** | Accepting new work |
+| **Busy -- In Use** | Sequence running (or agent poll stale) |
+| **Closed -- Weather Not Permitted** | Auto: forecast fails global weather gate |
+| **Closed -- Daytime** | Sun up (nautical dawn → dusk) |
+| **Closed -- Observatory Maintenance** | Admin closed window |
 
-If you submit while not **Ready**, a modal offers:
+If not **Ready**, submit offers **Do not start** or **Queue until ready**.
 
-1. **Do not start** — cancel submit.
-2. **Queue until ready** — session is saved as **Pending**; it will be scheduled when the dome opens (not rejected).
+### 5.2 New Imaging Session
 
----
-
-### 5.2 New Imaging Session — form fields
-
-#### Session Type (required)
+#### Session Type
 
 | Button | Use when |
 |--------|----------|
-| **Deep Sky Object** | Galaxies, nebulae, clusters; LRGBSHO filters; optional **Project Mode** |
-| **Variable Star Imaging** | Time-series photometry; **G filter only**; fixed 0.5 h blocks |
+| **Deep Sky Object** | Galaxies / nebulae; LRGBSHO; Project / Mosaic |
+| **Variable Star Imaging** | Photometry; **G only**; 0.5 h blocks |
 
-#### Project Mode (DSO only)
+#### Project (DSO) — three-way switch
 
 | Setting | Effect |
 |---------|--------|
-| **Off** | Single-night session; must fit one clear night (duration + altitude + weather + moon) |
-| **On** | Multi-night project; one queue row, many **Session 1 / Session 2 / …** sub-sessions until all frames collected |
+| **Off** | Single-night session |
+| **On** | Multi-night project; one queue row → **Session 1 / 2 / …** until frames done |
+| **Mosaic On** | Multi-panel project: each panel has **its own RA/Dec** and **its own filter / exposure / frame plan** |
+
+#### Mosaic On (v6)
+
+1. Import from Plan Framing, or enable Mosaic On and **Add Panel**.
+2. Select a panel pill → edit that panel’s coordinates **and** Filters / exposure / counts (label shows `Filters * · Panel N`).
+3. Switching panels saves the previous panel’s plan and loads the next.
+4. **Add Panel** copies the current panel’s filter plan as a starting point.
+5. Submit stores `mosaicPanels` + `mosaicFilterPlansByPanel`. The planner interleaves panels (moon-aware).
 
 #### Target & coordinates
 
-| Field | DSO | Variable Star |
-|-------|-----|-----------------|
-| **Session Name** | Display name on schedule | Same |
-| **Catalog Target Search** | Search NGC/Messier/etc. → fills RA/Dec | — |
-| **Star Filter** + **Star List** | — | Filter catalog (Tonight Observable, High Priority, period/type filters) |
-| **Search A Star** | — | SIMBAD lookup by name |
-| **RA / Dec** | Hours and sexagesimal degrees | Filled from star pick |
-| **Tonight** (variable star) | — | Buttons for **0.5 h, 1 h, 1.5 h, …** observing blocks (+ 15 min overhead) |
+Catalog search (DSO), variable-star catalog / SIMBAD, sexagesimal RA/Dec. Variable star **Tonight** duration buttons: 0.5 h, 1 h, …
 
-#### Filters (DSO only)
+#### Filters (DSO)
 
-Add rows with **Filter** (Luminance, Red, Green, Blue, Sulfur, Hydrogen, Oxygen), **Frame Count**, **Exposure per Frame (s)**.
-
-- **Stacked Master** output requires **600 s** exposures on every filter row.
+Filter rows: Luminance, Red, Green, Blue, Sulfur, Hydrogen, Oxygen — count + exposure (s).
 
 #### Output Type
 
-| Button | What you receive |
-|--------|------------------|
-| **Raw ZIP** | Calibrated individual frames in a zip |
-| **Stacked Master** | Observatory stacks with Siril (600 s exposures only) |
-| **None** | Run executes but no file delivery |
-
-#### Camera Temperature
-
-Optional cooling setpoint (°C) passed to NINA sequence.
+| Button | Delivery |
+|--------|----------|
+| **Raw ZIP** | Calibrated frames |
+| **None** | Run only, no file delivery |
 
 #### Form buttons
 
-| Button | What it does |
-|--------|--------------|
-| **Start Session** | Validates form → submits to queue → runs scheduler → row appears under **Current Sessions** |
-| **Finish Editing** | Same as Start Session while editing an existing pending/scheduled row |
-| **Save Session** | Opens dialog — saves **template only** to your account (does **not** submit) |
-| **Run A Saved Session** | Opens dialog — pick a saved template → loads form (still need **Start Session** to submit) |
+| Button | Effect |
+|--------|--------|
+| **Start Session** | Validate → queue → schedule |
+| **Finish Editing** | Resubmit pending/scheduled edit |
+| **Save Session** | Template only (does not queue) |
+| **Run A Saved Session** | Load template into form |
 
-**Save Session vs Start Session:** Save = bookmark. Start = join the real queue.
+### 5.3 Tonight's Schedule
 
----
+Vertical timeline for this imaging night (America/New_York, ≈4 PM → 8 AM): twilight markers, green/red weather bands, session blocks. Headline weather uses **nautical dusk → dawn** only.
 
-### 5.3 Tonight's Schedule (right panel)
-
-**What it shows:** A vertical timeline for **this imaging night** (America/New_York, roughly 4 PM → 8 AM).
-
-| Visual | Meaning |
-|--------|---------|
-| **Sunset → Sunrise** markers | Civil / nautical / astronomical twilight boundaries |
-| **Green bands — Weather Permitted** | Hours passing scheduler cloud/precip/wind rules |
-| **Red bands — Weather Not Permitted** | Hours blocked for placement |
-| **Colored blocks** | Scheduled sessions (height = duration; position = start time) |
-| **Target — Session N** | Project Mode sub-session label |
-| **Grey / empty** | No schedulable time |
-
-**Headline:** “Tonight’s weather prediction” — counts only **nautical dusk → nautical dawn** (same window as the timeline, not afternoon hours on the strip). Stricter than individual green bands: one bad precip hour can mark the whole night “not permitted”.
-
-Blocks update when you refresh **Current Sessions** or when background reconcile runs (~every 6 min from the observatory agent).
-
----
-
-### 5.4 Current Sessions (bottom left)
-
-Lists every active queue row, project, and board entry visible tonight.
-
-#### Status badges
+### 5.4 Current Sessions
 
 | Status | Meaning |
 |--------|---------|
-| **Pending** | In queue; **not** on tonight’s timeline yet (or project has no plan tonight) |
-| **Scheduled** | Has a planned start time tonight |
-| **In progress** | NINA is running (or was delivered) |
-| **Completed** | Success |
-| **Failed** | Aborted or error |
-| **On hold** | Admin paused scheduling/delivery — **Unhold** from Account → Session Control |
-| **Rejected** | Could not schedule while observatory was Ready (e.g. no slot fit) |
+| **Pending** | Not on tonight’s timeline yet |
+| **Scheduled** | Planned start tonight |
+| **In progress** | Delivered / running |
+| **Completed** / **Failed** | Terminal |
+| **On hold** | Admin paused |
+| **Rejected** | Could not schedule while Ready |
 
-#### Row actions
+Actions: **Check progress**, **Download file**, **Edit**, **Delete**. Projects: pick **Session N** inside progress for per-sub downloads.
 
-| Button | When it appears | What it does |
-|--------|-----------------|--------------|
-| **Check progress** | Most statuses | Opens **Session progress** overlay: live terminal log + latest preview JPEG |
-| **Download file** | **Completed** and data ready (`outputMode` not None) | Opens presigned download (ZIP or stacked master) |
-| **Edit session** | **Pending** or **Scheduled** | Loads form; **Finish Editing** resubmits and recalculates schedule |
-| **Delete session** | Usually always (owner/admin) | Removes queue row; may ask session password on legacy rows |
+### 5.5 Telescope Status
 
-**Project Mode rows:** **Check progress** → pick **Session 1**, **Session 2**, … Each completed sub-session can have its own **Download** inside the progress overlay. Project downloads stay available until the whole project completes (48 h retention applies after completion).
-
-**Why Pending with clear weather on the chart?** Target altitude, queue full, moon too close for your filters, or no contiguous window long enough — not just clouds.
-
----
-
-### 5.5 Session progress overlay (from Check progress)
-
-| Section | Content |
-|---------|---------|
-| **Terminal** | Timestamped NINA log lines streamed live (SSE) |
-| **Latest Image** | Most recent preview frame from the observatory (~every new exposure) |
-| **Session Detail** | Name, contact, output mode, RA/Dec, filter plan, estimated duration |
-| **Project progress** (projects only) | List of sub-sessions with status; per-session download when ready |
-
-Close with **×** or click outside.
-
----
-
-### 5.6 Telescope Status (bottom right)
-
-| Element | Information |
-|---------|-------------|
-| **Observatory status** | Same Ready / Busy / Closed labels as the form header |
-| **3D mount model** | Points where the telescope is aimed when NINA mount-telemetry plugin is active |
-| **RA / Dec / Alt / Az** | Live numbers when telemetry is fresh (< ~15 s stale) |
-| **Tracking** | On/off from mount |
-
-If telemetry is offline, the model shows a default north-pointing attitude.
+Observatory status, 3D mount attitude, live RA/Dec/Alt/Az when mount telemetry is fresh.
 
 ---
 
 ## 6. Gallery, Team, Account
 
-### Gallery
-
-Browse static showcase images. Members can **Submit Gallery Work** from **Account** (upload request for admin review).
-
-### Team
-
-Contact cards: **Joshua Lake** (Director), **James Tian** (Operator, Tech), **Lucas Shi** (ASC Cloud AI Model Developer).
-
-### Account (members)
-
-| Section | Buttons / actions |
-|---------|-------------------|
-| **Account Info** | View username, email; **Change password** |
-| **Saved Sessions** | List of templates; **Run this session** → opens Remote with form loaded; **Refresh** |
-| **Session History** | Past submissions with status; **Refresh** |
-| **Submit Gallery Work** | Upload image + metadata for gallery consideration |
-
-### Account (admins only — extra panels)
-
-See [Part II §10](#10-admin-tools-on-account).
+**Gallery** — showcase images; members can submit work from Account.  
+**Team** — staff contacts.  
+**Account** — profile, saved sessions, history; admins see Part II tools.
 
 ---
 
 ## 7. Typical member workflow
 
-**Single-night galaxy (DSO, Project Mode off)**
+**Single-night DSO**
 
-1. **Atlas** → find target → **Send to Remote** (or search on Remote form).
-2. Add filter rows (e.g. L 60×30, R/G/B 60×20 each).
-3. **Output Type** → Raw ZIP.
-4. **Start Session** while observatory **Ready**.
-5. Watch **Tonight's Schedule** for your block; status → **Scheduled**.
-6. When **In progress**, **Check progress** for log + preview.
-7. When **Completed**, **Download file**.
+1. Plan (Atlas) → target → **Send to Remote**, or search on Remote.
+2. Filters + **Raw ZIP** → **Start Session** while **Ready**.
+3. Watch schedule → **Check progress** → **Download**.
 
-**Multi-night nebula (Project Mode on)**
+**Multi-night Project On**
 
-1. Same as above but enable **Project Mode** and enter **total** frame counts per filter (can exceed one night).
-2. Timeline may show **Session 1** tonight and leave remaining filters for later nights.
-3. Download each sub-session as it completes from the progress overlay.
+1. Enable **Project On**, enter total frames per filter.
+2. Timeline may show **Session 1** tonight; remaining frames continue later nights.
+
+**Mosaic**
+
+1. Plan → Framing → Grid or Custom → **Send**.
+2. Remote **Mosaic On**: set each panel’s filters → **Start Session**.
 
 **Variable star**
 
-1. **Variable Star Imaging** → pick star from catalog or SIMBAD.
-2. Choose duration block(s) under **Tonight**.
-3. **Start Session** — always **G** filter, no Project Mode.
+1. Variable Star Imaging → catalog / SIMBAD → duration → **Start Session** (G only).
 
 ---
 
@@ -334,13 +269,11 @@ See [Part II §10](#10-admin-tools-on-account).
 
 | Question | Answer |
 |----------|--------|
-| Why “too long for one night”? | Normal DSO: shorten plan or enable **Project Mode**. |
-| Why **Pending** with green weather? | Altitude, queue, **moon avoidance**, or gap too short — see schedule reasons in admin log if you ask staff. |
-| Can someone jump the queue? | No — order is by submission time (`createdAt`) and fair placement rules. |
-| Why one Project became Session 1 + 2? | Weather gap or reconcile found two viable windows tonight. |
-| Two projects at once? | No — one multi-night project holds ≥30° windows; others fill remaining time. |
-| Moon blocking my LRGB? | Scheduler skips broadband when Moon is too close; try narrowband (Ha) or another night. Variable stars ignore moon rules. |
-| Emails? | Session started / completed / failed (Resend) — if configured. |
+| Why “too long for one night”? | Shorten plan or use **Project On** / **Mosaic On**. |
+| Why **Pending** with green weather? | Altitude, queue, moon avoidance, or gap too short. |
+| Can someone jump the queue? | No — FIFO by `createdAt` + fair placement. |
+| Moon blocking LRGB? | Broadband skipped when Moon is too close; try NB or another night. Variable stars ignore moon rules. |
+| Mosaic filters the same on every panel? | No (v6) — each panel has its own plan; switch the panel pill to edit. |
 | Data retention? | Completed/failed rows and files purge after **48 hours**. |
 
 ---
@@ -351,88 +284,51 @@ See [Part II §10](#10-admin-tools-on-account).
 
 **Before sunset**
 
-- [ ] Observatory PC on; `observatory/nina_agent.py` running (or root `nina_agent.py` launcher).
-- [ ] NINA installed; template paths match agent config.
-- [ ] Vercel production healthy; KV env vars set.
-- [ ] **Account → Observatory Status** in **Auto** (or deliberate **Manual**).
-- [ ] No stray **Schedule Control** closed windows.
-- [ ] `CRON_SECRET` on Vercel matches `POMFRET_CRON_SECRET` on the PC.
+- [ ] Observatory PC on; `observatory/nina_agent.py` running.
+- [ ] NINA + templates match agent config.
+- [ ] Vercel prod healthy; KV env set.
+- [ ] Account → Observatory Status **Auto** (or deliberate Manual).
+- [ ] No stray Schedule Control closed windows.
+- [ ] `CRON_SECRET` matches PC `POMFRET_CRON_SECRET`.
 
 **During the night**
 
-- [ ] **Log** panel: `nina-sequence` deliveries, errors, schedule changes.
-- [ ] Agent 401 on reconcile → fix bearer token.
-- [ ] **Scheduled** but never **In progress** → altitude at delivery, project hold, closed window, NINA not polling.
-- [ ] **Emergency STOP** only when the dome must halt immediately; audit log shows who armed it (`armed` / `delivered` / `completed`).
-- [ ] **Telescope Status** shows mount pointing when telemetry plugin active.
+- [ ] Audit **Log**: sequence deliveries, ESTOP, schedule changes.
+- [ ] Agent 401 → fix bearer token.
+- [ ] **Scheduled** but never starts → altitude at delivery, project hold, closed window, NINA not polling.
+- [ ] Manual **Emergency STOP** only when the dome must halt now.
+- [ ] Weather-safety auto-ESTOP may arm on ASC rain / precip / 20 km thunder (nautical night).
 
 **After dawn**
 
-- [ ] Audit log: **End Night** sequence delivered.
-- [ ] Review **Failed** sessions; 48 h retention handles cleanup.
+- [ ] End Night (after sessions and/or dawn) delivered; Discord messages as below.
+- [ ] Review **Failed** sessions.
 
 ---
 
 ## 10. Admin tools on Account
 
-Admins see everything members see, plus:
-
 ### Observatory Status
 
-| Control | Effect |
-|---------|--------|
-| **Manual / Auto** | **Auto** derives status from daytime + weather + busy; **Manual** lets you pick status directly |
-| **Ready / Busy / Closed …** | Status pills (disabled in Auto except viewing) |
+**Manual / Auto**; Ready / Busy / Closed pills.
 
 ### Emergency STOP
 
-Top-right on Account (requires NINA agent connected):
+| Phase | Meaning |
+|-------|---------|
+| **Emergency STOP** | Idle — arm (confirm) |
+| **STOPPING…** | Kill/close-dome sequence delivered |
+| **STOPPED** | Blocked until dome closed / admin clears |
 
-| Button phase | Meaning |
-|--------------|---------|
-| **Emergency STOP** | Idle — press to arm (confirm dialog) |
-| **STOPPING…** | Kill sequence delivered to agent; dome closing |
-| **STOPPED** | Delivery blocked until dome reports closed or admin clears via observatory status |
+Arming fails in-progress work, holds pending/scheduled rows, audits who armed it.
 
-Arming fails in-progress sessions, puts pending/scheduled rows **on hold**, and writes audit entries with the admin’s name. **Run** in Session Control is disabled while STOPPING or STOPPED.
+### Log / Schedule Control / Session Control
 
-### Log
+Audit refresh + CSV export; closed windows; Run / Hold / Complete / Fail / Delete / recover In progress.
 
-| Button | Effect |
-|--------|--------|
-| **Refresh** | Reload audit entries |
-| **Export** | Download CSV of log |
+### All Sky Camera Control / Gallery / Members
 
-### Schedule Control
-
-| Field / button | Effect |
-|----------------|--------|
-| Description | Shown to members when window is active |
-| Start / End HH:MM | Local ET closed interval |
-| **Add closed window** | Blocks new scheduling; triggers reconcile |
-| **Remove** | Deletes a window |
-
-### Session Control
-
-| Button | Effect |
-|--------|--------|
-| **Refresh** | Reload active sessions |
-| **Run** | Force-run pending / scheduled / planned (altitude + weather gates still apply) |
-| **Hold / Unhold** | Pause or resume scheduling and delivery |
-| **Complete / Fail / Delete** | Force terminal state on stuck rows |
-| **In progress** | Recovery: mark a **Failed** row in-progress again |
-
-### All Sky Camera Control
-
-Pi camera modes (**stream**, **auto**, **half_hour**, **hour**, **off**), manual gain/exposure, **Auto Exposure** and **Auto White Balance** tuning charts (admin diagnostics).
-
-### Gallery Request
-
-Approve or reject member gallery submissions.
-
-### All Members
-
-Promote to admin; delete members. Accounts listed in **`BOOTSTRAP_ADMIN_EMAILS`** (env) may also **Set as Member** or **Remove** other admins (not bootstrap peers or themselves).
+Pi modes + auto-tuning charts; gallery moderation; member admin (bootstrap emails can demote other admins).
 
 ---
 
@@ -440,17 +336,15 @@ Promote to admin; delete members. Accounts listed in **`BOOTSTRAP_ADMIN_EMAILS`*
 
 | Symptom | Likely cause | Check |
 |---------|--------------|-------|
-| Submit rejected “observatory not ready” | Status closed | Observatory panel; weather; closed window |
-| **Pending** + clear weather | Altitude, moon, queue, gap | Audit schedule reasons |
-| **Scheduled**, never starts | Delivery blocked | Target < 30°; project hold; NINA poll |
+| Submit “not ready” | Closed status | Obs panel; weather; closed window |
+| **Pending** + clear weather | Altitude, moon, queue, gap | Schedule reasons / audit |
+| **Scheduled**, never starts | Delivery blocked | ≥30°; project hold; NINA poll |
 | Agent 401 | Secret mismatch | `IMAGING_QUEUE_SECRET` / `CRON_SECRET` |
-| No emails | Resend unset | `RESEND_API_KEY`, `IMAGING_MAIL_FROM` |
-| No download | R2 / retention | Agent `session-files` POST; 48 h purge |
-| Preview stuck on Image 1/N | KV write / per-session key | Audit; redeploy if old monolithic preview bug |
-| Project sub not delivering | Reconcile / planner | In-progress lock; weather replan |
-| Project sub **on hold** after a fail | Auto-hold same night | **Unhold** in Session Control when ready to retry |
-| **Emergency STOP** unavailable | Agent disconnected | Start `nina_agent.py`; button requires live poll |
-| ESTOP stuck **STOPPING** / **STOPPED** | Agent or KV | Audit log `event`; obs status PATCH clears STOPPED when leaving maintenance |
+| No download | R2 / retention | `session-files`; 48 h purge |
+| Framing RA flipped (e.g. 08h vs 20h) | Pre-v6 inverse bug | Deploy **v6.0.0+** |
+| Mosaic filters don’t change per panel | Pre-v6 shared plans | Deploy **v6.0.0+** |
+| Weather ESTOP didn’t fire | Daytime / already STOPPED / no threat | Nautical night only; ASC / precip / storm ring |
+| ESTOP stuck STOPPING | Agent / KV | Audit `event`; obs PATCH clears STOPPED |
 
 ---
 
@@ -462,12 +356,11 @@ Promote to admin; delete members. Accounts listed in **`BOOTSTRAP_ADMIN_EMAILS`*
 flowchart TB
   subgraph users [Browsers]
     M[Members]
-    G[Guests]
     A[Admins]
   end
 
   subgraph vercel [Vercel Next.js 14]
-    Remote[Remote UI]
+    UI[Plan / Remote / Weather]
     API[API Routes]
     KV[(Vercel KV)]
     Planner[Planner + Reconcile]
@@ -483,24 +376,25 @@ flowchart TB
     OM[Open-Meteo]
     R2[(Cloudflare R2)]
     Resend[Resend]
+    Discord[NINA Discord Alert]
   end
 
-  M --> Remote
-  G --> Remote
-  A --> Remote
-  Remote --> API
+  M --> UI
+  A --> UI
+  UI --> API
   API --> KV
   API --> Planner
   Planner --> OM
   Agent --> API
   Cam --> API
   Agent --> NINA
+  NINA --> Discord
   Agent --> R2
   API --> R2
   API --> Resend
 ```
 
-**KV keys (production):** `member-users`, `member-session:*`, `member-saved-sessions:*`, `imaging-queue-requests`, `imaging-session-board`, `imaging-projects`, `observatory-status`, `admin-closed-windows`, `imaging-r2-object-map`, `imaging-preview:{queueId}`, `imaging-audit-log`, `imaging-emergency-stop`, `end-night-state`, `camera-auto-tuning-history`.
+**KV (production):** `member-users`, `member-session:*`, `imaging-queue-requests`, `imaging-session-board`, `imaging-projects`, `observatory-status`, `admin-closed-windows`, `imaging-r2-object-map`, `imaging-preview:{queueId}`, `imaging-audit-log`, `imaging-emergency-stop`, end-night keys, weather-safety debounce, camera auto-tuning history.
 
 Without KV, stores are **in-memory** (lost on cold start).
 
@@ -508,181 +402,136 @@ Without KV, stores are **in-memory** (lost on cold start).
 
 ## 13. Autonomous scheduler
 
-Members do not pick start times. **Tonight** = nautical dusk → nautical dawn (Pomfret, CT).
+**Tonight** = nautical dusk → nautical dawn (Pomfret, CT). Members do not pick start times.
 
 ### Weather (`lib/tonight-weather-gate.ts`)
 
-Per forecast hour: cloud **< 10%**, precip **< 10%**, wind **≤ 10 m/s**.
-
-**Global gate:** ≥ 2 consecutive clear hours remaining; no precip ≥ 10%; wind limits. **Headline “Permitted”** and this gate use only **nautical dusk → nautical dawn** hours (not pre-twilight afternoon).
+Per hour: cloud **&lt; 10%**, precip **&lt; 10%**, wind **≤ 10 m/s**. Global gate / headline use nautical-night hours only.
 
 ### Altitude (`lib/target-altitude.ts`)
 
-Target **≥ 30°** for **100%** of session window (5-minute buckets).
+Target **≥ 30°** for **100%** of the session window.
 
-### Moon avoidance (`lib/moon-avoidance.ts`) — v2.1+
+### Moon avoidance (`lib/moon-avoidance.ts`)
 
-ACP/NINA **Lorentzian** model — required angular separation scales with lunar age:
-
-| Tier | Filters | `distance` at full moon |
-|------|---------|-------------------------|
-| Broadband | L, R, G, B | 110° |
-| Weak NB | O (OIII) | 95° |
-| Strong NB | S (SII) | 65° |
-| Strong NB | H (Ha) | 55° |
-
-Relaxations: Moon below horizon → 0; Moon alt **< 10°** → requirement × 0.5.
-
-| Session type | Moon behavior |
-|--------------|---------------|
-| **Normal DSO** | **All** filters must pass for the window → else **unscheduled** (pending, like weather) |
-| **Project Mode** | Skip blocked filters **per sub-session window**; no backfill; frames carry forward |
-| **Variable Star** | **Exempt** |
-
-Pre-submit: `createRequest` rejects if no ideal-night slot exists for all filters (400). Queue POST does not **reject** solely for moon when observatory is Ready.
-
-### Cross-spell placement
-
-Sessions may span multiple clear hourly segments if **≥ 80%** weather coverage and **100%** altitude (and moon for normal DSO).
+Lorentzian separation by lunar age (broadband stricter than NB). Normal DSO: all filters must pass. **Project / Mosaic:** skip blocked filters per window. **Variable star:** exempt.
 
 ### Queue fairness
 
-FIFO by `createdAt`. In-progress project reserves ≥30° intervals for its target (`lib/imaging/project/altitude-hold.ts`).
+FIFO by `createdAt`. In-progress project altitude hold reserves ≥30° intervals. v6 fixes a FIFO double-booking bug that could hide the next Session.
 
 ### Reconcile
 
-`reconcilePendingScheduleStatus()` on: **current-sessions** GET, agent `GET /api/imaging/reconcile-queue-schedule` (~6 min), admin schedule-control changes.
+On current-sessions GET, agent reconcile (~6 min), schedule-control changes. UI polls adaptively (day slow / night faster).
 
 ---
 
-## 14. Project Mode & Variable Star
+## 14. Project Mode, Mosaic & Variable Star
 
-**Project:** one queue row + `imaging-projects` KV; sub-sessions `{projectId}::night-{n}` for NINA/progress/preview keys.
+**Project On:** one queue row + `imaging-projects`; subs `{projectId}::night-{n}`.
 
-**Delivery:** queue row consumed on first sub; each sub JSON delivered once; progress uses sub-session id in `PomfretAstro.QueueId`.
+**Mosaic On:** `mosaicMode` + `mosaicPanels` + per-panel remaining (`mosaicRemainingByPanel` from `mosaicFilterPlansByPanel`). Planner: `planMosaicInterleavedSubSessions` — cross-panel, moon-aware.
 
-**Auto-hold after failure:** If any sub-session **failed** tonight, newly planned subs for that night are placed **on hold** until an admin **Unhold**s them (avoids back-to-back retries after a bad run).
+**Variable star:** G only; N×0.5 h + 15 min overhead; no Project/Mosaic.
 
-**Variable star:** G filter only; duration = N × 0.5 h + 15 min overhead; catalog + SIMBAD APIs; no Project Mode.
+**Auto-hold after failure:** failed sub tonight → new plans that night stay on hold until admin Unhold.
 
 ---
 
-## 15. NINA agent & observatory scripts
+## 15. NINA agent, end night & ESTOP
 
 ```
-Website                          Observatory PC
-────────                         ──────────────
-POST /api/imaging/queue    →     (member submit)
-GET  /api/imaging/nina-sequence ←  observatory/nina_agent.py (~45 s poll)
-POST /api/imaging/session-progress ← NINA Ground Station
-POST /api/imaging/session-files  ← R2 upload complete
-POST /api/imaging/preview        ← JPEG preview
-GET  /api/imaging/reconcile...   ← ~every 6 min
+Website                              Observatory PC
+────────                             ──────────────
+POST /api/imaging/queue        →     member submit
+GET  /api/imaging/nina-sequence ←    nina_agent.py (~45 s; ESTOP poll faster while imaging)
+GET  /api/imaging/emergency-stop/delivery ← ESTOP-only lightweight poll
+POST /api/imaging/session-progress ← Ground Station / sequences
+POST /api/imaging/session-files  ←   R2 complete
+POST /api/imaging/preview        ←   JPEG
+GET  /api/imaging/reconcile...   ←   ~6 min
 ```
 
-**Repo layout:**
+**Templates (repo root):** Classic DSO (+ multi-filter), Variable Star, `End Night Session.json`, `EStop.json`. Runtime Discord text patching: `lib/imaging/nina-discord-message.ts`.
 
-```
-observatory/
-├── nina_agent.py          # Windows — queue poll, R2 upload, reconcile trigger
-├── camera_service.py      # Pi — all-sky stream, auto exposure/WB, Drive upload
-├── asc_cloud_ai.py        # Pi — TM cloud/rain inference on auto captures
-├── auto_exposure.py
-├── auto_white_balance.py
-├── observatory_solar.py   # Gain schedule by nautical dawn/dusk; same for ASC AI day/night
-├── imaging_drive.py
-├── google_drive_upload.py
-├── models/                # Day/Night Cloud & Rain TFJS models
-└── requirements-ai.txt    # tensorflow, tensorflowjs (optional on Pi)
+### End night
 
-camera_service.py            # root launcher → observatory/
-nina_agent.py                # root launcher → observatory/
-```
+| Trigger | Queue id pattern | Discord |
+|---------|------------------|---------|
+| After last tonight session | `end-night-{nightKey}` | `Tonight's Session Completed.` |
+| Nautical dawn fallback | `end-night-{nightKey}-dawn` | `End Night - Dawn` |
 
-**Sequence templates (repo root):** `Classic DSO Imaging Sequence.json`, multi-filter variant, `Variable Star Sequence.json`, `End Night Session.json`. Runtime builder: `lib/imaging/nina/sequence-json.ts`.
+Sequence: Connect → Close dome → Disconnect → Discord.
 
-**NINA delivery rules:** closed windows → 409; observatory ready; target ≥ 30°; project altitude hold; end-night after last tonight work or nautical dawn fallback.
+### Emergency STOP
 
-**Emergency STOP:** Admin `POST /api/imaging/emergency-stop` → next agent poll returns kill/close-dome JSON. While NINA reports imaging **in progress**, the poll serves ESTOP only (no competing session delivery). Dome-closed progress marks **STOPPED** in KV (`imaging-emergency-stop`).
+| Source | Discord |
+|--------|---------|
+| Manual admin arm | `ESTOPPED` |
+| Weather safety (`weather-safety-auto`) | `Weather Safety System Triggered - ESTOPPED` |
 
-**Weather safety auto-ESTOP:** During **nautical night** (dusk→dawn only), the same ESTOP path arms automatically when (1) ASC AI detects rain and/or (2) a thunderstorm (`weather_code` 95/96/99) appears on a **20 km** ring around Pomfret — regardless of session in-progress (covers gaps with the dome still open). **Daytime is a no-op** (end-night at dawn keeps the dome closed). Already-armed/STOPPED ESTOP blocks re-arm. Hooks: agent-pulse, observatory weather refresh, schedule maintenance. Weather ASC overlay **Thunderstorm Detection** (Safe/Unsafe) reads the same ring via `GET /api/weather/storm-approach`.
+ESTOP sequence also POSTs dome-closed progress to clear KV state.
+
+**Weather-safety auto-ESTOP** (nautical night only): ASC rain (high confidence), site precip forecast threshold, and/or thunderstorm (`weather_code` 95/96/99) on the **20 km** Open-Meteo ring. Daytime is a no-op. Already STOPPING/STOPPED blocks re-arm. Hooks: agent-pulse, observatory weather refresh, schedule maintenance. Weather **Thunderstorm Detection** uses `GET /api/weather/storm-approach`.
+
+While NINA reports imaging, agent polls deliver **ESTOP only** (409 for other work).
 
 ---
 
 ## 16. All-sky camera & auto tuning
 
-- **Stream:** Pi `camera_service.py` → MJPEG; shown on Weather page and admin panel.
-- **Auto modes:** `stream`, `auto`, `half_hour`, `hour`, `off` — gain scheduled by `observatory_solar.py` (0 day / 80 twilight / 150 night using **nautical** dawn/dusk).
-- **ASC cloud AI:** In `auto`, `half_hour`, and `hour` modes, each captured frame runs Teachable Machine cloud + rain models (`observatory/asc_cloud_ai.py`). **Nautical dawn → nautical dusk** uses `Day_*` models; otherwise `Night_*`. Results are exposed on camera `/status` as `sensors.allSkyCam.ascCloud` (includes `modelVersion`, currently **ASC AI Model Version 1** / `v1`). Weather page **Cloud Cover** and the all-sky overlay read this field (not Open-Meteo). Rain is inferred and stored in status JSON but not shown in the UI yet.
-- **Models:** `AI Models/` (training exports) and `observatory/models/` (Pi runtime). Version manifest: `ASC_AI_MODEL_VERSION.json`. See [AI Models/README.md](AI%20Models/README.md). Pi install: `pip install -r observatory/requirements-ai.txt` (TensorFlow + tensorflowjs; optional — capture continues if AI deps are missing).
-- **Auto exposure / WB:** closed-loop on Pi; samples posted to `/api/camera/auto-tuning-history`; admin charts in **All Sky Camera Control**.
-- **Half Hour / Hour modes:** timed capture uploads to Google Drive via `imaging_drive.py`.
-
-**Mount telemetry:** `nina-plugins/PomfretAstro.MountTelemetry/` → `POST /api/imaging/mount-pointing` → Remote 3D panel.
+- Pi `camera_service.py` → MJPEG on Weather + admin.
+- Modes: `stream`, `auto`, `half_hour`, `hour`, `off`; gain via `observatory_solar.py` (nautical dawn/dusk).
+- ASC cloud/rain AI (`asc_cloud_ai.py`); day/night model sets. Weather Cloud Cover / overlay read ASC status when available.
+- Auto exposure / WB samples → `/api/camera/auto-tuning-history`.
+- Mount telemetry plugin → Remote 3D panel.
 
 ---
 
 ## 17. Repository layout & `lib/imaging`
 
-This repository is the **Pomfret Astro website** only (Next.js app at the repo root). FRAOS desktop/cloud editions live in a separate repo: [QimingTian/FRAOS](https://github.com/QimingTian/FRAOS).
+This repository is the **Pomfret Astro website** only (Next.js at repo root). FRAOS editions: [QimingTian/FRAOS](https://github.com/QimingTian/FRAOS).
 
 ```
-website/                     ← git repo root
-├── app/ components/ lib/   ← pomfretastro.org (Vercel Root Directory = repo root)
-│   ├── app/
-│   │   ├── api/auth|admin|member|imaging/   # REST + SSE
-│   │   └── dashboard/                        # Weather, Atlas, Remote, …
-│   ├── components/
-│   ├── lib/
-│   │   ├── imaging/                          # Domain modules (canonical)
-│   │   │   ├── queue/        store, reconcile, schedule-insight, …
-│   │   │   ├── project/      store, planner, retention, altitude-hold, …
-│   │   │   ├── session/      board, control, failure, progress-queue, …
-│   │   │   ├── core/         audit-log, preview-store, emails, …
-│   │   │   └── nina/         sequence-json builder
-│   │   ├── imaging-queue-store.ts            # re-export stubs (legacy import paths)
-│   │   ├── moon-avoidance.ts
-│   │   ├── tonight-weather-gate.ts
-│   │   ├── sunrise-window.ts
-│   │   ├── target-altitude.ts
-│   │   ├── schedule-strip.ts
-│   │   └── member-store.ts
-│   ├── observatory/                          # Pi + Windows Python (shipped scripts)
-│   ├── nina-plugins/                         # Pomfret custom NINA plugins
-│   ├── public/telescope-models/              # .obj files for Remote 3D mount panel
-│   ├── mobile-webapp/                        # Phone all-sky HUD
-│   └── vercel.json                           # iad1 + daily cleanup cron
-└── third-party/             ← not deployed (see ../third-party/README.md from here)
-    ├── nina/  siril-1.4.2/  ExoPlanets/  stellarium-web-engine/  emsdk/  …
+website/                          ← git repo root (= Vercel root)
+├── app/                          # Next.js App Router (Weather, Plan, Remote, …)
+├── components/                   # Plan framing, Remote, shared UI
+├── lib/
+│   ├── imaging/                  # queue, project, session, weather-safety, ESTOP, …
+│   ├── mosaic/                   # Grid/Custom panel math
+│   ├── fov-overlay.ts            # VIEW raDec ↔ screen (v6 front-hemisphere inverse)
+│   └── …
+├── observatory/                  # nina_agent, camera_service, ASC AI
+├── nina-plugins/
+├── public/
+├── End Night Session.json
+├── EStop.json
+└── Classic DSO / Variable Star sequence JSON
 ```
 
-**Tests:** `npm test` (or `npm run test:types` for typecheck only)
+**Tests:** `npm test` · **Types:** `npm run test:types`
 
 ---
 
 ## 18. Environment variables & deployment
 
-**Required production:** `KV_REST_API_URL`, `KV_REST_API_TOKEN`
+**Required:** `KV_REST_API_URL`, `KV_REST_API_TOKEN`
 
-**Auth:** `BOOTSTRAP_ADMIN_EMAILS` (comma-separated admin emails), `SITE_URL` (verification links)
+**Auth:** `BOOTSTRAP_ADMIN_EMAILS`, `SITE_URL`
 
-**Security:** See [SECURITY_SETUP.md](SECURITY_SETUP.md) for production secret checklist and post-deploy verification.
+**Security checklist:** [SECURITY_SETUP.md](SECURITY_SETUP.md)
 
-**Imaging:** `IMAGING_QUEUE_SECRET`, `CRON_SECRET`, `IMAGING_R2_WRITE_SECRET`, R2 S3 vars, `NINA_SESSION_PROGRESS_BASIC_*`, `NINA_MOUNT_TELEMETRY_*`
+**Imaging:** `IMAGING_QUEUE_SECRET`, `CRON_SECRET`, `IMAGING_R2_WRITE_SECRET`, R2 S3 vars, NINA progress / mount telemetry secrets
 
-**Weather radar (optional):** `LIBREWXR_API_BASE_URL` — upstream LibreWXR API (default `https://api.librewxr.net`). For reliability, self-host [LibreWXR](https://librewxr.net/docs) on a VPS (e.g. Hetzner) and point this to your instance; the site proxies metadata and tiles through `/api/librewxr/*`.
-
-**Email:** `RESEND_API_KEY`, `IMAGING_MAIL_FROM`
-
-**Dev:**
+**Optional:** `LIBREWXR_API_BASE_URL`, `RESEND_API_KEY`, `IMAGING_MAIL_FROM`
 
 ```bash
 npm install && npm run dev    # http://localhost:3000
-npm run test:types
-npm test
+npm run test:types && npm test
+npm run deploy                # Vercel prod (iad1)
 ```
 
-**Deploy:** `npm run deploy` (Vercel prod, region `iad1`). Cron: `GET /api/imaging/cleanup-sessions` daily 05:00 UTC. Reconcile: agent-only (Hobby plan — no sub-daily Vercel cron).
+Cron: `GET /api/imaging/cleanup-sessions` daily 05:00 UTC. Reconcile: agent-driven.
 
 ---
 
@@ -692,24 +541,24 @@ npm test
 |--------|------|-------|
 | POST | `/api/auth/signup`, `/login`, `/logout` | Rate limited |
 | GET | `/api/auth/me` | Cookie session |
-| GET/POST/DELETE | `/api/member/saved-sessions` | Member |
-| GET | `/api/member/sessions` | History |
-| POST | `/api/imaging/queue` | Submit session (member) |
-| GET | `/api/imaging/current-sessions` | Public read; triggers reconcile + retention |
+| POST | `/api/imaging/queue` | Submit (member); mosaic fields optional |
+| GET | `/api/imaging/current-sessions` | Public; reconcile + retention |
 | GET | `/api/imaging/nina-sequence` | Agent poll |
+| GET | `/api/imaging/emergency-stop/delivery` | ESTOP-only poll |
+| GET/POST | `/api/imaging/emergency-stop` | Admin status + arm |
 | GET | `/api/imaging/reconcile-queue-schedule` | `CRON_SECRET` |
 | GET/PATCH | `/api/imaging/observatory-status` | GET public |
 | GET/POST/DELETE | `/api/imaging/schedule-control` | Admin |
-| GET/POST | `/api/imaging/session-control` | Admin Run / Hold / force actions |
-| GET/POST | `/api/imaging/emergency-stop` | Admin ESTOP status + arm |
+| GET/POST | `/api/imaging/session-control` | Admin Run / Hold / … |
 | GET | `/api/imaging/audit-log` | Admin |
 | GET | `/api/imaging/download` | Presigned R2 |
-| GET | `/api/imaging/tonight-weather-prediction` | Remote schedule bands |
-| GET | `/api/imaging/object-resolve` | Atlas / Remote search |
+| GET | `/api/imaging/tonight-weather-prediction` | Schedule bands |
+| GET | `/api/weather/storm-approach` | 20 km thunder ring |
+| GET | `/api/imaging/object-resolve` | Plan / Remote search |
 | GET | `/api/imaging/variable-stars`, `/variable-star-lookup` | Variable star UI |
-| GET/POST | `/api/camera/auto-tuning-history` | Pi tuning samples / admin charts |
+| GET/POST | `/api/camera/auto-tuning-history` | Pi tuning |
 
-**SSE:** `/api/imaging/queue/[id]/progress-stream`, `preview-stream`
+Progress/preview use **HTTP polling** (adaptive), not browser SSE.
 
 ---
 
@@ -717,15 +566,29 @@ npm test
 
 | Route | Page |
 |-------|------|
-| `/dashboard` | Welcome video |
-| `/dashboard/weather` | Weather + cloud map + moon + all-sky |
-| `/dashboard/atlas` | Stellarium atlas |
-| `/dashboard/remote` | **Main imaging UI** |
+| `/dashboard` | Welcome |
+| `/dashboard/weather` | Weather + ASC |
+| `/dashboard/plan` | **Plan** (Atlas + Framing) |
+| `/dashboard/atlas` | Redirect / legacy → Plan |
+| `/dashboard/remote` | Main imaging UI |
 | `/dashboard/gallery` | Gallery |
 | `/dashboard/contact` | Team |
-| `/dashboard/account` | Account (+ admin tools) |
-| `/login`, `/signup` | Auth (redirect to dashboard) |
+| `/dashboard/account` | Account (+ admin) |
+| `/login`, `/signup` | Auth |
 
 ---
 
-*Last updated: June 2026 — v3.1.x: Emergency STOP (admin actor audit, KV persistence), Session Control Run/Hold, project auto-hold after failed sub, NINA-running ESTOP poll gate, global weather Permitted window (nautical night only). Prior: v2.1 moon avoidance, `lib/imaging/` layout, all-sky auto tuning.*
+## What’s new in v6.0.0
+
+- Stable Plan Framing (NINA-aligned VIEW draw + front-hemisphere inverse)
+- Mosaic On: **per-panel** filters / exposure / counts
+- Weather-safety ESTOP + ASC thunderstorm overlay (20 km ring)
+- Distinct Discord messages for end-night (session / dawn) and ESTOP (manual / weather)
+- Weather / Remote UI radius polish; project FIFO schedule fix
+- Next.js `^14.2.35`; website-only repo at root
+
+Full notes: [Release v6.0.0](https://github.com/QimingTian/Pomfret-Astro-Website/releases/tag/v6.0.0)
+
+---
+
+*Last updated: July 2026 — **v6.0.0**. Prior milestones: v5.x Plan/mosaic/field rotation; v4.x adaptive polling (retire SSE); v3.x Emergency STOP & Session Control; v2.1 moon avoidance.*

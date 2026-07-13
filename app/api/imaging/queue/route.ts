@@ -37,7 +37,10 @@ import { getScheduleReservedIntervalsForActiveProject } from '@/lib/imaging-proj
 import { computeScheduleInsight } from '@/lib/imaging-queue-schedule-insight'
 import { getObservatoryStatus, isObservatoryReady } from '@/lib/observatory-status-store'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
-import { getTonightWeatherPermittedIntervals } from '@/lib/tonight-weather-gate'
+import {
+  getTonightWeatherPermittedIntervals,
+  pickOpenMeteoImagingNightBounds,
+} from '@/lib/tonight-weather-gate'
 
 export const runtime = 'nodejs'
 
@@ -68,7 +71,7 @@ async function detectSunsetSunrisePrecipGate(): Promise<{ active: boolean | null
     '?latitude=41.9159&longitude=-71.9626' +
     '&hourly=precipitation_probability' +
     '&daily=sunrise,sunset' +
-    '&forecast_days=2&timezone=America/New_York&timeformat=unixtime'
+    '&past_days=1&forecast_days=2&timezone=America/New_York&timeformat=unixtime'
   try {
     const res = await fetch(url, { cache: 'no-store' })
     if (!res.ok) return { active: null, hitHours: [] }
@@ -78,19 +81,14 @@ async function detectSunsetSunrisePrecipGate(): Promise<{ active: boolean | null
     }
     const times = data.hourly?.time ?? []
     const precip = data.hourly?.precipitation_probability ?? []
-    const sunset = data.daily?.sunset?.[0]
-    const sunrise = data.daily?.sunrise?.[1]
-    if (
-      !Number.isFinite(sunset) ||
-      !Number.isFinite(sunrise) ||
-      times.length === 0 ||
-      precip.length !== times.length ||
-      Number(sunrise) <= Number(sunset)
-    ) {
+    const nightBounds = pickOpenMeteoImagingNightBounds(
+      data.daily?.sunset ?? [],
+      data.daily?.sunrise ?? []
+    )
+    if (!nightBounds || times.length === 0 || precip.length !== times.length) {
       return { active: null, hitHours: [] }
     }
-    const sunsetSec = Number(sunset)
-    const sunriseSec = Number(sunrise)
+    const { sunsetSec, sunriseSec } = nightBounds
     const hitHours = times.filter((t, i) => t >= sunsetSec && t < sunriseSec && Number(precip[i]) >= 10)
     return { active: hitHours.length > 0, hitHours }
   } catch {

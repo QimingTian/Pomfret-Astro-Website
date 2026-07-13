@@ -72,19 +72,15 @@ export type ImagingProject = {
   adminApprovalPending?: boolean
   mosaicMode?: boolean
   mosaicPanels?: MosaicPanel[]
+  /** Original per-panel filter plans (parallel to mosaicPanels); UI progress totals. */
+  mosaicFilterPlansByPanel?: FilterPlanRow[][]
   /** Per-panel filter progress (parallel to mosaicPanels). Enables cross-panel moon-aware scheduling. */
   mosaicRemainingByPanel?: FilterRemainingRow[][]
   /** @deprecated Mosaic interleaving uses mosaicRemainingByPanel; kept for legacy reads. */
   activePanelIndex?: number
 }
 
-/** Display label for project sub-sessions (mosaic uses Panel-Sub form). */
-export function projectSessionDisplayLabel(night: Pick<ProjectNight, 'nightIndex' | 'mosaicPanelIndex' | 'mosaicSubIndex'>): string {
-  if (night.mosaicPanelIndex != null && night.mosaicSubIndex != null) {
-    return `Session ${night.mosaicPanelIndex}-${night.mosaicSubIndex}`
-  }
-  return `Session ${night.nightIndex}`
-}
+export { projectSessionDisplayLabel } from '@/lib/imaging/project/session-display-label'
 
 export function projectTargetCoordsForPanel(
   project: ImagingProject,
@@ -611,6 +607,11 @@ export async function createImagingProject(input: CreateImagingProjectInput): Pr
           mosaicMode: true,
           mosaicPanels: input.mosaicPanels,
           mosaicRemainingByPanel,
+          ...(perPanelPlans
+            ? {
+                mosaicFilterPlansByPanel: perPanelPlans.map((plans) => plans.map((p) => ({ ...p }))),
+              }
+            : {}),
           activePanelIndex: 1,
         }
       : {}),
@@ -636,6 +637,9 @@ export async function applyPendingProjectQueueEdit(
     lastName: string | null
     email: string | null
     sessionPasswordHash?: string
+    mosaicMode?: boolean
+    mosaicPanels?: MosaicPanel[]
+    mosaicFilterPlansByPanel?: FilterPlanRow[][]
   }
 ): Promise<ImagingProject | { error: string }> {
   const project = await getProjectById(projectId)
@@ -649,11 +653,34 @@ export async function applyPendingProjectQueueEdit(
   }
 
   const ts = new Date().toISOString()
-  const remainingByFilter: FilterRemainingRow[] = input.filterPlans.map((p) => ({
+  const mosaicMode =
+    input.mosaicMode === true &&
+    Array.isArray(input.mosaicPanels) &&
+    input.mosaicPanels.length > 0
+  const perPanelPlans =
+    mosaicMode &&
+    input.mosaicFilterPlansByPanel?.length === input.mosaicPanels!.length
+      ? input.mosaicFilterPlansByPanel
+      : null
+  const filterPlansTotal = perPanelPlans
+    ? aggregateFilterPlansTotal(perPanelPlans)
+    : input.filterPlans.map((p) => ({ ...p }))
+  const remainingByFilter: FilterRemainingRow[] = filterPlansTotal.map((p) => ({
     filterName: p.filterName,
     exposureSeconds: p.exposureSeconds,
     countRemaining: p.count,
   }))
+  const mosaicRemainingByPanel = mosaicMode
+    ? perPanelPlans
+      ? perPanelPlans.map((plans) =>
+          plans.map((p) => ({
+            filterName: p.filterName,
+            exposureSeconds: p.exposureSeconds,
+            countRemaining: p.count,
+          })),
+        )
+      : input.mosaicPanels!.map(() => remainingByFilter.map((r) => ({ ...r })))
+    : undefined
   // Keep terminal sub-sessions so Check Progress / history survive filter-plan edits.
   const nights = project.nights.filter(
     (n) => n.status === 'completed' || n.status === 'failed' || n.status === 'in_progress'
@@ -668,14 +695,35 @@ export async function applyPendingProjectQueueEdit(
     decDeg: input.decDeg,
     outputMode: input.outputMode,
     ...(input.cameraCoolingTempC != null ? { cameraCoolingTempC: input.cameraCoolingTempC } : {}),
-    filterPlansTotal: input.filterPlans.map((p) => ({ ...p })),
-    remainingByFilter,
+    filterPlansTotal,
+    remainingByFilter: perPanelPlans
+      ? sumRemainingByFilterAcrossPanels(mosaicRemainingByPanel ?? [])
+      : remainingByFilter,
     estimatedDurationSeconds: input.estimatedDurationSeconds,
     firstName: input.firstName,
     lastName: input.lastName,
     email: input.email,
     nights,
     ...(input.sessionPasswordHash ? { sessionPasswordHash: input.sessionPasswordHash } : {}),
+    ...(mosaicMode
+      ? {
+          mosaicMode: true,
+          mosaicPanels: input.mosaicPanels,
+          mosaicRemainingByPanel,
+          ...(perPanelPlans
+            ? {
+                mosaicFilterPlansByPanel: perPanelPlans.map((plans) => plans.map((p) => ({ ...p }))),
+              }
+            : { mosaicFilterPlansByPanel: undefined }),
+          activePanelIndex: 1,
+        }
+      : {
+          mosaicMode: false,
+          mosaicPanels: undefined,
+          mosaicRemainingByPanel: undefined,
+          mosaicFilterPlansByPanel: undefined,
+          activePanelIndex: undefined,
+        }),
   }
   const all = await readProjects()
   const idx = all.findIndex((p) => p.id === projectId)
@@ -998,7 +1046,7 @@ export async function markNightCompleted(
     remainingByFilter: nextRemaining,
     status,
     ...(project.mosaicMode ? { mosaicRemainingByPanel, activePanelIndex: firstMosaicPanelWithRemaining({ ...project, mosaicRemainingByPanel }) ?? project.activePanelIndex } : {}),
-    ...(projectCompleted ? { completedAt } : {}),
+    ...(projectCompleted ? { completedAt, onBoard: false } : {}),
   })
   if (!updated) return undefined
   return { project: updated, projectCompleted }

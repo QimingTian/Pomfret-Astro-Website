@@ -35,6 +35,7 @@ import {
   type RemoteSavedSessionFormV1,
 } from '@/lib/remote-saved-session'
 import { canSubmitImagingPublic } from '@/lib/member-access'
+import { projectSessionDisplayLabel } from '@/lib/imaging/project/session-display-label'
 import {
   DSO_SESSION_OVERHEAD_SEC,
   VARIABLE_STAR_SESSION_OVERHEAD_SEC,
@@ -732,6 +733,34 @@ function mosaicDraftFromCoords(
   }
 }
 
+function toMosaicDraftPanel(p: {
+  id: number
+  raHours: number
+  decDeg: number
+  positionAngleDeg?: number
+  name?: string
+}): MosaicPanel {
+  return {
+    id: p.id,
+    raHours: p.raHours,
+    decDeg: p.decDeg,
+    positionAngleDeg: typeof p.positionAngleDeg === 'number' ? p.positionAngleDeg : 0,
+    name: typeof p.name === 'string' && p.name.trim() ? p.name : `Panel ${p.id}`,
+    screenDeltaXPx: 0,
+    screenDeltaYPx: 0,
+  }
+}
+
+function nightDisplayLabel(night: {
+  nightIndex: number
+  sessionLabel?: string
+  mosaicPanelIndex?: number
+  mosaicSubIndex?: number
+}): string {
+  if (typeof night.sessionLabel === 'string' && night.sessionLabel.trim()) return night.sessionLabel.trim()
+  return projectSessionDisplayLabel(night)
+}
+
 
 
 export default function RemotePage() {
@@ -801,6 +830,8 @@ export default function RemotePage() {
       scheduleBarEndMs?: number | null
       projectMode?: boolean
       mosaicMode?: boolean
+      mosaicPanels?: MosaicPanel[]
+      mosaicFilterPlansByPanel?: Array<Array<{ filterName: string; exposureSeconds: number; count: number }>>
       userId?: string | null
       projectFramesTotal?: number
       projectFramesCaptured?: number
@@ -809,6 +840,9 @@ export default function RemotePage() {
         id: string
         nightIndex: number
         nightKey: string
+        sessionLabel?: string
+        mosaicPanelIndex?: number
+        mosaicSubIndex?: number
         status: string
         plannedStartIso?: string | null
         scheduleStripNightKey?: string | null
@@ -1227,7 +1261,9 @@ export default function RemotePage() {
     )
     const ra = coords.ok ? coords.raHours : 0
     const dec = coords.ok ? coords.decDeg : 0
-    const nextId = (mosaicDraft?.panels.reduce((max, p) => Math.max(max, p.id), 0) ?? 0) + 1
+    const used = new Set((mosaicDraft?.panels ?? []).map((p) => p.id))
+    let nextId = 1
+    while (used.has(nextId)) nextId++
     const panel = buildMosaicPanel(nextId, ra, dec)
     const flushed = {
       ...panelFilterPlansByIdRef.current,
@@ -1576,6 +1612,9 @@ export default function RemotePage() {
         scheduleBarStartMs?: unknown
         scheduleBarEndMs?: unknown
         projectMode?: unknown
+        mosaicMode?: unknown
+        mosaicPanels?: unknown
+        mosaicFilterPlansByPanel?: unknown
         projectFramesTotal?: unknown
         projectFramesCaptured?: unknown
         projectFilterProgress?: unknown
@@ -1585,6 +1624,49 @@ export default function RemotePage() {
         .filter((x) => typeof x.id === 'string')
         .map((x) => {
           const sessionType: 'dso' | 'variable_star' = x.sessionType === 'variable_star' ? 'variable_star' : 'dso'
+          const mosaicPanels = Array.isArray(x.mosaicPanels)
+            ? x.mosaicPanels
+                .map((p) => {
+                  if (!p || typeof p !== 'object') return null
+                  const rec = p as Record<string, unknown>
+                  const id = typeof rec.id === 'number' && Number.isFinite(rec.id) ? rec.id : null
+                  const raHours = typeof rec.raHours === 'number' && Number.isFinite(rec.raHours) ? rec.raHours : null
+                  const decDeg = typeof rec.decDeg === 'number' && Number.isFinite(rec.decDeg) ? rec.decDeg : null
+                  if (id == null || raHours == null || decDeg == null) return null
+                  return toMosaicDraftPanel({
+                    id,
+                    raHours,
+                    decDeg,
+                    positionAngleDeg:
+                      typeof rec.positionAngleDeg === 'number' && Number.isFinite(rec.positionAngleDeg)
+                        ? rec.positionAngleDeg
+                        : 0,
+                    name: typeof rec.name === 'string' ? rec.name : undefined,
+                  })
+                })
+                .filter((p): p is MosaicPanel => p != null)
+            : undefined
+          const mosaicFilterPlansByPanel =
+            Array.isArray(x.mosaicFilterPlansByPanel) &&
+            mosaicPanels &&
+            x.mosaicFilterPlansByPanel.length === mosaicPanels.length
+              ? x.mosaicFilterPlansByPanel.map((plans) => {
+                  if (!Array.isArray(plans)) return [] as Array<{ filterName: string; exposureSeconds: number; count: number }>
+                  return plans
+                    .map((p) => {
+                      if (!p || typeof p !== 'object') return null
+                      const rec = p as Record<string, unknown>
+                      const filterName = typeof rec.filterName === 'string' ? rec.filterName : ''
+                      const exposureSeconds = Number(rec.exposureSeconds)
+                      const count = Number(rec.count)
+                      if (!filterName || !Number.isFinite(exposureSeconds) || !Number.isFinite(count)) return null
+                      return { filterName, exposureSeconds, count }
+                    })
+                    .filter((p): p is { filterName: string; exposureSeconds: number; count: number } => p != null)
+                })
+              : undefined
+          const mosaicMode =
+            x.mosaicMode === true || (Array.isArray(mosaicPanels) && mosaicPanels.length > 0)
           return {
             id: String(x.id),
             target: typeof x.target === 'string' ? x.target : 'Unknown target',
@@ -1657,7 +1739,10 @@ export default function RemotePage() {
               typeof x.scheduleBarEndMs === 'number' && Number.isFinite(x.scheduleBarEndMs)
                 ? x.scheduleBarEndMs
                 : null,
-            projectMode: x.projectMode === true,
+            projectMode: x.projectMode === true || mosaicMode,
+            mosaicMode,
+            ...(mosaicPanels && mosaicPanels.length > 0 ? { mosaicPanels } : {}),
+            ...(mosaicFilterPlansByPanel ? { mosaicFilterPlansByPanel } : {}),
             projectFramesTotal:
               typeof x.projectFramesTotal === 'number' && Number.isFinite(x.projectFramesTotal)
                 ? x.projectFramesTotal
@@ -1687,10 +1772,26 @@ export default function RemotePage() {
                     if (!n || typeof n !== 'object') return null
                     const rec = n as Record<string, unknown>
                     if (typeof rec.id !== 'string') return null
+                    const nightIndex = typeof rec.nightIndex === 'number' ? rec.nightIndex : 0
+                    const mosaicPanelIndex =
+                      typeof rec.mosaicPanelIndex === 'number' && Number.isFinite(rec.mosaicPanelIndex)
+                        ? rec.mosaicPanelIndex
+                        : undefined
+                    const mosaicSubIndex =
+                      typeof rec.mosaicSubIndex === 'number' && Number.isFinite(rec.mosaicSubIndex)
+                        ? rec.mosaicSubIndex
+                        : undefined
+                    const sessionLabel =
+                      typeof rec.sessionLabel === 'string'
+                        ? rec.sessionLabel
+                        : nightDisplayLabel({ nightIndex, mosaicPanelIndex, mosaicSubIndex })
                     return {
                       id: rec.id,
-                      nightIndex: typeof rec.nightIndex === 'number' ? rec.nightIndex : 0,
+                      nightIndex,
                       nightKey: typeof rec.nightKey === 'string' ? rec.nightKey : '',
+                      sessionLabel,
+                      ...(mosaicPanelIndex != null ? { mosaicPanelIndex } : {}),
+                      ...(mosaicSubIndex != null ? { mosaicSubIndex } : {}),
                       status: typeof rec.status === 'string' ? rec.status : 'planned',
                       plannedStartIso: typeof rec.plannedStartIso === 'string' ? rec.plannedStartIso : null,
                       scheduleStripNightKey:
@@ -2002,7 +2103,7 @@ export default function RemotePage() {
               ...item,
               id: night.id,
               nightKey: night.nightKey,
-              target: `${item.target} — Session ${night.nightIndex}`,
+              target: `${item.target} — ${nightDisplayLabel(night)}`,
               status: 'on_hold',
               plannedStartIso: null,
               estimatedDurationSeconds: night.estimatedDurationSeconds,
@@ -2020,7 +2121,7 @@ export default function RemotePage() {
             ...item,
             id: night.id,
             nightKey: night.nightKey,
-            target: `${item.target} — Session ${night.nightIndex}`,
+            target: `${item.target} — ${nightDisplayLabel(night)}`,
             status:
               night.status === 'in_progress'
                 ? 'in_progress'
@@ -2752,7 +2853,7 @@ export default function RemotePage() {
       return {
         ...item,
         id: night.id,
-        target: `${item.target} — Session ${night.nightIndex}`,
+        target: `${item.target} — ${nightDisplayLabel(night)}`,
         status:
           night.status === 'in_progress'
             ? 'in_progress'
@@ -3295,7 +3396,9 @@ export default function RemotePage() {
 
   function beginEditSession(item: (typeof queueItems)[number]) {
     setEditingSessionId(item.id)
-    setProjectModeTri(item.mosaicMode === true ? 'mosaic' : item.projectMode === true ? 'on' : 'off')
+    const isMosaic =
+      item.mosaicMode === true || (Array.isArray(item.mosaicPanels) && item.mosaicPanels.length > 0)
+    setProjectModeTri(isMosaic ? 'mosaic' : item.projectMode === true ? 'on' : 'off')
     setSessionType(item.sessionType === 'variable_star' ? 'variable_star' : 'dso')
     setVariableStarPreviewStar(null)
     setVariableStarLastFoundName(null)
@@ -3340,15 +3443,62 @@ export default function RemotePage() {
     if (item.cameraCoolingTempC === 0 || item.cameraCoolingTempC === -10) {
       setCameraCoolingTempC(item.cameraCoolingTempC)
     }
-    if (Array.isArray(item.filterPlans) && item.filterPlans.length > 0) {
-      setFilterPlans(
-        item.filterPlans.map((p) => ({
-          filterName: p.filterName,
-          count: String(p.count),
-          exposureSeconds: String(p.exposureSeconds),
-        }))
+
+    const sharedFilterForms: FilterPlanFormRow[] =
+      Array.isArray(item.filterPlans) && item.filterPlans.length > 0
+        ? item.filterPlans.map((p) => ({
+            filterName: p.filterName,
+            count: String(p.count),
+            exposureSeconds: String(p.exposureSeconds),
+          }))
+        : []
+
+    if (isMosaic && item.mosaicPanels && item.mosaicPanels.length > 0) {
+      const panels = item.mosaicPanels.map((p) => toMosaicDraftPanel(p))
+      const center = panels[0]!
+      const raHours =
+        typeof item.raHours === 'number' && Number.isFinite(item.raHours) ? item.raHours : center.raHours
+      const decDeg =
+        typeof item.decDeg === 'number' && Number.isFinite(item.decDeg) ? item.decDeg : center.decDeg
+      setMosaicDraft(mosaicDraftFromCoords(panels, item.target ?? 'Mosaic target', raHours, decDeg))
+      const byId: Record<number, FilterPlanFormRow[]> = {}
+      const perPanel =
+        item.mosaicFilterPlansByPanel &&
+        item.mosaicFilterPlansByPanel.length === panels.length
+          ? item.mosaicFilterPlansByPanel
+          : null
+      for (let i = 0; i < panels.length; i++) {
+        const panel = panels[i]!
+        const plans = perPanel
+          ? perPanel[i]!.map((p) => ({
+              filterName: p.filterName,
+              count: String(p.count),
+              exposureSeconds: String(p.exposureSeconds),
+            }))
+          : cloneFilterPlanForms(sharedFilterForms)
+        byId[panel.id] = plans
+      }
+      setPanelFilterPlansById(byId)
+      setSelectedMosaicPanelId(center.id)
+      setFilterPlans(cloneFilterPlanForms(byId[center.id] ?? sharedFilterForms))
+      applySexagesimalPartsFromRadec(
+        center.raHours,
+        center.decDeg,
+        setRaHourPart,
+        setRaMinutePart,
+        setRaSecondPart,
+        setDecSign,
+        setDecDegreePart,
+        setDecMinutePart,
+        setDecSecondPart,
       )
+    } else {
+      setMosaicDraft(null)
+      setPanelFilterPlansById({})
+      setSelectedMosaicPanelId(1)
+      setFilterPlans(sharedFilterForms)
     }
+
     setSessionPassword('')
     setSubmitError(null)
     setSubmitSuccess('Editing pending session. Update fields then click Finish Editing.')
@@ -4399,7 +4549,11 @@ export default function RemotePage() {
               {queueItems.map((item) => {
                 const displayStatus = item.status === 'claimed' ? 'in_progress' : item.status
                 const sessionTypeLabel = item.sessionType === 'variable_star' ? 'Variable Star' : 'Deep Sky Object'
-                const projectLabel = item.projectMode ? ' · Project Mode' : ''
+                const projectLabel = item.mosaicMode
+                  ? ' · Mosaic Project Mode'
+                  : item.projectMode
+                    ? ' · Project Mode'
+                    : ''
                 const projectHasDownloads =
                   item.projectMode === true &&
                   item.outputMode !== 'none' &&
@@ -4642,7 +4796,7 @@ export default function RemotePage() {
                       {nightPickerPurpose === 'download' ? (
                         <div className="flex items-center justify-between gap-2 rounded-lg border border-gray-600 px-3 py-2">
                           <div className="min-w-0 text-sm text-white">
-                            <span className="font-medium">Session {night.nightIndex}</span>
+                            <span className="font-medium">{nightDisplayLabel(night)}</span>
                             <span className="text-gray-400"> · {night.nightKey}</span>
                           </div>
                           <button
@@ -4684,7 +4838,7 @@ export default function RemotePage() {
                           }}
                           className="w-full rounded-lg border border-gray-600 px-3 py-2 text-left text-sm text-white hover:bg-[#151616]"
                         >
-                          <span className="font-medium">Session {night.nightIndex}</span>
+                          <span className="font-medium">{nightDisplayLabel(night)}</span>
                           <span className="text-gray-400"> · {night.nightKey}</span>
                           <span
                             className={`ml-2 text-xs font-semibold uppercase ${queueStatusBadgeClass(

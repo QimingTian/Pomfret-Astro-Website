@@ -215,6 +215,7 @@ export function useCameraFrameOverlay({
                   ) ??
                   boresightRotDeg
               } else {
+                // Idle: engine RA→screen (NINA-aligned). Framing freezes time_speed so this stays put.
                 offset =
                   raDecToScreenDelta(stel, panel.raHours, panel.decDeg, h, fov) ?? {
                     x: panel.screenDeltaXPx,

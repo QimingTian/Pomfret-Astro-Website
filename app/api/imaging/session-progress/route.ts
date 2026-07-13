@@ -40,12 +40,20 @@ async function markEndNightDueIfTonightComplete(): Promise<void> {
   const now = new Date()
   const schedulingWindow = getTonightSchedulingWindow(now)
   const nightKey = getTonightScheduleStrip(now).nightKey
+  // Reconcile first so the next pending project can get tonight subs before we
+  // decide the night is empty (otherwise end-night arms on a race and skips the queue).
+  await reconcilePendingScheduleStatus({ force: true })
   const remaining = await hasRemainingTonightImagingWork(
     nightKey,
     schedulingWindow.nauticalDuskUtc.getTime(),
     schedulingWindow.nauticalDawnUtc.getTime()
   )
-  if (!remaining) await logEndNightDue(nightKey, 'tonight imaging complete (NINA session end signal)')
+  if (remaining) {
+    const { clearEndNightDue } = await import('@/lib/end-night-state')
+    await clearEndNightDue(nightKey)
+    return
+  }
+  await logEndNightDue(nightKey, 'tonight imaging complete (NINA session end signal)')
 }
 
 /** When set, requests must authenticate (see `authorized`). When unset, endpoint is open (use only if you accept that risk). */
@@ -237,8 +245,9 @@ export async function POST(request: NextRequest) {
             }
             publishProgress(match.project.id, { type: 'status', queueStatus: 'completed' })
           }
-          void reconcilePendingScheduleStatus({ force: true })
-          void markEndNightDueIfTonightComplete()
+          // Must finish reconcile + end-night decision before responding so the next
+          // project is scheduled (or end-night correctly armed) before NINA's next poll.
+          await markEndNightDueIfTonightComplete()
         }
       }
       return withImagingCors({ ok: true as const })
@@ -274,7 +283,7 @@ export async function POST(request: NextRequest) {
           })
         })
         publishProgress(queueId, { type: 'status', queueStatus: 'completed' })
-        void markEndNightDueIfTonightComplete()
+        await markEndNightDueIfTonightComplete()
       }
     }
   }

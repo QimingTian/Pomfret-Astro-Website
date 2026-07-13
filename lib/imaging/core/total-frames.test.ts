@@ -30,3 +30,33 @@ test('projectFilterFrameProgress reports captured per filter', () => {
   assert.equal(total, 35)
   assert.equal(captured, 30)
 })
+
+test('projectFilterFrameProgress labels mosaic filters as Panel N -- filter', () => {
+  const rows = projectFilterFrameProgress({
+    filterPlansTotal: [
+      { filterName: 'S', exposureSeconds: 300, count: 10 },
+      { filterName: 'H', exposureSeconds: 300, count: 8 },
+    ],
+    remainingByFilter: [
+      { filterName: 'S', countRemaining: 6 },
+      { filterName: 'H', countRemaining: 8 },
+    ],
+    mosaicMode: true,
+    mosaicPanels: [
+      { id: 1, name: 'Panel 1' },
+      { id: 2, name: 'Panel 2' },
+    ],
+    mosaicFilterPlansByPanel: [
+      [{ filterName: 'S', exposureSeconds: 300, count: 10 }],
+      [{ filterName: 'H', exposureSeconds: 300, count: 8 }],
+    ],
+    mosaicRemainingByPanel: [
+      [{ filterName: 'S', countRemaining: 4 }],
+      [{ filterName: 'H', countRemaining: 8 }],
+    ],
+  })
+  assert.deepEqual(rows, [
+    { filterName: 'Panel 1 -- S', total: 10, captured: 6 },
+    { filterName: 'Panel 2 -- H', total: 8, captured: 0 },
+  ])
+})

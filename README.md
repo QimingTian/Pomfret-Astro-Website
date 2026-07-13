@@ -1,9 +1,9 @@
 # Pomfret Astro — System Guide
 
-> **v6.0.0** — First fully stable major release after Plan / mosaic / weather-safety. No known open bugs at publish time.
+> **v6.1.0** — Scheduling hardening after midnight weather gate, End Night reconcile ordering, and mosaic session labels.
 
 **Live site:** [https://www.pomfretastro.org](https://www.pomfretastro.org)  
-**Release:** [v6.0.0](https://github.com/QimingTian/Pomfret-Astro-Website/releases/tag/v6.0.0)
+**Release:** [v6.1.0](https://github.com/QimingTian/Pomfret-Astro-Website/releases/tag/v6.1.0)
 
 | Part | Who it is for | What it covers |
 |------|---------------|----------------|
@@ -578,6 +578,13 @@ Progress/preview use **HTTP polling** (adaptive), not browser SSE.
 
 ---
 
+## What’s new in v6.1.0
+
+- Weather gate uses the **current imaging night** after local midnight (`past_days` + sunset/sunrise pair pick) so FIFO projects can re-schedule post-midnight
+- End Night waits for **force reconcile** before deciding the night is empty
+- Mosaic `Session P-S` labels no longer bump on every scheduled replan; edit session shows Mosaic On + per-panel plans
+- Dashboard welcome story polish; project `onBoard` cleared when fully completed
+
 ## What’s new in v6.0.0
 
 - Stable Plan Framing (NINA-aligned VIEW draw + front-hemisphere inverse)
@@ -587,8 +594,8 @@ Progress/preview use **HTTP polling** (adaptive), not browser SSE.
 - Weather / Remote UI radius polish; project FIFO schedule fix
 - Next.js `^14.2.35`; website-only repo at root
 
-Full notes: [Release v6.0.0](https://github.com/QimingTian/Pomfret-Astro-Website/releases/tag/v6.0.0)
+Full notes: [Release v6.1.0](https://github.com/QimingTian/Pomfret-Astro-Website/releases/tag/v6.1.0) · [v6.0.0](https://github.com/QimingTian/Pomfret-Astro-Website/releases/tag/v6.0.0)
 
 ---
 
-*Last updated: July 2026 — **v6.0.0**. Prior milestones: v5.x Plan/mosaic/field rotation; v4.x adaptive polling (retire SSE); v3.x Emergency STOP & Session Control; v2.1 moon avoidance.*
+*Last updated: July 2026 — **v6.1.0**. Prior milestones: v6.0.0 Plan/mosaic/weather-safety; v5.x Plan/mosaic/field rotation; v4.x adaptive polling (retire SSE); v3.x Emergency STOP & Session Control; v2.1 moon avoidance.*

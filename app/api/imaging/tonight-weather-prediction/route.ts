@@ -8,6 +8,7 @@ import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import {
   evaluateGlobalTonightWeatherPermitted,
   MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS,
+  pickOpenMeteoImagingNightBounds,
   type HourlyForecastSample,
 } from '@/lib/tonight-weather-gate'
 
@@ -59,7 +60,7 @@ export async function GET(request: Request) {
     `?latitude=${LAT}&longitude=${LON}` +
     '&hourly=cloud_cover,precipitation_probability,wind_speed_10m,is_day' +
     '&daily=sunrise,sunset' +
-    '&forecast_days=2&timezone=America/New_York&timeformat=unixtime'
+    '&past_days=1&forecast_days=2&timezone=America/New_York&timeformat=unixtime'
 
   try {
     const response = await fetch(url, { cache: 'no-store' })
@@ -90,16 +91,25 @@ export async function GET(request: Request) {
     }
 
     // Strict "tonight" window from caller when provided (Remote schedule window).
-    // Fallback to today's sunset -> tomorrow sunrise.
+    // Fallback: imaging night that contains now (previous evening → this morning after midnight).
     const parsedStartSec = startSecParam ? Number(startSecParam) : NaN
     const parsedEndSec = endSecParam ? Number(endSecParam) : NaN
     const hasExternalWindow =
       Number.isFinite(parsedStartSec) &&
       Number.isFinite(parsedEndSec) &&
       parsedEndSec > parsedStartSec
-    const windowStartSec = hasExternalWindow ? parsedStartSec : dailySunset[0]
-    const windowEndSec = hasExternalWindow ? parsedEndSec : dailySunrise[1]
-    if (!Number.isFinite(windowStartSec) || !Number.isFinite(windowEndSec) || windowEndSec <= windowStartSec) {
+    const pickedNight = pickOpenMeteoImagingNightBounds(dailySunset, dailySunrise)
+    const fallbackStart = pickedNight?.sunsetSec
+    const fallbackEnd = pickedNight?.sunriseSec
+    const windowStartSec = hasExternalWindow ? parsedStartSec : fallbackStart
+    const windowEndSec = hasExternalWindow ? parsedEndSec : fallbackEnd
+    if (
+      windowStartSec == null ||
+      windowEndSec == null ||
+      !Number.isFinite(windowStartSec) ||
+      !Number.isFinite(windowEndSec) ||
+      windowEndSec <= windowStartSec
+    ) {
       return NextResponse.json({ ok: false as const, error: 'Invalid tonight window from forecast data' }, { status: 502 })
     }
 

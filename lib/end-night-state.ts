@@ -91,7 +91,8 @@ export async function isEndNightDue(nightKey: string): Promise<boolean> {
   return due
 }
 
-async function clearEndNightDue(nightKey: string): Promise<void> {
+/** Clear a premature end-night arm (e.g. after reconcile finds more work tonight). */
+export async function clearEndNightDue(nightKey: string): Promise<void> {
   if (!nightKey) return
   const mem = dueMemoryMap()
   delete mem[nightKey]

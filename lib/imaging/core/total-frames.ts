@@ -21,11 +21,49 @@ export type FilterFrameProgress = {
   captured: number
 }
 
-/** Per-filter light frame progress for project mode UI. */
+/** Per-filter light frame progress for project mode UI. Mosaic rows are `Panel N -- Filter`. */
 export function projectFilterFrameProgress(project: {
   filterPlansTotal: FilterPlanLike[]
   remainingByFilter: Array<{ filterName: string; countRemaining: number }>
+  mosaicMode?: boolean
+  mosaicPanels?: Array<{ id: number; name?: string }>
+  mosaicFilterPlansByPanel?: FilterPlanLike[][]
+  mosaicRemainingByPanel?: Array<Array<{ filterName: string; countRemaining: number }>>
 }): FilterFrameProgress[] {
+  if (
+    project.mosaicMode &&
+    project.mosaicPanels?.length &&
+    project.mosaicFilterPlansByPanel?.length === project.mosaicPanels.length &&
+    project.mosaicRemainingByPanel?.length === project.mosaicPanels.length
+  ) {
+    const rows: FilterFrameProgress[] = []
+    for (let i = 0; i < project.mosaicPanels.length; i++) {
+      const panel = project.mosaicPanels[i]!
+      const label = (panel.name?.trim() || `Panel ${panel.id}`).trim()
+      const totals = project.mosaicFilterPlansByPanel[i] ?? []
+      const remainingRows = project.mosaicRemainingByPanel[i] ?? []
+      const remainingByName = new Map<string, number>()
+      for (const row of remainingRows) {
+        remainingByName.set(
+          row.filterName,
+          Math.max(0, Math.round(Number(row.countRemaining) || 0)),
+        )
+      }
+      for (const plan of totals) {
+        const total = Math.max(0, Math.round(Number(plan.count) || 0))
+        if (total <= 0) continue
+        const remaining = remainingByName.get(plan.filterName) ?? total
+        const captured = Math.max(0, Math.min(total, total - remaining))
+        rows.push({
+          filterName: `${label} -- ${plan.filterName}`,
+          total,
+          captured,
+        })
+      }
+    }
+    return rows
+  }
+
   const remainingByName = new Map<string, number>()
   for (const row of project.remainingByFilter) {
     remainingByName.set(

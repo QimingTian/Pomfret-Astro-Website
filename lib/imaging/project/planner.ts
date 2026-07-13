@@ -345,18 +345,25 @@ function remainingAfterInProgressSubsTonight(
   return working
 }
 
-function mosaicSubBaseForPanel(project: ImagingProject, panelIndex: number): number {
-  return (
-    project.nights.filter(
-      (n) =>
-        n.mosaicPanelIndex === panelIndex &&
-        (n.status === 'completed' ||
-          n.status === 'in_progress' ||
-          n.status === 'scheduled' ||
-          n.status === 'failed' ||
-          n.status === 'on_hold'),
-    ).length + 1
+/**
+ * Next P-S index for a mosaic panel. Exclude `scheduled` — reconcile replaces those
+ * tonight rows, so counting them would bump 1-1 → 1-2 on every replan.
+ */
+export function mosaicSubBaseForPanel(project: ImagingProject, panelIndex: number): number {
+  const durable = project.nights.filter(
+    (n) =>
+      n.mosaicPanelIndex === panelIndex &&
+      (n.status === 'completed' ||
+        n.status === 'in_progress' ||
+        n.status === 'failed' ||
+        n.status === 'on_hold'),
   )
+  if (durable.length === 0) return 1
+  const maxSub = Math.max(
+    0,
+    ...durable.map((n) => (typeof n.mosaicSubIndex === 'number' ? n.mosaicSubIndex : 0)),
+  )
+  return Math.max(durable.length, maxSub) + 1
 }
 
 function intersectTimeIntervals(

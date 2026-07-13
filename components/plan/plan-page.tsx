@@ -765,7 +765,10 @@ export default function PlanPage() {
 
   const handleAddCustomPanel = useCallback(() => {
     if (!equipment) return
-    const id = customPanelIdRef.current++
+    const used = new Set(customPanels.map((p) => p.id))
+    let id = 1
+    while (used.has(id)) id++
+    customPanelIdRef.current = id + 1
     const n = customPanels.length
     const screenDeltaXPx = ((n % 3) - 1) * 48
     const screenDeltaYPx = (Math.floor(n / 3) - (n > 0 ? 0 : 0)) * 48
@@ -798,7 +801,7 @@ export default function PlanPage() {
         screenDeltaYPx,
       },
     ])
-  }, [customPanels.length, equipment, getViewCenterRaDec, panelCoordsFromScreenOffset])
+  }, [customPanels, equipment, getViewCenterRaDec, panelCoordsFromScreenOffset])
 
   const handleDeleteCustomPanel = useCallback(() => {
     setCustomPanels((prev) => {
@@ -817,6 +820,10 @@ export default function PlanPage() {
 
   const handleSelectedPanelCoords = useCallback(
     (raHours: number, decDeg: number) => {
+      // Coord edit owns the panel — drop any post-drag screen pin or the frame stays stuck.
+      if (customScreenPinRef.current?.panelId === deletePanelId) {
+        customScreenPinRef.current = null
+      }
       const offset = panelScreenOffsetFromRaDec(raHours, decDeg)
       setCustomPanels((prev) =>
         prev.map((p) => {
@@ -874,13 +881,6 @@ export default function PlanPage() {
             decDeg: p.decDeg,
           })
           if (!coords) return p
-          const view = getViewCenterRaDec()
-          if (view) {
-            const dRaH = Math.abs(coords.raHours - view.raHours)
-            const dRaWrapped = Math.min(dRaH, 24 - dRaH) * 15
-            const dDec = Math.abs(coords.decDeg - view.decDeg)
-            if (dRaWrapped > 35 || dDec > 35) return p
-          }
           // Keep the exact drop pixels — do not re-sync from engine (avoids release nudge).
           ok = true
           return {
@@ -894,7 +894,7 @@ export default function PlanPage() {
       )
       return ok
     },
-    [panelCoordsFromScreenOffset, getViewCenterRaDec],
+    [panelCoordsFromScreenOffset],
   )
 
   const handleCustomPanelPointerDown = useCallback(

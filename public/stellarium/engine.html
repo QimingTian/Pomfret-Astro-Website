@@ -383,8 +383,12 @@
         if (!core) return
         if (pomfretFramingEnabled) {
           try { canvas.style.pointerEvents = pomfretSkyLocked ? 'none' : 'auto' } catch (_) {}
+          // Framing treats the sky as a fixed plate — freeze the ephemeris clock so
+          // FOV overlays (Custom/Grid) do not crawl as parallactic angle / LST advance.
+          try { core.time_speed = 0 } catch (_) {}
         } else {
           try { canvas.style.pointerEvents = 'auto' } catch (_) {}
+          try { core.time_speed = 1 } catch (_) {}
         }
       } catch (err) { console.warn('[pomfret-stellarium] framing mode failed', err) }
     }

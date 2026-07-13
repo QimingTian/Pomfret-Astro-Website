@@ -172,6 +172,14 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       typeof b.estimatedDurationSeconds === 'number' && Number.isFinite(b.estimatedDurationSeconds)
         ? b.estimatedDurationSeconds
         : undefined,
+    projectMode: b.projectMode === true || b.mosaicMode === true,
+    mosaicMode: b.mosaicMode === true,
+    mosaicPanels: Array.isArray(b.mosaicPanels)
+      ? (b.mosaicPanels as CreateImagingInput['mosaicPanels'])
+      : undefined,
+    mosaicFilterPlansByPanel: Array.isArray(b.mosaicFilterPlansByPanel)
+      ? (b.mosaicFilterPlansByPanel as CreateImagingInput['mosaicFilterPlansByPanel'])
+      : undefined,
   }
 
   const updated = await updatePendingRequestById(id, payload)
@@ -193,6 +201,15 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       lastName: updated.lastName ?? null,
       email: updated.email ?? null,
       ...(updated.sessionPasswordHash ? { sessionPasswordHash: updated.sessionPasswordHash } : {}),
+      ...(updated.mosaicMode
+        ? {
+            mosaicMode: true,
+            mosaicPanels: updated.mosaicPanels,
+            ...(updated.mosaicFilterPlansByPanel
+              ? { mosaicFilterPlansByPanel: updated.mosaicFilterPlansByPanel }
+              : {}),
+          }
+        : { mosaicMode: false }),
     })
     if ('error' in projectSync) {
       return withImagingCors({ ok: false as const, error: projectSync.error }, 400)

@@ -849,7 +849,7 @@ export async function updatePendingRequestById(
           )
         })()
       : normalizedFilterPlans.reduce((sum, p) => sum + p.count * p.exposureSeconds, 0) + DSO_SESSION_OVERHEAD_SEC
-  const projectMode = current.projectMode === true
+  const projectMode = current.projectMode === true || input.mosaicMode === true || input.projectMode === true
   if (!projectMode) {
     const { nauticalDuskUtc, nauticalDawnUtc } = getTonightSchedulingWindow(new Date())
     const nightAltitudeAllowedMs = altitudeAllowedCoverageMs(
@@ -959,6 +959,19 @@ export async function updatePendingRequestById(
     ninaSequenceJson,
     sessionPasswordHash,
     sequenceTemplate,
+    ...(projectMode ? { projectMode: true as const } : {}),
+    ...(input.mosaicMode === true &&
+    Array.isArray(input.mosaicPanels) &&
+    input.mosaicPanels.length > 0
+      ? {
+          mosaicMode: true as const,
+          mosaicPanels: input.mosaicPanels,
+          ...(Array.isArray(input.mosaicFilterPlansByPanel) &&
+          input.mosaicFilterPlansByPanel.length === input.mosaicPanels.length
+            ? { mosaicFilterPlansByPanel: input.mosaicFilterPlansByPanel }
+            : {}),
+        }
+      : { mosaicMode: false, mosaicPanels: undefined, mosaicFilterPlansByPanel: undefined }),
   }
   delete (next as { scheduleStatus?: unknown }).scheduleStatus
   mem[idx] = next

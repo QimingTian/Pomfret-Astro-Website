@@ -4,6 +4,7 @@ import { getCurrentUser } from '@/lib/member-auth'
 import {
   effectiveProjectStatus,
   listProjects,
+  projectSessionDisplayLabel,
   tonightDurationSecondsFromPlans,
   type ImagingProject,
   type ProjectNight,
@@ -68,6 +69,9 @@ export async function GET(request: NextRequest) {
     previewPath?: string
     sessionType?: 'dso' | 'variable_star'
     projectMode?: boolean
+    mosaicMode?: boolean
+    mosaicPanels?: ImagingProject['mosaicPanels']
+    mosaicFilterPlansByPanel?: ImagingProject['mosaicFilterPlansByPanel']
     userId?: string | null
     projectFramesTotal?: number
     projectFramesCaptured?: number
@@ -77,6 +81,8 @@ export async function GET(request: NextRequest) {
       nightIndex: number
       nightKey: string
       sessionLabel?: string
+      mosaicPanelIndex?: number
+      mosaicSubIndex?: number
       status: string
       plannedStartIso?: string | null
       scheduleStripNightKey?: string | null
@@ -142,6 +148,15 @@ export async function GET(request: NextRequest) {
       plannedStartIso:
         p.nights.find((n) => n.status === 'scheduled' || n.status === 'in_progress')?.plannedStartIso ?? null,
       projectMode: true,
+      mosaicMode: p.mosaicMode === true,
+      ...(p.mosaicMode && p.mosaicPanels?.length
+        ? {
+            mosaicPanels: p.mosaicPanels,
+            ...(p.mosaicFilterPlansByPanel?.length === p.mosaicPanels.length
+              ? { mosaicFilterPlansByPanel: p.mosaicFilterPlansByPanel }
+              : {}),
+          }
+        : {}),
       userId: p.userId ?? null,
       projectFramesTotal,
       projectFramesCaptured,
@@ -150,7 +165,9 @@ export async function GET(request: NextRequest) {
         id: n.id,
         nightIndex: n.nightIndex,
         nightKey: n.nightKey,
-        sessionLabel: `Session ${n.nightIndex}`,
+        sessionLabel: projectSessionDisplayLabel(n),
+        ...(n.mosaicPanelIndex != null ? { mosaicPanelIndex: n.mosaicPanelIndex } : {}),
+        ...(n.mosaicSubIndex != null ? { mosaicSubIndex: n.mosaicSubIndex } : {}),
         status: n.status === 'planned' ? 'scheduled' : n.status === 'on_hold' ? 'on_hold' : n.status,
         plannedStartIso: n.plannedStartIso ?? null,
         scheduleStripNightKey: n.scheduleStripNightKey ?? null,
@@ -200,7 +217,21 @@ export async function GET(request: NextRequest) {
       scheduleStripNightKey: null,
       scheduleBarStartMs: null,
       scheduleBarEndMs: null,
-      ...(p.projectMode ? { projectMode: true } : {}),
+      ...(p.projectMode || p.mosaicMode ? { projectMode: true } : {}),
+      ...(p.mosaicMode
+        ? {
+            mosaicMode: true as const,
+            ...(Array.isArray(p.mosaicPanels) && p.mosaicPanels.length > 0
+              ? {
+                  mosaicPanels: p.mosaicPanels,
+                  ...(Array.isArray(p.mosaicFilterPlansByPanel) &&
+                  p.mosaicFilterPlansByPanel.length === p.mosaicPanels.length
+                    ? { mosaicFilterPlansByPanel: p.mosaicFilterPlansByPanel }
+                    : {}),
+                }
+              : {}),
+          }
+        : {}),
       userId: p.userId ?? null,
     })
   }

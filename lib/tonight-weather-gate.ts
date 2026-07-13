@@ -156,13 +156,47 @@ export function weatherCoverageOk(
   return covered >= duration * requiredFraction
 }
 
+/**
+ * Open-Meteo daily sunrise[i]/sunset[i] are civil events for local calendar day i.
+ * The imaging night that begins on the evening of day i is sunset[i] → sunrise[i+1].
+ *
+ * After local midnight we are still in that night — do NOT use sunset[0]/sunrise[1] of
+ * "today's" calendar row (that is tomorrow evening's night).
+ */
+export function pickOpenMeteoImagingNightBounds(
+  sunsetsSec: number[],
+  sunrisesSec: number[],
+  nowMs = Date.now()
+): { sunsetSec: number; sunriseSec: number } | null {
+  const nowSec = nowMs / 1000
+  let upcoming: { sunsetSec: number; sunriseSec: number } | null = null
+
+  for (let i = 0; i < sunsetsSec.length; i++) {
+    const sunsetSec = Number(sunsetsSec[i])
+    const sunriseSec = Number(sunrisesSec[i + 1])
+    if (!Number.isFinite(sunsetSec) || !Number.isFinite(sunriseSec) || sunriseSec <= sunsetSec) {
+      continue
+    }
+    if (sunsetSec <= nowSec && nowSec < sunriseSec) {
+      return { sunsetSec, sunriseSec }
+    }
+    if (sunsetSec > nowSec && upcoming == null) {
+      upcoming = { sunsetSec, sunriseSec }
+    }
+  }
+
+  return upcoming
+}
+
 export async function getTonightWeatherPermittedIntervals(): Promise<TonightWeatherIntervalsResult> {
+  // past_days=1 keeps yesterday's sunset after local midnight so the current imaging night
+  // (previous evening → this morning) is still present in daily[].
   const url =
     'https://api.open-meteo.com/v1/forecast' +
     `?latitude=${LAT}&longitude=${LON}` +
     '&hourly=cloud_cover,precipitation_probability,wind_speed_10m' +
     '&daily=sunrise,sunset' +
-    '&forecast_days=2&timezone=America/New_York&timeformat=unixtime'
+    '&past_days=1&forecast_days=2&timezone=America/New_York&timeformat=unixtime'
 
   try {
     const res = await fetch(url, { cache: 'no-store' })
@@ -174,12 +208,12 @@ export async function getTonightWeatherPermittedIntervals(): Promise<TonightWeat
     const clouds = data.hourly?.cloud_cover ?? []
     const precip = data.hourly?.precipitation_probability ?? []
     const wind = data.hourly?.wind_speed_10m ?? []
-    const sunset = data.daily?.sunset?.[0]
-    const sunrise = data.daily?.sunrise?.[1]
+    const nightBounds = pickOpenMeteoImagingNightBounds(
+      data.daily?.sunset ?? [],
+      data.daily?.sunrise ?? []
+    )
     if (
-      !Number.isFinite(sunset) ||
-      !Number.isFinite(sunrise) ||
-      Number(sunrise) <= Number(sunset) ||
+      !nightBounds ||
       times.length === 0 ||
       clouds.length !== times.length ||
       precip.length !== times.length ||
@@ -188,11 +222,13 @@ export async function getTonightWeatherPermittedIntervals(): Promise<TonightWeat
       return { status: 'unknown', permittedIntervals: [], reason: 'Weather forecast data incomplete' }
     }
 
-    const nightStartMs = Number(sunset) * 1000
-    const nightEndMs = Number(sunrise) * 1000
+    const sunset = nightBounds.sunsetSec
+    const sunrise = nightBounds.sunriseSec
+    const nightStartMs = sunset * 1000
+    const nightEndMs = sunrise * 1000
     const nightIndices: number[] = []
     for (let i = 0; i < times.length; i += 1) {
-      if (times[i] >= Number(sunset) && times[i] < Number(sunrise)) nightIndices.push(i)
+      if (times[i] >= sunset && times[i] < sunrise) nightIndices.push(i)
     }
     if (nightIndices.length === 0) {
       return { status: 'unknown', permittedIntervals: [], reason: 'No forecast samples for tonight window' }

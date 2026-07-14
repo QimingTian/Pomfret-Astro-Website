@@ -6,8 +6,8 @@ import {
   isPierWest,
   localSiderealTimeHours,
   normalizeSigned180,
-} from './mount-gem-angles.ts'
-import { currentAltitudeDeg } from './target-altitude.ts'
+} from './mount-gem-angles'
+import { currentAltitudeDeg } from './target-altitude'
 
 test('hourAngleDeg wraps to signed 180', () => {
   assert.equal(hourAngleDeg(0, 0), 0)

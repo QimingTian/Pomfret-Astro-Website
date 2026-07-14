@@ -19,6 +19,7 @@ type MountSample = {
   sideOfPier?: string | null
   trackingEnabled?: boolean | null
   receivedAtUtc?: string | null
+  clientUtc?: string | null
 }
 
 /** glTF Y-up export: Blender north (−Y) becomes +Z; yaw 180° so NCP / north face web −Z (compass N). */

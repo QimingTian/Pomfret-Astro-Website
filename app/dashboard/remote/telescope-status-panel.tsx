@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
-import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { useAdaptivePoll } from '@/hooks/use-adaptive-poll'
+import { OBS_LON_DEG } from '@/lib/target-altitude'
+import { finiteOrNull, gemSpinDeltasDeg, localSiderealTimeHours } from '@/lib/mount-gem-angles'
 
 type MountSample = {
   connected?: boolean
@@ -19,93 +21,115 @@ type MountSample = {
   receivedAtUtc?: string | null
 }
 
-// In this scene, north is defined towards the camera direction (+Z on the ground plane).
-const WORLD_NORTH_Y_OFFSET_DEG = 180
-const POMFRET_SITE = {
-  latitudeDeg: 41.9,
-  longitudeDeg: -71.9,
-}
-const POLAR_ALIGNMENT_X_DEG = 40
-const WEBSITE_Y_OFFSET_DEG = -90
-const WORLD_COMPASS_ROTATION_DEG = 0
+/** glTF Y-up export: Blender north (−Y) becomes +Z; yaw 180° so NCP / north face web −Z (compass N). */
+const MODEL_ROOT_YAW_DEG = 180
+/**
+ * Both ME_RA_SPIN and ME_DEC_SPIN animate about Blender local +Z (disc face-normal).
+ * After glTF Y-up + modelRoot yaw 180°, that mechanical axis is Three local +Y
+ * (verified: +Y keeps NINA pierWest ⇒ OTA west of pier; −Y inverted the pier side).
+ * Hierarchy: RA_SPIN → RA_Disc → UpperHousing → DEC_AXIS → DEC_SPIN → Disc/CW
+ */
+const BLENDER_Z_IN_GLTF = new THREE.Vector3(0, 1, 0)
+const RA_LOCAL_AXIS = BLENDER_Z_IN_GLTF
+const DEC_LOCAL_AXIS = BLENDER_Z_IN_GLTF
 const TELEMETRY_STALE_MS = 15_000
-const DISCONNECTED_POINTING = {
-  // North celestial pole for Pomfret: due North at local latitude altitude.
-  altDeg: POMFRET_SITE.latitudeDeg,
-  azDeg: 0,
+const MODEL_URL = '/telescope-models/paramount-me.glb?v=me-axes-20260714'
+
+type GemTarget = {
+  raDeltaDeg: number
+  decDeltaDeg: number
 }
 
-function finiteOrNull(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
-}
-
-function normalize360(v: number): number {
-  let n = v
-  while (n < 0) n += 360
-  while (n >= 360) n -= 360
-  return n
-}
-function clampAltitude(deg: number): number {
-  if (deg < -10) return -10
-  if (deg > 90) return 90
-  return deg
-}
-
-function telescopeInfoToPoint3D(sample: MountSample): { x: number; y: number; z: number } | null {
-  const ra = finiteOrNull(sample.raHours)
-  const dec = finiteOrNull(sample.decDeg)
-  const sidereal = finiteOrNull(sample.siderealTimeHours)
-  const siteLat = finiteOrNull(sample.siteLatitudeDeg) ?? POMFRET_SITE.latitudeDeg
-  if (ra == null || dec == null || sidereal == null) return null
-
-  const xOffset = -90
-  const yOffset = -90
-  const elevation = -Math.abs(siteLat)
-  let adjustedDec = 180 - dec
-  const hourAngleDeg = normalize360((sidereal - ra) * 15.0)
-  let adjustedHourAngleDeg = hourAngleDeg
-
-  const sop = (sample.sideOfPier ?? '').toLowerCase()
-  const hasKnownPier = sop === 'pierwest' || sop === 'piereast'
-  const useWestCoordinates = hasKnownPier ? sop === 'pierwest' : hourAngleDeg >= 180
-  if (useWestCoordinates) {
-    adjustedHourAngleDeg -= 180
-    adjustedDec = dec
+function makeStarfieldPoints(): THREE.Points {
+  const count = 1800
+  const positions = new Float32Array(count * 3)
+  const colors = new Float32Array(count * 3)
+  let seed = 42
+  const rand = () => {
+    seed = (seed * 16807) % 2147483647
+    return (seed - 1) / 2147483646
   }
-  adjustedDec = siteLat > 0 ? adjustedDec : -adjustedDec
-  return { x: adjustedDec + xOffset, y: adjustedHourAngleDeg + yOffset, z: elevation }
+  for (let i = 0; i < count; i += 1) {
+    // Hemisphere above and around the mount; keep them far so orbit doesn't clip through.
+    const u = rand()
+    const v = rand()
+    const theta = u * Math.PI * 2
+    const phi = Math.acos(0.08 + 0.92 * v) // prefer sky dome, sparse near nadir
+    const radius = 18 + rand() * 28
+    const i3 = i * 3
+    positions[i3] = radius * Math.sin(phi) * Math.cos(theta)
+    positions[i3 + 1] = radius * Math.cos(phi) * 0.85 + 2.5
+    positions[i3 + 2] = radius * Math.sin(phi) * Math.sin(theta)
+    const tint = 0.75 + rand() * 0.25
+    colors[i3] = tint
+    colors[i3 + 1] = tint
+    colors[i3 + 2] = 0.9 + rand() * 0.1
+  }
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+  const material = new THREE.PointsMaterial({
+    size: 0.08,
+    sizeAttenuation: true,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.9,
+    depthWrite: false,
+  })
+  const points = new THREE.Points(geometry, material)
+  points.frustumCulled = false
+  return points
 }
 
-function makeGroundTexture(): THREE.CanvasTexture {
+/** Huge rolling ground; flat around the pier so the mount footing sits cleanly. */
+function makeRollingGround(): THREE.Mesh {
+  const size = 480
+  const segments = 160
+  const geometry = new THREE.PlaneGeometry(size, size, segments, segments)
+  geometry.rotateX(-Math.PI / 2)
+  const pos = geometry.attributes.position
+  for (let i = 0; i < pos.count; i += 1) {
+    const x = pos.getX(i)
+    const z = pos.getZ(i)
+    const r = Math.hypot(x, z)
+    const flatten = Math.min(1, Math.max(0, (r - 5) / 10))
+    const h =
+      (Math.sin(x * 0.045) * Math.cos(z * 0.038) * 0.55 +
+        Math.sin(x * 0.11 + 0.7) * Math.sin(z * 0.09 + 1.1) * 0.28 +
+        Math.sin(x * 0.29 + z * 0.17) * 0.08) *
+      flatten
+    pos.setY(i, h)
+  }
+  pos.needsUpdate = true
+  geometry.computeVertexNormals()
+  const material = new THREE.MeshStandardMaterial({
+    color: 0x151912,
+    roughness: 0.97,
+    metalness: 0.02,
+  })
+  const mesh = new THREE.Mesh(geometry, material)
+  mesh.receiveShadow = true
+  return mesh
+}
+
+/** Compass pad around the pier — rings + ticks only (no grid). */
+function makeCompassPad(): THREE.Mesh {
   const size = 2048
   const canvas = document.createElement('canvas')
   canvas.width = size
   canvas.height = size
   const ctx = canvas.getContext('2d')
-  if (!ctx) return new THREE.CanvasTexture(canvas)
-
-  // Transparent ground background; draw only grid/compass lines and labels.
-  ctx.clearRect(0, 0, size, size)
-  ctx.strokeStyle = 'rgba(55,60,68,0.55)'
-  ctx.lineWidth = 2
-  const step = size / 8
-  for (let i = 0; i <= 8; i += 1) {
-    const p = i * step
-    ctx.beginPath()
-    ctx.moveTo(p, 0)
-    ctx.lineTo(p, size)
-    ctx.stroke()
-    ctx.beginPath()
-    ctx.moveTo(0, p)
-    ctx.lineTo(size, p)
-    ctx.stroke()
+  if (!ctx) {
+    return new THREE.Mesh(new THREE.PlaneGeometry(8, 8), new THREE.MeshBasicMaterial({ visible: false }))
   }
 
+  ctx.clearRect(0, 0, size, size)
   const cx = size / 2
   const cy = size / 2
-  const rOuter = size * 0.26
-  const rInner = size * 0.17
-  ctx.strokeStyle = '#9da4ad'
+  const rOuter = size * 0.46
+  const rInner = size * 0.30
+
+  ctx.strokeStyle = 'rgba(157,164,173,0.9)'
   ctx.lineWidth = 10
   ctx.beginPath()
   ctx.arc(cx, cy, rOuter, 0, Math.PI * 2)
@@ -118,9 +142,9 @@ function makeGroundTexture(): THREE.CanvasTexture {
   for (let i = 0; i < 72; i += 1) {
     const a = (i / 72) * Math.PI * 2
     const longTick = i % 6 === 0
-    const r0 = rInner + 20
-    const r1 = longTick ? rOuter - 7 : rOuter - 18
-    ctx.strokeStyle = longTick ? '#b7bec8' : '#6e7680'
+    const r0 = rInner + 24
+    const r1 = longTick ? rOuter - 8 : rOuter - 22
+    ctx.strokeStyle = longTick ? 'rgba(183,190,200,0.95)' : 'rgba(110,118,128,0.75)'
     ctx.lineWidth = longTick ? 4 : 2
     ctx.beginPath()
     ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0)
@@ -130,12 +154,24 @@ function makeGroundTexture(): THREE.CanvasTexture {
 
   const texture = new THREE.CanvasTexture(canvas)
   texture.anisotropy = 8
-  // Use default texture orientation to avoid mirrored-looking ground labels.
-  texture.flipY = true
-  texture.center.set(0.5, 0.5)
-  texture.rotation = THREE.MathUtils.degToRad(WORLD_COMPASS_ROTATION_DEG)
+  texture.colorSpace = THREE.SRGBColorSpace
   texture.needsUpdate = true
-  return texture
+
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(7.2, 7.2),
+    new THREE.MeshStandardMaterial({
+      map: texture,
+      transparent: true,
+      depthWrite: false,
+      metalness: 0.05,
+      roughness: 0.85,
+    })
+  )
+  mesh.rotation.x = -Math.PI / 2
+  mesh.position.y = 0.015
+  mesh.receiveShadow = true
+  mesh.userData.compassTexture = texture
+  return mesh
 }
 
 function makeCompassLabelSprite(text: string): THREE.Sprite {
@@ -159,18 +195,40 @@ function makeCompassLabelSprite(text: string): THREE.Sprite {
     depthWrite: false,
   })
   const sprite = new THREE.Sprite(material)
-  // Anchor on bottom edge so labels sit above the ground plane.
   sprite.center.set(0.5, 0)
-  sprite.scale.set(12, 12, 1)
+  // ~0.55 m tall labels — sized for a metric pier (~2 m), not the old giant OBJ scene.
+  sprite.scale.set(0.55, 0.55, 1)
   return sprite
+}
+
+function resolveLstHours(sample: MountSample, serverNowUtc: string | undefined): number | null {
+  const fromPlugin = finiteOrNull(sample.siderealTimeHours)
+  if (fromPlugin != null) return fromPlugin
+  const utc =
+    (sample.clientUtc && Date.parse(sample.clientUtc)) ||
+    (sample.receivedAtUtc && Date.parse(sample.receivedAtUtc)) ||
+    (serverNowUtc && Date.parse(serverNowUtc)) ||
+    Date.now()
+  if (!Number.isFinite(utc)) return null
+  return localSiderealTimeHours(new Date(utc), OBS_LON_DEG)
+}
+
+function findObjectByName(root: THREE.Object3D, name: string): THREE.Object3D | null {
+  let found: THREE.Object3D | null = null
+  root.traverse((obj) => {
+    if (!found && obj.name === name) found = obj
+  })
+  return found
+}
+
+function ncpRestTarget(): GemTarget {
+  return { raDeltaDeg: 0, decDeltaDeg: 0 }
 }
 
 export function TelescopeStatusPanel() {
   const viewportRef = useRef<HTMLDivElement | null>(null)
-  const targetEulerRef = useRef({ x: 0, y: 0, z: 0 })
-  const currentEulerRef = useRef({ x: 0, y: 0, z: 0 })
-  const opticalTargetRef = useRef({ alt: 0, az: 0 })
-  const pierRollRef = useRef(0)
+  const gemTargetRef = useRef<GemTarget>(ncpRestTarget())
+  const gemCurrentRef = useRef<GemTarget>(ncpRestTarget())
   const [connected, setConnected] = useState(false)
   const [trackingEnabled, setTrackingEnabled] = useState<boolean | null>(null)
   const mountedRef = useRef(true)
@@ -182,43 +240,39 @@ export function TelescopeStatusPanel() {
     }
   }, [])
 
-  const applySample = useCallback(
-    (sample: MountSample | null | undefined, serverNowUtc: string | undefined) => {
-      if (!mountedRef.current) return
-      if (!sample) {
-        setConnected(false)
-        setTrackingEnabled(null)
-        opticalTargetRef.current = { alt: DISCONNECTED_POINTING.altDeg, az: DISCONNECTED_POINTING.azDeg }
-        pierRollRef.current = Math.PI
-        return
-      }
-      const receivedAtMs = sample.receivedAtUtc ? Date.parse(sample.receivedAtUtc) : NaN
-      const serverNowMs = serverNowUtc ? Date.parse(serverNowUtc) : NaN
-      const nowMs = Number.isFinite(serverNowMs) ? serverNowMs : Date.now()
-      const stale = !Number.isFinite(receivedAtMs) || nowMs - receivedAtMs > TELEMETRY_STALE_MS
-      const nowConnected = !stale && sample.connected === true
-      setConnected(nowConnected)
-      setTrackingEnabled(
-        nowConnected ? (typeof sample.trackingEnabled === 'boolean' ? sample.trackingEnabled : null) : null
-      )
-      const alt = finiteOrNull(sample.altitudeDeg)
-      const az = finiteOrNull(sample.azimuthDeg)
-      if (nowConnected && alt != null && az != null) {
-        opticalTargetRef.current = { alt: clampAltitude(alt), az: normalize360(az) }
-        const sop = (sample.sideOfPier ?? '').toLowerCase()
-        pierRollRef.current = sop === 'piereast' ? 0 : Math.PI
-      } else {
-        opticalTargetRef.current = { alt: DISCONNECTED_POINTING.altDeg, az: DISCONNECTED_POINTING.azDeg }
-        pierRollRef.current = Math.PI
-      }
-      targetEulerRef.current = {
-        x: POLAR_ALIGNMENT_X_DEG,
-        y: WEBSITE_Y_OFFSET_DEG,
-        z: 0,
-      }
-    },
-    []
-  )
+  const applySample = useCallback((sample: MountSample | null | undefined, serverNowUtc: string | undefined) => {
+    if (!mountedRef.current) return
+    if (!sample) {
+      setConnected(false)
+      setTrackingEnabled(null)
+      gemTargetRef.current = ncpRestTarget()
+      return
+    }
+    const receivedAtMs = sample.receivedAtUtc ? Date.parse(sample.receivedAtUtc) : NaN
+    const serverNowMs = serverNowUtc ? Date.parse(serverNowUtc) : NaN
+    const nowMs = Number.isFinite(serverNowMs) ? serverNowMs : Date.now()
+    const stale = !Number.isFinite(receivedAtMs) || nowMs - receivedAtMs > TELEMETRY_STALE_MS
+    const nowConnected = !stale && sample.connected === true
+    setConnected(nowConnected)
+    setTrackingEnabled(
+      nowConnected ? (typeof sample.trackingEnabled === 'boolean' ? sample.trackingEnabled : null) : null
+    )
+
+    const ra = finiteOrNull(sample.raHours)
+    const dec = finiteOrNull(sample.decDeg)
+    const lst = resolveLstHours(sample, serverNowUtc)
+    if (nowConnected && ra != null && dec != null && lst != null) {
+      const spins = gemSpinDeltasDeg({
+        raHours: ra,
+        decDeg: dec,
+        siderealTimeHours: lst,
+        sideOfPier: sample.sideOfPier,
+      })
+      gemTargetRef.current = { raDeltaDeg: spins.raDeltaDeg, decDeltaDeg: spins.decDeltaDeg }
+    } else {
+      gemTargetRef.current = ncpRestTarget()
+    }
+  }, [])
 
   useAdaptivePoll('mount', async () => {
     try {
@@ -240,59 +294,60 @@ export function TelescopeStatusPanel() {
     const host = viewportRef.current
     if (!host) return
 
+    // Rural night sky: deep blue-black, not pure void (airglow / twilight remnant).
+    const skyColor = new THREE.Color(0x070b14)
     const scene = new THREE.Scene()
-    scene.background = null
+    scene.background = skyColor
+    scene.fog = new THREE.FogExp2(skyColor.getHex(), 0.018)
 
-    const camera = new THREE.PerspectiveCamera(62, 1, 0.1, 900)
-    // Keep the same distance/height, look from South side (towards North).
-    camera.position.set(0, 36, -74)
-    camera.lookAt(0, 0, 0)
+    const camera = new THREE.PerspectiveCamera(50, 1, 0.05, 500)
+    // Metric model (~2 m pier): tighter south-side view.
+    camera.position.set(2.4, 1.85, 4.6)
+    camera.lookAt(0, 1.15, 0)
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false })
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-    renderer.setClearColor(0x000000, 0)
+    renderer.setClearColor(skyColor, 1)
     renderer.domElement.style.width = '100%'
     renderer.domElement.style.height = '100%'
     renderer.domElement.style.display = 'block'
+    renderer.outputColorSpace = THREE.SRGBColorSpace
     host.appendChild(renderer.domElement)
+
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
     controls.dampingFactor = 0.08
     controls.rotateSpeed = 0.8
     controls.zoomSpeed = 0.95
-    controls.panSpeed = 0.85
-    controls.minDistance = 20
-    controls.maxDistance = 280
-    controls.maxPolarAngle = Math.PI / 2 - 0.01
-    controls.target.set(0, 12, 0)
+    controls.panSpeed = 0.7
+    // Free orbit / zoom — no horizon lock; only keep from going inside the pier / into space.
+    controls.minDistance = 0.35
+    controls.maxDistance = 220
+    controls.minPolarAngle = 0
+    controls.maxPolarAngle = Math.PI
+    controls.target.set(0, 1.15, 0)
     controls.update()
 
-    const hemi = new THREE.HemisphereLight('#f1f5ff', '#111318', 1.05)
+    const hemi = new THREE.HemisphereLight('#f1f5ff', '#1a1c20', 0.95)
     scene.add(hemi)
-    const key = new THREE.DirectionalLight('#ffffff', 1.35)
-    key.position.set(46, 64, 30)
+    const key = new THREE.DirectionalLight('#ffffff', 1.25)
+    key.position.set(4, 7, 3)
     scene.add(key)
-    const fill = new THREE.DirectionalLight('#8ea2cf', 0.6)
-    fill.position.set(-56, 32, -46)
+    const fill = new THREE.DirectionalLight('#8ea2cf', 0.55)
+    fill.position.set(-4, 3.5, -3)
     scene.add(fill)
 
-    const groundTexture = makeGroundTexture()
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(170, 170),
-      new THREE.MeshStandardMaterial({
-        map: groundTexture,
-        transparent: true,
-        metalness: 0.06,
-        roughness: 0.93,
-      })
-    )
-    ground.rotation.x = -Math.PI / 2
-    ground.position.y = 0
+    const stars = makeStarfieldPoints()
+    scene.add(stars)
+
+    const ground = makeRollingGround()
     scene.add(ground)
 
-    // Compass labels as sprites avoid "backside mirrored text" on the ground plane.
-    const labelR = 60
-    const labelY = 0.35
+    const compass = makeCompassPad()
+    scene.add(compass)
+
+    const labelR = 3.2
+    const labelY = 0.06
     const labelN = makeCompassLabelSprite('N')
     labelN.position.set(0, labelY, -labelR)
     scene.add(labelN)
@@ -306,104 +361,55 @@ export function TelescopeStatusPanel() {
     labelE.position.set(labelR, labelY, 0)
     scene.add(labelE)
 
-    const pillarHeight = 16
-    const pillar = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.7, 2.1, pillarHeight, 24),
-      new THREE.MeshStandardMaterial({ color: '#f4f5f7', metalness: 0.24, roughness: 0.3 })
-    )
-    // Cylinder center sits at half height, so base touches ground (y=0).
-    pillar.position.set(0, pillarHeight / 2, 0)
-    scene.add(pillar)
-
     const modelRoot = new THREE.Group()
-    // Rotation pivot is fixed at pillar top center.
-    modelRoot.position.set(0, pillarHeight, 0)
+    modelRoot.rotation.y = THREE.MathUtils.degToRad(MODEL_ROOT_YAW_DEG)
     scene.add(modelRoot)
 
-    // Match Point3D transform order around the same pivot:
-    // Rotate X (axis 1,0,2000) -> Rotate Y (0,1,0) -> Rotate Z (2000,0,1).
-    const axisXGroup = new THREE.Group()
-    const axisYGroup = new THREE.Group()
-    const axisZGroup = new THREE.Group()
-    const pointingGroup = new THREE.Group()
-    modelRoot.add(axisXGroup)
-    axisXGroup.add(axisYGroup)
-    axisYGroup.add(axisZGroup)
-    axisZGroup.add(pointingGroup)
-    const point3dAxisX = new THREE.Vector3(1, 0, 2000).normalize()
-    const point3dAxisY = new THREE.Vector3(0, 1, 0).normalize()
-    const point3dAxisZ = new THREE.Vector3(2000, 0, 1).normalize()
-    const localOpticalAxisDir = new THREE.Vector3(0, 1, 0)
-
-    const objLoader = new OBJLoader()
+    const raRestQuat = new THREE.Quaternion()
+    const decRestQuat = new THREE.Quaternion()
+    const raDeltaQuat = new THREE.Quaternion()
+    const decDeltaQuat = new THREE.Quaternion()
+    let raSpin: THREE.Object3D | null = null
+    let decSpin: THREE.Object3D | null = null
+    let missingNodesLogged = false
     let disposed = false
 
-    fetch('/api/imaging/point3d-model?model=Refractor.obj', { cache: 'force-cache' })
-      .then((r) => (r.ok ? r.text() : Promise.reject(new Error('model-load-failed'))))
-      .then((text) => {
+    const loader = new GLTFLoader()
+    loader.load(
+      MODEL_URL,
+      (gltf) => {
         if (disposed) return
-        const obj = objLoader.parse(text)
-        obj.traverse((child) => {
-          if (child instanceof THREE.Mesh) {
-            child.castShadow = true
-            child.receiveShadow = true
-            child.material = new THREE.MeshStandardMaterial({
-              color: '#f4f5f7',
-              metalness: 0.24,
-              roughness: 0.3,
-            })
+        const model = gltf.scene
+        model.traverse((child) => {
+          const mesh = child as THREE.Mesh
+          if (mesh.isMesh) {
+            mesh.castShadow = true
+            mesh.receiveShadow = true
           }
         })
-        // precise=true: expand from transformed vertices (not geometry.boundingBox × matrix).
-        // Default path differs slightly between Chrome & Safari when two AABB edges are nearly
-        // equal, so the inferred optical axis flips only in Chrome.
-        const box = new THREE.Box3().setFromObject(obj, true)
-        const size = new THREE.Vector3()
-        box.getSize(size)
-        const targetSpan = 26
-        const maxDim = Math.max(size.x, size.y, size.z) || 1
-        const scale = targetSpan / maxDim
-        obj.scale.setScalar(scale)
-        // Static model alignment:
-        // - Y 180deg: correct forward/backward orientation.
-        // - Z 180deg: roll tube so diagonal mirror (tail) stays on the correct side.
-        obj.rotation.set(0, Math.PI, Math.PI)
-        // Point3D rotates around a fixed model-space pivot close to the RA/DEC shaft center.
-        // Keep exactly one pivot so telescope + counterweight bar stay anchored to the pillar top.
-        const point3dPivot = new THREE.Vector3(0, -102, 525)
-        const transformedPivot = point3dPivot.clone().multiplyScalar(scale).applyEuler(obj.rotation)
-        obj.position.copy(transformedPivot.multiplyScalar(-1))
+        modelRoot.add(model)
 
-        pointingGroup.add(obj)
-
-        // Build optical axis in telescope local space and keep it attached to the model.
-        obj.updateMatrixWorld(true)
-        const opticalBox = new THREE.Box3().setFromObject(obj, true)
-        const opticalSize = new THREE.Vector3()
-        const opticalCenter = new THREE.Vector3()
-        opticalBox.getSize(opticalSize)
-        opticalBox.getCenter(opticalCenter)
-        const axisCandidates = [
-          { axis: new THREE.Vector3(1, 0, 0), span: opticalSize.x },
-          { axis: new THREE.Vector3(0, 1, 0), span: opticalSize.y },
-          { axis: new THREE.Vector3(0, 0, 1), span: opticalSize.z },
-        ]
-        axisCandidates.sort((a, b) => b.span - a.span)
-        localOpticalAxisDir.copy(axisCandidates[0].axis).normalize()
-        const opticalAxisLength = Math.max(axisCandidates[0].span * 1.12, 8)
-        const halfLen = opticalAxisLength / 2
-        const start = opticalCenter.clone().addScaledVector(localOpticalAxisDir, -halfLen)
-        const end = opticalCenter.clone().addScaledVector(localOpticalAxisDir, halfLen)
-
-        // Keep fixed camera preset; do not auto-fit camera.
-        camera.updateProjectionMatrix()
-      })
-      .catch(() => {
-        // No-op: leave empty viewport if model is unavailable.
-      })
+        raSpin = findObjectByName(model, 'ME_RA_SPIN')
+        decSpin = findObjectByName(model, 'ME_DEC_SPIN')
+        if (!raSpin || !decSpin) {
+          if (!missingNodesLogged) {
+            missingNodesLogged = true
+            console.warn('[TelescopeStatus] GLB missing ME_RA_SPIN / ME_DEC_SPIN — frozen at rest')
+          }
+          return
+        }
+        // Hierarchy is authored in Blender:
+        // RA_SPIN → RA_Disc → UpperHousing → DEC_AXIS → DEC_SPIN → Disc/CW
+        raRestQuat.copy(raSpin.quaternion)
+        decRestQuat.copy(decSpin.quaternion)
+      },
+      undefined,
+      (err) => {
+        console.warn('[TelescopeStatus] Failed to load paramount-me.glb', err)
+      }
+    )
 
     let raf = 0
-
     const resize = () => {
       const w = host.clientWidth
       const h = host.clientHeight
@@ -417,31 +423,19 @@ export function TelescopeStatusPanel() {
     ro.observe(host)
 
     const animate = () => {
-      const t = targetEulerRef.current
-      const c = currentEulerRef.current
-      c.x += (t.x - c.x) * 0.08
-      c.y += (t.y - c.y) * 0.08
-      c.z += (t.z - c.z) * 0.08
-      axisXGroup.setRotationFromAxisAngle(point3dAxisX, THREE.MathUtils.degToRad(c.x))
-      axisYGroup.setRotationFromAxisAngle(point3dAxisY, THREE.MathUtils.degToRad(c.y))
-      axisZGroup.setRotationFromAxisAngle(point3dAxisZ, THREE.MathUtils.degToRad(c.z))
+      const t = gemTargetRef.current
+      const c = gemCurrentRef.current
+      c.raDeltaDeg += (t.raDeltaDeg - c.raDeltaDeg) * 0.1
+      c.decDeltaDeg += (t.decDeltaDeg - c.decDeltaDeg) * 0.1
 
-      const opt = opticalTargetRef.current
-      const azRad = THREE.MathUtils.degToRad(opt.az)
-      const altRad = THREE.MathUtils.degToRad(opt.alt)
-      const horiz = Math.cos(altRad)
-      const targetDir = new THREE.Vector3(
-        Math.sin(azRad) * horiz, // East (+X)
-        Math.sin(altRad), // Up (+Y)
-        -Math.cos(azRad) * horiz // North (-Z) for current ground/compass orientation
-      ).normalize()
-      const parentWorldQ = new THREE.Quaternion()
-      axisZGroup.getWorldQuaternion(parentWorldQ)
-      const targetInParent = targetDir.clone().applyQuaternion(parentWorldQ.clone().invert()).normalize()
-      const desiredQ = new THREE.Quaternion().setFromUnitVectors(localOpticalAxisDir, targetInParent)
-      const pierRollQ = new THREE.Quaternion().setFromAxisAngle(localOpticalAxisDir, pierRollRef.current)
-      desiredQ.multiply(pierRollQ)
-      pointingGroup.quaternion.slerp(desiredQ, 0.12)
+      if (raSpin) {
+        raDeltaQuat.setFromAxisAngle(RA_LOCAL_AXIS, THREE.MathUtils.degToRad(c.raDeltaDeg))
+        raSpin.quaternion.copy(raRestQuat).multiply(raDeltaQuat)
+      }
+      if (decSpin) {
+        decDeltaQuat.setFromAxisAngle(DEC_LOCAL_AXIS, THREE.MathUtils.degToRad(c.decDeltaDeg))
+        decSpin.quaternion.copy(decRestQuat).multiply(decDeltaQuat)
+      }
 
       controls.update()
       renderer.render(scene, camera)
@@ -454,19 +448,24 @@ export function TelescopeStatusPanel() {
       disposed = true
       ro.disconnect()
       controls.dispose()
-      groundTexture.dispose()
+      stars.geometry.dispose()
+      ;(stars.material as THREE.PointsMaterial).dispose()
+      ground.geometry.dispose()
+      ;(ground.material as THREE.MeshStandardMaterial).dispose()
+      const compassMap = compass.userData.compassTexture as THREE.CanvasTexture | undefined
+      compassMap?.dispose()
+      compass.geometry.dispose()
+      ;(compass.material as THREE.MeshStandardMaterial).dispose()
       renderer.dispose()
       scene.traverse((obj) => {
+        if (obj === stars || obj === ground || obj === compass) return
         const mesh = obj as THREE.Mesh
         if (mesh.geometry) mesh.geometry.dispose()
         const mat = mesh.material
-        if (Array.isArray(mat)) {
-          mat.forEach((m) => m.dispose())
-        } else if (mat) {
-          mat.dispose()
-        }
+        if (Array.isArray(mat)) mat.forEach((m) => m.dispose())
+        else if (mat) mat.dispose()
       })
-      host.removeChild(renderer.domElement)
+      if (renderer.domElement.parentElement === host) host.removeChild(renderer.domElement)
     }
   }, [])
 
@@ -475,7 +474,9 @@ export function TelescopeStatusPanel() {
       <div ref={viewportRef} className="h-[24rem] w-full overflow-hidden rounded-md lg:h-[26rem]" />
       <p className="mt-2 text-center text-sm">
         <span className="text-white">Telescope: </span>
-        <span className={connected ? 'text-green-400' : 'text-red-400'}>{connected ? 'Connected' : 'Disconnected'}</span>
+        <span className={connected ? 'text-green-400' : 'text-red-400'}>
+          {connected ? 'Connected' : 'Disconnected'}
+        </span>
         <span className="text-white"> | Tracking: </span>
         <span className={trackingEnabled ? 'text-green-400' : 'text-red-400'}>
           {trackingEnabled == null ? 'Unknown' : trackingEnabled ? 'Enabled' : 'Stopped'}

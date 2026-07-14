@@ -10,6 +10,8 @@ import {
   markNightInProgress,
   markProjectOnBoard,
   patchProject,
+  projectTargetCoords,
+  projectTargetCoordsForPanel,
   tonightDurationSecondsFromPlans,
   type ImagingProject,
   type ProjectNight,
@@ -132,7 +134,8 @@ export function projectNightAdminForceRunWindow(
   night: ProjectNight,
   windowStartMs: number,
   deadlineMs: number,
-  nowMs = Date.now()
+  nowMs = Date.now(),
+  opts?: { raHours?: number }
 ): AdminForceRunTimeWindow | null {
   if (!isAdminForceRunActive(night, nowMs) || !night.plannedStartIso) return null
   if (night.status !== 'scheduled' && night.status !== 'in_progress') return null
@@ -142,7 +145,12 @@ export function projectNightAdminForceRunWindow(
   const endMs =
     Number.isFinite(untilMs) && untilMs > startMs
       ? untilMs
-      : startMs + tonightDurationSecondsFromPlans(night.filterPlansTonight) * 1000
+      : startMs +
+        tonightDurationSecondsFromPlans(night.filterPlansTonight, {
+          startMs,
+          raHours: opts?.raHours,
+        }) *
+          1000
   return clipTonightWindow(startMs, endMs, windowStartMs, deadlineMs)
 }
 
@@ -162,7 +170,13 @@ export async function collectActiveAdminForceRunOccupancies(
   for (const project of await listProjects()) {
     for (const night of project.nights) {
       if (night.nightKey !== nightKey) continue
-      const window = projectNightAdminForceRunWindow(night, windowStartMs, deadlineMs, nowMs)
+      const sky =
+        night.mosaicPanelIndex != null
+          ? projectTargetCoordsForPanel(project, night.mosaicPanelIndex)
+          : projectTargetCoords(project)
+      const window = projectNightAdminForceRunWindow(night, windowStartMs, deadlineMs, nowMs, {
+        raHours: sky.raHours,
+      })
       if (window) out.push(window)
     }
   }
@@ -255,7 +269,14 @@ async function deliverForceRunProjectSub(
   }
 
   const startMs = Date.parse(night.plannedStartIso ?? '')
-  const durationSeconds = tonightDurationSecondsFromPlans(night.filterPlansTonight)
+  const sky =
+    night.mosaicPanelIndex != null
+      ? projectTargetCoordsForPanel(project, night.mosaicPanelIndex)
+      : projectTargetCoords(project)
+  const durationSeconds = tonightDurationSecondsFromPlans(night.filterPlansTonight, {
+    startMs: Number.isFinite(startMs) ? startMs : undefined,
+    raHours: sky.raHours,
+  })
   const endMs = startMs + durationSeconds * 1000
   if (!Number.isFinite(startMs) || endMs <= startMs) {
     return NextResponse.json(
@@ -264,8 +285,8 @@ async function deliverForceRunProjectSub(
     )
   }
   const altitude = validateAdminForceRunAltitude(
-    project.raHours,
-    project.decDeg,
+    sky.raHours,
+    sky.decDeg,
     startMs,
     endMs,
     project.target
@@ -295,7 +316,10 @@ async function deliverForceRunProjectSub(
       count: night.filterPlansTonight[0]?.count ?? 0,
       outputMode: project.outputMode,
       filterPlans: project.filterPlansTotal,
-      estimatedDurationSeconds: tonightDurationSecondsFromPlans(night.filterPlansTonight),
+      estimatedDurationSeconds: tonightDurationSecondsFromPlans(night.filterPlansTonight, {
+        startMs: Number.isFinite(startMs) ? startMs : undefined,
+        raHours: sky.raHours,
+      }),
       sessionPasswordHash: project.sessionPasswordHash,
       userId: project.userId,
       projectMode: true,
@@ -505,16 +529,26 @@ export async function adminRunSession(sessionId: string): Promise<{ ok: true } |
     if (night.filterPlansTonight.length === 0) {
       return { error: 'Sub-session has no imaging plan for tonight.' }
     }
-    const durationSeconds = tonightDurationSecondsFromPlans(night.filterPlansTonight)
+    const durationSeconds = tonightDurationSecondsFromPlans(night.filterPlansTonight, {
+      startMs: nowMs,
+      raHours:
+        night.mosaicPanelIndex != null
+          ? projectTargetCoordsForPanel(project, night.mosaicPanelIndex).raHours
+          : projectTargetCoords(project).raHours,
+    })
     if (durationSeconds <= 0) return { error: 'Could not estimate sub-session duration.' }
     const endMs = nowMs + durationSeconds * 1000
     if (endMs > deadlineMs) {
       return { error: 'Session would extend past nautical dawn.' }
     }
 
+    const sky =
+      night.mosaicPanelIndex != null
+        ? projectTargetCoordsForPanel(project, night.mosaicPanelIndex)
+        : projectTargetCoords(project)
     const altitude = validateAdminForceRunAltitude(
-      project.raHours,
-      project.decDeg,
+      sky.raHours,
+      sky.decDeg,
       nowMs,
       endMs,
       project.target

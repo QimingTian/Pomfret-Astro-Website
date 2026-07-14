@@ -22,6 +22,8 @@ import {
   projectHoldsQueueTonight,
   releaseOnBoardProjectIfNothingDeliverable,
   remainingFramesTotal,
+  projectTargetCoords,
+  projectTargetCoordsForPanel,
   tonightDurationSecondsFromPlans,
   type ImagingProject,
   type ProjectNight,
@@ -245,7 +247,20 @@ async function deliverProjectSubSessionJson(
       count: nightRef.filterPlansTonight[0]?.count ?? 0,
       outputMode: projectRef.outputMode,
       filterPlans: projectRef.filterPlansTotal,
-      estimatedDurationSeconds: tonightDurationSecondsFromPlans(nightRef.filterPlansTonight),
+      estimatedDurationSeconds: (() => {
+        const startMs =
+          nightRef.plannedStartIso != null && Number.isFinite(Date.parse(nightRef.plannedStartIso))
+            ? Date.parse(nightRef.plannedStartIso)
+            : undefined
+        const sky =
+          nightRef.mosaicPanelIndex != null
+            ? projectTargetCoordsForPanel(projectRef, nightRef.mosaicPanelIndex)
+            : projectTargetCoords(projectRef)
+        return tonightDurationSecondsFromPlans(nightRef.filterPlansTonight, {
+          startMs,
+          raHours: sky.raHours,
+        })
+      })(),
       sessionPasswordHash: projectRef.sessionPasswordHash,
       userId: projectRef.userId,
       projectMode: true,

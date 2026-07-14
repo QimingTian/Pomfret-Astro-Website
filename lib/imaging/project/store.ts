@@ -1,7 +1,7 @@
 import { logSessionStatusChange } from '@/lib/imaging/session/status-audit'
 import { buildNinaSequenceJson } from '@/lib/build-nina-sequence-json'
 import { projectNightSubId } from '@/lib/imaging-project-ids'
-import { DSO_SESSION_OVERHEAD_SEC } from '@/lib/imaging-session-overhead'
+import { dsoSessionDurationSeconds } from '@/lib/imaging-session-overhead'
 import { boardRemove, getBoardEntry, listBoardEntries } from '@/lib/imaging-session-board'
 import { getRequestById } from '@/lib/imaging-queue-store'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
@@ -243,11 +243,21 @@ export async function compactStaleProjectNights(): Promise<void> {
 }
 
 /** Planned window end for a sub-session (planned start + duration, or frozen schedule bar end). */
-export function projectSubSessionWindowEndMs(night: ProjectNight): number | null {
+export function projectSubSessionWindowEndMs(
+  night: ProjectNight,
+  opts?: { raHours?: number }
+): number | null {
   if (night.plannedStartIso) {
     const startMs = Date.parse(night.plannedStartIso)
     if (Number.isFinite(startMs)) {
-      return startMs + tonightDurationSecondsFromPlans(night.filterPlansTonight) * 1000
+      return (
+        startMs +
+        tonightDurationSecondsFromPlans(night.filterPlansTonight, {
+          startMs,
+          raHours: opts?.raHours,
+        }) *
+          1000
+      )
     }
   }
   if (typeof night.scheduleBarEndMs === 'number' && Number.isFinite(night.scheduleBarEndMs)) {
@@ -1148,9 +1158,23 @@ export function getNightForNinaDelivery(
   )
 }
 
-export function tonightDurationSecondsFromPlans(plans: FilterPlanRow[]): number {
+export type TonightDurationOpts = {
+  /** Target RA (hours). With startMs, enables meridian-flip overhead. */
+  raHours?: number
+  /** Planned session start (ms). */
+  startMs?: number
+}
+
+export function tonightDurationSecondsFromPlans(
+  plans: FilterPlanRow[],
+  opts?: TonightDurationOpts
+): number {
   if (plans.length === 0) return 0
-  return plans.reduce((sum, p) => sum + p.count * p.exposureSeconds, 0) + DSO_SESSION_OVERHEAD_SEC
+  return dsoSessionDurationSeconds({
+    filterPlans: plans,
+    raHours: opts?.raHours,
+    startMs: opts?.startMs,
+  })
 }
 
 /** Tonight sub-session windows used to block other queue rows (not full multi-night estimate). */
@@ -1177,7 +1201,14 @@ export function collectTonightProjectSubSessionOccupancy(
       if (!night.plannedStartIso) continue
       const startMs = Date.parse(night.plannedStartIso)
       if (!Number.isFinite(startMs)) continue
-      const durationSeconds = tonightDurationSecondsFromPlans(night.filterPlansTonight)
+      const sky =
+        night.mosaicPanelIndex != null
+          ? projectTargetCoordsForPanel(project, night.mosaicPanelIndex)
+          : projectTargetCoords(project)
+      const durationSeconds = tonightDurationSecondsFromPlans(night.filterPlansTonight, {
+        startMs,
+        raHours: sky.raHours,
+      })
       if (durationSeconds <= 0) continue
       const endMs = startMs + durationSeconds * 1000
       const overlapStart = Math.max(startMs, windowStartMs)

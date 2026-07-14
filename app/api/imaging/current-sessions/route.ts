@@ -5,6 +5,8 @@ import {
   effectiveProjectStatus,
   listProjects,
   projectSessionDisplayLabel,
+  projectTargetCoords,
+  projectTargetCoordsForPanel,
   tonightDurationSecondsFromPlans,
   type ImagingProject,
   type ProjectNight,
@@ -175,7 +177,20 @@ export async function GET(request: NextRequest) {
         scheduleBarEndMs: n.scheduleBarEndMs ?? null,
         failedAt: n.failedAt ?? null,
         filterPlans: n.filterPlansTonight,
-        estimatedDurationSeconds: tonightDurationSecondsFromPlans(n.filterPlansTonight),
+        estimatedDurationSeconds: (() => {
+          const startMs =
+            n.plannedStartIso != null && Number.isFinite(Date.parse(n.plannedStartIso))
+              ? Date.parse(n.plannedStartIso)
+              : undefined
+          const sky =
+            n.mosaicPanelIndex != null
+              ? projectTargetCoordsForPanel(p, n.mosaicPanelIndex)
+              : projectTargetCoords(p)
+          return tonightDurationSecondsFromPlans(n.filterPlansTonight, {
+            startMs,
+            raHours: sky.raHours,
+          })
+        })(),
       })),
       scheduleStripNightKey: boardEntry?.scheduleStripNightKey ?? null,
       scheduleBarStartMs: boardEntry?.scheduleBarStartMs ?? null,

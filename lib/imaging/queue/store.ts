@@ -3,8 +3,8 @@ import path from 'path'
 
 import { buildNinaSequenceJson } from '@/lib/build-nina-sequence-json'
 import {
-  DSO_SESSION_OVERHEAD_SEC,
   VARIABLE_STAR_SESSION_OVERHEAD_SEC,
+  dsoSessionDurationSeconds,
 } from '@/lib/imaging-session-overhead'
 import { hashSessionPassword } from '@/lib/session-password'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
@@ -109,7 +109,14 @@ const MAX_FILTER = 64
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const STACKED_MASTER_REQUIRED_EXPOSURE_SECONDS = 600
 const VARIABLE_STAR_ESTIMATE_ALTITUDE_DEG = 40
-export { DSO_SESSION_OVERHEAD_SEC, VARIABLE_STAR_SESSION_OVERHEAD_SEC } from '@/lib/imaging-session-overhead'
+export {
+  DSO_SESSION_OVERHEAD_SEC,
+  DSO_MERIDIAN_FLIP_OVERHEAD_SEC,
+  DSO_EXTRA_FILTER_OVERHEAD_SEC,
+  VARIABLE_STAR_SESSION_OVERHEAD_SEC,
+  dsoSessionOverheadSeconds,
+  dsoSessionDurationSeconds,
+} from '@/lib/imaging-session-overhead'
 
 function variableStarDurationFromClientEstimate(inputEst: unknown): { ok: true; seconds: number } | { ok: false } {
   if (typeof inputEst !== 'number' || !Number.isFinite(inputEst)) return { ok: false }
@@ -615,7 +622,7 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
             )
           )
         })()
-      : normalizedFilterPlans.reduce((sum, p) => sum + p.count * p.exposureSeconds, 0) + DSO_SESSION_OVERHEAD_SEC
+      : dsoSessionDurationSeconds({ filterPlans: normalizedFilterPlans })
 
   if (!projectMode) {
     const { nauticalDuskUtc, nauticalDawnUtc } = getTonightSchedulingWindow(new Date())
@@ -848,7 +855,7 @@ export async function updatePendingRequestById(
             )
           )
         })()
-      : normalizedFilterPlans.reduce((sum, p) => sum + p.count * p.exposureSeconds, 0) + DSO_SESSION_OVERHEAD_SEC
+      : dsoSessionDurationSeconds({ filterPlans: normalizedFilterPlans })
   const projectMode = current.projectMode === true || input.mosaicMode === true || input.projectMode === true
   if (!projectMode) {
     const { nauticalDuskUtc, nauticalDawnUtc } = getTonightSchedulingWindow(new Date())

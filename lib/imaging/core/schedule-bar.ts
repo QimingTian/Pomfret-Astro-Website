@@ -1,4 +1,4 @@
-import { DSO_SESSION_OVERHEAD_SEC } from '@/lib/imaging-session-overhead'
+import { dsoSessionDurationSeconds, DSO_SESSION_OVERHEAD_SEC } from '@/lib/imaging-session-overhead'
 import type { SessionBoardEntry } from '@/lib/imaging-session-board'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 
@@ -13,18 +13,41 @@ export function estimateSessionDurationMs(entry: {
   exposureSeconds?: number
   count?: number
   filterPlans?: Array<{ filterName: string; exposureSeconds: number; count: number }>
+  raHours?: number
+  plannedStartIso?: string | null
 }): number {
   if (typeof entry.estimatedDurationSeconds === 'number' && Number.isFinite(entry.estimatedDurationSeconds)) {
     return Math.max(entry.estimatedDurationSeconds, 60) * 1000
   }
+  const startMs =
+    entry.plannedStartIso != null && Number.isFinite(Date.parse(entry.plannedStartIso))
+      ? Date.parse(entry.plannedStartIso)
+      : undefined
   if (Array.isArray(entry.filterPlans) && entry.filterPlans.length > 0) {
-    const imagingSeconds = entry.filterPlans.reduce((sum, p) => sum + p.count * p.exposureSeconds, 0)
-    return Math.max(imagingSeconds + DSO_SESSION_OVERHEAD_SEC, DSO_SESSION_OVERHEAD_SEC) * 1000
+    return (
+      Math.max(
+        dsoSessionDurationSeconds({
+          filterPlans: entry.filterPlans,
+          raHours: entry.raHours,
+          startMs,
+        }),
+        DSO_SESSION_OVERHEAD_SEC
+      ) * 1000
+    )
   }
   const exp = typeof entry.exposureSeconds === 'number' ? entry.exposureSeconds : 0
   const count = typeof entry.count === 'number' ? entry.count : 0
   if (exp > 0 && count > 0) {
-    return Math.max(exp * count + DSO_SESSION_OVERHEAD_SEC, DSO_SESSION_OVERHEAD_SEC) * 1000
+    return (
+      Math.max(
+        dsoSessionDurationSeconds({
+          filterPlans: [{ filterName: 'L', exposureSeconds: exp, count }],
+          raHours: entry.raHours,
+          startMs,
+        }),
+        DSO_SESSION_OVERHEAD_SEC
+      ) * 1000
+    )
   }
   return DSO_SESSION_OVERHEAD_SEC * 1000
 }

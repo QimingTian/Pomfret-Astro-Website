@@ -1,4 +1,4 @@
-import { DSO_SESSION_OVERHEAD_SEC } from '@/lib/imaging-session-overhead'
+import { dsoSessionDurationSeconds } from '@/lib/imaging-session-overhead'
 import { subtractOccupiedFromFree } from '@/lib/imaging-queue-free-intervals'
 import type { ProjectSubSessionOccupancy } from '@/lib/imaging-project-store'
 import {
@@ -192,17 +192,40 @@ function buildUnscheduledReasons(input: {
 export function estimateDurationSeconds(
   req: Pick<
     SchedulePendingRow,
-    'exposureSeconds' | 'count' | 'filterPlans' | 'estimatedDurationSeconds'
+    | 'exposureSeconds'
+    | 'count'
+    | 'filterPlans'
+    | 'estimatedDurationSeconds'
+    | 'raHours'
+    | 'plannedStartIso'
   >
 ): number {
   if (typeof req.estimatedDurationSeconds === 'number' && Number.isFinite(req.estimatedDurationSeconds)) {
     return Math.max(60, req.estimatedDurationSeconds)
   }
-  const fromPlans =
+  const plans =
     Array.isArray(req.filterPlans) && req.filterPlans.length > 0
-      ? req.filterPlans.reduce((sum, p) => sum + Number(p.count) * Number(p.exposureSeconds), 0) +
-          DSO_SESSION_OVERHEAD_SEC
-      : Number(req.exposureSeconds) * Number(req.count) + DSO_SESSION_OVERHEAD_SEC
+      ? req.filterPlans.map((p) => ({
+          filterName: p.filterName,
+          exposureSeconds: Number(p.exposureSeconds),
+          count: Number(p.count),
+        }))
+      : [
+          {
+            filterName: 'L',
+            exposureSeconds: Number(req.exposureSeconds),
+            count: Number(req.count),
+          },
+        ]
+  const startMs =
+    req.plannedStartIso != null && Number.isFinite(Date.parse(req.plannedStartIso))
+      ? Date.parse(req.plannedStartIso)
+      : undefined
+  const fromPlans = dsoSessionDurationSeconds({
+    filterPlans: plans,
+    raHours: typeof req.raHours === 'number' ? req.raHours : undefined,
+    startMs,
+  })
   return Math.max(60, Math.round(fromPlans))
 }
 

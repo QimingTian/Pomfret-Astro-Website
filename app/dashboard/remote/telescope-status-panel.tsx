@@ -42,7 +42,7 @@ type GemTarget = {
 }
 
 function makeStarfieldPoints(): THREE.Points {
-  const count = 1800
+  const count = 2200
   const positions = new Float32Array(count * 3)
   const colors = new Float32Array(count * 3)
   let seed = 42
@@ -50,32 +50,33 @@ function makeStarfieldPoints(): THREE.Points {
     seed = (seed * 16807) % 2147483647
     return (seed - 1) / 2147483646
   }
+  // Keep a ~8° buffer above the horizon so stars don't sit on the ground.
+  const minCosPhi = Math.sin((8 * Math.PI) / 180)
   for (let i = 0; i < count; i += 1) {
-    // Hemisphere above and around the mount; keep them far so orbit doesn't clip through.
-    const u = rand()
-    const v = rand()
-    const theta = u * Math.PI * 2
-    const phi = Math.acos(0.08 + 0.92 * v) // prefer sky dome, sparse near nadir
-    const radius = 18 + rand() * 28
+    const theta = rand() * Math.PI * 2
+    const cosPhi = minCosPhi + (1 - minCosPhi) * rand()
+    const sinPhi = Math.sqrt(Math.max(0, 1 - cosPhi * cosPhi))
+    const radius = 24 + rand() * 40
     const i3 = i * 3
-    positions[i3] = radius * Math.sin(phi) * Math.cos(theta)
-    positions[i3 + 1] = radius * Math.cos(phi) * 0.85 + 2.5
-    positions[i3 + 2] = radius * Math.sin(phi) * Math.sin(theta)
-    const tint = 0.75 + rand() * 0.25
+    positions[i3] = radius * sinPhi * Math.cos(theta)
+    positions[i3 + 1] = radius * cosPhi
+    positions[i3 + 2] = radius * sinPhi * Math.sin(theta)
+    const tint = 0.72 + rand() * 0.28
     colors[i3] = tint
     colors[i3 + 1] = tint
-    colors[i3 + 2] = 0.9 + rand() * 0.1
+    colors[i3 + 2] = 0.88 + rand() * 0.12
   }
   const geometry = new THREE.BufferGeometry()
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
   const material = new THREE.PointsMaterial({
-    size: 0.08,
+    size: 0.09,
     sizeAttenuation: true,
     vertexColors: true,
     transparent: true,
     opacity: 0.9,
     depthWrite: false,
+    fog: false,
   })
   const points = new THREE.Points(geometry, material)
   points.frustumCulled = false
@@ -295,16 +296,16 @@ export function TelescopeStatusPanel() {
     const host = viewportRef.current
     if (!host) return
 
-    // Rural night sky: deep blue-black, not pure void (airglow / twilight remnant).
-    const skyColor = new THREE.Color(0x070b14)
+    // Near-black night sky (keep a hair of cool tint so it's not a flat void).
+    const skyColor = new THREE.Color(0x020308)
     const scene = new THREE.Scene()
     scene.background = skyColor
-    scene.fog = new THREE.FogExp2(skyColor.getHex(), 0.018)
+    scene.fog = new THREE.FogExp2(skyColor.getHex(), 0.014)
 
     const camera = new THREE.PerspectiveCamera(50, 1, 0.05, 500)
-    // Metric model (~2 m pier): tighter south-side view.
-    camera.position.set(2.4, 1.85, 4.6)
-    camera.lookAt(0, 1.15, 0)
+    // Default view from southeast (world +X = E, +Z = S).
+    camera.position.set(2.35, 1.55, 2.35)
+    camera.lookAt(0, 1.35, 0)
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false })
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
@@ -321,12 +322,11 @@ export function TelescopeStatusPanel() {
     controls.rotateSpeed = 0.8
     controls.zoomSpeed = 0.95
     controls.panSpeed = 0.7
-    // Free orbit / zoom — no horizon lock; only keep from going inside the pier / into space.
     controls.minDistance = 0.35
-    controls.maxDistance = 220
+    controls.maxDistance = Infinity
     controls.minPolarAngle = 0
     controls.maxPolarAngle = Math.PI
-    controls.target.set(0, 1.15, 0)
+    controls.target.set(0, 1.35, 0)
     controls.update()
 
     const hemi = new THREE.HemisphereLight('#f1f5ff', '#1a1c20', 0.95)
@@ -472,7 +472,7 @@ export function TelescopeStatusPanel() {
 
   return (
     <div className="bg-transparent p-3">
-      <div ref={viewportRef} className="h-[24rem] w-full overflow-hidden rounded-md lg:h-[26rem]" />
+      <div ref={viewportRef} className="h-[32rem] w-full overflow-hidden rounded-md lg:h-[36rem]" />
       <p className="mt-2 text-center text-sm">
         <span className="text-white">Telescope: </span>
         <span className={connected ? 'text-green-400' : 'text-red-400'}>

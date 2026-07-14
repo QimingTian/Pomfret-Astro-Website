@@ -34,7 +34,7 @@ const BLENDER_Z_IN_GLTF = new THREE.Vector3(0, 1, 0)
 const RA_LOCAL_AXIS = BLENDER_Z_IN_GLTF
 const DEC_LOCAL_AXIS = BLENDER_Z_IN_GLTF
 const TELEMETRY_STALE_MS = 15_000
-const MODEL_URL = '/telescope-models/paramount-me.glb?v=me-axes-20260714'
+const MODEL_URL = '/telescope-models/paramount-me.glb?v=bisque-20260714'
 
 type GemTarget = {
   raDeltaDeg: number

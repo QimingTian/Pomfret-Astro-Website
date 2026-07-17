@@ -1,23 +1,37 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { glassPillToggleActiveMd, glassPillToggleIdleMd } from '@/lib/glass-ui'
 
-const GALLERY_IMAGES: Array<{ file: string; description: string }> = [
+type GalleryImage = { file: string; description: string }
+
+const DEEP_SKY_IMAGES: GalleryImage[] = [
   { file: 'photo1.png', description: 'M31 | 14.08h | LRGB' },
   { file: 'photo2.png', description: 'IC1805 | 35h | SHO' },
   { file: 'photo3.png', description: 'Markarians Chain | 14.16h RGB + 11h Ha | HaRGB' },
   { file: 'photo4.png', description: 'M101 | 12.5h LRGB + 5h Ha | HaLRGB' },
+]
+
+const PHOTOMETRY_IMAGES: GalleryImage[] = [
   { file: 'photo5.png', description: 'V2563_Cyg_12.45-12.77:_Period_0.530922' },
 ]
 
-export default function GalleryPage() {
+type DataCategory = 'deep_sky' | 'photometry'
+
+export default function DataPage() {
+  const [category, setCategory] = useState<DataCategory>('deep_sky')
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
 
-  const images = GALLERY_IMAGES.map((entry) => ({
+  const entries = category === 'deep_sky' ? DEEP_SKY_IMAGES : PHOTOMETRY_IMAGES
+  const images = entries.map((entry) => ({
     src: `/gallery/${entry.file}`,
     alt: entry.file.replace(/\.[^.]+$/, ''),
     description: entry.description,
   }))
+
+  useEffect(() => {
+    setSelectedIndex(null)
+  }, [category])
 
   useEffect(() => {
     if (selectedIndex == null) return
@@ -35,6 +49,22 @@ export default function GalleryPage() {
   return (
     <div className="flex h-full flex-col lg:-ml-3">
       <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-4">Our Data</h1>
+      <div className="flex flex-wrap gap-2 mb-2">
+        <button
+          type="button"
+          onClick={() => setCategory('deep_sky')}
+          className={category === 'deep_sky' ? glassPillToggleActiveMd : glassPillToggleIdleMd}
+        >
+          Deep Sky Object
+        </button>
+        <button
+          type="button"
+          onClick={() => setCategory('photometry')}
+          className={category === 'photometry' ? glassPillToggleActiveMd : glassPillToggleIdleMd}
+        >
+          Photometry
+        </button>
+      </div>
       <div className="flex-1 pb-8 min-h-0">
         <div className="mt-6">
           {images.length > 0 ? (

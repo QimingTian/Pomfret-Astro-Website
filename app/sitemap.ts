@@ -9,6 +9,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     '/signup',
     '/dashboard',
     '/dashboard/account',
+    '/dashboard/about',
     '/dashboard/contact',
     '/dashboard/gallery',
     '/dashboard/weather',

@@ -36,10 +36,11 @@ function DashboardChrome({ children }: { children: React.ReactNode }) {
   }, [pathname, member.refresh])
 
   const navItems = [
+    { href: '/dashboard/about', label: 'About' },
     { href: '/dashboard/weather', label: 'Weather' },
     { href: '/dashboard/plan', label: 'Plan' },
     { href: '/dashboard/remote', label: 'Remote' },
-    { href: '/dashboard/gallery', label: 'Gallery' },
+    { href: '/dashboard/gallery', label: 'Data' },
     { href: '/dashboard/contact', label: 'Team' },
     { href: '/dashboard/account', label: accountNavLabel(member) },
   ]

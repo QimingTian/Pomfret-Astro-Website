@@ -1,4 +1,5 @@
 import { emitLiveEvent, liveProgressChannel } from '@/lib/imaging/live-bus'
+import { appendSessionProgressLine } from '@/lib/imaging/core/session-progress-store'
 
 export type LiveProgressEvent =
   | { type: 'line'; at: string; text: string }
@@ -33,6 +34,9 @@ export function subscribeProgress(queueId: string, listener: Listener): () => vo
 }
 
 export function publishProgress(queueId: string, event: LiveProgressEvent): void {
+  if (event.type === 'line') {
+    void appendSessionProgressLine(queueId, { at: event.at, text: event.text })
+  }
   const listeners = listenersMap().get(queueId)
   if (listeners && listeners.size > 0) {
     for (const listener of Array.from(listeners)) {

@@ -1,4 +1,4 @@
-import { listSessionProgressLinesFromAudit } from '@/lib/imaging-audit-log'
+import { listSessionProgressLines } from '@/lib/imaging/core/session-progress-store'
 import { liveProgressChannel, subscribeLiveEvents } from '@/lib/imaging/live-bus'
 import { subscribeProgress, type LiveProgressEvent } from '@/lib/imaging-progress-live'
 import { authorizeImagingSession, resolveImagingSessionContext } from '@/lib/imaging-session-access'
@@ -33,7 +33,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       const enqueue = (payload: unknown) => controller.enqueue(encoder.encode(sseData(payload)))
 
       let queueStatus = session.queueStatus
-      const lines = await listSessionProgressLinesFromAudit(id)
+      const lines = await listSessionProgressLines(id)
       enqueue({ type: 'snapshot', queueStatus, lines })
 
       const onLiveEvent = (event: LiveProgressEvent) => {

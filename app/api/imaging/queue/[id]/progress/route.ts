@@ -1,4 +1,4 @@
-import { listSessionProgressLinesFromAudit } from '@/lib/imaging-audit-log'
+import { listSessionProgressLines } from '@/lib/imaging/core/session-progress-store'
 import { authorizeImagingSession, resolveImagingSessionContext } from '@/lib/imaging-session-access'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import type { NextRequest } from 'next/server'
@@ -27,7 +27,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     return withImagingCors({ ok: false as const, error: 'Not found' }, 404)
   }
 
-  const lines = await listSessionProgressLinesFromAudit(id)
+  const lines = await listSessionProgressLines(id)
   const queueStatus = session.queueStatus
 
   return withImagingCors({

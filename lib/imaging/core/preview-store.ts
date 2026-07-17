@@ -66,8 +66,19 @@ async function readMetaFromKv(queueId: string): Promise<PreviewMeta | null> {
   return null
 }
 
-/** One-time migration: load legacy KV blob into R2/memory, then delete from KV. */
+let legacyMonolithPurgeStarted = false
+
+/** Drop the old base64 monolith (~1MB) so hasPreview / cold paths never re-download it. */
+function purgeLegacyPreviewMonolithOnce(): void {
+  if (legacyMonolithPurgeStarted || !kvEnabled()) return
+  legacyMonolithPurgeStarted = true
+  void kvDel(LEGACY_MONOLITH_KEY)
+  void kvDel(LEGACY_INDEX_KEY)
+}
+
+/** One-time migration: load per-queue legacy KV blob into R2/memory, then delete from KV. */
 async function migrateLegacyBlobToMemory(queueId: string): Promise<PreviewEntry | null> {
+  purgeLegacyPreviewMonolithOnce()
   const perQueue = await kvGetJson<PreviewEntry>(legacyBlobKvKey(queueId))
   if (perQueue?.dataBase64) {
     memoryMap()[queueId] = perQueue
@@ -75,15 +86,6 @@ async function migrateLegacyBlobToMemory(queueId: string): Promise<PreviewEntry 
     const body = Buffer.from(perQueue.dataBase64, 'base64')
     await putLivePreviewObject(queueId, body, perQueue.contentType || 'image/jpeg')
     return perQueue
-  }
-
-  const legacy = await kvGetJson<{ byQueueId?: Record<string, PreviewEntry> }>(LEGACY_MONOLITH_KEY)
-  const fromMonolith = legacy?.byQueueId?.[queueId]
-  if (fromMonolith?.dataBase64) {
-    memoryMap()[queueId] = fromMonolith
-    const body = Buffer.from(fromMonolith.dataBase64, 'base64')
-    await putLivePreviewObject(queueId, body, fromMonolith.contentType || 'image/jpeg')
-    return fromMonolith
   }
 
   return null
@@ -154,6 +156,7 @@ export async function upsertPreviewImage(
 }
 
 export async function getPreviewImage(queueId: string): Promise<PreviewEntry | null> {
+  purgeLegacyPreviewMonolithOnce()
   const mem = memoryMap()[queueId]
   if (mem?.dataBase64) return mem
 
@@ -167,6 +170,7 @@ export async function getPreviewImage(queueId: string): Promise<PreviewEntry | n
 }
 
 export async function hasPreviewImage(queueId: string): Promise<boolean> {
+  purgeLegacyPreviewMonolithOnce()
   const mem = memoryMap()[queueId]
   if (mem?.dataBase64) return true
 
@@ -174,10 +178,7 @@ export async function hasPreviewImage(queueId: string): Promise<boolean> {
   if (meta) return true
 
   const legacy = await kvGetJson<PreviewEntry>(legacyBlobKvKey(queueId))
-  if (legacy?.dataBase64) return true
-
-  const monolith = await kvGetJson<{ byQueueId?: Record<string, PreviewEntry> }>(LEGACY_MONOLITH_KEY)
-  return Boolean(monolith?.byQueueId?.[queueId]?.dataBase64)
+  return Boolean(legacy?.dataBase64)
 }
 
 export async function removePreviewImage(queueId: string): Promise<void> {

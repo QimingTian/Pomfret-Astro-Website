@@ -605,6 +605,13 @@ export async function reportObservatoryAgentPulse(input: { ninaRunning: boolean 
   memory().__pomfret_nina_running_reported_at__ = now
   memory().__pomfret_last_agent_seen_ts__ = now
   await persist({ force: prevRunning !== input.ninaRunning })
+  if (prevRunning !== input.ninaRunning) {
+    void import('@/lib/imaging/site-poll-snapshot')
+      .then((m) => m.refreshSitePollSnapshot())
+      .catch(() => {
+        // ignore
+      })
+  }
   try {
     await onNinaRunningReported(input.ninaRunning, now)
   } catch {

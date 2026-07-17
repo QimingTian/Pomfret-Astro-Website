@@ -6,6 +6,11 @@ let pollSequenceDebounce: ReturnType<typeof setTimeout> | null = null
 
 export function emitSiteSessionsChanged(reason: string): void {
   void emitLiveEvent('site:sessions', { type: 'sessions_changed', reason })
+  void import('@/lib/imaging/site-poll-snapshot')
+    .then((m) => m.refreshSitePollSnapshot())
+    .catch(() => {
+      // ignore snapshot refresh failures
+    })
 }
 
 export function emitAgentWake(wakeType: AgentWakeType): void {

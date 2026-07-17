@@ -174,17 +174,20 @@ export async function POST(request: NextRequest) {
           : 'Session progress update'
 
   const at = new Date().toISOString()
-  await appendAuditLog({
-    kind: 'session.progress',
-    message: msg,
-    detail: auditDetail,
-    at,
-  })
+  // Routine NINA progress goes to per-session progress lists (not the audit monolith).
+  // Audit remains for completion / ESTOP / failures below.
   if (queueId) {
     publishProgress(queueId, {
       type: 'line',
       at,
       text: progressLineText(auditDetail),
+    })
+  } else {
+    void appendAuditLog({
+      kind: 'session.progress',
+      message: msg,
+      detail: auditDetail,
+      at,
     })
   }
 

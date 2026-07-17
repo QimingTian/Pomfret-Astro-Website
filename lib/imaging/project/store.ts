@@ -4,6 +4,7 @@ import { projectNightSubId } from '@/lib/imaging-project-ids'
 import { dsoSessionDurationSeconds } from '@/lib/imaging-session-overhead'
 import { boardRemove, getBoardEntry, listBoardEntries } from '@/lib/imaging-session-board'
 import { getRequestById } from '@/lib/imaging-queue-store'
+import { emitSiteSessionsChanged } from '@/lib/imaging/site-events'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 import type { ScheduleBarPlacement } from '@/lib/imaging-schedule-bar'
 
@@ -220,14 +221,31 @@ async function readProjects(): Promise<ImagingProject[]> {
   return [...memoryProjects()]
 }
 
+function projectSessionsSignature(projects: ImagingProject[]): string {
+  return projects
+    .map((p) => {
+      const nights = p.nights.map((n) => `${n.id}:${n.status}`).join(',')
+      return `${p.id}:${p.status}:${nights}`
+    })
+    .join('|')
+}
+
 async function writeProjects(projects: ImagingProject[]): Promise<void> {
   const trimmed = projects.length > MAX_PROJECTS ? projects.slice(-MAX_PROJECTS) : projects
+  const prevSig = projectSessionsSignature(memoryProjects())
+  const nextSig = projectSessionsSignature(trimmed)
   if (kvEnabled()) {
     const ok = await kvSetJson(KEY, { projects: trimmed })
-    if (ok) return
+    if (ok) {
+      const g = globalThis as GlobalWithProjects
+      g.__pomfret_imaging_projects__ = trimmed
+      if (prevSig !== nextSig) emitSiteSessionsChanged('projects')
+      return
+    }
   }
   const g = globalThis as GlobalWithProjects
   g.__pomfret_imaging_projects__ = trimmed
+  if (prevSig !== nextSig) emitSiteSessionsChanged('projects')
 }
 
 /** Remove duplicate strip-night rows left by older reconcile bugs. */

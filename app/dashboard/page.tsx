@@ -1,5 +1,5 @@
-import { WelcomeStory } from '@/components/dashboard/welcome-story'
+import { AboutHome } from '@/components/dashboard/about-home'
 
 export default function DashboardPage() {
-  return <WelcomeStory />
+  return <AboutHome />
 }

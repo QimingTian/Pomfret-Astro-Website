@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Pomfret [O III] Survey — Trusted Shortlist</title>
+<style>
+:root {
+  --bg: #f3efe6; --ink: #1a1814; --muted: #5a554c; --card: #fffdf8;
+  --line: #d8d0c2; --a: #1f4d3a; --b: #6a4a12; --c: #3a3f66; --accent: #163a44;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Iowan Old Style", Palatino, Georgia, serif;
+  color: var(--ink);
+  background:
+    radial-gradient(1000px 500px at 0% 0%, #e4eee6, transparent 60%),
+    radial-gradient(800px 400px at 100% 0%, #f0e6d8, transparent 55%),
+    var(--bg);
+  line-height: 1.45;
+}
+.wrap { max-width: 940px; margin: 0 auto; padding: 2.4rem 1.2rem 4rem; }
+h1 { color: var(--accent); font-size: clamp(1.8rem, 4vw, 2.5rem); margin: 0 0 .3rem; }
+.sub { color: var(--muted); margin: 0 0 1.4rem; }
+h2.section { font-size: 1.2rem; border-bottom: 1px solid var(--line); padding-bottom: .3rem; }
+.formula {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  background: #ebe5d8; padding: .85rem 1rem; border-radius: 6px; white-space: pre-wrap;
+}
+.protocol {
+  background: #163a44; color: #f6f1e7; padding: 1rem 1.15rem; border-radius: 10px;
+  margin: 1rem 0 1.5rem;
+}
+.protocol strong { color: #f0c27a; }
+.protocol ol { margin: .4rem 0 0 1.1rem; }
+table.summary, table.logic {
+  width: 100%; border-collapse: collapse; background: var(--card);
+  border: 1px solid var(--line); font-size: .94rem; margin: .6rem 0 1rem;
+}
+th, td { border-bottom: 1px solid var(--line); padding: .5rem .6rem; text-align: left; vertical-align: top; }
+th { background: #efe8da; }
+.summary a { color: var(--accent); font-weight: 700; text-decoration: none; }
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  padding: 1.05rem 1.15rem 1.2rem; margin: 1rem 0 1.35rem;
+}
+.card header { display: flex; gap: .85rem; align-items: flex-start; }
+.badge {
+  font-weight: 800; color: #fff; min-width: 2.6rem; text-align: center;
+  padding: .55rem .35rem; border-radius: 8px; font-size: 1.2rem;
+}
+.tier-A .badge { background: var(--a); }
+.tier-B .badge { background: var(--b); }
+.tier-C .badge { background: var(--c); }
+.tier-A { border-left: 5px solid var(--a); }
+.tier-B { border-left: 5px solid var(--b); }
+.tier-C { border-left: 5px solid var(--c); }
+.card h2 { margin: 0; font-size: 1.25rem; }
+.window { margin: .2rem 0 0; color: #b85b22; font-size: 1.05rem; }
+.why { color: var(--muted); font-size: .95rem; margin: .45rem 0 .7rem; }
+.months { display: flex; flex-wrap: wrap; gap: .28rem; margin: .4rem 0 .7rem; }
+.chip {
+  font-family: ui-monospace, Menlo, monospace; font-size: .7rem;
+  padding: .18rem .38rem; border-radius: 999px; background: #e7e0d4; color: #8a8378;
+}
+.chip.on { background: var(--accent); color: #f7f3ea; }
+.coords {
+  display: grid; grid-template-columns: 1fr 1fr; gap: .35rem 1rem; margin-bottom: .45rem;
+  font-family: ui-monospace, Menlo, monospace; font-size: .9rem;
+}
+.coords span, .meta span { display: inline-block; min-width: 8rem; color: var(--muted);
+  font-family: "Iowan Old Style", Palatino, Georgia, serif; font-size: .85rem; }
+.meta { margin: .15rem 0; }
+.scores td { padding: .32rem .15rem; border-bottom: 1px solid var(--line); }
+.scores td:first-child { width: 42%; color: var(--muted); }
+.bar { position: relative; height: 1.1rem; background: #e7e0d4; border-radius: 4px; overflow: hidden; }
+.bar-fill { height: 100%; background: linear-gradient(90deg, #1f5b6b, #3f8f7a); }
+.bar-label {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: .7rem; font-family: ui-monospace, Menlo, monospace;
+}
+.neg { color: #a33; font-weight: 700; }
+.rec { margin: .85rem 0 0; background: #f3ebe0; padding: .7rem .8rem; border-radius: 6px; }
+.note { font-size: .82rem; color: var(--muted); margin: .4rem 0 0; }
+.counts { display: flex; gap: .6rem; flex-wrap: wrap; margin: .6rem 0 1rem; }
+.pill { background: var(--card); border: 1px solid var(--line); padding: .4rem .7rem; border-radius: 999px; font-size: .9rem; }
+.pill b { color: var(--accent); }
+footer { margin-top: 2rem; color: var(--muted); font-size: .9rem; border-top: 1px solid var(--line); padding-top: 1rem; }
+@media (max-width: 640px) { .coords { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Pomfret [O III] Trusted Shortlist</h1>
+  <p class="sub">Generated 2026-07-17 · <b>v2.1</b> (conditional dust · Hα bell · boundary rims)</p>
+
+  <div class="protocol">
+    <strong>How to invest 100 hours without wasting them</strong>
+    <ol>
+      <li>Only shoot <b>Tier A</b> (and maybe one Tier B) whose <b>Shoot</b> window matches now.</li>
+      <li>First night block: <b>5–10 h of [O III]</b> on that field (same framing you would use for 100 h).</li>
+      <li><b>Go / no-go:</b> if you see filaments, arcs, or a shell → continue toward 100 h. If the stack is blank → stop and move to the next Tier A.</li>
+      <li>Tier C is for deliberate deep work on <em>known</em> shells/SNRs — valuable, but not “unrecorded.”</li>
+    </ol>
+  </div>
+
+  <div class="counts">
+    <div class="pill">Tier A: <b>5</b></div>
+    <div class="pill">Tier B: <b>10</b></div>
+    <div class="pill">Tier C: <b>82</b></div>
+    <div class="pill">Tiles scored: <b>6769</b></div>
+  </div>
+
+  <section>
+    <h2 class="section">What changed in v2.1</h2>
+    <ul>
+      <li><b>Dust is conditional:</b> default weight lowered; contributes only when energy/structure already exists; boosted on H II / bubble rims.</li>
+      <li><b>Hα bell curve:</b> peaks at weak–moderate intensity; blank sky and classic bright H II both score near zero.</li>
+      <li><b>Boundary rims:</b> Sharpless H II (+ IR bubbles when available) scored on the <em>edge</em>, not the bright core — arcs/filaments proxy without ML.</li>
+      <li>Still kept from v2: WR/O shell annulus, energy gates, SNR/WR-shell Tier C tags, famous-core penalties.</li>
+    </ul>
+    <div class="formula">energy = WR_annulus + O_annulus + X-ray + Structure + BoundaryRim
+score = energy + Hα_bell + Dust(energy-gated) + UnderObs(energy-gated) − Famous − Season</div>
+  </section>
+
+  <section>
+    <h2 class="section">Site</h2>
+    <p>Pomfret School (41.8862° N, 71.9651° W),
+    min altitude 30.0°, tile ~2.0°
+    (scope FOV ~2.54°×1.7°).</p>
+  </section>
+
+  <section>
+    <h2 class="section">Shortlist</h2>
+    <p class="sub" style="margin-top:0">Sorted Tier A → B → C. <strong>Shoot</strong> = recommended months above 30° from Pomfret.</p>
+    <table class="summary">
+      <thead>
+        <tr><th>#</th><th>Tier</th><th>Score</th><th>Energy</th><th>RA</th><th>Dec</th><th>Shoot</th><th>Nearest WR</th></tr>
+      </thead>
+      <tbody><tr><td><a href='#rec-1'>#1</a></td><td><span class='pill'>Tier A</span></td><td>11.40</td><td>8.76</td><td>02h 33m 45.6s</td><td>+56° 53&#x27; 10.3&quot;</td><td><strong>September–December</strong></td><td>WR4</td></tr><tr><td><a href='#rec-2'>#2</a></td><td><span class='pill'>Tier A</span></td><td>11.11</td><td>8.79</td><td>22h 05m 16.2s</td><td>+56° 53&#x27; 10.3&quot;</td><td><strong>July–October</strong></td><td>WR151</td></tr><tr><td><a href='#rec-3'>#3</a></td><td><span class='pill'>Tier A</span></td><td>10.64</td><td>9.83</td><td>22h 03m 41.1s</td><td>+58° 53&#x27; 10.3&quot;</td><td><strong>July–October</strong></td><td>WR151</td></tr><tr><td><a href='#rec-4'>#4</a></td><td><span class='pill'>Tier A</span></td><td>10.10</td><td>8.76</td><td>22h 19m 54.8s</td><td>+56° 53&#x27; 10.3&quot;</td><td><strong>July–October</strong></td><td>WR153ab</td></tr><tr><td><a href='#rec-5'>#5</a></td><td><span class='pill'>Tier A</span></td><td>10.02</td><td>8.58</td><td>20h 43m 22.1s</td><td>+40° 53&#x27; 10.3&quot;</td><td><strong>June–September</strong></td><td>WR147</td></tr><tr><td><a href='#rec-6'>#6</a></td><td><span class='pill'>Tier B</span></td><td>10.77</td><td>4.96</td><td>02h 39m 56.6s</td><td>+54° 53&#x27; 10.3&quot;</td><td><strong>September–December</strong></td><td>WR4</td></tr><tr><td><a href='#rec-7'>#7</a></td><td><span class='pill'>Tier B</span></td><td>9.92</td><td>8.45</td><td>19h 47m 57.3s</td><td>+18° 53&#x27; 10.3&quot;</td><td><strong>May–September</strong></td><td>WR128</td></tr><tr><td><a href='#rec-8'>#8</a></td><td><span class='pill'>Tier B</span></td><td>9.00</td><td>5.93</td><td>19h 51m 22.1s</td><td>+16° 53&#x27; 10.3&quot;</td><td><strong>June–September</strong></td><td>WR128</td></tr><tr><td><a href='#rec-9'>#9</a></td><td><span class='pill'>Tier B</span></td><td>8.98</td><td>4.76</td><td>22h 08m 13.7s</td><td>+54° 53&#x27; 10.3&quot;</td><td><strong>July–October</strong></td><td>WR152</td></tr><tr><td><a href='#rec-10'>#10</a></td><td><span class='pill'>Tier B</span></td><td>8.90</td><td>6.07</td><td>02h 48m 24.3s</td><td>+56° 53&#x27; 10.3&quot;</td><td><strong>September–December</strong></td><td>WR5</td></tr><tr><td><a href='#rec-11'>#11</a></td><td><span class='pill'>Tier B</span></td><td>8.82</td><td>8.01</td><td>22h 19m 10.0s</td><td>+58° 53&#x27; 10.3&quot;</td><td><strong>July–October</strong></td><td>WR151</td></tr><tr><td><a href='#rec-12'>#12</a></td><td><span class='pill'>Tier B</span></td><td>8.51</td><td>6.18</td><td>03h 03m 02.9s</td><td>+56° 53&#x27; 10.3&quot;</td><td><strong>September–December</strong></td><td>WR5</td></tr><tr><td><a href='#rec-13'>#13</a></td><td><span class='pill'>Tier B</span></td><td>8.47</td><td>8.42</td><td>20h 04m 27.2s</td><td>+34° 53&#x27; 10.3&quot;</td><td><strong>June–September</strong></td><td>WR133</td></tr><tr><td><a href='#rec-14'>#14</a></td><td><span class='pill'>Tier B</span></td><td>7.90</td><td>6.36</td><td>01h 13m 59.5s</td><td>+60° 53&#x27; 10.3&quot;</td><td><strong>August–December</strong></td><td>WR2</td></tr><tr><td><a href='#rec-15'>#15</a></td><td><span class='pill'>Tier B</span></td><td>7.71</td><td>6.23</td><td>01h 40m 37.9s</td><td>+58° 53&#x27; 10.3&quot;</td><td><strong>August–December</strong></td><td>WR3</td></tr><tr><td><a href='#rec-16'>#16</a></td><td><span class='pill'>Tier C</span></td><td>15.09</td><td>13.00</td><td>23h 50m 34.8s</td><td>+62° 53&#x27; 10.3&quot;</td><td><strong>July–November</strong></td><td>WR158</td></tr><tr><td><a href='#rec-17'>#17</a></td><td><span class='pill'>Tier C</span></td><td>13.95</td><td>13.74</td><td>20h 05m 15.4s</td><td>+36° 53&#x27; 10.3&quot;</td><td><strong>June–September</strong></td><td>WR133</td></tr><tr><td><a href='#rec-18'>#18</a></td><td><span class='pill'>Tier C</span></td><td>12.91</td><td>8.28</td><td>20h 13m 48.9s</td><td>+44° 53&#x27; 10.3&quot;</td><td><strong>June–September</strong></td><td>WR140</td></tr><tr><td><a href='#rec-19'>#19</a></td><td><span class='pill'>Tier C</span></td><td>12.39</td><td>8.08</td><td>18h 44m 12.7s</td><td>-01° 06&#x27; 49.7&quot;</td><td><strong>June–July</strong></td><td>WR121a</td></tr><tr><td><a href='#rec-20'>#20</a></td><td><span class='pill'>Tier C</span></td><td>12.29</td><td>9.55</td><td>18h 40m 27.6s</td><td>-05° 06&#x27; 49.7&quot;</td><td><strong>June–July</strong></td><td>WR120</td></tr></tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2 class="section">Field dossiers</h2>
+    
+<article class="card tier-A" id="rec-1">
+  <header>
+    <div class="badge">A</div>
+    <div>
+      <h2>#1 · score 11.40 · energy 8.76</h2>
+      <p class="window"><strong>Shoot:</strong> September–December</p>
+    </div>
+  </header>
+  <div class="months"><span class="chip">Jan</span><span class="chip">Feb</span><span class="chip">Mar</span><span class="chip">Apr</span><span class="chip">May</span><span class="chip">Jun</span><span class="chip">Jul</span><span class="chip">Aug</span><span class="chip on">Sep</span><span class="chip on">Oct</span><span class="chip on">Nov</span><span class="chip on">Dec</span></div>
+  <p class="why">Strong WR shell-scale annulus + ISM context; not a catalogued shell — best discovery bet (still pilot 5–10 h before 100 h)</p>
+  <div class="coords">
+    <div><span>RA</span> 02h 33m 45.6s <small>(38.440°)</small></div>
+    <div><span>Dec</span> +56° 53&#x27; 10.3&quot; <small>(+56.886°)</small></div>
+  </div>
+  <div class="meta"><span>Nearest WR</span> WR4 @ 1.03°</div>
+  <div class="meta"><span>Nearest O</span> 137.73-02.73_01 @ 1.24°</div>
+  <div class="meta"><span>Structure tag</span> —</div>
+  <div class="meta"><span>Boundary rim</span> —
+    </div>
+  <div class="meta"><span>Named nebulae ≤1.5°</span> 0</div>
+  <h3>Score breakdown</h3>
+  <table class="scores"><tbody><tr><td>WR shell annulus</td><td><div class="bar"><div class="bar-fill" style="width:97.3%"></div><span class="bar-label">4.86/5</span></div></td></tr><tr><td>O-star annulus</td><td><div class="bar"><div class="bar-fill" style="width:99.9%"></div><span class="bar-label">3.49/4</span></div></td></tr><tr><td>Structure (SNR/shell)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>Boundary rim (H II/bubble)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>X-ray</td><td><div class="bar"><div class="bar-fill" style="width:13.4%"></div><span class="bar-label">0.40/3</span></div></td></tr><tr><td>Hα bell (weak–moderate)</td><td><div class="bar"><div class="bar-fill" style="width:12.3%"></div><span class="bar-label">0.49/4</span></div></td></tr><tr><td>Dust (conditional)*</td><td><div class="bar"><div class="bar-fill" style="width:10.0%"></div><span class="bar-label">0.15/2</span></div></td></tr><tr><td>Under-observed†</td><td><div class="bar"><div class="bar-fill" style="width:100.0%"></div><span class="bar-label">2.00/2</span></div></td></tr></tbody></table>
+  <p class="note">*Dust only if energy ≥ 3.5; boosted on rims.
+  †Under-observed only if energy ≥ 3.</p>
+  <p class="rec"><strong>Protocol:</strong> 5–10 h [O III] pilot in <em>September–December</em>. If filaments/shell appear → commit toward 100 h. If blank → abandon.</p>
+</article>
+
+<article class="card tier-A" id="rec-2">
+  <header>
+    <div class="badge">A</div>
+    <div>
+      <h2>#2 · score 11.11 · energy 8.79</h2>
+      <p class="window"><strong>Shoot:</strong> July–October</p>
+    </div>
+  </header>
+  <div class="months"><span class="chip">Jan</span><span class="chip">Feb</span><span class="chip">Mar</span><span class="chip">Apr</span><span class="chip">May</span><span class="chip">Jun</span><span class="chip on">Jul</span><span class="chip on">Aug</span><span class="chip on">Sep</span><span class="chip on">Oct</span><span class="chip">Nov</span><span class="chip">Dec</span></div>
+  <p class="why">Strong WR shell-scale annulus + ISM context; not a catalogued shell — best discovery bet (still pilot 5–10 h before 100 h)</p>
+  <div class="coords">
+    <div><span>RA</span> 22h 05m 16.2s <small>(331.318°)</small></div>
+    <div><span>Dec</span> +56° 53&#x27; 10.3&quot; <small>(+56.886°)</small></div>
+  </div>
+  <div class="meta"><span>Nearest WR</span> WR151 @ 1.03°</div>
+  <div class="meta"><span>Nearest O</span> 102.01+02.18_01 @ 1.19°</div>
+  <div class="meta"><span>Structure tag</span> —</div>
+  <div class="meta"><span>Boundary rim</span> —
+    </div>
+  <div class="meta"><span>Named nebulae ≤1.5°</span> 1</div>
+  <h3>Score breakdown</h3>
+  <table class="scores"><tbody><tr><td>WR shell annulus</td><td><div class="bar"><div class="bar-fill" style="width:97.1%"></div><span class="bar-label">4.85/5</span></div></td></tr><tr><td>O-star annulus</td><td><div class="bar"><div class="bar-fill" style="width:100.0%"></div><span class="bar-label">3.50/4</span></div></td></tr><tr><td>Structure (SNR/shell)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>Boundary rim (H II/bubble)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>X-ray</td><td><div class="bar"><div class="bar-fill" style="width:14.7%"></div><span class="bar-label">0.44/3</span></div></td></tr><tr><td>Hα bell (weak–moderate)</td><td><div class="bar"><div class="bar-fill" style="width:1.8%"></div><span class="bar-label">0.07/4</span></div></td></tr><tr><td>Dust (conditional)*</td><td><div class="bar"><div class="bar-fill" style="width:49.4%"></div><span class="bar-label">0.74/2</span></div></td></tr><tr><td>Under-observed†</td><td><div class="bar"><div class="bar-fill" style="width:75.0%"></div><span class="bar-label">1.50/2</span></div></td></tr></tbody></table>
+  <p class="note">*Dust only if energy ≥ 3.5; boosted on rims.
+  †Under-observed only if energy ≥ 3.</p>
+  <p class="rec"><strong>Protocol:</strong> 5–10 h [O III] pilot in <em>July–October</em>. If filaments/shell appear → commit toward 100 h. If blank → abandon.</p>
+</article>
+
+<article class="card tier-A" id="rec-3">
+  <header>
+    <div class="badge">A</div>
+    <div>
+      <h2>#3 · score 10.64 · energy 9.83</h2>
+      <p class="window"><strong>Shoot:</strong> July–October</p>
+    </div>
+  </header>
+  <div class="months"><span class="chip">Jan</span><span class="chip">Feb</span><span class="chip">Mar</span><span class="chip">Apr</span><span class="chip">May</span><span class="chip">Jun</span><span class="chip on">Jul</span><span class="chip on">Aug</span><span class="chip on">Sep</span><span class="chip on">Oct</span><span class="chip">Nov</span><span class="chip">Dec</span></div>
+  <p class="why">Strong WR shell-scale annulus + ISM context; not a catalogued shell — best discovery bet (still pilot 5–10 h before 100 h)</p>
+  <div class="coords">
+    <div><span>RA</span> 22h 03m 41.1s <small>(330.921°)</small></div>
+    <div><span>Dec</span> +58° 53&#x27; 10.3&quot; <small>(+58.886°)</small></div>
+  </div>
+  <div class="meta"><span>Nearest WR</span> WR151 @ 1.38°</div>
+  <div class="meta"><span>Nearest O</span> 102.01+02.18_01 @ 0.91°</div>
+  <div class="meta"><span>Structure tag</span> —</div>
+  <div class="meta"><span>Boundary rim</span> Sh2-134
+     (HII)</div>
+  <div class="meta"><span>Named nebulae ≤1.5°</span> 4</div>
+  <h3>Score breakdown</h3>
+  <table class="scores"><tbody><tr><td>WR shell annulus</td><td><div class="bar"><div class="bar-fill" style="width:68.3%"></div><span class="bar-label">3.42/5</span></div></td></tr><tr><td>O-star annulus</td><td><div class="bar"><div class="bar-fill" style="width:93.7%"></div><span class="bar-label">3.28/4</span></div></td></tr><tr><td>Structure (SNR/shell)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>Boundary rim (H II/bubble)</td><td><div class="bar"><div class="bar-fill" style="width:77.2%"></div><span class="bar-label">2.70/4</span></div></td></tr><tr><td>X-ray</td><td><div class="bar"><div class="bar-fill" style="width:14.6%"></div><span class="bar-label">0.44/3</span></div></td></tr><tr><td>Hα bell (weak–moderate)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>Dust (conditional)*</td><td><div class="bar"><div class="bar-fill" style="width:53.8%"></div><span class="bar-label">0.81/2</span></div></td></tr><tr><td>Under-observed†</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/2</span></div></td></tr></tbody></table>
+  <p class="note">*Dust only if energy ≥ 3.5; boosted on rims.
+  †Under-observed only if energy ≥ 3.</p>
+  <p class="rec"><strong>Protocol:</strong> 5–10 h [O III] pilot in <em>July–October</em>. If filaments/shell appear → commit toward 100 h. If blank → abandon.</p>
+</article>
+
+<article class="card tier-A" id="rec-4">
+  <header>
+    <div class="badge">A</div>
+    <div>
+      <h2>#4 · score 10.10 · energy 8.76</h2>
+      <p class="window"><strong>Shoot:</strong> July–October</p>
+    </div>
+  </header>
+  <div class="months"><span class="chip">Jan</span><span class="chip">Feb</span><span class="chip">Mar</span><span class="chip">Apr</span><span class="chip">May</span><span class="chip">Jun</span><span class="chip on">Jul</span><span class="chip on">Aug</span><span class="chip on">Sep</span><span class="chip on">Oct</span><span class="chip">Nov</span><span class="chip">Dec</span></div>
+  <p class="why">Strong WR shell-scale annulus + ISM context; not a catalogued shell — best discovery bet (still pilot 5–10 h before 100 h)</p>
+  <div class="coords">
+    <div><span>RA</span> 22h 19m 54.8s <small>(334.979°)</small></div>
+    <div><span>Dec</span> +56° 53&#x27; 10.3&quot; <small>(+56.886°)</small></div>
+  </div>
+  <div class="meta"><span>Nearest WR</span> WR153ab @ 0.78°</div>
+  <div class="meta"><span>Nearest O</span> 102.01+02.18_01 @ 2.65°</div>
+  <div class="meta"><span>Structure tag</span> —</div>
+  <div class="meta"><span>Boundary rim</span> Sh2-132
+     (HII)</div>
+  <div class="meta"><span>Named nebulae ≤1.5°</span> 4</div>
+  <h3>Score breakdown</h3>
+  <table class="scores"><tbody><tr><td>WR shell annulus</td><td><div class="bar"><div class="bar-fill" style="width:96.7%"></div><span class="bar-label">4.84/5</span></div></td></tr><tr><td>O-star annulus</td><td><div class="bar"><div class="bar-fill" style="width:19.6%"></div><span class="bar-label">0.68/4</span></div></td></tr><tr><td>Structure (SNR/shell)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>Boundary rim (H II/bubble)</td><td><div class="bar"><div class="bar-fill" style="width:90.0%"></div><span class="bar-label">3.15/4</span></div></td></tr><tr><td>X-ray</td><td><div class="bar"><div class="bar-fill" style="width:2.8%"></div><span class="bar-label">0.08/3</span></div></td></tr><tr><td>Hα bell (weak–moderate)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>Dust (conditional)*</td><td><div class="bar"><div class="bar-fill" style="width:89.7%"></div><span class="bar-label">1.35/2</span></div></td></tr><tr><td>Under-observed†</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/2</span></div></td></tr></tbody></table>
+  <p class="note">*Dust only if energy ≥ 3.5; boosted on rims.
+  †Under-observed only if energy ≥ 3.</p>
+  <p class="rec"><strong>Protocol:</strong> 5–10 h [O III] pilot in <em>July–October</em>. If filaments/shell appear → commit toward 100 h. If blank → abandon.</p>
+</article>
+
+<article class="card tier-A" id="rec-5">
+  <header>
+    <div class="badge">A</div>
+    <div>
+      <h2>#5 · score 10.02 · energy 8.58</h2>
+      <p class="window"><strong>Shoot:</strong> June–September</p>
+    </div>
+  </header>
+  <div class="months"><span class="chip">Jan</span><span class="chip">Feb</span><span class="chip">Mar</span><span class="chip">Apr</span><span class="chip">May</span><span class="chip on">Jun</span><span class="chip on">Jul</span><span class="chip on">Aug</span><span class="chip on">Sep</span><span class="chip">Oct</span><span class="chip">Nov</span><span class="chip">Dec</span></div>
+  <p class="why">Strong WR shell-scale annulus + ISM context; not a catalogued shell — best discovery bet (still pilot 5–10 h before 100 h)</p>
+  <div class="coords">
+    <div><span>RA</span> 20h 43m 22.1s <small>(310.842°)</small></div>
+    <div><span>Dec</span> +40° 53&#x27; 10.3&quot; <small>(+40.886°)</small></div>
+  </div>
+  <div class="meta"><span>Nearest WR</span> WR147 @ 1.37°</div>
+  <div class="meta"><span>Nearest O</span> 080.57+00.83_01 @ 1.88°</div>
+  <div class="meta"><span>Structure tag</span> —</div>
+  <div class="meta"><span>Boundary rim</span> Sh2-109
+     (HII)</div>
+  <div class="meta"><span>Named nebulae ≤1.5°</span> 7</div>
+  <h3>Score breakdown</h3>
+  <table class="scores"><tbody><tr><td>WR shell annulus</td><td><div class="bar"><div class="bar-fill" style="width:69.6%"></div><span class="bar-label">3.48/5</span></div></td></tr><tr><td>O-star annulus</td><td><div class="bar"><div class="bar-fill" style="width:69.6%"></div><span class="bar-label">2.43/4</span></div></td></tr><tr><td>Structure (SNR/shell)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>Boundary rim (H II/bubble)</td><td><div class="bar"><div class="bar-fill" style="width:64.5%"></div><span class="bar-label">2.26/4</span></div></td></tr><tr><td>X-ray</td><td><div class="bar"><div class="bar-fill" style="width:13.6%"></div><span class="bar-label">0.41/3</span></div></td></tr><tr><td>Hα bell (weak–moderate)</td><td><div class="bar"><div class="bar-fill" style="width:3.8%"></div><span class="bar-label">0.15/4</span></div></td></tr><tr><td>Dust (conditional)*</td><td><div class="bar"><div class="bar-fill" style="width:85.8%"></div><span class="bar-label">1.29/2</span></div></td></tr><tr><td>Under-observed†</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/2</span></div></td></tr></tbody></table>
+  <p class="note">*Dust only if energy ≥ 3.5; boosted on rims.
+  †Under-observed only if energy ≥ 3.</p>
+  <p class="rec"><strong>Protocol:</strong> 5–10 h [O III] pilot in <em>June–September</em>. If filaments/shell appear → commit toward 100 h. If blank → abandon.</p>
+</article>
+
+<article class="card tier-B" id="rec-6">
+  <header>
+    <div class="badge">B</div>
+    <div>
+      <h2>#6 · score 10.77 · energy 4.96</h2>
+      <p class="window"><strong>Shoot:</strong> September–December</p>
+    </div>
+  </header>
+  <div class="months"><span class="chip">Jan</span><span class="chip">Feb</span><span class="chip">Mar</span><span class="chip">Apr</span><span class="chip">May</span><span class="chip">Jun</span><span class="chip">Jul</span><span class="chip">Aug</span><span class="chip on">Sep</span><span class="chip on">Oct</span><span class="chip on">Nov</span><span class="chip on">Dec</span></div>
+  <p class="why">Decent energy coupling but weaker / less WR-specific evidence — pilot 5–10 h only; do not pre-commit 100 h</p>
+  <div class="coords">
+    <div><span>RA</span> 02h 39m 56.6s <small>(39.986°)</small></div>
+    <div><span>Dec</span> +54° 53&#x27; 10.3&quot; <small>(+54.886°)</small></div>
+  </div>
+  <div class="meta"><span>Nearest WR</span> WR4 @ 1.85°</div>
+  <div class="meta"><span>Nearest O</span> 137.09-04.73_01 @ 1.09°</div>
+  <div class="meta"><span>Structure tag</span> —</div>
+  <div class="meta"><span>Boundary rim</span> —
+    </div>
+  <div class="meta"><span>Named nebulae ≤1.5°</span> 0</div>
+  <h3>Score breakdown</h3>
+  <table class="scores"><tbody><tr><td>WR shell annulus</td><td><div class="bar"><div class="bar-fill" style="width:22.3%"></div><span class="bar-label">1.12/5</span></div></td></tr><tr><td>O-star annulus</td><td><div class="bar"><div class="bar-fill" style="width:99.1%"></div><span class="bar-label">3.47/4</span></div></td></tr><tr><td>Structure (SNR/shell)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>Boundary rim (H II/bubble)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>X-ray</td><td><div class="bar"><div class="bar-fill" style="width:12.5%"></div><span class="bar-label">0.38/3</span></div></td></tr><tr><td>Hα bell (weak–moderate)</td><td><div class="bar"><div class="bar-fill" style="width:89.3%"></div><span class="bar-label">3.57/4</span></div></td></tr><tr><td>Dust (conditional)*</td><td><div class="bar"><div class="bar-fill" style="width:15.9%"></div><span class="bar-label">0.24/2</span></div></td></tr><tr><td>Under-observed†</td><td><div class="bar"><div class="bar-fill" style="width:100.0%"></div><span class="bar-label">2.00/2</span></div></td></tr></tbody></table>
+  <p class="note">*Dust only if energy ≥ 3.5; boosted on rims.
+  †Under-observed only if energy ≥ 3.</p>
+  <p class="rec"><strong>Protocol:</strong> Pilot only (5–10 h) in <em>September–December</em>. Do <u>not</u> pre-commit 100 h.</p>
+</article>
+
+<article class="card tier-B" id="rec-7">
+  <header>
+    <div class="badge">B</div>
+    <div>
+      <h2>#7 · score 9.92 · energy 8.45</h2>
+      <p class="window"><strong>Shoot:</strong> May–September</p>
+    </div>
+  </header>
+  <div class="months"><span class="chip">Jan</span><span class="chip">Feb</span><span class="chip">Mar</span><span class="chip">Apr</span><span class="chip on">May</span><span class="chip on">Jun</span><span class="chip on">Jul</span><span class="chip on">Aug</span><span class="chip on">Sep</span><span class="chip">Oct</span><span class="chip">Nov</span><span class="chip">Dec</span></div>
+  <p class="why">Decent energy coupling but weaker / less WR-specific evidence — pilot 5–10 h only; do not pre-commit 100 h</p>
+  <div class="coords">
+    <div><span>RA</span> 19h 47m 57.3s <small>(296.989°)</small></div>
+    <div><span>Dec</span> +18° 53&#x27; 10.3&quot; <small>(+18.886°)</small></div>
+  </div>
+  <div class="meta"><span>Nearest WR</span> WR128 @ 0.70°</div>
+  <div class="meta"><span>Nearest O</span> 056.48-04.33_01 @ 1.06°</div>
+  <div class="meta"><span>Structure tag</span> —</div>
+  <div class="meta"><span>Boundary rim</span> —
+    </div>
+  <div class="meta"><span>Named nebulae ≤1.5°</span> 2</div>
+  <h3>Score breakdown</h3>
+  <table class="scores"><tbody><tr><td>WR shell annulus</td><td><div class="bar"><div class="bar-fill" style="width:91.7%"></div><span class="bar-label">4.58/5</span></div></td></tr><tr><td>O-star annulus</td><td><div class="bar"><div class="bar-fill" style="width:98.6%"></div><span class="bar-label">3.45/4</span></div></td></tr><tr><td>Structure (SNR/shell)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>Boundary rim (H II/bubble)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>X-ray</td><td><div class="bar"><div class="bar-fill" style="width:13.8%"></div><span class="bar-label">0.41/3</span></div></td></tr><tr><td>Hα bell (weak–moderate)</td><td><div class="bar"><div class="bar-fill" style="width:10.7%"></div><span class="bar-label">0.43/4</span></div></td></tr><tr><td>Dust (conditional)*</td><td><div class="bar"><div class="bar-fill" style="width:3.0%"></div><span class="bar-label">0.04/2</span></div></td></tr><tr><td>Under-observed†</td><td><div class="bar"><div class="bar-fill" style="width:50.0%"></div><span class="bar-label">1.00/2</span></div></td></tr></tbody></table>
+  <p class="note">*Dust only if energy ≥ 3.5; boosted on rims.
+  †Under-observed only if energy ≥ 3.</p>
+  <p class="rec"><strong>Protocol:</strong> Pilot only (5–10 h) in <em>May–September</em>. Do <u>not</u> pre-commit 100 h.</p>
+</article>
+
+<article class="card tier-B" id="rec-8">
+  <header>
+    <div class="badge">B</div>
+    <div>
+      <h2>#8 · score 9.00 · energy 5.93</h2>
+      <p class="window"><strong>Shoot:</strong> June–September</p>
+    </div>
+  </header>
+  <div class="months"><span class="chip">Jan</span><span class="chip">Feb</span><span class="chip">Mar</span><span class="chip">Apr</span><span class="chip">May</span><span class="chip on">Jun</span><span class="chip on">Jul</span><span class="chip on">Aug</span><span class="chip on">Sep</span><span class="chip">Oct</span><span class="chip">Nov</span><span class="chip">Dec</span></div>
+  <p class="why">Decent energy coupling but weaker / less WR-specific evidence — pilot 5–10 h only; do not pre-commit 100 h</p>
+  <div class="coords">
+    <div><span>RA</span> 19h 51m 22.1s <small>(297.842°)</small></div>
+    <div><span>Dec</span> +16° 53&#x27; 10.3&quot; <small>(+16.886°)</small></div>
+  </div>
+  <div class="meta"><span>Nearest WR</span> WR128 @ 1.48°</div>
+  <div class="meta"><span>Nearest O</span> 056.48-04.33_01 @ 1.80°</div>
+  <div class="meta"><span>Structure tag</span> —</div>
+  <div class="meta"><span>Boundary rim</span> —
+    </div>
+  <div class="meta"><span>Named nebulae ≤1.5°</span> 0</div>
+  <h3>Score breakdown</h3>
+  <table class="scores"><tbody><tr><td>WR shell annulus</td><td><div class="bar"><div class="bar-fill" style="width:57.6%"></div><span class="bar-label">2.88/5</span></div></td></tr><tr><td>O-star annulus</td><td><div class="bar"><div class="bar-fill" style="width:75.4%"></div><span class="bar-label">2.64/4</span></div></td></tr><tr><td>Structure (SNR/shell)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>Boundary rim (H II/bubble)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>X-ray</td><td><div class="bar"><div class="bar-fill" style="width:13.6%"></div><span class="bar-label">0.41/3</span></div></td></tr><tr><td>Hα bell (weak–moderate)</td><td><div class="bar"><div class="bar-fill" style="width:2.9%"></div><span class="bar-label">0.11/4</span></div></td></tr><tr><td>Dust (conditional)*</td><td><div class="bar"><div class="bar-fill" style="width:63.8%"></div><span class="bar-label">0.96/2</span></div></td></tr><tr><td>Under-observed†</td><td><div class="bar"><div class="bar-fill" style="width:100.0%"></div><span class="bar-label">2.00/2</span></div></td></tr></tbody></table>
+  <p class="note">*Dust only if energy ≥ 3.5; boosted on rims.
+  †Under-observed only if energy ≥ 3.</p>
+  <p class="rec"><strong>Protocol:</strong> Pilot only (5–10 h) in <em>June–September</em>. Do <u>not</u> pre-commit 100 h.</p>
+</article>
+
+<article class="card tier-B" id="rec-9">
+  <header>
+    <div class="badge">B</div>
+    <div>
+      <h2>#9 · score 8.98 · energy 4.76</h2>
+      <p class="window"><strong>Shoot:</strong> July–October</p>
+    </div>
+  </header>
+  <div class="months"><span class="chip">Jan</span><span class="chip">Feb</span><span class="chip">Mar</span><span class="chip">Apr</span><span class="chip">May</span><span class="chip">Jun</span><span class="chip on">Jul</span><span class="chip on">Aug</span><span class="chip on">Sep</span><span class="chip on">Oct</span><span class="chip">Nov</span><span class="chip">Dec</span></div>
+  <p class="why">Decent energy coupling but weaker / less WR-specific evidence — pilot 5–10 h only; do not pre-commit 100 h</p>
+  <div class="coords">
+    <div><span>RA</span> 22h 08m 13.7s <small>(332.057°)</small></div>
+    <div><span>Dec</span> +54° 53&#x27; 10.3&quot; <small>(+54.886°)</small></div>
+  </div>
+  <div class="meta"><span>Nearest WR</span> WR152 @ 1.38°</div>
+  <div class="meta"><span>Nearest O</span> 099.85-03.13_01 @ 2.51°</div>
+  <div class="meta"><span>Structure tag</span> —</div>
+  <div class="meta"><span>Boundary rim</span> —
+    </div>
+  <div class="meta"><span>Named nebulae ≤1.5°</span> 0</div>
+  <h3>Score breakdown</h3>
+  <table class="scores"><tbody><tr><td>WR shell annulus</td><td><div class="bar"><div class="bar-fill" style="width:68.3%"></div><span class="bar-label">3.42/5</span></div></td></tr><tr><td>O-star annulus</td><td><div class="bar"><div class="bar-fill" style="width:26.3%"></div><span class="bar-label">0.92/4</span></div></td></tr><tr><td>Structure (SNR/shell)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>Boundary rim (H II/bubble)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>X-ray</td><td><div class="bar"><div class="bar-fill" style="width:14.1%"></div><span class="bar-label">0.42/3</span></div></td></tr><tr><td>Hα bell (weak–moderate)</td><td><div class="bar"><div class="bar-fill" style="width:44.9%"></div><span class="bar-label">1.80/4</span></div></td></tr><tr><td>Dust (conditional)*</td><td><div class="bar"><div class="bar-fill" style="width:28.2%"></div><span class="bar-label">0.42/2</span></div></td></tr><tr><td>Under-observed†</td><td><div class="bar"><div class="bar-fill" style="width:100.0%"></div><span class="bar-label">2.00/2</span></div></td></tr></tbody></table>
+  <p class="note">*Dust only if energy ≥ 3.5; boosted on rims.
+  †Under-observed only if energy ≥ 3.</p>
+  <p class="rec"><strong>Protocol:</strong> Pilot only (5–10 h) in <em>July–October</em>. Do <u>not</u> pre-commit 100 h.</p>
+</article>
+
+<article class="card tier-B" id="rec-10">
+  <header>
+    <div class="badge">B</div>
+    <div>
+      <h2>#10 · score 8.90 · energy 6.07</h2>
+      <p class="window"><strong>Shoot:</strong> September–December</p>
+    </div>
+  </header>
+  <div class="months"><span class="chip">Jan</span><span class="chip">Feb</span><span class="chip">Mar</span><span class="chip">Apr</span><span class="chip">May</span><span class="chip">Jun</span><span class="chip">Jul</span><span class="chip">Aug</span><span class="chip on">Sep</span><span class="chip on">Oct</span><span class="chip on">Nov</span><span class="chip on">Dec</span></div>
+  <p class="why">Decent energy coupling but weaker / less WR-specific evidence — pilot 5–10 h only; do not pre-commit 100 h</p>
+  <div class="coords">
+    <div><span>RA</span> 02h 48m 24.3s <small>(42.101°)</small></div>
+    <div><span>Dec</span> +56° 53&#x27; 10.3&quot; <small>(+56.886°)</small></div>
+  </div>
+  <div class="meta"><span>Nearest WR</span> WR5 @ 0.52°</div>
+  <div class="meta"><span>Nearest O</span> 138.77-02.08_01 @ 0.49°</div>
+  <div class="meta"><span>Structure tag</span> —</div>
+  <div class="meta"><span>Boundary rim</span> —
+    </div>
+  <div class="meta"><span>Named nebulae ≤1.5°</span> 0</div>
+  <h3>Score breakdown</h3>
+  <table class="scores"><tbody><tr><td>WR shell annulus</td><td><div class="bar"><div class="bar-fill" style="width:69.6%"></div><span class="bar-label">3.48/5</span></div></td></tr><tr><td>O-star annulus</td><td><div class="bar"><div class="bar-fill" style="width:64.1%"></div><span class="bar-label">2.24/4</span></div></td></tr><tr><td>Structure (SNR/shell)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>Boundary rim (H II/bubble)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>X-ray</td><td><div class="bar"><div class="bar-fill" style="width:11.4%"></div><span class="bar-label">0.34/3</span></div></td></tr><tr><td>Hα bell (weak–moderate)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>Dust (conditional)*</td><td><div class="bar"><div class="bar-fill" style="width:55.4%"></div><span class="bar-label">0.83/2</span></div></td></tr><tr><td>Under-observed†</td><td><div class="bar"><div class="bar-fill" style="width:100.0%"></div><span class="bar-label">2.00/2</span></div></td></tr></tbody></table>
+  <p class="note">*Dust only if energy ≥ 3.5; boosted on rims.
+  †Under-observed only if energy ≥ 3.</p>
+  <p class="rec"><strong>Protocol:</strong> Pilot only (5–10 h) in <em>September–December</em>. Do <u>not</u> pre-commit 100 h.</p>
+</article>
+
+<article class="card tier-B" id="rec-11">
+  <header>
+    <div class="badge">B</div>
+    <div>
+      <h2>#11 · score 8.82 · energy 8.01</h2>
+      <p class="window"><strong>Shoot:</strong> July–October</p>
+    </div>
+  </header>
+  <div class="months"><span class="chip">Jan</span><span class="chip">Feb</span><span class="chip">Mar</span><span class="chip">Apr</span><span class="chip">May</span><span class="chip">Jun</span><span class="chip on">Jul</span><span class="chip on">Aug</span><span class="chip on">Sep</span><span class="chip on">Oct</span><span class="chip">Nov</span><span class="chip">Dec</span></div>
+  <p class="why">Decent energy coupling but weaker / less WR-specific evidence — pilot 5–10 h only; do not pre-commit 100 h</p>
+  <div class="coords">
+    <div><span>RA</span> 22h 19m 10.0s <small>(334.791°)</small></div>
+    <div><span>Dec</span> +58° 53&#x27; 10.3&quot; <small>(+58.886°)</small></div>
+  </div>
+  <div class="meta"><span>Nearest WR</span> WR151 @ 1.70°</div>
+  <div class="meta"><span>Nearest O</span> 103.83+02.61_01 @ 1.11°</div>
+  <div class="meta"><span>Structure tag</span> —</div>
+  <div class="meta"><span>Boundary rim</span> —
+    </div>
+  <div class="meta"><span>Named nebulae ≤1.5°</span> 10</div>
+  <h3>Score breakdown</h3>
+  <table class="scores"><tbody><tr><td>WR shell annulus</td><td><div class="bar"><div class="bar-fill" style="width:34.4%"></div><span class="bar-label">1.72/5</span></div></td></tr><tr><td>O-star annulus</td><td><div class="bar"><div class="bar-fill" style="width:99.4%"></div><span class="bar-label">3.48/4</span></div></td></tr><tr><td>Structure (SNR/shell)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>Boundary rim (H II/bubble)</td><td><div class="bar"><div class="bar-fill" style="width:13.8%"></div><span class="bar-label">0.48/4</span></div></td></tr><tr><td>X-ray</td><td><div class="bar"><div class="bar-fill" style="width:77.7%"></div><span class="bar-label">2.33/3</span></div></td></tr><tr><td>Hα bell (weak–moderate)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>Dust (conditional)*</td><td><div class="bar"><div class="bar-fill" style="width:53.5%"></div><span class="bar-label">0.80/2</span></div></td></tr><tr><td>Under-observed†</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/2</span></div></td></tr></tbody></table>
+  <p class="note">*Dust only if energy ≥ 3.5; boosted on rims.
+  †Under-observed only if energy ≥ 3.</p>
+  <p class="rec"><strong>Protocol:</strong> Pilot only (5–10 h) in <em>July–October</em>. Do <u>not</u> pre-commit 100 h.</p>
+</article>
+
+<article class="card tier-B" id="rec-12">
+  <header>
+    <div class="badge">B</div>
+    <div>
+      <h2>#12 · score 8.51 · energy 6.18</h2>
+      <p class="window"><strong>Shoot:</strong> September–December</p>
+    </div>
+  </header>
+  <div class="months"><span class="chip">Jan</span><span class="chip">Feb</span><span class="chip">Mar</span><span class="chip">Apr</span><span class="chip">May</span><span class="chip">Jun</span><span class="chip">Jul</span><span class="chip">Aug</span><span class="chip on">Sep</span><span class="chip on">Oct</span><span class="chip on">Nov</span><span class="chip on">Dec</span></div>
+  <p class="why">Decent energy coupling but weaker / less WR-specific evidence — pilot 5–10 h only; do not pre-commit 100 h</p>
+  <div class="coords">
+    <div><span>RA</span> 03h 03m 02.9s <small>(45.762°)</small></div>
+    <div><span>Dec</span> +56° 53&#x27; 10.3&quot; <small>(+56.886°)</small></div>
+  </div>
+  <div class="meta"><span>Nearest WR</span> WR5 @ 1.48°</div>
+  <div class="meta"><span>Nearest O</span> 138.77-02.08_01 @ 1.54°</div>
+  <div class="meta"><span>Structure tag</span> —</div>
+  <div class="meta"><span>Boundary rim</span> —
+    </div>
+  <div class="meta"><span>Named nebulae ≤1.5°</span> 1</div>
+  <h3>Score breakdown</h3>
+  <table class="scores"><tbody><tr><td>WR shell annulus</td><td><div class="bar"><div class="bar-fill" style="width:57.1%"></div><span class="bar-label">2.86/5</span></div></td></tr><tr><td>O-star annulus</td><td><div class="bar"><div class="bar-fill" style="width:91.3%"></div><span class="bar-label">3.19/4</span></div></td></tr><tr><td>Structure (SNR/shell)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>Boundary rim (H II/bubble)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>X-ray</td><td><div class="bar"><div class="bar-fill" style="width:4.4%"></div><span class="bar-label">0.13/3</span></div></td></tr><tr><td>Hα bell (weak–moderate)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>Dust (conditional)*</td><td><div class="bar"><div class="bar-fill" style="width:55.4%"></div><span class="bar-label">0.83/2</span></div></td></tr><tr><td>Under-observed†</td><td><div class="bar"><div class="bar-fill" style="width:75.0%"></div><span class="bar-label">1.50/2</span></div></td></tr></tbody></table>
+  <p class="note">*Dust only if energy ≥ 3.5; boosted on rims.
+  †Under-observed only if energy ≥ 3.</p>
+  <p class="rec"><strong>Protocol:</strong> Pilot only (5–10 h) in <em>September–December</em>. Do <u>not</u> pre-commit 100 h.</p>
+</article>
+
+<article class="card tier-B" id="rec-13">
+  <header>
+    <div class="badge">B</div>
+    <div>
+      <h2>#13 · score 8.47 · energy 8.42</h2>
+      <p class="window"><strong>Shoot:</strong> June–September</p>
+    </div>
+  </header>
+  <div class="months"><span class="chip">Jan</span><span class="chip">Feb</span><span class="chip">Mar</span><span class="chip">Apr</span><span class="chip">May</span><span class="chip on">Jun</span><span class="chip on">Jul</span><span class="chip on">Aug</span><span class="chip on">Sep</span><span class="chip">Oct</span><span class="chip">Nov</span><span class="chip">Dec</span></div>
+  <p class="why">Decent energy coupling but weaker / less WR-specific evidence — pilot 5–10 h only; do not pre-commit 100 h</p>
+  <div class="coords">
+    <div><span>RA</span> 20h 04m 27.2s <small>(301.113°)</small></div>
+    <div><span>Dec</span> +34° 53&#x27; 10.3&quot; <small>(+34.886°)</small></div>
+  </div>
+  <div class="meta"><span>Nearest WR</span> WR133 @ 0.95°</div>
+  <div class="meta"><span>Nearest O</span> 072.47+02.02_01 @ 0.76°</div>
+  <div class="meta"><span>Structure tag</span> —</div>
+  <div class="meta"><span>Boundary rim</span> —
+    </div>
+  <div class="meta"><span>Named nebulae ≤1.5°</span> 14</div>
+  <h3>Score breakdown</h3>
+  <table class="scores"><tbody><tr><td>WR shell annulus</td><td><div class="bar"><div class="bar-fill" style="width:99.5%"></div><span class="bar-label">4.97/5</span></div></td></tr><tr><td>O-star annulus</td><td><div class="bar"><div class="bar-fill" style="width:86.1%"></div><span class="bar-label">3.01/4</span></div></td></tr><tr><td>Structure (SNR/shell)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>Boundary rim (H II/bubble)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>X-ray</td><td><div class="bar"><div class="bar-fill" style="width:14.6%"></div><span class="bar-label">0.44/3</span></div></td></tr><tr><td>Hα bell (weak–moderate)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>Dust (conditional)*</td><td><div class="bar"><div class="bar-fill" style="width:2.8%"></div><span class="bar-label">0.04/2</span></div></td></tr><tr><td>Under-observed†</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/2</span></div></td></tr></tbody></table>
+  <p class="note">*Dust only if energy ≥ 3.5; boosted on rims.
+  †Under-observed only if energy ≥ 3.</p>
+  <p class="rec"><strong>Protocol:</strong> Pilot only (5–10 h) in <em>June–September</em>. Do <u>not</u> pre-commit 100 h.</p>
+</article>
+
+<article class="card tier-B" id="rec-14">
+  <header>
+    <div class="badge">B</div>
+    <div>
+      <h2>#14 · score 7.90 · energy 6.36</h2>
+      <p class="window"><strong>Shoot:</strong> August–December</p>
+    </div>
+  </header>
+  <div class="months"><span class="chip">Jan</span><span class="chip">Feb</span><span class="chip">Mar</span><span class="chip">Apr</span><span class="chip">May</span><span class="chip">Jun</span><span class="chip">Jul</span><span class="chip on">Aug</span><span class="chip on">Sep</span><span class="chip on">Oct</span><span class="chip on">Nov</span><span class="chip on">Dec</span></div>
+  <p class="why">Decent energy coupling but weaker / less WR-specific evidence — pilot 5–10 h only; do not pre-commit 100 h</p>
+  <div class="coords">
+    <div><span>RA</span> 01h 13m 59.5s <small>(18.498°)</small></div>
+    <div><span>Dec</span> +60° 53&#x27; 10.3&quot; <small>(+60.886°)</small></div>
+  </div>
+  <div class="meta"><span>Nearest WR</span> WR2 @ 1.15°</div>
+  <div class="meta"><span>Nearest O</span> 127.87-01.35_01 @ 2.26°</div>
+  <div class="meta"><span>Structure tag</span> —</div>
+  <div class="meta"><span>Boundary rim</span> —
+    </div>
+  <div class="meta"><span>Named nebulae ≤1.5°</span> 1</div>
+  <h3>Score breakdown</h3>
+  <table class="scores"><tbody><tr><td>WR shell annulus</td><td><div class="bar"><div class="bar-fill" style="width:90.0%"></div><span class="bar-label">4.50/5</span></div></td></tr><tr><td>O-star annulus</td><td><div class="bar"><div class="bar-fill" style="width:41.5%"></div><span class="bar-label">1.45/4</span></div></td></tr><tr><td>Structure (SNR/shell)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>Boundary rim (H II/bubble)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>X-ray</td><td><div class="bar"><div class="bar-fill" style="width:13.4%"></div><span class="bar-label">0.40/3</span></div></td></tr><tr><td>Hα bell (weak–moderate)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>Dust (conditional)*</td><td><div class="bar"><div class="bar-fill" style="width:3.1%"></div><span class="bar-label">0.05/2</span></div></td></tr><tr><td>Under-observed†</td><td><div class="bar"><div class="bar-fill" style="width:75.0%"></div><span class="bar-label">1.50/2</span></div></td></tr></tbody></table>
+  <p class="note">*Dust only if energy ≥ 3.5; boosted on rims.
+  †Under-observed only if energy ≥ 3.</p>
+  <p class="rec"><strong>Protocol:</strong> Pilot only (5–10 h) in <em>August–December</em>. Do <u>not</u> pre-commit 100 h.</p>
+</article>
+
+<article class="card tier-B" id="rec-15">
+  <header>
+    <div class="badge">B</div>
+    <div>
+      <h2>#15 · score 7.71 · energy 6.23</h2>
+      <p class="window"><strong>Shoot:</strong> August–December</p>
+    </div>
+  </header>
+  <div class="months"><span class="chip">Jan</span><span class="chip">Feb</span><span class="chip">Mar</span><span class="chip">Apr</span><span class="chip">May</span><span class="chip">Jun</span><span class="chip">Jul</span><span class="chip on">Aug</span><span class="chip on">Sep</span><span class="chip on">Oct</span><span class="chip on">Nov</span><span class="chip on">Dec</span></div>
+  <p class="why">Decent energy coupling but weaker / less WR-specific evidence — pilot 5–10 h only; do not pre-commit 100 h</p>
+  <div class="coords">
+    <div><span>RA</span> 01h 40m 37.9s <small>(25.158°)</small></div>
+    <div><span>Dec</span> +58° 53&#x27; 10.3&quot; <small>(+58.886°)</small></div>
+  </div>
+  <div class="meta"><span>Nearest WR</span> WR3 @ 0.76°</div>
+  <div class="meta"><span>Nearest O</span> 127.87-01.35_01 @ 2.46°</div>
+  <div class="meta"><span>Structure tag</span> —</div>
+  <div class="meta"><span>Boundary rim</span> —
+    </div>
+  <div class="meta"><span>Named nebulae ≤1.5°</span> 2</div>
+  <h3>Score breakdown</h3>
+  <table class="scores"><tbody><tr><td>WR shell annulus</td><td><div class="bar"><div class="bar-fill" style="width:96.0%"></div><span class="bar-label">4.80/5</span></div></td></tr><tr><td>O-star annulus</td><td><div class="bar"><div class="bar-fill" style="width:28.9%"></div><span class="bar-label">1.01/4</span></div></td></tr><tr><td>Structure (SNR/shell)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>Boundary rim (H II/bubble)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>X-ray</td><td><div class="bar"><div class="bar-fill" style="width:13.7%"></div><span class="bar-label">0.41/3</span></div></td></tr><tr><td>Hα bell (weak–moderate)</td><td><div class="bar"><div class="bar-fill" style="width:5.4%"></div><span class="bar-label">0.22/4</span></div></td></tr><tr><td>Dust (conditional)*</td><td><div class="bar"><div class="bar-fill" style="width:17.7%"></div><span class="bar-label">0.27/2</span></div></td></tr><tr><td>Under-observed†</td><td><div class="bar"><div class="bar-fill" style="width:50.0%"></div><span class="bar-label">1.00/2</span></div></td></tr></tbody></table>
+  <p class="note">*Dust only if energy ≥ 3.5; boosted on rims.
+  †Under-observed only if energy ≥ 3.</p>
+  <p class="rec"><strong>Protocol:</strong> Pilot only (5–10 h) in <em>August–December</em>. Do <u>not</u> pre-commit 100 h.</p>
+</article>
+
+<article class="card tier-C" id="rec-16">
+  <header>
+    <div class="badge">C</div>
+    <div>
+      <h2>#16 · score 15.09 · energy 13.00</h2>
+      <p class="window"><strong>Shoot:</strong> July–November</p>
+    </div>
+  </header>
+  <div class="months"><span class="chip">Jan</span><span class="chip">Feb</span><span class="chip">Mar</span><span class="chip">Apr</span><span class="chip">May</span><span class="chip">Jun</span><span class="chip on">Jul</span><span class="chip on">Aug</span><span class="chip on">Sep</span><span class="chip on">Oct</span><span class="chip on">Nov</span><span class="chip">Dec</span></div>
+  <p class="why">Known SNR/WR shell — deep [O III] has value, but not an unrecorded blank field</p>
+  <div class="coords">
+    <div><span>RA</span> 23h 50m 34.8s <small>(357.645°)</small></div>
+    <div><span>Dec</span> +62° 53&#x27; 10.3&quot; <small>(+62.886°)</small></div>
+  </div>
+  <div class="meta"><span>Nearest WR</span> WR158 @ 1.26°</div>
+  <div class="meta"><span>Nearest O</span> 117.44-00.14_01 @ 1.69°</div>
+  <div class="meta"><span>Structure tag</span> G116.5+01.1 (SNR)</div>
+  <div class="meta"><span>Boundary rim</span> —
+    </div>
+  <div class="meta"><span>Named nebulae ≤1.5°</span> 1</div>
+  <h3>Score breakdown</h3>
+  <table class="scores"><tbody><tr><td>WR shell annulus</td><td><div class="bar"><div class="bar-fill" style="width:80.8%"></div><span class="bar-label">4.04/5</span></div></td></tr><tr><td>O-star annulus</td><td><div class="bar"><div class="bar-fill" style="width:82.9%"></div><span class="bar-label">2.90/4</span></div></td></tr><tr><td>Structure (SNR/shell)</td><td><div class="bar"><div class="bar-fill" style="width:91.5%"></div><span class="bar-label">3.20/4</span></div></td></tr><tr><td>Boundary rim (H II/bubble)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>X-ray</td><td><div class="bar"><div class="bar-fill" style="width:95.2%"></div><span class="bar-label">2.86/3</span></div></td></tr><tr><td>Hα bell (weak–moderate)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>Dust (conditional)*</td><td><div class="bar"><div class="bar-fill" style="width:39.3%"></div><span class="bar-label">0.59/2</span></div></td></tr><tr><td>Under-observed†</td><td><div class="bar"><div class="bar-fill" style="width:75.0%"></div><span class="bar-label">1.50/2</span></div></td></tr></tbody></table>
+  <p class="note">*Dust only if energy ≥ 3.5; boosted on rims.
+  †Under-observed only if energy ≥ 3.</p>
+  <p class="rec"><strong>Protocol:</strong> Known structure — excellent deep [O III] science in <em>July–November</em>, but do not claim as unrecorded discovery.</p>
+</article>
+
+<article class="card tier-C" id="rec-17">
+  <header>
+    <div class="badge">C</div>
+    <div>
+      <h2>#17 · score 13.95 · energy 13.74</h2>
+      <p class="window"><strong>Shoot:</strong> June–September</p>
+    </div>
+  </header>
+  <div class="months"><span class="chip">Jan</span><span class="chip">Feb</span><span class="chip">Mar</span><span class="chip">Apr</span><span class="chip">May</span><span class="chip on">Jun</span><span class="chip on">Jul</span><span class="chip on">Aug</span><span class="chip on">Sep</span><span class="chip">Oct</span><span class="chip">Nov</span><span class="chip">Dec</span></div>
+  <p class="why">Known SNR/WR shell — deep [O III] has value, but not an unrecorded blank field</p>
+  <div class="coords">
+    <div><span>RA</span> 20h 05m 15.4s <small>(301.314°)</small></div>
+    <div><span>Dec</span> +36° 53&#x27; 10.3&quot; <small>(+36.886°)</small></div>
+  </div>
+  <div class="meta"><span>Nearest WR</span> WR133 @ 1.11°</div>
+  <div class="meta"><span>Nearest O</span> 072.59+02.61_01 @ 0.93°</div>
+  <div class="meta"><span>Structure tag</span> WR134 shell (WR_shell)</div>
+  <div class="meta"><span>Boundary rim</span> WR134 shell
+     (WR_shell)</div>
+  <div class="meta"><span>Named nebulae ≤1.5°</span> 9</div>
+  <h3>Score breakdown</h3>
+  <table class="scores"><tbody><tr><td>WR shell annulus</td><td><div class="bar"><div class="bar-fill" style="width:93.2%"></div><span class="bar-label">4.66/5</span></div></td></tr><tr><td>O-star annulus</td><td><div class="bar"><div class="bar-fill" style="width:94.5%"></div><span class="bar-label">3.31/4</span></div></td></tr><tr><td>Structure (SNR/shell)</td><td><div class="bar"><div class="bar-fill" style="width:65.1%"></div><span class="bar-label">2.28/4</span></div></td></tr><tr><td>Boundary rim (H II/bubble)</td><td><div class="bar"><div class="bar-fill" style="width:87.7%"></div><span class="bar-label">3.07/4</span></div></td></tr><tr><td>X-ray</td><td><div class="bar"><div class="bar-fill" style="width:14.2%"></div><span class="bar-label">0.43/3</span></div></td></tr><tr><td>Hα bell (weak–moderate)</td><td><div class="bar"><div class="bar-fill" style="width:3.3%"></div><span class="bar-label">0.13/4</span></div></td></tr><tr><td>Dust (conditional)*</td><td><div class="bar"><div class="bar-fill" style="width:4.7%"></div><span class="bar-label">0.07/2</span></div></td></tr><tr><td>Under-observed†</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/2</span></div></td></tr></tbody></table>
+  <p class="note">*Dust only if energy ≥ 3.5; boosted on rims.
+  †Under-observed only if energy ≥ 3.</p>
+  <p class="rec"><strong>Protocol:</strong> Known structure — excellent deep [O III] science in <em>June–September</em>, but do not claim as unrecorded discovery.</p>
+</article>
+
+<article class="card tier-C" id="rec-18">
+  <header>
+    <div class="badge">C</div>
+    <div>
+      <h2>#18 · score 12.91 · energy 8.28</h2>
+      <p class="window"><strong>Shoot:</strong> June–September</p>
+    </div>
+  </header>
+  <div class="months"><span class="chip">Jan</span><span class="chip">Feb</span><span class="chip">Mar</span><span class="chip">Apr</span><span class="chip">May</span><span class="chip on">Jun</span><span class="chip on">Jul</span><span class="chip on">Aug</span><span class="chip on">Sep</span><span class="chip">Oct</span><span class="chip">Nov</span><span class="chip">Dec</span></div>
+  <p class="why">Known SNR/WR shell — deep [O III] has value, but not an unrecorded blank field</p>
+  <div class="coords">
+    <div><span>RA</span> 20h 13m 48.9s <small>(303.454°)</small></div>
+    <div><span>Dec</span> +44° 53&#x27; 10.3&quot; <small>(+44.886°)</small></div>
+  </div>
+  <div class="meta"><span>Nearest WR</span> WR140 @ 1.57°</div>
+  <div class="meta"><span>Nearest O</span> 081.18+06.61_01 @ 0.87°</div>
+  <div class="meta"><span>Structure tag</span> G082.2+05.3 (SNR)</div>
+  <div class="meta"><span>Boundary rim</span> —
+    </div>
+  <div class="meta"><span>Named nebulae ≤1.5°</span> 6</div>
+  <h3>Score breakdown</h3>
+  <table class="scores"><tbody><tr><td>WR shell annulus</td><td><div class="bar"><div class="bar-fill" style="width:47.2%"></div><span class="bar-label">2.36/5</span></div></td></tr><tr><td>O-star annulus</td><td><div class="bar"><div class="bar-fill" style="width:91.9%"></div><span class="bar-label">3.21/4</span></div></td></tr><tr><td>Structure (SNR/shell)</td><td><div class="bar"><div class="bar-fill" style="width:65.7%"></div><span class="bar-label">2.30/4</span></div></td></tr><tr><td>Boundary rim (H II/bubble)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>X-ray</td><td><div class="bar"><div class="bar-fill" style="width:13.7%"></div><span class="bar-label">0.41/3</span></div></td></tr><tr><td>Hα bell (weak–moderate)</td><td><div class="bar"><div class="bar-fill" style="width:97.4%"></div><span class="bar-label">3.90/4</span></div></td></tr><tr><td>Dust (conditional)*</td><td><div class="bar"><div class="bar-fill" style="width:48.6%"></div><span class="bar-label">0.73/2</span></div></td></tr><tr><td>Under-observed†</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/2</span></div></td></tr></tbody></table>
+  <p class="note">*Dust only if energy ≥ 3.5; boosted on rims.
+  †Under-observed only if energy ≥ 3.</p>
+  <p class="rec"><strong>Protocol:</strong> Known structure — excellent deep [O III] science in <em>June–September</em>, but do not claim as unrecorded discovery.</p>
+</article>
+
+<article class="card tier-C" id="rec-19">
+  <header>
+    <div class="badge">C</div>
+    <div>
+      <h2>#19 · score 12.39 · energy 8.08</h2>
+      <p class="window"><strong>Shoot:</strong> June–July</p>
+    </div>
+  </header>
+  <div class="months"><span class="chip">Jan</span><span class="chip">Feb</span><span class="chip">Mar</span><span class="chip">Apr</span><span class="chip">May</span><span class="chip on">Jun</span><span class="chip on">Jul</span><span class="chip">Aug</span><span class="chip">Sep</span><span class="chip">Oct</span><span class="chip">Nov</span><span class="chip">Dec</span></div>
+  <p class="why">Known SNR/WR shell — deep [O III] has value, but not an unrecorded blank field</p>
+  <div class="coords">
+    <div><span>RA</span> 18h 44m 12.7s <small>(281.053°)</small></div>
+    <div><span>Dec</span> -01° 06&#x27; 49.7&quot; <small>(-1.114°)</small></div>
+  </div>
+  <div class="meta"><span>Nearest WR</span> WR121a @ 1.18°</div>
+  <div class="meta"><span>Nearest O</span> 024.53-00.85_01 @ 6.87°</div>
+  <div class="meta"><span>Structure tag</span> G030.7+01.0 (SNR)</div>
+  <div class="meta"><span>Boundary rim</span> —
+    </div>
+  <div class="meta"><span>Named nebulae ≤1.5°</span> 3</div>
+  <h3>Score breakdown</h3>
+  <table class="scores"><tbody><tr><td>WR shell annulus</td><td><div class="bar"><div class="bar-fill" style="width:87.5%"></div><span class="bar-label">4.37/5</span></div></td></tr><tr><td>O-star annulus</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>Structure (SNR/shell)</td><td><div class="bar"><div class="bar-fill" style="width:94.0%"></div><span class="bar-label">3.29/4</span></div></td></tr><tr><td>Boundary rim (H II/bubble)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>X-ray</td><td><div class="bar"><div class="bar-fill" style="width:13.9%"></div><span class="bar-label">0.42/3</span></div></td></tr><tr><td>Hα bell (weak–moderate)</td><td><div class="bar"><div class="bar-fill" style="width:79.4%"></div><span class="bar-label">3.17/4</span></div></td></tr><tr><td>Dust (conditional)*</td><td><div class="bar"><div class="bar-fill" style="width:42.3%"></div><span class="bar-label">0.63/2</span></div></td></tr><tr><td>Under-observed†</td><td><div class="bar"><div class="bar-fill" style="width:25.0%"></div><span class="bar-label">0.50/2</span></div></td></tr></tbody></table>
+  <p class="note">*Dust only if energy ≥ 3.5; boosted on rims.
+  †Under-observed only if energy ≥ 3.</p>
+  <p class="rec"><strong>Protocol:</strong> Known structure — excellent deep [O III] science in <em>June–July</em>, but do not claim as unrecorded discovery.</p>
+</article>
+
+<article class="card tier-C" id="rec-20">
+  <header>
+    <div class="badge">C</div>
+    <div>
+      <h2>#20 · score 12.29 · energy 9.55</h2>
+      <p class="window"><strong>Shoot:</strong> June–July</p>
+    </div>
+  </header>
+  <div class="months"><span class="chip">Jan</span><span class="chip">Feb</span><span class="chip">Mar</span><span class="chip">Apr</span><span class="chip">May</span><span class="chip on">Jun</span><span class="chip on">Jul</span><span class="chip">Aug</span><span class="chip">Sep</span><span class="chip">Oct</span><span class="chip">Nov</span><span class="chip">Dec</span></div>
+  <p class="why">Known SNR/WR shell — deep [O III] has value, but not an unrecorded blank field</p>
+  <div class="coords">
+    <div><span>RA</span> 18h 40m 27.6s <small>(280.115°)</small></div>
+    <div><span>Dec</span> -05° 06&#x27; 49.7&quot; <small>(-5.114°)</small></div>
+  </div>
+  <div class="meta"><span>Nearest WR</span> WR120 @ 0.69°</div>
+  <div class="meta"><span>Nearest O</span> 024.53-00.85_01 @ 2.77°</div>
+  <div class="meta"><span>Structure tag</span> G027.4+00.0 (SNR)</div>
+  <div class="meta"><span>Boundary rim</span> —
+    </div>
+  <div class="meta"><span>Named nebulae ≤1.5°</span> 0</div>
+  <h3>Score breakdown</h3>
+  <table class="scores"><tbody><tr><td>WR shell annulus</td><td><div class="bar"><div class="bar-fill" style="width:90.9%"></div><span class="bar-label">4.55/5</span></div></td></tr><tr><td>O-star annulus</td><td><div class="bar"><div class="bar-fill" style="width:14.7%"></div><span class="bar-label">0.51/4</span></div></td></tr><tr><td>Structure (SNR/shell)</td><td><div class="bar"><div class="bar-fill" style="width:97.3%"></div><span class="bar-label">3.41/4</span></div></td></tr><tr><td>Boundary rim (H II/bubble)</td><td><div class="bar"><div class="bar-fill" style="width:0.0%"></div><span class="bar-label">0.00/4</span></div></td></tr><tr><td>X-ray</td><td><div class="bar"><div class="bar-fill" style="width:36.3%"></div><span class="bar-label">1.09/3</span></div></td></tr><tr><td>Hα bell (weak–moderate)</td><td><div class="bar"><div class="bar-fill" style="width:3.4%"></div><span class="bar-label">0.14/4</span></div></td></tr><tr><td>Dust (conditional)*</td><td><div class="bar"><div class="bar-fill" style="width:39.6%"></div><span class="bar-label">0.59/2</span></div></td></tr><tr><td>Under-observed†</td><td><div class="bar"><div class="bar-fill" style="width:100.0%"></div><span class="bar-label">2.00/2</span></div></td></tr></tbody></table>
+  <p class="note">*Dust only if energy ≥ 3.5; boosted on rims.
+  †Under-observed only if energy ≥ 3.</p>
+  <p class="rec"><strong>Protocol:</strong> Known structure — excellent deep [O III] science in <em>June–July</em>, but do not claim as unrecorded discovery.</p>
+</article>
+
+  </section>
+
+  <footer>
+    Still not a detection guarantee — but empty-sky inflation and star-centered false peaks are gated out.
+    Full table: <code>candidates.csv</code>. Config: <code>weights.yaml</code>, <code>known_shells.yaml</code>, <code>exclude_targets.yaml</code>.
+  </footer>
+</div>
+</body>
+</html>

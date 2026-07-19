@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { glassPillToggleActiveMd, glassPillToggleIdleMd } from '@/lib/glass-ui'
 
 type GalleryImage = { file: string; description: string }
@@ -18,7 +19,13 @@ const PHOTOMETRY_IMAGES: GalleryImage[] = [
 
 type DataCategory = 'deep_sky' | 'photometry'
 
+function categoryFromParam(raw: string | null): DataCategory {
+  if (raw === 'photometry') return 'photometry'
+  return 'deep_sky'
+}
+
 export default function DataPage() {
+  const router = useRouter()
   const [category, setCategory] = useState<DataCategory>('deep_sky')
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
 
@@ -28,6 +35,11 @@ export default function DataPage() {
     alt: entry.file.replace(/\.[^.]+$/, ''),
     description: entry.description,
   }))
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    setCategory(categoryFromParam(params.get('category')))
+  }, [])
 
   useEffect(() => {
     setSelectedIndex(null)
@@ -42,6 +54,15 @@ export default function DataPage() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [selectedIndex])
 
+  const selectCategory = (next: DataCategory) => {
+    setCategory(next)
+    const params = new URLSearchParams(window.location.search)
+    if (next === 'deep_sky') params.delete('category')
+    else params.set('category', next)
+    const qs = params.toString()
+    router.replace(qs ? `/dashboard/gallery?${qs}` : '/dashboard/gallery', { scroll: false })
+  }
+
   const selectedImage = selectedIndex != null ? images[selectedIndex] : null
   const openImage = (index: number) => setSelectedIndex(index)
   const closeImage = () => setSelectedIndex(null)
@@ -52,14 +73,14 @@ export default function DataPage() {
       <div className="flex flex-wrap gap-2 mb-2">
         <button
           type="button"
-          onClick={() => setCategory('deep_sky')}
+          onClick={() => selectCategory('deep_sky')}
           className={category === 'deep_sky' ? glassPillToggleActiveMd : glassPillToggleIdleMd}
         >
           Deep Sky Object
         </button>
         <button
           type="button"
-          onClick={() => setCategory('photometry')}
+          onClick={() => selectCategory('photometry')}
           className={category === 'photometry' ? glassPillToggleActiveMd : glassPillToggleIdleMd}
         >
           Photometry

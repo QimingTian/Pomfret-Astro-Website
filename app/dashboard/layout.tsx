@@ -27,7 +27,7 @@ export default function DashboardLayout({
 
 function DashboardChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
-  const isWelcomePage = pathname === '/dashboard'
+  const isHomePage = pathname === '/dashboard' || pathname === '/dashboard/about'
   const [menuOpen, setMenuOpen] = useState(false)
   const member = useMember()
 
@@ -44,6 +44,11 @@ function DashboardChrome({ children }: { children: React.ReactNode }) {
     { href: '/dashboard/contact', label: 'Team' },
     { href: '/dashboard/account', label: accountNavLabel(member) },
   ]
+
+  const navItemActive = (href: string) => {
+    if (href === '/dashboard/about') return isHomePage
+    return pathname === href
+  }
 
   return (
     <div className="dashboard-surface min-h-screen text-apple-dark dark:text-[#eee9dc]">
@@ -69,7 +74,7 @@ function DashboardChrome({ children }: { children: React.ReactNode }) {
             <div className="flex items-center gap-2">
               <nav className="hidden md:flex items-center gap-2">
                 {navItems.map((item) => {
-                  const isActive = pathname === item.href
+                  const isActive = navItemActive(item.href)
                   return (
                     <Link
                       key={item.href}
@@ -90,7 +95,7 @@ function DashboardChrome({ children }: { children: React.ReactNode }) {
           <div className="md:hidden border-t border-black/10 dark:border-white/10 bg-white/90 dark:bg-[#12151b]/95">
             <nav className="px-4 py-3 space-y-1.5">
               {navItems.map((item) => {
-                const isActive = pathname === item.href
+                const isActive = navItemActive(item.href)
                 return (
                   <Link
                     key={item.href}
@@ -109,7 +114,7 @@ function DashboardChrome({ children }: { children: React.ReactNode }) {
 
       <main
         className={
-          isWelcomePage
+          isHomePage
             ? 'min-h-[calc(100vh-5rem)]'
             : 'mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-10 py-8'
         }

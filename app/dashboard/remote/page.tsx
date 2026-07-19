@@ -37,6 +37,7 @@ import {
 } from '@/lib/remote-saved-session'
 import { canSubmitImagingPublic } from '@/lib/member-access'
 import { projectSessionDisplayLabel } from '@/lib/imaging/project/session-display-label'
+import { skyCoordsForMosaicPanel } from '@/lib/imaging/project/panel-coords'
 import {
   DSO_SESSION_OVERHEAD_SEC,
   VARIABLE_STAR_SESSION_OVERHEAD_SEC,
@@ -2859,6 +2860,21 @@ export default function RemotePage() {
       if (!item.nights) continue
       const night = item.nights.find((n) => n.id === terminalSessionId)
       if (!night) continue
+      const sky =
+        typeof item.raHours === 'number' &&
+        Number.isFinite(item.raHours) &&
+        typeof item.decDeg === 'number' &&
+        Number.isFinite(item.decDeg)
+          ? skyCoordsForMosaicPanel(
+              {
+                raHours: item.raHours,
+                decDeg: item.decDeg,
+                mosaicMode: item.mosaicMode === true,
+                mosaicPanels: item.mosaicPanels,
+              },
+              night.mosaicPanelIndex,
+            )
+          : null
       return {
         ...item,
         id: night.id,
@@ -2873,6 +2889,9 @@ export default function RemotePage() {
                 : night.status,
         filterPlans: night.filterPlans ?? item.filterPlans,
         estimatedDurationSeconds: night.estimatedDurationSeconds ?? item.estimatedDurationSeconds,
+        ...(sky
+          ? { raHours: sky.raHours, decDeg: sky.decDeg }
+          : {}),
       }
     }
     return null

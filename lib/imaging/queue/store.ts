@@ -22,6 +22,7 @@ import {
   requiredAltitudeCoverageMs,
 } from '@/lib/target-altitude'
 import { allFiltersMoonOk } from '@/lib/moon-avoidance'
+import { formatRaDecTargetLabel } from '@/lib/format-radec'
 
 /** Queue lifecycle: mutually exclusive (no separate scheduleStatus flag). */
 export type ImagingRequestStatus =
@@ -464,7 +465,7 @@ export interface CreateImagingInput {
 }
 
 function targetLabelFromCoords(raHours: number, decDeg: number): string {
-  return `RA ${raHours}h · Dec ${decDeg}°`
+  return formatRaDecTargetLabel(raHours, decDeg)
 }
 
 function canFitInIdealNight(

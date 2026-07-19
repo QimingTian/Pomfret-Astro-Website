@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useState } from 'react'
+import { formatDecDegDms, formatRaHoursHms } from '@/lib/format-radec'
 import { glassPillSm } from '@/lib/glass-ui'
 
 export type UnlockDebugSky = { raHours: number; decDeg: number }
@@ -100,25 +101,9 @@ export function serializeUnlockDebugSession(session: UnlockDebugSession): string
   )
 }
 
-function formatRaHours(raHours: number): string {
-  const h = Math.floor(raHours)
-  const m = Math.floor((raHours - h) * 60)
-  const s = ((raHours - h) * 60 - m) * 60
-  return `${h}h ${m}m ${s.toFixed(2)}s`
-}
-
-function formatDecDeg(decDeg: number): string {
-  const sign = decDeg >= 0 ? '+' : '-'
-  const abs = Math.abs(decDeg)
-  const d = Math.floor(abs)
-  const m = Math.floor((abs - d) * 60)
-  const s = ((abs - d) * 60 - m) * 60
-  return `${sign}${d}° ${m}' ${s.toFixed(1)}"`
-}
-
 function formatSky(sky: UnlockDebugSky | null): string {
   if (!sky) return '—'
-  return `${formatRaHours(sky.raHours)}, ${formatDecDeg(sky.decDeg)} (${sky.raHours.toFixed(6)}h, ${sky.decDeg.toFixed(6)}°)`
+  return `${formatRaHoursHms(sky.raHours)}  ${formatDecDegDms(sky.decDeg)}`
 }
 
 function fmtNum(n: number | null | undefined): string {

@@ -26,6 +26,7 @@ import { PlanTimelineSlot } from './plan-timeline-slot'
 import { PlanSkyLayers, LAYER_ORDER, type LayerKey } from './plan-sky-layers'
 import { PlanFramingToolbar, PlanFrameOverlays } from './plan-framing-toolbar'
 import { PlanSelectionOverlay, type LiveSkyInfo } from './plan-selection-overlay'
+import { formatDecDegDms, formatRaHoursHms } from '@/lib/format-radec'
 
 const POMFRET_LATITUDE = 41.9159
 const POMFRET_LONGITUDE = -71.9626
@@ -1171,9 +1172,7 @@ export default function PlanPage() {
       } catch {
         return
       }
-      const raH = Math.floor(raHours)
-      const raM = Math.floor((raHours - raH) * 60)
-      name = `Plan view ${raH}h${raM.toString().padStart(2, '0')}m ${decDeg >= 0 ? '+' : ''}${decDeg.toFixed(1)}`
+      name = `Plan view ${formatRaHoursHms(raHours)} ${formatDecDegDms(decDeg)}`
     }
     const params = new URLSearchParams({
       prefillTarget: name,

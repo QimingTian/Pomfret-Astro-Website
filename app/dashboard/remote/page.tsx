@@ -9,6 +9,7 @@ import { useMember } from '@/hooks/use-member'
 import { useAdaptivePoll } from '@/hooks/use-adaptive-poll'
 import { useSiteStream } from '@/lib/use-site-stream'
 import type { VariableStarRow } from '@/lib/variable-star-catalog'
+import { formatRaDecPair } from '@/lib/format-radec'
 import {
   MIN_ALTITUDE_DEG,
   OBS_LAT_DEG,
@@ -4734,8 +4735,9 @@ export default function RemotePage() {
                   <p><span className="text-gray-500">Submitted At: </span>{terminalSessionDetail ? new Date(terminalSessionDetail.createdAt).toLocaleString() : '--'}</p>
                   <p>
                     <span className="text-gray-500">RA / Dec: </span>
-                    {typeof terminalSessionDetail?.raHours === 'number' && typeof terminalSessionDetail?.decDeg === 'number'
-                      ? `${terminalSessionDetail.raHours.toFixed(5)}h / ${terminalSessionDetail.decDeg.toFixed(5)}°`
+                    {typeof terminalSessionDetail?.raHours === 'number' &&
+                    typeof terminalSessionDetail?.decDeg === 'number'
+                      ? formatRaDecPair(terminalSessionDetail.raHours, terminalSessionDetail.decDeg)
                       : '--'}
                   </p>
                   <p><span className="text-gray-500">Estimated Duration: </span>{formatDurationShort(terminalSessionDetail?.estimatedDurationSeconds)}</p>

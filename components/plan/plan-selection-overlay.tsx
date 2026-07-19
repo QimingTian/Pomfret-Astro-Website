@@ -1,6 +1,7 @@
 'use client'
 
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { formatDecDegDms, formatRaHoursHms } from '@/lib/format-radec'
 import { glassSurface } from '@/lib/glass-ui'
 
 export type SkyCoord = { raHours: number; decDeg: number }
@@ -20,26 +21,9 @@ type Props = {
   live: LiveSkyInfo
 }
 
-function formatRaHours(raHours: number): string {
-  const wrapped = ((raHours % 24) + 24) % 24
-  const h = Math.floor(wrapped)
-  const m = Math.floor((wrapped - h) * 60)
-  const s = ((wrapped - h) * 60 - m) * 60
-  return `${String(h).padStart(2, '0')}h ${String(m).padStart(2, '0')}m ${s.toFixed(1).padStart(4, '0')}s`
-}
-
-function formatDecDeg(decDeg: number): string {
-  const sign = decDeg >= 0 ? '+' : '−'
-  const abs = Math.abs(decDeg)
-  const d = Math.floor(abs)
-  const m = Math.floor((abs - d) * 60)
-  const s = ((abs - d) * 60 - m) * 60
-  return `${sign}${String(d).padStart(2, '0')}° ${String(m).padStart(2, '0')}′ ${s.toFixed(1).padStart(4, '0')}″`
-}
-
 function formatSky(sky: SkyCoord | null): string {
   if (!sky || !Number.isFinite(sky.raHours) || !Number.isFinite(sky.decDeg)) return '—'
-  return `${formatRaHours(sky.raHours)}  ${formatDecDeg(sky.decDeg)}`
+  return `${formatRaHoursHms(sky.raHours)}  ${formatDecDegDms(sky.decDeg)}`
 }
 
 function CoordBlock({ label, sky }: { label: string; sky: SkyCoord | null }) {

@@ -360,7 +360,7 @@ export function AboutHome() {
                   Discovery Project
                 </h3>
                 <div
-                  className="mt-3 max-w-4xl space-y-4 text-[15px] sm:text-[16px] leading-relaxed text-white"
+                  className="mt-3 max-w-4xl space-y-4 text-[16px] sm:text-[18px] leading-snug text-white"
                   style={{ fontFamily: SF_PRO }}
                 >
                   <p>Find what has not been deeply imaged.</p>

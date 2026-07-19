@@ -19,4 +19,4 @@ export function patchNinaDiscordMessageText(root: Record<string, unknown>, text:
 export const END_NIGHT_DISCORD_AFTER_SESSIONS = "Tonight's Session Completed."
 export const END_NIGHT_DISCORD_DAWN = 'End Night - Dawn'
 export const ESTOP_DISCORD_MANUAL = 'ESTOPPED'
-export const ESTOP_DISCORD_WEATHER_SAFETY = 'Weather Safety System Triggered - ESTOPPED'
+export const ESTOP_DISCORD_WEATHER_SAFETY = 'Weather Safety System Triggered -- Observatory Locked.'

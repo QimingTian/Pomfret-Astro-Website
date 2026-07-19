@@ -468,7 +468,7 @@ Sequence: Connect → Close dome → Disconnect → Discord.
 | Source | Discord |
 |--------|---------|
 | Manual admin arm | `ESTOPPED` |
-| Weather safety (`weather-safety-auto`) | `Weather Safety System Triggered - ESTOPPED` |
+| Weather safety (`weather-safety-auto`) | `Weather Safety System Triggered -- Observatory Locked.` |
 
 ESTOP sequence also POSTs dome-closed progress to clear KV state.
 

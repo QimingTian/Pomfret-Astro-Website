@@ -8,7 +8,17 @@ import { useAppStore } from '@/lib/store'
 import MJPEGStream from '@/components/MJPEGStream'
 import { allSkyCameraStatusUrl } from '@/lib/asc-cloud'
 import { moonPhaseInfo } from '@/lib/moon-avoidance'
+import {
+  type AstroConditionScale,
+  astroConditionIsRed,
+  formatAstroConditionLabel,
+} from '@/lib/astro-conditions'
 import { fetchOpenMeteoCurrentWeather } from '@/lib/open-meteo-current'
+import {
+  formatUsAqiLabel,
+  fetchOpenMeteoAirQuality,
+  usAqiIsRed,
+} from '@/lib/open-meteo-air-quality'
 import {
   observatoryOverlayStatusIsRed,
   observatoryOverlayStatusLabel,
@@ -104,6 +114,9 @@ export default function AllSkyCameraView() {
   const [windGustKmh, setWindGustKmh] = useState<number | null>(null)
   const [tempC, setTempC] = useState<number | null>(null)
   const [humidityPct, setHumidityPct] = useState<number | null>(null)
+  const [usAqi, setUsAqi] = useState<number | null>(null)
+  const [transparency, setTransparency] = useState<AstroConditionScale | null>(null)
+  const [seeing, setSeeing] = useState<AstroConditionScale | null>(null)
   /** null = unknown / fetch failed; true = Safe; false = Unsafe (20 km ring). */
   const [stormSafe, setStormSafe] = useState<boolean | null>(null)
 
@@ -115,11 +128,15 @@ export default function AllSkyCameraView() {
 
   useEffect(() => {
     const loadWeather = async () => {
-      const wx = await fetchOpenMeteoCurrentWeather()
+      const [wx, aq] = await Promise.all([
+        fetchOpenMeteoCurrentWeather(),
+        fetchOpenMeteoAirQuality(),
+      ])
       setWindKmh(wx.windSpeedKmh)
       setWindGustKmh(wx.windGustKmh)
       setTempC(wx.temperatureC)
       setHumidityPct(wx.humidityPercent)
+      setUsAqi(aq.usAqi)
     }
     void loadWeather()
     const id = window.setInterval(() => void loadWeather(), 60_000)
@@ -140,6 +157,44 @@ export default function AllSkyCameraView() {
     }
     void loadStorm()
     const id = window.setInterval(() => void loadStorm(), 60_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    const loadAstro = async () => {
+      try {
+        const res = await fetch('/api/weather/astro-conditions', { cache: 'no-store' })
+        const data = (await res.json()) as {
+          transparency?: number | null
+          seeing?: number | null
+        }
+        if (cancelled) return
+        if (!res.ok) {
+          setTransparency(null)
+          setSeeing(null)
+          return
+        }
+        const t = data.transparency
+        const s = data.seeing
+        setTransparency(
+          typeof t === 'number' && t >= 1 && t <= 8 ? (Math.round(t) as AstroConditionScale) : null
+        )
+        setSeeing(
+          typeof s === 'number' && s >= 1 && s <= 8 ? (Math.round(s) as AstroConditionScale) : null
+        )
+      } catch {
+        if (!cancelled) {
+          setTransparency(null)
+          setSeeing(null)
+        }
+      }
+    }
+    void loadAstro()
+    const id = window.setInterval(() => void loadAstro(), 60_000)
     return () => {
       cancelled = true
       window.clearInterval(id)
@@ -261,6 +316,13 @@ export default function AllSkyCameraView() {
       cloudPct != null && Number.isFinite(cloudPct) ? `${Math.round(cloudPct)}%` : '—'
     const cloudValueRed = cloudPct != null && Number.isFinite(cloudPct) && cloudPct > 20
 
+    const transparencyText = formatAstroConditionLabel(transparency)
+    const transparencyValueRed = astroConditionIsRed(transparency)
+    const seeingText = formatAstroConditionLabel(seeing)
+    const seeingValueRed = astroConditionIsRed(seeing)
+    const aqiText = formatUsAqiLabel(usAqi)
+    const aqiValueRed = usAqiIsRed(usAqi)
+
     const windText =
       windKmh != null && Number.isFinite(windKmh) ? `${windKmh.toFixed(0)} km/h` : '—'
     const windValueRed = windKmh != null && Number.isFinite(windKmh) && windKmh > 36
@@ -319,6 +381,28 @@ export default function AllSkyCameraView() {
           <span className={overlayTitleClass}>Cloud: </span>
           <span className={cloudText === '—' ? dashClass : overlayValueClass(cloudValueRed)}>
             {cloudText}
+          </span>
+        </p>
+        <p className="break-words">
+          <span className={overlayTitleClass}>Transparency: </span>
+          <span
+            className={
+              transparencyText === '—' ? dashClass : overlayValueClass(transparencyValueRed)
+            }
+          >
+            {transparencyText}
+          </span>
+        </p>
+        <p className="break-words">
+          <span className={overlayTitleClass}>Seeing: </span>
+          <span className={seeingText === '—' ? dashClass : overlayValueClass(seeingValueRed)}>
+            {seeingText}
+          </span>
+        </p>
+        <p className="break-words">
+          <span className={overlayTitleClass}>AQI: </span>
+          <span className={aqiText === '—' ? dashClass : overlayValueClass(aqiValueRed)}>
+            {aqiText}
           </span>
         </p>
         <p className="break-words">
@@ -384,6 +468,9 @@ export default function AllSkyCameraView() {
     gain,
     observatoryStatus,
     cloudPct,
+    transparency,
+    seeing,
+    usAqi,
     windKmh,
     windGustKmh,
     tempC,

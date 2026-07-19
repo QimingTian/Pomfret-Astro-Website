@@ -91,7 +91,7 @@ You **request** imaging on the website; the observatory computer and NINA **exec
 | **Cloud Map** | NOAA GOES-East CONUS (≈10 min refresh) |
 | **Precipitation radar** | LibreWXR past radar + nowcast (proxied) |
 | **Moon** | Phase, illumination, altitude, rise/set |
-| **All-sky camera** | Live fisheye + ASC overlays (cloud AI, exposure/gain, wind gust, moon illumination, **Thunderstorm Detection** Safe/Unsafe from the shared 20 km ring) |
+| **All-sky camera** | Live fisheye + ASC overlays (cloud AI, **Transparency / Seeing** from 7Timer ASTRO, **AQI** from Open-Meteo, exposure/gain, wind gust, moon illumination, **Thunderstorm Detection** Safe/Unsafe from the shared 20 km ring) |
 
 UI uses unified pill / 1rem corner radius site-wide (v6).
 
@@ -472,7 +472,7 @@ Sequence: Connect → Close dome → Disconnect → Discord.
 
 ESTOP sequence also POSTs dome-closed progress to clear KV state.
 
-**Weather-safety auto-ESTOP** (nautical night only): ASC rain (high confidence), site precip forecast threshold, and/or thunderstorm (`weather_code` 95/96/99) on the **20 km** Open-Meteo ring. Daytime is a no-op. Already STOPPING/STOPPED blocks re-arm. Hooks: agent-pulse, observatory weather refresh, schedule maintenance. Weather **Thunderstorm Detection** uses `GET /api/weather/storm-approach`.
+**Weather-safety auto-ESTOP** (nautical night only): ASC rain (high confidence), site precip forecast threshold, and/or thunderstorm (`weather_code` 95/96/99) on the **20 km** Open-Meteo ring. Daytime is a no-op. Already STOPPING/STOPPED blocks re-arm. Hooks: agent-pulse, observatory weather refresh, schedule maintenance. Weather **Thunderstorm Detection** uses `GET /api/weather/storm-approach`. ASC **Transparency / Seeing** use `GET /api/weather/astro-conditions` (7Timer ASTRO).
 
 While NINA reports imaging, agent polls deliver **ESTOP only** (409 for other work).
 

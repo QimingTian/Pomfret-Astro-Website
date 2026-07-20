@@ -16,7 +16,13 @@ import {
   type AutoTuningSample,
 } from '@/lib/auto-tuning-history'
 import { useAppStore } from '@/lib/store'
-import { glassPillDangerSm, glassPillSm, glassPillSuccessSm } from '@/lib/glass-ui'
+import {
+  glassNavLink,
+  glassNavLinkActive,
+  glassPillDangerSm,
+  glassPillSm,
+  glassPillSuccessSm,
+} from '@/lib/glass-ui'
 
 import { AutoExposureTuningChart } from './auto-exposure-tuning-chart'
 import { AutoWbTuningChart } from './auto-wb-tuning-chart'
@@ -697,7 +703,8 @@ export function AllSkyCameraControlPanel() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Settings state
+  // Settings state (live camera — Set applies immediately)
+  const [settingsTab, setSettingsTab] = useState<'camera' | 'sequence'>('camera')
   const [gain, setGain] = useState(50)
   const [gainMax, setGainMax] = useState(DEFAULT_GAIN_MAX)
   const [gamma, setGamma] = useState(50)
@@ -705,6 +712,12 @@ export function AllSkyCameraControlPanel() {
   const [photoExposureS, setPhotoExposureS] = useState(1)
   const [wbR, setWbR] = useState(50)
   const [wbB, setWbB] = useState(50)
+
+  // Sequence-only draft settings (never applied until Start Sequence; WB is auto during sequence)
+  const [seqGain, setSeqGain] = useState(50)
+  const [seqGamma, setSeqGamma] = useState(50)
+  const [seqPhotoExposureS, setSeqPhotoExposureS] = useState(1)
+  const seqSettingsSeededRef = useRef(false)
 
   // Stream refresh key — bump to force the MJPEG <img> to reconnect
   const [streamKey, setStreamKey] = useState(() => Date.now())
@@ -735,8 +748,14 @@ export function AllSkyCameraControlPanel() {
 
   const seqCountInputRef = useRef<NumericInputHandle>(null)
   const seqIntervalInputRef = useRef<NumericInputHandle>(null)
+  const seqGainInputRef = useRef<NumericInputHandle>(null)
+  const seqGammaInputRef = useRef<NumericInputHandle>(null)
+  const seqPhotoExpInputRef = useRef<NumericInputHandle>(null)
   const [seqCountInputValid, setSeqCountInputValid] = useState(true)
   const [seqIntervalInputValid, setSeqIntervalInputValid] = useState(true)
+  const [seqGainInputValid, setSeqGainInputValid] = useState(true)
+  const [seqGammaInputValid, setSeqGammaInputValid] = useState(true)
+  const [seqPhotoExpInputValid, setSeqPhotoExpInputValid] = useState(true)
 
   const settingsLoadedRef = useRef(false)
 
@@ -881,6 +900,15 @@ export function AllSkyCameraControlPanel() {
         setVideoExposureS(roundVideoExposureS(s.video_exposure / 1_000_000))
       }
       if (typeof s.gain_max === 'number') setGainMax(s.gain_max)
+      // Seed Sequence Settings once from live camera so drafts start sensible.
+      if (!seqSettingsSeededRef.current) {
+        seqSettingsSeededRef.current = true
+        if (typeof s.gain === 'number') setSeqGain(s.gain)
+        if (typeof s.gamma === 'number') setSeqGamma(s.gamma)
+        if (typeof s.photo_exposure === 'number') {
+          setSeqPhotoExposureS(Math.round((s.photo_exposure / 1_000_000) * 1000) / 1000)
+        }
+      }
     } catch {
       // keep previous values on failure
     }
@@ -1137,10 +1165,20 @@ export function AllSkyCameraControlPanel() {
         setError('Sequence name is required')
         return
       }
+      const gainV = seqGainInputRef.current?.commit() ?? seqGain
+      const gammaV = seqGammaInputRef.current?.commit() ?? seqGamma
+      const photoExpV = seqPhotoExpInputRef.current?.commit() ?? seqPhotoExposureS
+      setSeqGain(gainV)
+      setSeqGamma(gammaV)
+      setSeqPhotoExposureS(photoExpV)
       const body: Record<string, unknown> = {
         count,
         file_format: 'TIFF',
         folder_name: folderName,
+        gain: gainV,
+        gamma: gammaV,
+        photo_exposure: Math.round(photoExpV * 1_000_000),
+        auto_wb: true,
       }
       if (interval > 0) body.interval = interval
       await camJson(base, '/camera/sequence/start', {
@@ -1154,7 +1192,7 @@ export function AllSkyCameraControlPanel() {
     } finally {
       setSeqBusy(false)
     }
-  }, [base, seqFolderName, seqCount, seqInterval, pollSeqStatus])
+  }, [base, seqFolderName, seqCount, seqInterval, seqGain, seqGamma, seqPhotoExposureS, pollSeqStatus])
 
   const stopSequence = useCallback(async () => {
     if (!base) return
@@ -1277,10 +1315,29 @@ export function AllSkyCameraControlPanel() {
         {camStatus.connected && (
           <div className="grid gap-6 lg:grid-cols-2 lg:items-stretch">
             <div
-              className={`boxed-fields space-y-4${settingsAutoManaged ? ' opacity-60' : ''}`}
+              className={`boxed-fields space-y-4${
+                settingsTab === 'camera' && settingsAutoManaged ? ' opacity-60' : ''
+              }`}
             >
-            <p className="text-sm font-medium text-white">Camera Settings</p>
+            <div className="flex flex-wrap items-center gap-1">
+              <button
+                type="button"
+                className={settingsTab === 'camera' ? glassNavLinkActive : glassNavLink}
+                onClick={() => setSettingsTab('camera')}
+              >
+                Camera Settings
+              </button>
+              <button
+                type="button"
+                className={settingsTab === 'sequence' ? glassNavLinkActive : glassNavLink}
+                onClick={() => setSettingsTab('sequence')}
+              >
+                Sequence Settings
+              </button>
+            </div>
 
+            {settingsTab === 'camera' ? (
+              <>
             {/* Gain */}
             <div className={camCtrlGrid}>
               <span className={labelClass}>
@@ -1485,6 +1542,74 @@ export function AllSkyCameraControlPanel() {
                 Set
               </button>
             </div>
+              </>
+            ) : (
+              <>
+            <div className={camCtrlGrid}>
+              <span className={labelClass}>
+                Gain <span className="text-gray-500">({GAIN_UI_MIN}-{gainMax})</span>
+              </span>
+              <StyledSlider
+                min={GAIN_UI_MIN}
+                max={gainMax}
+                value={seqGain}
+                onChange={setSeqGain}
+              />
+              <NumericInput
+                ref={seqGainInputRef}
+                value={seqGain}
+                onChange={setSeqGain}
+                min={GAIN_UI_MIN}
+                max={gainMax}
+                onValidityChange={setSeqGainInputValid}
+                className={fieldInputCompact}
+              />
+              {setButtonSpacer}
+            </div>
+
+            <div className={camCtrlGrid}>
+              <span className={labelClass}>Gamma</span>
+              <StyledSlider
+                min={1}
+                max={100}
+                value={seqGamma}
+                onChange={setSeqGamma}
+              />
+              <NumericInput
+                ref={seqGammaInputRef}
+                value={seqGamma}
+                onChange={setSeqGamma}
+                min={1}
+                max={100}
+                onValidityChange={setSeqGammaInputValid}
+                className={fieldInputCompact}
+              />
+              {setButtonSpacer}
+            </div>
+
+            <div className={camCtrlGrid}>
+              <span className={labelClass}>Photo Exp (s)</span>
+              <StyledSlider
+                min={0}
+                max={PHOTO_EXP_SLIDER_STEPS}
+                step={1}
+                value={photoExposureToSlider(seqPhotoExposureS)}
+                onChange={(pos) => setSeqPhotoExposureS(sliderToPhotoExposure(pos))}
+              />
+              <NumericInput
+                ref={seqPhotoExpInputRef}
+                value={seqPhotoExposureS}
+                onChange={setSeqPhotoExposureS}
+                min={PHOTO_EXP_MIN_S}
+                max={PHOTO_EXP_MAX_S}
+                decimal
+                onValidityChange={setSeqPhotoExpInputValid}
+                className={fieldInputCompact}
+              />
+              {setButtonSpacer}
+            </div>
+              </>
+            )}
 
             </div>
 
@@ -1596,6 +1721,9 @@ export function AllSkyCameraControlPanel() {
                         seqBusy ||
                         !seqCountInputValid ||
                         !seqIntervalInputValid ||
+                        !seqGainInputValid ||
+                        !seqGammaInputValid ||
+                        !seqPhotoExpInputValid ||
                         !seqFolderName.trim()
                       }
                       onClick={() => void startSequence()}

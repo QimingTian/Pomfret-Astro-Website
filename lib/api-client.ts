@@ -109,6 +109,10 @@ export class APIClient {
     count: number
     fileFormat: string
     interval?: number
+    gain?: number
+    gamma?: number
+    photoExposureUs?: number
+    autoWb?: boolean
   }): Promise<{
     success: boolean
     message: string
@@ -121,6 +125,7 @@ export class APIClient {
     const body: Record<string, unknown> = {
       count: params.count,
       file_format: params.fileFormat,
+      auto_wb: params.autoWb !== false,
     }
     if (params.folderName?.trim()) {
       body.folder_name = params.folderName.trim()
@@ -128,6 +133,9 @@ export class APIClient {
     if (params.interval !== undefined && params.interval > 0) {
       body.interval = params.interval
     }
+    if (params.gain !== undefined) body.gain = params.gain
+    if (params.gamma !== undefined) body.gamma = params.gamma
+    if (params.photoExposureUs !== undefined) body.photo_exposure = params.photoExposureUs
 
     return this.request('/camera/sequence/start', {
       method: 'POST',

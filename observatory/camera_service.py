@@ -210,6 +210,10 @@ sequence_state = {
     'interval': 0,  # Interval between photos in seconds (0 = fast mode, >0 = time-lapse mode)
     'last_error': None,
     'thread': None,
+    # Optional still overrides for this sequence only (restored after run).
+    'settings': None,
+    'settings_restore': None,
+    'auto_wb': True,
 }
 
 # Server-side auto mode (periodic photo capture for Weather / public view)
@@ -443,6 +447,10 @@ def auto_capture_loop():
     """Background thread: capture, wait interval, repeat; wake resets wait after settings."""
     print("[Auto] Loop started")
     while auto_state['active'] and camera_state['connected']:
+        if sequence_state['active']:
+            # Sequence owns still exposure/gain/WB; do not let auto overwrite mid-run.
+            _wait_auto_interval()
+            continue
         _apply_auto_mode_scheduled_gain()
         img = _capture_photo_to_memory()
         if img is not None:
@@ -1025,11 +1033,106 @@ class ASICamera:
 
         return img
 
+def _snapshot_still_settings():
+    return {
+        'exposure': camera_state['exposure'],
+        'gain': camera_state['gain'],
+        'gamma': camera_state.get('gamma', 50),
+        'wb_r': camera_state.get('wb_r', 50),
+        'wb_b': camera_state.get('wb_b', 50),
+    }
+
+
+def _apply_still_settings(settings):
+    if not settings:
+        return
+    if 'exposure' in settings and settings['exposure'] is not None:
+        camera_state['exposure'] = int(settings['exposure'])
+    if 'gain' in settings and settings['gain'] is not None:
+        gain_max = camera_state.get('gain_max', 500)
+        camera_state['gain'] = max(0, min(gain_max, int(settings['gain'])))
+    if 'gamma' in settings and settings['gamma'] is not None:
+        camera_state['gamma'] = max(1, min(100, int(settings['gamma'])))
+    if 'wb_r' in settings and settings['wb_r'] is not None:
+        camera_state['wb_r'] = max(0, min(100, int(settings['wb_r'])))
+    if 'wb_b' in settings and settings['wb_b'] is not None:
+        camera_state['wb_b'] = max(0, min(100, int(settings['wb_b'])))
+
+
+def _parse_sequence_settings(data):
+    """Optional still overrides from sequence/start body. Returns dict or None.
+    WB is never taken from the client — Sequence uses Auto WB like Auto mode.
+    """
+    if not isinstance(data, dict):
+        return None
+    out = {}
+    if 'photo_exposure' in data:
+        try:
+            out['exposure'] = int(data['photo_exposure'])
+        except (TypeError, ValueError):
+            return None
+    if 'gain' in data:
+        try:
+            out['gain'] = int(data['gain'])
+        except (TypeError, ValueError):
+            return None
+    if 'gamma' in data:
+        try:
+            out['gamma'] = int(data['gamma'])
+        except (TypeError, ValueError):
+            return None
+    return out if out else None
+
+
+def _apply_sequence_auto_wb_from_frame(img):
+    """Same Auto WB algorithm as auto mode; only adjusts wb_r/wb_b for subsequent sequence frames."""
+    if img is None:
+        return
+    stats = auto_exp.compute_brightness_mean(img)
+    wb_adj = auto_wb.decide_auto_white_balance_adjustment(
+        mean_r=stats['mean_r'],
+        mean_g=stats['mean_g'],
+        mean_b=stats['mean_b'],
+        wb_r=camera_state.get('wb_r', auto_wb.AUTO_WB_R_START),
+        wb_b=camera_state.get('wb_b', auto_wb.AUTO_WB_B_START),
+        clip_white_pct=stats['clip_white_pct'],
+        valid_pixel_frac=stats.get('valid_pixel_frac', 1.0),
+    )
+    if wb_adj is None:
+        print(
+            f"[Sequence AutoWB] hold R={stats['mean_r']:.1f} G={stats['mean_g']:.1f} B={stats['mean_b']:.1f} "
+            f"wb_r={camera_state.get('wb_r')} wb_b={camera_state.get('wb_b')}"
+        )
+        return
+    camera_state['wb_r'] = wb_adj['wb_r']
+    camera_state['wb_b'] = wb_adj['wb_b']
+    _apply_manual_white_balance()
+    print(
+        f"[Sequence AutoWB] {wb_adj['action']}: {wb_adj['reason']} → "
+        f"wb_r={wb_adj['wb_r']} wb_b={wb_adj['wb_b']}"
+    )
+
+
+def _restore_sequence_camera_settings():
+    restore = sequence_state.get('settings_restore')
+    if restore:
+        _apply_still_settings(restore)
+        print(
+            f"[Sequence] Restored camera stills: "
+            f"exp={restore.get('exposure')} gain={restore.get('gain')} "
+            f"gamma={restore.get('gamma')} wb_r={restore.get('wb_r')} wb_b={restore.get('wb_b')}"
+        )
+    sequence_state['settings'] = None
+    sequence_state['settings_restore'] = None
+    sequence_state['auto_wb'] = True
+
+
 def sequence_capture_loop():
     """Background thread: capture stills and upload each frame to Google Drive (in-memory only)."""
     import google_drive_upload as gdrive
 
     drive_folder_id = sequence_state['drive_folder_id']
+    seq_settings = sequence_state.get('settings')
 
     while sequence_state['active']:
         try:
@@ -1060,9 +1163,16 @@ def sequence_capture_loop():
             if photo_format != ASI_IMG_RGB24:
                 asi_lib.ASISetROIFormat(camera.camera_id, width, height, 1, photo_format)
                 format_applied = True
+
+            # Re-apply sequence stills each frame so auto-mode cannot drift mid-run.
+            if seq_settings:
+                _apply_still_settings(seq_settings)
             
             # Capture
             img = camera.capture_snapshot()
+
+            if img is not None and sequence_state.get('auto_wb', True):
+                _apply_sequence_auto_wb_from_frame(img)
             
             # Restore format if needed
             if was_streaming and format_applied:
@@ -1120,6 +1230,7 @@ def sequence_capture_loop():
     
     print(f"[Sequence] Sequence capture stopped")
     sequence_state['active'] = False
+    _restore_sequence_camera_settings()
 
 def _get_control_range(camera_id, control_type):
     """Return (min, max) for an ASI control from SDK caps, or None."""
@@ -1650,6 +1761,28 @@ def start_sequence():
 
     drive_url = gdrive.folder_web_url(drive_folder_id)
 
+    seq_settings = _parse_sequence_settings(data)
+    use_auto_wb = data.get('auto_wb', True) is not False
+    sequence_state['settings_restore'] = _snapshot_still_settings()
+    sequence_state['settings'] = seq_settings
+    sequence_state['auto_wb'] = use_auto_wb
+    if seq_settings:
+        _apply_still_settings(seq_settings)
+    if use_auto_wb:
+        camera_state['wb_r'] = auto_wb.AUTO_WB_R_START
+        camera_state['wb_b'] = auto_wb.AUTO_WB_B_START
+        _apply_manual_white_balance()
+        print(
+            f"[Sequence] Auto WB start wb_r={camera_state['wb_r']} wb_b={camera_state['wb_b']}"
+        )
+    print(
+        f"[Sequence] Using sequence stills: "
+        f"exp={camera_state['exposure']} gain={camera_state['gain']} "
+        f"gamma={camera_state.get('gamma')} "
+        f"wb_r={camera_state.get('wb_r')} wb_b={camera_state.get('wb_b')} "
+        f"auto_wb={use_auto_wb}"
+    )
+
     sequence_state['active'] = True
     sequence_state['drive_folder_id'] = drive_folder_id
     sequence_state['drive_folder_name'] = folder_name
@@ -1677,6 +1810,8 @@ def start_sequence():
         'count': count,
         'file_format': file_format,
         'interval': interval,
+        'settings': seq_settings,
+        'auto_wb': use_auto_wb,
     })
 
 @app.route('/camera/sequence/stop', methods=['POST'])

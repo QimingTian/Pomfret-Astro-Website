@@ -6,7 +6,12 @@ import { useMember } from '@/hooks/use-member'
 import { useObservatoryEnvelope } from '@/hooks/use-observatory-envelope'
 import { useAppStore } from '@/lib/store'
 import MJPEGStream from '@/components/MJPEGStream'
-import { allSkyCameraStatusUrl, allSkyCameraSequenceStatusUrl } from '@/lib/asc-cloud'
+import {
+  allSkyCameraSequenceStatusUrl,
+  allSkyCameraStatusUrl,
+  DEFAULT_ALL_SKY_STREAM_URL,
+  defaultAllSkySequenceStatusUrl,
+} from '@/lib/asc-cloud'
 import { moonPhaseInfo } from '@/lib/moon-avoidance'
 import {
   type AstroConditionScale,
@@ -98,7 +103,7 @@ const streamAreaClass = 'relative w-full overflow-hidden rounded-lg bg-black'
 export default function AllSkyCameraView() {
   const member = useMember()
   const controller = useAppStore((s) => s.controllers.find((c) => c.roles.includes('cameras')))
-  const streamURL = controller?.apiClient?.getStreamURL()
+  const streamURL = controller?.apiClient?.getStreamURL() ?? DEFAULT_ALL_SKY_STREAM_URL
   const { serverStatus: observatoryStatus } = useObservatoryEnvelope({
     siteStreamEnabled: member.status === 'authenticated',
   })
@@ -128,11 +133,7 @@ export default function AllSkyCameraView() {
   }, [])
 
   useEffect(() => {
-    const seqUrl = allSkyCameraSequenceStatusUrl(streamURL)
-    if (!seqUrl) {
-      setSequenceActive(false)
-      return
-    }
+    const seqUrl = allSkyCameraSequenceStatusUrl(streamURL) ?? defaultAllSkySequenceStatusUrl()
     let cancelled = false
     const loadSeq = async () => {
       try {
@@ -330,11 +331,13 @@ export default function AllSkyCameraView() {
   }, [streamURL])
 
   const overlay = useMemo(() => {
+    const ascUnavailable = sequenceActive
     const obsText = observatoryOverlayStatusLabel(observatoryStatus)
     const obsValueRed = observatoryOverlayStatusIsRed(observatoryStatus)
 
-    const exposureGainText =
-      exposureUs != null && gain != null
+    const exposureGainText = ascUnavailable
+      ? '—'
+      : exposureUs != null && gain != null
         ? `${formatAscExposureUs(exposureUs)} / gain ${Math.round(gain)}`
         : exposureUs != null
           ? `${formatAscExposureUs(exposureUs)} / gain —`
@@ -343,8 +346,11 @@ export default function AllSkyCameraView() {
             : '—'
 
     const cloudText =
-      cloudPct != null && Number.isFinite(cloudPct) ? `${Math.round(cloudPct)}%` : '—'
-    const cloudValueRed = cloudPct != null && Number.isFinite(cloudPct) && cloudPct > 20
+      ascUnavailable || cloudPct == null || !Number.isFinite(cloudPct)
+        ? '—'
+        : `${Math.round(cloudPct)}%`
+    const cloudValueRed =
+      !ascUnavailable && cloudPct != null && Number.isFinite(cloudPct) && cloudPct > 20
 
     const transparencyText = formatAstroConditionLabel(transparency)
     const transparencyValueRed = astroConditionIsRed(transparency)
@@ -368,12 +374,20 @@ export default function AllSkyCameraView() {
       humidityPct != null && Number.isFinite(humidityPct) ? `${Math.round(humidityPct)}%` : '—'
     const humValueRed = humidityPct != null && Number.isFinite(humidityPct) && humidityPct > 90
 
-    const rainingText = raining === true ? 'True' : raining === false ? 'False' : '—'
+    const rainingText = ascUnavailable
+      ? '—'
+      : raining === true
+        ? 'True'
+        : raining === false
+          ? 'False'
+          : '—'
 
     const moonIllumPct = now ? Math.round(moonPhaseInfo(now).illumination * 100) : null
     const moonIllumText = moonIllumPct != null ? `${moonIllumPct}%` : '—'
 
     const dashClass = overlayValueGreen
+    const lastFrameText =
+      ascUnavailable || !lastFrameAt ? '—' : formatOverlayDateTime(lastFrameAt)
 
     return (
       <div
@@ -387,8 +401,8 @@ export default function AllSkyCameraView() {
         </p>
         <p className="break-words">
           <span className={overlayTitleClass}>ASC View Last Updated: </span>
-          <span className={lastFrameAt ? overlayValueGreen : dashClass}>
-            {lastFrameAt ? formatOverlayDateTime(lastFrameAt) : '—'}
+          <span className={lastFrameText === '—' ? dashClass : overlayValueGreen}>
+            {lastFrameText}
           </span>
         </p>
         <p className="break-words">
@@ -492,6 +506,7 @@ export default function AllSkyCameraView() {
       </div>
     )
   }, [
+    sequenceActive,
     now,
     lastFrameAt,
     exposureUs,
@@ -509,41 +524,35 @@ export default function AllSkyCameraView() {
     stormSafe,
   ])
 
+  const sequenceMessage = (
+    <div
+      className="absolute inset-0 z-20 flex items-center justify-center bg-black px-4"
+      role="status"
+      aria-live="polite"
+    >
+      <p
+        className="text-center text-base font-semibold text-white sm:text-lg"
+        style={overlayTextShadowStyle}
+      >
+        All Sky Camera Is Executing A Sequence.
+      </p>
+    </div>
+  )
+
   return (
     <div className="flex h-full flex-col">
       <div className="min-h-0 flex-1">
-        {!controller ? (
-          <div className={`${streamAreaClass} min-h-[400px]`}>
-            {sequenceActive ? (
-              <div className="absolute inset-0 z-20 flex items-center justify-center bg-black px-4">
-                <p className="text-center text-base font-medium text-white sm:text-lg">
-                  All Sky Camera Is Executing A Sequence.
-                </p>
-              </div>
-            ) : (
-              <>
-                {overlay}
-                <AscCompassRose />
-              </>
-            )}
-          </div>
-        ) : (
-          <div className={streamAreaClass}>
-            {sequenceActive ? (
-              <div className="absolute inset-0 z-20 flex items-center justify-center bg-black px-4">
-                <p className="text-center text-base font-medium text-white sm:text-lg">
-                  All Sky Camera Is Executing A Sequence.
-                </p>
-              </div>
-            ) : (
-              <>
-                {overlay}
-                <AscCompassRose />
-                <MJPEGStream url={streamURL || ''} minimal />
-              </>
-            )}
-          </div>
-        )}
+        <div className={`${streamAreaClass} min-h-[400px]`}>
+          {sequenceActive ? (
+            sequenceMessage
+          ) : (
+            <>
+              <MJPEGStream url={streamURL} minimal />
+              <AscCompassRose />
+            </>
+          )}
+          {overlay}
+        </div>
       </div>
     </div>
   )

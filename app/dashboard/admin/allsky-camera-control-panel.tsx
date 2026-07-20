@@ -1079,13 +1079,18 @@ export function AllSkyCameraControlPanel() {
   }, [base])
 
   useEffect(() => {
-    if (!seqStatus?.active) return
-    const id = setInterval(async () => {
-      const stillActive = await pollSeqStatus()
-      if (!stillActive) clearInterval(id)
-    }, SEQ_POLL_MS)
-    return () => clearInterval(id)
-  }, [seqStatus?.active, pollSeqStatus])
+    if (!base) return
+    let cancelled = false
+    const tick = async () => {
+      if (!cancelled) await pollSeqStatus()
+    }
+    void tick()
+    const id = setInterval(() => void tick(), SEQ_POLL_MS)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [base, pollSeqStatus])
 
   // ------------------------------------------------------------------
   // Actions (all go through public URL)
@@ -1236,8 +1241,12 @@ export function AllSkyCameraControlPanel() {
           {/* Stream view — 16:9 sets row height; preview does not stretch with right column */}
           <div className="relative aspect-video w-full self-start overflow-hidden rounded-lg bg-black">
             {seqStatus?.active ? (
-              <div className="absolute inset-0 flex items-center justify-center px-4">
-                <p className="text-center text-base font-medium text-white sm:text-lg">
+              <div
+                className="absolute inset-0 flex items-center justify-center bg-black px-4"
+                role="status"
+                aria-live="polite"
+              >
+                <p className="text-center text-base font-semibold text-white sm:text-lg">
                   All Sky Camera Is Executing A Sequence.
                 </p>
               </div>

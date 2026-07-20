@@ -1,6 +1,6 @@
 import type { AscCloudInference } from '@/lib/types'
 
-const DEFAULT_STREAM_URL = 'https://cam.pomfretastro.org/camera/stream'
+export const DEFAULT_ALL_SKY_STREAM_URL = 'https://cam.pomfretastro.org/camera/stream'
 
 /** Resolve camera /status URL from MJPEG stream URL (same host). */
 export function allSkyCameraStatusUrl(streamUrl: string | null | undefined): string | null {
@@ -31,7 +31,17 @@ export function allSkyCameraSequenceStatusUrl(streamUrl: string | null | undefin
 }
 
 export function defaultAllSkyStatusUrl(): string {
-  return allSkyCameraStatusUrl(DEFAULT_STREAM_URL) ?? 'https://cam.pomfretastro.org/camera/status'
+  return (
+    allSkyCameraStatusUrl(DEFAULT_ALL_SKY_STREAM_URL) ??
+    'https://cam.pomfretastro.org/camera/status'
+  )
+}
+
+export function defaultAllSkySequenceStatusUrl(): string {
+  return (
+    allSkyCameraSequenceStatusUrl(DEFAULT_ALL_SKY_STREAM_URL) ??
+    'https://cam.pomfretastro.org/camera/sequence/status'
+  )
 }
 
 type StatusPayload = {

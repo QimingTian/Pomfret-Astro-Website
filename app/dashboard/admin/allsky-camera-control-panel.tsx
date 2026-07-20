@@ -1337,14 +1337,22 @@ export function AllSkyCameraControlPanel() {
             <div className="flex flex-wrap items-center gap-1">
               <button
                 type="button"
-                className={settingsTab === 'camera' ? glassNavLinkActive : glassNavLink}
+                className={
+                  settingsTab === 'camera'
+                    ? `${glassNavLinkActive} !pl-0`
+                    : `${glassNavLink} !pl-0`
+                }
                 onClick={() => setSettingsTab('camera')}
               >
                 Camera Settings
               </button>
               <button
                 type="button"
-                className={settingsTab === 'sequence' ? glassNavLinkActive : glassNavLink}
+                className={
+                  settingsTab === 'sequence'
+                    ? `${glassNavLinkActive} !pl-0`
+                    : `${glassNavLink} !pl-0`
+                }
                 onClick={() => setSettingsTab('sequence')}
               >
                 Sequence Settings
@@ -1630,9 +1638,7 @@ export function AllSkyCameraControlPanel() {
 
             <div className="flex h-full min-h-0 flex-col">
             <div className="boxed-fields flex min-h-0 flex-1 flex-col space-y-4">
-                <div className="flex flex-wrap items-center gap-1">
-                  <p className="px-4 py-2 text-sm font-medium text-white">Sequence Capture</p>
-                </div>
+                <p className="py-2 text-sm font-medium text-white">Sequence Capture</p>
 
             {seqStatus?.active ? (
               <div className="space-y-2">

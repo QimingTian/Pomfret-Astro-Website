@@ -16,6 +16,20 @@ export function allSkyCameraStatusUrl(streamUrl: string | null | undefined): str
   }
 }
 
+/** Resolve /camera/sequence/status from MJPEG stream URL (same host). */
+export function allSkyCameraSequenceStatusUrl(streamUrl: string | null | undefined): string | null {
+  if (!streamUrl) return null
+  try {
+    const u = new URL(streamUrl)
+    if (/\/camera\//.test(u.pathname)) {
+      return new URL('sequence/status', streamUrl).href
+    }
+    return new URL('/camera/sequence/status', u.origin).href
+  } catch {
+    return null
+  }
+}
+
 export function defaultAllSkyStatusUrl(): string {
   return allSkyCameraStatusUrl(DEFAULT_STREAM_URL) ?? 'https://cam.pomfretastro.org/camera/status'
 }

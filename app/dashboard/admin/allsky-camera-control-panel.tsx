@@ -1235,7 +1235,13 @@ export function AllSkyCameraControlPanel() {
         <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-4">
           {/* Stream view — 16:9 sets row height; preview does not stretch with right column */}
           <div className="relative aspect-video w-full self-start overflow-hidden rounded-lg bg-black">
-            {!camStatus.connected ? (
+            {seqStatus?.active ? (
+              <div className="absolute inset-0 flex items-center justify-center px-4">
+                <p className="text-center text-base font-medium text-white sm:text-lg">
+                  All Sky Camera Is Executing A Sequence.
+                </p>
+              </div>
+            ) : !camStatus.connected ? (
               <div className="flex h-full items-center justify-center">
                 <span className="text-sm text-gray-500">Disconnected</span>
               </div>

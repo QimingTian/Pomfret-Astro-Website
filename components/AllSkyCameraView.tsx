@@ -6,7 +6,7 @@ import { useMember } from '@/hooks/use-member'
 import { useObservatoryEnvelope } from '@/hooks/use-observatory-envelope'
 import { useAppStore } from '@/lib/store'
 import MJPEGStream from '@/components/MJPEGStream'
-import { allSkyCameraStatusUrl } from '@/lib/asc-cloud'
+import { allSkyCameraStatusUrl, allSkyCameraSequenceStatusUrl } from '@/lib/asc-cloud'
 import { moonPhaseInfo } from '@/lib/moon-avoidance'
 import {
   type AstroConditionScale,
@@ -119,12 +119,42 @@ export default function AllSkyCameraView() {
   const [seeing, setSeeing] = useState<AstroConditionScale | null>(null)
   /** null = unknown / fetch failed; true = Safe; false = Unsafe (20 km ring). */
   const [stormSafe, setStormSafe] = useState<boolean | null>(null)
+  const [sequenceActive, setSequenceActive] = useState(false)
 
   useEffect(() => {
     setNow(new Date())
     const id = window.setInterval(() => setNow(new Date()), 1000)
     return () => window.clearInterval(id)
   }, [])
+
+  useEffect(() => {
+    const seqUrl = allSkyCameraSequenceStatusUrl(streamURL)
+    if (!seqUrl) {
+      setSequenceActive(false)
+      return
+    }
+    let cancelled = false
+    const loadSeq = async () => {
+      try {
+        const res = await fetch(seqUrl, {
+          mode: 'cors',
+          credentials: 'omit',
+          cache: 'no-store',
+        })
+        if (!res.ok || cancelled) return
+        const data = (await res.json()) as { active?: boolean }
+        if (!cancelled) setSequenceActive(data.active === true)
+      } catch {
+        if (!cancelled) setSequenceActive(false)
+      }
+    }
+    void loadSeq()
+    const id = window.setInterval(() => void loadSeq(), 2_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [streamURL])
 
   useEffect(() => {
     const loadWeather = async () => {
@@ -484,14 +514,34 @@ export default function AllSkyCameraView() {
       <div className="min-h-0 flex-1">
         {!controller ? (
           <div className={`${streamAreaClass} min-h-[400px]`}>
-            {overlay}
-            <AscCompassRose />
+            {sequenceActive ? (
+              <div className="absolute inset-0 z-20 flex items-center justify-center bg-black px-4">
+                <p className="text-center text-base font-medium text-white sm:text-lg">
+                  All Sky Camera Is Executing A Sequence.
+                </p>
+              </div>
+            ) : (
+              <>
+                {overlay}
+                <AscCompassRose />
+              </>
+            )}
           </div>
         ) : (
           <div className={streamAreaClass}>
-            {overlay}
-            <AscCompassRose />
-            <MJPEGStream url={streamURL || ''} minimal />
+            {sequenceActive ? (
+              <div className="absolute inset-0 z-20 flex items-center justify-center bg-black px-4">
+                <p className="text-center text-base font-medium text-white sm:text-lg">
+                  All Sky Camera Is Executing A Sequence.
+                </p>
+              </div>
+            ) : (
+              <>
+                {overlay}
+                <AscCompassRose />
+                <MJPEGStream url={streamURL || ''} minimal />
+              </>
+            )}
           </div>
         )}
       </div>

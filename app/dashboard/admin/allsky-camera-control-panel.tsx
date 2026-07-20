@@ -1334,25 +1334,17 @@ export function AllSkyCameraControlPanel() {
                 settingsTab === 'camera' && settingsAutoManaged ? ' opacity-60' : ''
               }`}
             >
-            <div className="flex flex-wrap items-center gap-1">
+            <div className="-ml-4 flex flex-wrap items-center gap-1">
               <button
                 type="button"
-                className={
-                  settingsTab === 'camera'
-                    ? `${glassNavLinkActive} !pl-0`
-                    : `${glassNavLink} !pl-0`
-                }
+                className={settingsTab === 'camera' ? glassNavLinkActive : glassNavLink}
                 onClick={() => setSettingsTab('camera')}
               >
                 Camera Settings
               </button>
               <button
                 type="button"
-                className={
-                  settingsTab === 'sequence'
-                    ? `${glassNavLinkActive} !pl-0`
-                    : `${glassNavLink} !pl-0`
-                }
+                className={settingsTab === 'sequence' ? glassNavLinkActive : glassNavLink}
                 onClick={() => setSettingsTab('sequence')}
               >
                 Sequence Settings

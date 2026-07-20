@@ -1,7 +1,7 @@
 import { hourAngleDeg, localSiderealTimeHours } from '@/lib/mount-gem-angles'
 
 /** DSO / project base overhead (slew / settle / focus buffer). */
-export const DSO_SESSION_OVERHEAD_SEC = 30 * 60
+export const DSO_SESSION_OVERHEAD_SEC = 40 * 60
 
 /** Extra when the planned session block crosses the local meridian. */
 export const DSO_MERIDIAN_FLIP_OVERHEAD_SEC = 10 * 60
@@ -71,7 +71,7 @@ export function imagingSecondsFromFilterPlans(filterPlans: DsoOverheadFilterPlan
 
 /**
  * DSO / project session overhead:
- *   30 min base
+ *   40 min base
  * + 5 min × (distinctFilters − 1) when more than one filter
  * + 10 min if [start, start+imaging+base+filterExtra] crosses the meridian
  *

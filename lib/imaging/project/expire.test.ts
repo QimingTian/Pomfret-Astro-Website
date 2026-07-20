@@ -13,7 +13,7 @@ test('projectSubSessionWindowEndMs uses planned start plus dynamic overhead', ()
     plannedStartIso: '2026-05-20T05:00:00.000Z',
   }
   const start = Date.parse(night.plannedStartIso!)
-  // No raHours → base 30 min only (no meridian flip).
+  // No raHours → base 40 min only (no meridian flip).
   const end = projectSubSessionWindowEndMs(night)
-  assert.equal(end, start + (10 * 60 + 30 * 60) * 1000)
+  assert.equal(end, start + (10 * 60 + 40 * 60) * 1000)
 })

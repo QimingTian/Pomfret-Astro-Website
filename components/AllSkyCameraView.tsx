@@ -526,7 +526,7 @@ export default function AllSkyCameraView() {
 
   const sequenceMessage = (
     <div
-      className="absolute inset-0 z-20 flex items-center justify-center bg-black px-4"
+      className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center bg-black px-4"
       role="status"
       aria-live="polite"
     >
@@ -543,15 +543,9 @@ export default function AllSkyCameraView() {
     <div className="flex h-full flex-col">
       <div className="min-h-0 flex-1">
         <div className={`${streamAreaClass} min-h-[400px]`}>
-          {sequenceActive ? (
-            sequenceMessage
-          ) : (
-            <>
-              <MJPEGStream url={streamURL} minimal />
-              <AscCompassRose />
-            </>
-          )}
+          {sequenceActive ? sequenceMessage : <MJPEGStream url={streamURL} minimal />}
           {overlay}
+          <AscCompassRose />
         </div>
       </div>
     </div>

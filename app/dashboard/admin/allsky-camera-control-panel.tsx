@@ -1635,7 +1635,7 @@ export function AllSkyCameraControlPanel() {
             {seqStatus?.active ? (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-300">
+                  <span className="text-lg font-medium text-white sm:text-xl">
                     Capturing {seqStatus.current_count} / {seqStatus.total_count}
                   </span>
                   <button
@@ -1655,23 +1655,21 @@ export function AllSkyCameraControlPanel() {
                     }}
                   />
                 </div>
-                {seqStatus.folder_name && (
-                  <p className="text-xs text-gray-500">
-                    Drive folder:{' '}
-                    {seqStatus.drive_url ? (
-                      <a
-                        href={seqStatus.drive_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-400 underline hover:text-blue-300"
-                      >
-                        {seqStatus.folder_name}
-                      </a>
-                    ) : (
-                      seqStatus.folder_name
-                    )}
-                  </p>
-                )}
+                <p className="text-base font-medium text-white sm:text-lg">
+                  Drive Folder:{' '}
+                  {seqStatus.drive_url && seqStatus.folder_name ? (
+                    <a
+                      href={seqStatus.drive_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-white underline hover:text-white/80"
+                    >
+                      {seqStatus.folder_name}
+                    </a>
+                  ) : (
+                    <span>{seqStatus.folder_name || '—'}</span>
+                  )}
+                </p>
                 {seqStatus.last_error && (
                   <p className="text-xs text-red-400">Upload error: {seqStatus.last_error}</p>
                 )}

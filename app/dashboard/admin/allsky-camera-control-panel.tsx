@@ -1630,12 +1630,14 @@ export function AllSkyCameraControlPanel() {
 
             <div className="flex h-full min-h-0 flex-col">
             <div className="boxed-fields flex min-h-0 flex-1 flex-col space-y-4">
-                <p className="text-sm font-medium text-white">Sequence Capture</p>
+                <div className="flex flex-wrap items-center gap-1">
+                  <p className="px-4 py-2 text-sm font-medium text-white">Sequence Capture</p>
+                </div>
 
             {seqStatus?.active ? (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-lg font-medium text-white sm:text-xl">
+                  <span className="text-sm font-medium text-white">
                     Capturing {seqStatus.current_count} / {seqStatus.total_count}
                   </span>
                   <button
@@ -1655,7 +1657,7 @@ export function AllSkyCameraControlPanel() {
                     }}
                   />
                 </div>
-                <p className="text-base font-medium text-white sm:text-lg">
+                <p className="text-sm font-medium text-white">
                   Drive Folder:{' '}
                   {seqStatus.drive_url && seqStatus.folder_name ? (
                     <a

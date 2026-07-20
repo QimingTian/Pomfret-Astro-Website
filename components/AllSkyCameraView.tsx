@@ -545,7 +545,7 @@ export default function AllSkyCameraView() {
         <div className={`${streamAreaClass} min-h-[400px]`}>
           {sequenceActive ? sequenceMessage : <MJPEGStream url={streamURL} minimal />}
           {overlay}
-          <AscCompassRose />
+          {!sequenceActive ? <AscCompassRose /> : null}
         </div>
       </div>
     </div>

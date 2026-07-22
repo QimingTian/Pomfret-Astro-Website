@@ -4,6 +4,10 @@ import type { Ref, FormEvent, Dispatch, SetStateAction } from 'react'
 import { MemberAuthPanel } from '@/components/member-auth-panel'
 import type { MemberProfile } from '@/components/member-provider'
 import type { VariableStarRow } from '@/lib/variable-star-catalog'
+import {
+  VARIABLE_STAR_FILTER_OPTIONS,
+  type VariableStarFilterId,
+} from '@/lib/variable-star/filters'
 import type { MosaicDraft } from '@/lib/mosaic/framing-rectangle'
 import { VariableStarPreviewCharts, type VariableStarChartStar } from '@/app/dashboard/remote/variable-star-preview-charts'
 import { formatDurationShort } from '@/lib/remote/format'
@@ -46,17 +50,7 @@ function formatTonightXAxisHour(ms: number): string {
 type ImagingSessionTypeUi = 'dso' | 'variable_star'
 type ProjectModeTri = 'off' | 'on' | 'mosaic'
 type VariableStarLookupSource = 'catalog' | 'simbad'
-type VariableStarFilterUi =
-  | 'tonight_observable'
-  | 'high_priority'
-  | 'short_period'
-  | 'mid_period'
-  | 'long_period'
-  | 'type_na'
-  | 'type_lc'
-  | 'type_m'
-  | 'type_src'
-  | 'type_ea'
+type VariableStarFilterUi = VariableStarFilterId
 
 type ResolvedCatalogObject = {
   query: string
@@ -538,18 +532,7 @@ export function RemoteSessionForm({
                       </button>
                       {variableStarFilterDropdownOpen && (
                         <div className="absolute z-20 mt-1 w-full rounded-2xl border border-gray-300 bg-[#151616] p-2 text-sm dark:border-gray-600">
-                          {([
-                            { value: 'tonight_observable', label: 'Tonight Observable' },
-                            { value: 'high_priority', label: 'High Priority' },
-                            { value: 'short_period', label: 'Short Period' },
-                            { value: 'mid_period', label: 'Mid Period (1-100 Days)' },
-                            { value: 'long_period', label: 'Long Period (100+ Days)' },
-                            { value: 'type_na', label: 'Type: NA (Nova)' },
-                            { value: 'type_lc', label: 'Type: LC (Irregular Slow)' },
-                            { value: 'type_m', label: 'Type: M (Mira)' },
-                            { value: 'type_src', label: 'Type: SRC (Semiregular Supergiant)' },
-                            { value: 'type_ea', label: 'Type: EA (Algol Eclipsing Binary)' },
-                          ] as const).map((option) => {
+                          {VARIABLE_STAR_FILTER_OPTIONS.map((option) => {
                             const checked = variableStarFilterSelection.includes(option.value)
                             return (
                               <label

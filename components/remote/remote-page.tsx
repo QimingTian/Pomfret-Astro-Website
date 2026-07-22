@@ -9,12 +9,15 @@ import { useMember } from '@/hooks/use-member'
 import { useAdaptivePoll } from '@/hooks/use-adaptive-poll'
 import { useSiteStream } from '@/lib/use-site-stream'
 import type { VariableStarRow } from '@/lib/variable-star-catalog'
+import {
+  filterVariableStarCatalog,
+  type VariableStarFilterId,
+} from '@/lib/variable-star/filters'
 import { formatRaDecPair } from '@/lib/format-radec'
 import {
   MIN_ALTITUDE_DEG,
   OBS_LAT_DEG,
   OBS_LON_DEG,
-  TONIGHT_OBSERVABLE_MIN_COVERAGE_MS,
   altitudeSessionCoverageOk,
 } from '@/lib/target-altitude'
 import { getTonightScheduleStrip, isBeforeTonightWeatherHeadline } from '@/lib/schedule-strip'
@@ -129,17 +132,7 @@ type ResolvedCatalogObject = {
 type ImagingSessionTypeUi = 'dso' | 'variable_star'
 type ProjectModeTri = 'off' | 'on' | 'mosaic'
 type VariableStarLookupSource = 'catalog' | 'simbad'
-type VariableStarFilterUi =
-  | 'tonight_observable'
-  | 'high_priority'
-  | 'short_period'
-  | 'mid_period'
-  | 'long_period'
-  | 'type_na'
-  | 'type_lc'
-  | 'type_m'
-  | 'type_src'
-  | 'type_ea'
+type VariableStarFilterUi = VariableStarFilterId
 
 function applySexagesimalPartsFromRadec(
   raHours: number,
@@ -628,78 +621,10 @@ export default function RemotePage() {
       ),
     [variableStarCatalog]
   )
-  const displayedVariableStars = useMemo(() => {
-    const selected = new Set(variableStarFilterSelection)
-    if (selected.size === 0) return sortedVariableStars
-
-    const hasShortPeriod = selected.has('short_period')
-    const hasMidPeriod = selected.has('mid_period')
-    const hasLongPeriod = selected.has('long_period')
-    const hasAnyPeriodFilter = hasShortPeriod || hasMidPeriod || hasLongPeriod
-    const hasTypeNa = selected.has('type_na')
-    const hasTypeLc = selected.has('type_lc')
-    const hasTypeM = selected.has('type_m')
-    const hasTypeSrc = selected.has('type_src')
-    const hasTypeEa = selected.has('type_ea')
-    const hasAnyTypeFilter = hasTypeNa || hasTypeLc || hasTypeM || hasTypeSrc || hasTypeEa
-    const wantsTonightObservable = selected.has('tonight_observable')
-
-    let filtered = sortedVariableStars
-    if (selected.has('high_priority')) {
-      filtered = filtered.filter((s) => s.highPriority)
-    }
-
-    // Period filters are OR within the period group, then AND with other groups.
-    if (hasAnyPeriodFilter) {
-      filtered = filtered.filter((s) => {
-        const p = s.periodDays
-        if (p == null) return false
-        if (hasShortPeriod && p < 1) return true
-        if (hasMidPeriod && p >= 1 && p < 100) return true
-        if (hasLongPeriod && p >= 100) return true
-        return false
-      })
-    }
-
-    // Type filters are OR within the type group, then AND with other groups.
-    if (hasAnyTypeFilter) {
-      filtered = filtered.filter((s) => {
-        const t = (s.varType ?? '').toUpperCase()
-        if (hasTypeNa && t.includes('NA')) return true
-        if (hasTypeLc && t.includes('LC')) return true
-        if (hasTypeM && t === 'M') return true
-        if (hasTypeSrc && t.includes('SRC')) return true
-        if (hasTypeEa && t.includes('EA')) return true
-        return false
-      })
-    }
-
-    if (!wantsTonightObservable && !hasAnyPeriodFilter && !hasAnyTypeFilter) return filtered
-
-    const { astronomicalDuskUtc, astronomicalDawnUtc } = getTonightAstronomicalNightWindow(new Date())
-    const startMs = astronomicalDuskUtc.getTime()
-    const endMs = astronomicalDawnUtc.getTime()
-    const withCoverage = filtered
-      .map((s) => ({
-        star: s,
-        coverageMs: altitudeAllowedCoverageMsForInterval(
-          s.raHours,
-          s.decDeg,
-          startMs,
-          endMs,
-          MIN_ALTITUDE_DEG
-        ),
-      }))
-      .sort((a, b) => b.coverageMs - a.coverageMs || a.star.name.localeCompare(b.star.name))
-
-    if (wantsTonightObservable) {
-      return withCoverage
-        .filter((x) => x.coverageMs >= TONIGHT_OBSERVABLE_MIN_COVERAGE_MS)
-        .map((x) => x.star)
-    }
-
-    return withCoverage.map((x) => x.star)
-  }, [sortedVariableStars, variableStarFilterSelection])
+  const displayedVariableStars = useMemo(
+    () => filterVariableStarCatalog(sortedVariableStars, variableStarFilterSelection),
+    [sortedVariableStars, variableStarFilterSelection]
+  )
 
   const variableStarFilterKey = useMemo(
     () => [...variableStarFilterSelection].sort().join('|'),

@@ -1,0 +1,80 @@
+name: Variable Star Shortlist
+
+on:
+  schedule:
+    # Sunday 12:00 UTC — biweekly gate in check-week job
+    - cron: '0 12 * * 0'
+  workflow_dispatch: {}
+
+concurrency:
+  group: variable-star-shortlist
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  check-week:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - id: gate
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          WEEK=$(date -u +%V)
+          if [ $((10#$WEEK % 2)) -eq 0 ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "Even ISO week ${WEEK} — will build shortlist"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Odd ISO week ${WEEK} — skip"
+          fi
+
+  build-and-commit:
+    needs: check-week
+    if: needs.check-week.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build variable star shortlist
+        run: npm run build:variable-star-shortlist
+
+      - name: Validate catalog
+        run: |
+          ROWS=$(grep -c '^"' Variables/index.csv || true)
+          echo "catalog_rows=${ROWS}"
+          if [ "${ROWS}" -lt 100 ]; then
+            echo "Shortlist too small: ${ROWS}"
+            exit 1
+          fi
+
+      - name: Commit shortlist
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Variables/index.csv
+          if git diff --staged --quiet; then
+            echo "Shortlist unchanged — skipping commit"
+            exit 0
+          fi
+          git commit -m "chore(variable-stars): refresh Pomfret shortlist"
+          git pull --rebase origin main
+          git push

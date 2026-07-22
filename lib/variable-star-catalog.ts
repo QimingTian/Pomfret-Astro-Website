@@ -10,6 +10,8 @@ export type VariableStarRow = {
   minMag: number | null
   maxMag: number | null
   highPriority: boolean
+  /** Shortlist bucket tags from weekly build (e.g. type_cv|short_period). */
+  categories?: string[]
 }
 
 let cache: VariableStarRow[] | null = null
@@ -80,7 +82,10 @@ export function parsePeriodDaysField(raw: string | undefined): number | null {
 }
 
 function parseIndexCsv(text: string): VariableStarRow[] {
-  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0)
+  const lines = text.split(/\r?\n/).filter((l) => {
+    const t = l.trim()
+    return t.length > 0 && !t.startsWith('#')
+  })
   if (lines.length < 2) return []
   const header = parseCsvLine(lines[0])
   const idxName = header.findIndex((h) => h === 'Star Name')
@@ -91,6 +96,7 @@ function parseIndexCsv(text: string): VariableStarRow[] {
   const idxPeriod = header.findIndex((h) => h === 'Period (d)')
   const idxVarType = header.findIndex((h) => h === 'Var. Type')
   const idxHighPriority = header.findIndex((h) => h === 'High Priority')
+  const idxCategories = header.findIndex((h) => h === 'Categories')
   if (idxName === -1 || idxRa === -1 || idxDec === -1) return []
   const out: VariableStarRow[] = []
   const seenCoreSignatures = new Set<string>()
@@ -109,6 +115,11 @@ function parseIndexCsv(text: string): VariableStarRow[] {
     const varTypeRaw = idxVarType >= 0 ? String(cols[idxVarType] ?? '').trim() : ''
     const varType = varTypeRaw.length > 0 ? varTypeRaw.toUpperCase() : null
     const highPriority = idxHighPriority >= 0 && String(cols[idxHighPriority] ?? '').trim().length > 0
+    const categoriesRaw = idxCategories >= 0 ? String(cols[idxCategories] ?? '').trim() : ''
+    const categories =
+      categoriesRaw.length > 0
+        ? categoriesRaw.split('|').map((c) => c.trim()).filter((c) => c.length > 0)
+        : undefined
     const coreSignature = [
       name,
       raHours.toFixed(8),
@@ -119,7 +130,7 @@ function parseIndexCsv(text: string): VariableStarRow[] {
     ].join('|')
     if (seenCoreSignatures.has(coreSignature)) continue
     seenCoreSignatures.add(coreSignature)
-    out.push({ name, raHours, decDeg, varType, periodDays, minMag, maxMag, highPriority })
+    out.push({ name, raHours, decDeg, varType, periodDays, minMag, maxMag, highPriority, categories })
   }
   return out
 }

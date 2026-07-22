@@ -293,10 +293,15 @@ export async function isEmergencyStopStopping(): Promise<boolean> {
   return state?.phase === 'stopping'
 }
 
+export type ArmEmergencyStopResult = {
+  state: EmergencyStopState
+  newlyArmed: boolean
+}
+
 export async function armEmergencyStop(
   actor: ImagingAdminActor | string,
   heldSessionIds: string[] = []
-): Promise<EmergencyStopState> {
+): Promise<ArmEmergencyStopResult> {
   const resolvedActor: ImagingAdminActor =
     typeof actor === 'string'
       ? { displayName: actor, userId: '', username: actor, email: '' }
@@ -312,9 +317,21 @@ export async function armEmergencyStop(
     requestedByEmail: resolvedActor.email || null,
     heldSessionIds: [...heldSessionIds],
   }
-  await compareAndWriteState(() => state)
+  const result = await compareAndWriteState((current) => {
+    if (current?.phase === 'stopping' || current?.phase === 'stopped') {
+      return 'abort'
+    }
+    return state
+  })
+  if (result !== 'ok') {
+    const existing = await readState()
+    if (existing) {
+      return { state: existing, newlyArmed: false }
+    }
+    return { state, newlyArmed: false }
+  }
   await notifyEstopChanged(true)
-  return state
+  return { state, newlyArmed: true }
 }
 
 export async function updateEmergencyStopHeldSessionIds(

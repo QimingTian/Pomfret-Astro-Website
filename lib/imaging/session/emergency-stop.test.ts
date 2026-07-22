@@ -120,7 +120,7 @@ test('emergency stop async state machine', async (t) => {
     await resetEmergencyStopForTests()
     assert.equal(await isEmergencyStopBlocking(), false)
 
-    await armEmergencyStop('James Tian', ['sess-1'])
+    await armEmergencyStop('James Tian', ['sess-1']).then((r) => r.state)
     assert.equal(await isEmergencyStopBlocking(), true)
     assert.equal(await isEmergencyStopStopping(), true)
 
@@ -134,7 +134,7 @@ test('emergency stop async state machine', async (t) => {
 
   await t.test('markEmergencyStopDelivered advances progress to 66%', async () => {
     await resetEmergencyStopForTests()
-    const armed = await armEmergencyStop('James Tian')
+    const { state: armed } = await armEmergencyStop('James Tian')
     assert.equal(await markEmergencyStopDelivered(armed.queueId), true)
     assert.equal(await markEmergencyStopDelivered(armed.queueId), false)
     const publicState = await getEmergencyStopPublicState(true)
@@ -146,7 +146,7 @@ test('emergency stop async state machine', async (t) => {
     if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) return
 
     await resetEmergencyStopForTests()
-    const armed = await armEmergencyStop('James Tian', [])
+    const { state: armed } = await armEmergencyStop('James Tian', [])
     ;(globalThis as GlobalWithEstop).__pomfret_emergency_stop__ = {
       ...armed,
       deliveredAt: undefined,
@@ -163,7 +163,7 @@ test('emergency stop async state machine', async (t) => {
     assert.equal(idleConnected.phase, 'idle')
     assert.equal(idleConnected.canArm, true)
 
-    await armEmergencyStop('James Tian')
+    await armEmergencyStop('James Tian').then((r) => r.state)
     const stopping = await getEmergencyStopPublicState(true)
     assert.equal(stopping.canArm, false)
     await resetEmergencyStopForTests()
@@ -171,16 +171,31 @@ test('emergency stop async state machine', async (t) => {
 
   await t.test('clearEmergencyStopAfterManualUnlock returns held ids and clears state', async () => {
     await resetEmergencyStopForTests()
-    await armEmergencyStop('admin', ['a', 'b'])
+    await armEmergencyStop('admin', ['a', 'b']).then((r) => r.state)
     const cleared = await clearEmergencyStopAfterManualUnlock()
     assert.deepEqual(cleared?.heldSessionIds, ['a', 'b'])
     assert.equal(await isEmergencyStopBlocking(), false)
     await resetEmergencyStopForTests()
   })
 
+  await t.test('armEmergencyStop refuses to overwrite stopping or stopped state', async () => {
+    await resetEmergencyStopForTests()
+    const first = await armEmergencyStop('James Tian')
+    assert.equal(first.newlyArmed, true)
+    await markEmergencyStopCompleted(first.state.queueId)
+    assert.equal(await isEmergencyStopStopped(), true)
+
+    const second = await armEmergencyStop('Weather Safety (auto)')
+    assert.equal(second.newlyArmed, false)
+    assert.equal(second.state.queueId, first.state.queueId)
+    assert.equal(second.state.phase, 'stopped')
+    assert.equal(await isEmergencyStopStopped(), true)
+    await resetEmergencyStopForTests()
+  })
+
   await t.test('resolveSessionProgressQueueId routes Dome Closed to active ESTOP', async () => {
     await resetEmergencyStopForTests()
-    const armed = await armEmergencyStop('admin')
+    const { state: armed } = await armEmergencyStop('admin')
     const queueId = await resolveSessionProgressQueueId({ text: 'Dome Closed' })
     assert.equal(queueId, armed.queueId)
     await resetEmergencyStopForTests()

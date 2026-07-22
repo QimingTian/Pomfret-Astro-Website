@@ -56,7 +56,15 @@ export async function POST(request: NextRequest) {
   const previous = await getEmergencyStopState()
   const heldSessionIds = await applyEmergencyStopHolds()
   const actor = imagingAdminActorFromUser(admin.user)
-  const state = await armEmergencyStop(actor, heldSessionIds)
+  const { state, newlyArmed } = await armEmergencyStop(actor, heldSessionIds)
+  if (!newlyArmed) {
+    const publicState = await getEmergencyStopPublicState(agentConnected)
+    return withImagingCors({
+      ok: true as const,
+      ...publicState,
+      alreadyBlocking: true,
+    })
+  }
   if (heldSessionIds.length !== state.heldSessionIds.length) {
     await updateEmergencyStopHeldSessionIds(heldSessionIds)
   }

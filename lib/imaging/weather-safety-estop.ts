@@ -390,7 +390,10 @@ async function armWeatherSafetyEmergencyStop(
   threat: WeatherSafetyThreat
 ): Promise<WeatherSafetyArmResult> {
   const heldSessionIds = await applyEmergencyStopHolds()
-  const state = await armEmergencyStop(WEATHER_SAFETY_ACTOR, heldSessionIds)
+  const { state, newlyArmed } = await armEmergencyStop(WEATHER_SAFETY_ACTOR, heldSessionIds)
+  if (!newlyArmed) {
+    return { armed: false, skipped: 'already_blocking', threat }
+  }
   if (heldSessionIds.length !== state.heldSessionIds.length) {
     await updateEmergencyStopHeldSessionIds(heldSessionIds)
   }

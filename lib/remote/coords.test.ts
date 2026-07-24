@@ -31,3 +31,26 @@ test('parseCoordsFromFormParts rejects non-numeric Dec', () => {
   if (r.ok) return
   assert.match(r.message, /Dec requires numeric/)
 })
+
+test('sexagesimalPartsFromRadec carries 60″ from float declination (Sh2-129)', () => {
+  const dec = 59 + 57 / 60
+  const p = sexagesimalPartsFromRadec(21.196667, dec)
+  assert.equal(p.decSecondPart, '0')
+  const r = parseCoordsFromFormParts(
+    p.raHourPart,
+    p.raMinutePart,
+    p.raSecondPart,
+    p.decSign,
+    p.decDegreePart,
+    p.decMinutePart,
+    p.decSecondPart
+  )
+  assert.equal(r.ok, true)
+})
+
+test('parseCoordsFromFormParts carries 59°57′60″ to 59°58′0″', () => {
+  const r = parseCoordsFromFormParts('21', '11', '48', '+', '59', '57', '60')
+  assert.equal(r.ok, true)
+  if (!r.ok) return
+  assert.equal(r.decDeg, 59.96666667)
+})

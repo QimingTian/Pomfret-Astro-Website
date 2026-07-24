@@ -1662,7 +1662,7 @@ export default function RemotePage() {
         const frames = Math.round(Number(plan.count))
         const exposure = Math.round(Number(plan.exposureSeconds))
         if (!filterName) return null
-        if (!Number.isFinite(frames) || frames < 1 || frames > 500) return null
+        if (!Number.isFinite(frames) || frames < 1) return null
         if (!Number.isFinite(exposure) || exposure < 1 || exposure > 3600) return null
         normalized.push({ filterName, count: frames, exposureSeconds: exposure })
       }
@@ -1717,7 +1717,7 @@ export default function RemotePage() {
       const frames = Math.round(Number(plan.count))
       const exposure = Math.round(Number(plan.exposureSeconds))
       if (!filterName) return false
-      if (!Number.isFinite(frames) || frames < 1 || frames > 500) return false
+      if (!Number.isFinite(frames) || frames < 1) return false
       if (!Number.isFinite(exposure) || exposure < 1 || exposure > 3600) return false
     }
     return true
@@ -2590,8 +2590,8 @@ export default function RemotePage() {
           setSubmitError(`Filter name is required for each row${where}.`)
           return null
         }
-        if (!Number.isFinite(frames) || frames < 1 || frames > 500) {
-          setSubmitError(`Frame count for ${filterName}${where} must be between 1 and 500.`)
+        if (!Number.isFinite(frames) || frames < 1) {
+          setSubmitError(`Frame count for ${filterName}${where} must be at least 1.`)
           return null
         }
         if (!Number.isFinite(exposure) || exposure < 1 || exposure > 3600) {

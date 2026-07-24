@@ -579,8 +579,8 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
     if (!Number.isFinite(plan.exposureSeconds) || plan.exposureSeconds < 1 || plan.exposureSeconds > 3600) {
       return { error: 'Exposure must be between 1 and 3600 seconds' }
     }
-    if (!Number.isFinite(plan.count) || plan.count < 1 || plan.count > 500) {
-      return { error: 'Count must be between 1 and 500' }
+    if (!Number.isFinite(plan.count) || plan.count < 1) {
+      return { error: 'Count must be at least 1' }
     }
   }
 
@@ -849,8 +849,8 @@ export async function updatePendingRequestById(
     if (!Number.isFinite(plan.exposureSeconds) || plan.exposureSeconds < 1 || plan.exposureSeconds > 3600) {
       return { error: 'Exposure must be between 1 and 3600 seconds' }
     }
-    if (!Number.isFinite(plan.count) || plan.count < 1 || plan.count > 500) {
-      return { error: 'Count must be between 1 and 500' }
+    if (!Number.isFinite(plan.count) || plan.count < 1) {
+      return { error: 'Count must be at least 1' }
     }
   }
 

@@ -19,6 +19,7 @@ import {
   OBS_LAT_DEG,
   OBS_LON_DEG,
   altitudeSessionCoverageOk,
+  pomfretTargetObservabilityError,
 } from '@/lib/target-altitude'
 import { getTonightScheduleStrip, isBeforeTonightWeatherHeadline } from '@/lib/schedule-strip'
 import {
@@ -365,8 +366,6 @@ export default function RemotePage() {
     Array<{ id: string; startIso: string; endIso: string; description?: string }>
   >([])
   const [statusLoadError, setStatusLoadError] = useState<string | null>(null)
-  const [showClosedModal, setShowClosedModal] = useState(false)
-  const [showAltitudeModal, setShowAltitudeModal] = useState(false)
   const [showSaveRemoteSessionModal, setShowSaveRemoteSessionModal] = useState(false)
   const [showRunRemoteSessionModal, setShowRunRemoteSessionModal] = useState(false)
   const [saveModalName, setSaveModalName] = useState('')
@@ -374,7 +373,6 @@ export default function RemotePage() {
   const [runModalName, setRunModalName] = useState('')
   const [runModalError, setRunModalError] = useState<string | null>(null)
   const [cloudSavedSessions, setCloudSavedSessions] = useState<MemberSavedSessionApiEntry[]>([])
-  const [lastComputedAltitude, setLastComputedAltitude] = useState<number | null>(null)
   const [queueItems, setQueueItems] = useState<
     Array<{
       id: string
@@ -2577,10 +2575,7 @@ export default function RemotePage() {
     return { raHours: r.raHours, decDeg: r.decDeg }
   }
 
-  async function submitRequest(
-    whenClosedBehavior: 'reject' | 'queue_until_ready',
-    coords: { raHours: number; decDeg: number }
-  ) {
+  async function submitRequest(coords: { raHours: number; decDeg: number }) {
     const normalizeFormPlans = (
       plans: FilterPlanFormRow[],
       panelLabel?: string,
@@ -2656,6 +2651,22 @@ export default function RemotePage() {
       return
     }
 
+    if (mosaicMode && mosaicDraft?.panels?.length) {
+      for (const panel of mosaicDraft.panels) {
+        const obsErr = pomfretTargetObservabilityError(panel.decDeg)
+        if (obsErr) {
+          setSubmitError(`${panel.name}: ${obsErr}`)
+          return
+        }
+      }
+    } else {
+      const obsErr = pomfretTargetObservabilityError(coords.decDeg)
+      if (obsErr) {
+        setSubmitError(obsErr)
+        return
+      }
+    }
+
     if (sessionType === 'variable_star') {
       if (!variableStarDurationPick || !variableStarDurationPick.coordsOk) {
         setSubmitError('Enter valid RA and Dec for a variable star session.')
@@ -2700,7 +2711,7 @@ export default function RemotePage() {
         email: loggedInContact.email,
         raHours: coords.raHours,
         decDeg: coords.decDeg,
-        whenClosedBehavior,
+        whenClosedBehavior: 'queue_until_ready',
         ...(isLoggedIn && !sessionPassword.trim() ? {} : { sessionPassword }),
         outputMode: outputMode === 'none' ? 'none' : 'raw_zip',
         cameraCoolingTempC,
@@ -2752,9 +2763,7 @@ export default function RemotePage() {
           ? typeof data.message === 'string'
             ? data.message
             : 'Project submitted for administrator approval (over 30 hours total).'
-          : whenClosedBehavior === 'queue_until_ready'
-            ? 'Session accepted. It will be available for download when observatory is Ready.'
-            : 'Session started successfully.'
+          : 'Session submitted. It will appear in Current Sessions when scheduled.'
     )
     await refreshQueue()
   }
@@ -2891,30 +2900,7 @@ export default function RemotePage() {
     try {
       const coords = await parseCoordinates()
       if (!coords) return
-      if (editingSessionId) {
-        await submitRequest('reject', coords)
-        return
-      }
-
-      const visRes = await fetch('/api/imaging/visibility', {
-        method: 'POST',
-        headers: jsonHeaders,
-        body: JSON.stringify(coords),
-      })
-      const visData = await visRes.json().catch(() => ({}))
-      if (visRes.ok && visData?.ok === true) {
-        setLastComputedAltitude(typeof visData.altitudeDeg === 'number' ? visData.altitudeDeg : null)
-        if (visData.visible !== true) {
-          setShowAltitudeModal(true)
-          return
-        }
-      }
-
-      if (status !== 'ready') {
-        setShowClosedModal(true)
-        return
-      }
-      await submitRequest('reject', coords)
+      await submitRequest(coords)
     } finally {
       setSubmitting(false)
     }
@@ -3381,15 +3367,6 @@ export default function RemotePage() {
         setRunModalError={setRunModalError}
         setShowRunRemoteSessionModal={setShowRunRemoteSessionModal}
         applyRemoteSavedForm={applyRemoteSavedForm}
-        showClosedModal={showClosedModal}
-        status={status}
-        setShowClosedModal={setShowClosedModal}
-        setSubmitting={setSubmitting}
-        parseCoordinates={parseCoordinates}
-        submitRequest={submitRequest}
-        showAltitudeModal={showAltitudeModal}
-        lastComputedAltitude={lastComputedAltitude}
-        setShowAltitudeModal={setShowAltitudeModal}
       />
 
     </div>

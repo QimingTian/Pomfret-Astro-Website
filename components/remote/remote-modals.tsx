@@ -6,7 +6,7 @@ import { formatRaDecPair } from '@/lib/format-radec'
 import { formatDurationShort } from '@/lib/remote/format'
 import { queueStatusLabel, isSessionFailedTerminalLine } from '@/lib/remote/queue-status'
 import { nightDisplayLabel } from '@/lib/remote/night-label'
-import { queueStatusBadgeClass, type ObservatoryStatus } from '@/lib/remote/ui-status'
+import { queueStatusBadgeClass } from '@/lib/remote/ui-status'
 import {
   loadMemberSavedSessionByName,
   saveMemberSavedSession,
@@ -144,18 +144,6 @@ export type RemoteModalsProps = {
   setRunModalError: Dispatch<SetStateAction<string | null>>
   setShowRunRemoteSessionModal: Dispatch<SetStateAction<boolean>>
   applyRemoteSavedForm: (form: RemoteSavedSessionFormV1) => void
-  showClosedModal: boolean
-  status: ObservatoryStatus
-  setShowClosedModal: Dispatch<SetStateAction<boolean>>
-  setSubmitting: Dispatch<SetStateAction<boolean>>
-  parseCoordinates: () => Promise<{ raHours: number; decDeg: number } | null>
-  submitRequest: (
-    whenClosedBehavior: 'reject' | 'queue_until_ready',
-    coords: { raHours: number; decDeg: number }
-  ) => Promise<void>
-  showAltitudeModal: boolean
-  lastComputedAltitude: number | null
-  setShowAltitudeModal: Dispatch<SetStateAction<boolean>>
 }
 
 export function RemoteModals({
@@ -221,15 +209,6 @@ export function RemoteModals({
   setRunModalError,
   setShowRunRemoteSessionModal,
   applyRemoteSavedForm,
-  showClosedModal,
-  status,
-  setShowClosedModal,
-  setSubmitting,
-  parseCoordinates,
-  submitRequest,
-  showAltitudeModal,
-  lastComputedAltitude,
-  setShowAltitudeModal,
 }: RemoteModalsProps) {
   return (
     <>
@@ -858,109 +837,6 @@ export function RemoteModals({
         </div>
       )}
 
-      {showClosedModal && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-          <div className="w-full max-w-lg rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-6 space-y-4">
-            <h2 className="text-lg font-semibold text-apple-dark dark:text-white">Observatory Closed</h2>
-            <p className="text-sm text-gray-600 dark:text-gray-400">
-              Choose how to continue:
-            </p>
-            <div className="space-y-2">
-              <button
-                type="button"
-                className="w-full text-left rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-3 text-sm"
-                onClick={() => {
-                  setShowClosedModal(false)
-                  setSubmitError(
-                    status === 'busy_in_use'
-                      ? 'Observatory is busy. Session was not started.'
-                      : status === 'disconnected'
-                        ? 'Observatory is disconnected. Session was not started.'
-                      : 'Observatory is closed. Session was not started.'
-                  )
-                }}
-              >
-                1. {status === 'busy_in_use'
-                  ? 'Observatory busy: do not start now.'
-                  : status === 'disconnected'
-                    ? 'Observatory disconnected: do not start now.'
-                    : 'Observatory closed: cannot start now.'}
-              </button>
-              <button
-                type="button"
-                className="w-full text-left rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-3 text-sm"
-                onClick={async () => {
-                  setShowClosedModal(false)
-                  setSubmitting(true)
-                  setSubmitError(null)
-                  try {
-                    const coords = await parseCoordinates()
-                    if (!coords) return
-                    await submitRequest('queue_until_ready', coords)
-                  } finally {
-                    setSubmitting(false)
-                  }
-                }}
-              >
-                2. {status === 'busy_in_use'
-                  ? 'Start now, and wait until the previous task is finished.'
-                  : status === 'disconnected'
-                    ? 'Start now, and wait until the agent reconnects and observatory returns to Ready.'
-                  : 'Start now, and wait until observatory is Ready before it is available for download.'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {showAltitudeModal && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-          <div className="w-full max-w-lg rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-6 space-y-4">
-            <h2 className="text-lg font-semibold text-apple-dark dark:text-white">Target Below 30°</h2>
-            <p className="text-sm text-gray-600 dark:text-gray-400">
-              {lastComputedAltitude != null
-                ? `Current altitude is ${lastComputedAltitude.toFixed(2)}° (< 30°).`
-                : 'Current altitude is below 30°.'}
-            </p>
-            <div className="space-y-2">
-              <button
-                type="button"
-                className="w-full text-left rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-3 text-sm"
-                onClick={() => {
-                  setShowAltitudeModal(false)
-                  setSubmitError('Target below 30°. Session was not started.')
-                }}
-              >
-                1. Do not start.
-              </button>
-              <button
-                type="button"
-                className="w-full text-left rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-3 text-sm"
-                onClick={async () => {
-                  setShowAltitudeModal(false)
-                  setSubmitting(true)
-                  setSubmitError(null)
-                  try {
-                    const coords = await parseCoordinates()
-                    if (!coords) return
-                    if (status !== 'ready') {
-                      setShowClosedModal(true)
-                      return
-                    }
-                    await submitRequest('reject', coords)
-                    setSubmitSuccess(
-                      'Session started. It will be downloadable only when altitude reaches 30°+.'
-                    )
-                  } finally {
-                    setSubmitting(false)
-                  }
-                }}
-              >
-                2. Start now and wait until altitude reaches 30°.
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   )
 }

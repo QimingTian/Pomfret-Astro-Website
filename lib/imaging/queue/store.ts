@@ -19,6 +19,7 @@ import {
   altitudeCoverageMsAtMinAltitude,
   altitudeSessionCoverageOk,
   firstAltitudeAllowedTimeMs,
+  pomfretTargetObservabilityError,
   requiredAltitudeCoverageMs,
 } from '@/lib/target-altitude'
 import { allFiltersMoonOk } from '@/lib/moon-avoidance'
@@ -521,6 +522,22 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
     return { error: 'Dec (degrees) must be between -90 and 90' }
   }
 
+  const mosaicModeEarly = input.sequenceTemplate !== 'variable_star' && input.mosaicMode === true
+  if (mosaicModeEarly && Array.isArray(input.mosaicPanels) && input.mosaicPanels.length > 0) {
+    for (const panel of input.mosaicPanels) {
+      const panelDec = Number(panel.decDeg)
+      if (!Number.isFinite(panelDec)) continue
+      const obsErr = pomfretTargetObservabilityError(panelDec)
+      if (obsErr) {
+        const label = typeof panel.name === 'string' && panel.name.trim() ? panel.name.trim() : `Panel ${panel.id}`
+        return { error: `${label}: ${obsErr}` }
+      }
+    }
+  } else {
+    const obsErr = pomfretTargetObservabilityError(decDeg)
+    if (obsErr) return { error: obsErr }
+  }
+
   const exposureSeconds = Math.round(Number(input.exposureSeconds))
   const count = Math.round(Number(input.count))
 
@@ -781,6 +798,23 @@ export async function updatePendingRequestById(
   if (input.decDeg == null || String(input.decDeg).trim() === '') return { error: 'Dec is required' }
   const decDeg = Number(input.decDeg)
   if (!Number.isFinite(decDeg) || decDeg < -90 || decDeg > 90) return { error: 'Dec (degrees) must be between -90 and 90' }
+
+  const mosaicModeEarly =
+    input.sequenceTemplate !== 'variable_star' && input.mosaicMode === true
+  if (mosaicModeEarly && Array.isArray(input.mosaicPanels) && input.mosaicPanels.length > 0) {
+    for (const panel of input.mosaicPanels) {
+      const panelDec = Number(panel.decDeg)
+      if (!Number.isFinite(panelDec)) continue
+      const obsErr = pomfretTargetObservabilityError(panelDec)
+      if (obsErr) {
+        const label = typeof panel.name === 'string' && panel.name.trim() ? panel.name.trim() : `Panel ${panel.id}`
+        return { error: `${label}: ${obsErr}` }
+      }
+    }
+  } else {
+    const obsErr = pomfretTargetObservabilityError(decDeg)
+    if (obsErr) return { error: obsErr }
+  }
 
   const exposureSeconds = Math.round(Number(input.exposureSeconds))
   const count = Math.round(Number(input.count))

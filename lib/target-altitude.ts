@@ -65,6 +65,44 @@ export function isAltitudeAllowed(raHours: number, decDeg: number): {
   }
 }
 
+/** Upper culmination altitude for a fixed declination at the observatory latitude. */
+export function maximumAltitudeDegAtMeridian(decDeg: number, latDeg = OBS_LAT_DEG): number {
+  return 90 - Math.abs(latDeg - decDeg)
+}
+
+/** Minimum declination (deg) for meridian altitude >= minAltitudeDeg at the site. */
+export function minDecDegForMinAltitudeAtMeridian(
+  minAltitudeDeg = MIN_ALTITUDE_DEG,
+  latDeg = OBS_LAT_DEG
+): number {
+  return latDeg - (90 - minAltitudeDeg)
+}
+
+export function targetNeverRisesAtSite(decDeg: number, latDeg = OBS_LAT_DEG): boolean {
+  return maximumAltitudeDegAtMeridian(decDeg, latDeg) <= 0
+}
+
+export function targetObservableFromSite(
+  decDeg: number,
+  minAltitudeDeg = MIN_ALTITUDE_DEG,
+  latDeg = OBS_LAT_DEG
+): boolean {
+  return maximumAltitudeDegAtMeridian(decDeg, latDeg) >= minAltitudeDeg - 1e-6
+}
+
+/** Hard reject for targets that cannot meet Pomfret's minimum altitude rule. */
+export function pomfretTargetObservabilityError(decDeg: number): string | null {
+  if (!Number.isFinite(decDeg)) return 'Invalid declination.'
+  if (targetNeverRisesAtSite(decDeg)) {
+    return 'This target never rises at Pomfret Observatory.'
+  }
+  if (!targetObservableFromSite(decDeg)) {
+    const maxAlt = maximumAltitudeDegAtMeridian(decDeg)
+    return `This target only reaches ${maxAlt.toFixed(1)}° altitude at Pomfret (minimum ${MIN_ALTITUDE_DEG}° required).`
+  }
+  return null
+}
+
 /**
  * Approximate allowed-altitude coverage in [startMs, endMs) using fixed time buckets.
  * A bucket counts as allowed when altitude at its midpoint is >= MIN_ALTITUDE_DEG.

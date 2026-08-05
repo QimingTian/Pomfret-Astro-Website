@@ -13,16 +13,8 @@ import {
   emitSiteSessionsChanged,
   queueStatusSignature,
 } from '@/lib/imaging/site-events'
-import { getTonightAstronomicalNightWindow, getTonightSchedulingWindow } from '@/lib/sunrise-window'
-import {
-  altitudeAllowedCoverageMs,
-  altitudeCoverageMsAtMinAltitude,
-  altitudeSessionCoverageOk,
-  firstAltitudeAllowedTimeMs,
-  pomfretTargetObservabilityError,
-  requiredAltitudeCoverageMs,
-} from '@/lib/target-altitude'
-import { allFiltersMoonOk } from '@/lib/moon-avoidance'
+import { getTonightAstronomicalNightWindow } from '@/lib/sunrise-window'
+import { altitudeCoverageMsAtMinAltitude, pomfretTargetObservabilityError } from '@/lib/target-altitude'
 import { formatRaDecTargetLabel } from '@/lib/format-radec'
 
 /** Queue lifecycle: mutually exclusive (no separate scheduleStatus flag). */
@@ -469,39 +461,6 @@ function targetLabelFromCoords(raHours: number, decDeg: number): string {
   return formatRaDecTargetLabel(raHours, decDeg)
 }
 
-function canFitInIdealNight(
-  raHours: number,
-  decDeg: number,
-  durationMs: number,
-  windowStartMs: number,
-  windowEndMs: number,
-  moonFilterPlans?: Array<{ filterName: string }>
-): boolean {
-  if (!Number.isFinite(durationMs) || durationMs <= 0) return false
-  if (windowEndMs - windowStartMs < durationMs) return false
-  const latestStartMs = windowEndMs - durationMs
-  const STEP_MS = 5 * 60 * 1000
-
-  // Search possible starts under ideal conditions: no weather limits, no queue blockers.
-  // Still enforce target >= 30deg for the full session duration (100% altitude coverage),
-  // and — when filter plans are supplied — moon avoidance for every filter over the window.
-  let cursor = windowStartMs
-  while (cursor <= latestStartMs) {
-    const startMs = firstAltitudeAllowedTimeMs(raHours, decDeg, cursor, latestStartMs)
-    if (startMs == null) return false
-    const endMs = startMs + durationMs
-    if (endMs > windowEndMs) return false
-    if (
-      altitudeSessionCoverageOk(raHours, decDeg, startMs, endMs) &&
-      (!moonFilterPlans?.length || allFiltersMoonOk(moonFilterPlans, raHours, decDeg, startMs, endMs))
-    ) {
-      return true
-    }
-    cursor = startMs + STEP_MS
-  }
-  return false
-}
-
 export async function createRequest(input: CreateImagingInput): Promise<ImagingRequest | { error: string }> {
   await ensureLoadedFromDisk()
   const mem = getMemory()
@@ -643,52 +602,9 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
       : dsoSessionDurationSeconds({ filterPlans: normalizedFilterPlans })
 
   if (!projectMode) {
-    const { nauticalDuskUtc, nauticalDawnUtc } = getTonightSchedulingWindow(new Date())
-    const nightAltitudeAllowedMs = altitudeAllowedCoverageMs(
-      raHours,
-      decDeg,
-      nauticalDuskUtc.getTime(),
-      nauticalDawnUtc.getTime()
-    )
-    const requiredAltitudeAllowedMs = requiredAltitudeCoverageMs(estimatedDurationSeconds * 1000)
-    if (nightAltitudeAllowedMs < requiredAltitudeAllowedMs) {
-      return {
-        error:
-          'Session is too long for this target altitude profile tonight. Please shorten it.',
-      }
-    }
-
     const tonightWindow = getTonightAstronomicalNightWindow(new Date())
     if (estimatedDurationSeconds > tonightWindow.durationSeconds) {
       return { error: 'Session is too long to finish in one night. Please shorten it.' }
-    }
-
-    const durationMs = estimatedDurationSeconds * 1000
-    const idealWindowStartMs = nauticalDuskUtc.getTime()
-    const idealWindowEndMs = nauticalDawnUtc.getTime()
-    const idealNightFeasible = canFitInIdealNight(raHours, decDeg, durationMs, idealWindowStartMs, idealWindowEndMs)
-    if (!idealNightFeasible) {
-      return {
-        error:
-          'Session has no valid imaging window tonight even under ideal conditions (clear weather and empty schedule). Please shorten it or change target.',
-      }
-    }
-
-    if (sequenceTemplate !== 'variable_star') {
-      const moonFeasible = canFitInIdealNight(
-        raHours,
-        decDeg,
-        durationMs,
-        idealWindowStartMs,
-        idealWindowEndMs,
-        normalizedFilterPlans
-      )
-      if (!moonFeasible) {
-        return {
-          error:
-            'The Moon is too close to this target tonight for the requested filter(s). Please image after the Moon moves away, choose narrowband filters, or pick another target.',
-        }
-      }
     }
   }
 
@@ -893,48 +809,9 @@ export async function updatePendingRequestById(
       : dsoSessionDurationSeconds({ filterPlans: normalizedFilterPlans })
   const projectMode = current.projectMode === true || input.mosaicMode === true || input.projectMode === true
   if (!projectMode) {
-    const { nauticalDuskUtc, nauticalDawnUtc } = getTonightSchedulingWindow(new Date())
-    const nightAltitudeAllowedMs = altitudeAllowedCoverageMs(
-      raHours,
-      decDeg,
-      nauticalDuskUtc.getTime(),
-      nauticalDawnUtc.getTime()
-    )
-    if (nightAltitudeAllowedMs < requiredAltitudeCoverageMs(estimatedDurationSeconds * 1000)) {
-      return { error: 'Session is too long for this target altitude profile tonight. Please shorten it.' }
-    }
     const tonightWindow = getTonightAstronomicalNightWindow(new Date())
     if (estimatedDurationSeconds > tonightWindow.durationSeconds) {
       return { error: 'Session is too long to finish in one night. Please shorten it.' }
-    }
-    const idealNightFeasible = canFitInIdealNight(
-      raHours,
-      decDeg,
-      estimatedDurationSeconds * 1000,
-      nauticalDuskUtc.getTime(),
-      nauticalDawnUtc.getTime()
-    )
-    if (!idealNightFeasible) {
-      return {
-        error:
-          'Session has no valid imaging window tonight even under ideal conditions (clear weather and empty schedule). Please shorten it or change target.',
-      }
-    }
-    if (sequenceTemplate !== 'variable_star') {
-      const moonFeasible = canFitInIdealNight(
-        raHours,
-        decDeg,
-        estimatedDurationSeconds * 1000,
-        nauticalDuskUtc.getTime(),
-        nauticalDawnUtc.getTime(),
-        normalizedFilterPlans
-      )
-      if (!moonFeasible) {
-        return {
-          error:
-            'The Moon is too close to this target tonight for the requested filter(s). Please image after the Moon moves away, choose narrowband filters, or pick another target.',
-        }
-      }
     }
   }
 

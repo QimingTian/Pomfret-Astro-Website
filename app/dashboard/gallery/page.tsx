@@ -4,10 +4,10 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { glassPillToggleActiveMd, glassPillToggleIdleMd } from '@/lib/glass-ui'
 
-type GalleryImage = { file: string; thumbFile?: string; description: string; flagship?: boolean }
+type GalleryImage = { file: string; description: string; flagship?: boolean }
 
 const DEEP_SKY_IMAGES: GalleryImage[] = [
-  { file: 'photo6.webp', thumbFile: 'photo6-thumb.webp', description: 'W80 | 70h | SHO', flagship: true },
+  { file: 'photo6.webp', description: 'W80 | 70h | SHO', flagship: true },
   { file: 'photo1.webp', description: 'M31 | 14.08h | LRGB' },
   { file: 'photo2.webp', description: 'IC1805 | 35h | SHO' },
   { file: 'photo3.webp', description: 'Markarians Chain | 14.16h RGB + 11h Ha | HaRGB' },
@@ -33,7 +33,6 @@ export default function DataPage() {
   const entries = category === 'deep_sky' ? DEEP_SKY_IMAGES : PHOTOMETRY_IMAGES
   const images = entries.map((entry) => ({
     src: `/gallery/${entry.file}`,
-    thumbSrc: `/gallery/${entry.thumbFile ?? entry.file}`,
     alt: entry.description,
     description: entry.description,
     flagship: entry.flagship === true,
@@ -95,7 +94,7 @@ export default function DataPage() {
             <div className="grid gap-0 grid-cols-1 sm:grid-cols-3">
               {images.map((img, index) => (
                 <div
-                  key={img.thumbSrc}
+                  key={img.src}
                   className={
                     img.flagship
                       ? 'relative overflow-visible sm:col-span-2 sm:row-span-2'
@@ -115,10 +114,8 @@ export default function DataPage() {
                       }
                     >
                       <img
-                        src={img.thumbSrc}
+                        src={img.src}
                         alt={img.alt}
-                        loading="lazy"
-                        decoding="async"
                         className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-105 group-hover:z-10"
                       />
                     </div>
@@ -142,8 +139,6 @@ export default function DataPage() {
             <img
               src={selectedImage.src}
               alt={selectedImage.alt}
-              loading="eager"
-              decoding="async"
               className="max-h-[70vh] w-auto max-w-full object-contain"
               onClick={(e) => e.stopPropagation()}
             />

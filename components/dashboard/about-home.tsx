@@ -267,8 +267,8 @@ export function AboutHome() {
           <div className="relative w-full bg-black">
             <div className="absolute inset-0">
               <img
-                src="/about/ngc7000-complex-sho.jpg"
-                alt="Deep-sky narrowband imaging from Pomfret"
+                src="/about/ngc7000-complex-mosaic.webp"
+                alt="NGC7000 North America Nebula mosaic from Pomfret"
                 className="h-full w-full object-cover"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black via-black/45 to-transparent" />

@@ -4,17 +4,18 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { glassPillToggleActiveMd, glassPillToggleIdleMd } from '@/lib/glass-ui'
 
-type GalleryImage = { file: string; description: string }
+type GalleryImage = { file: string; thumbFile?: string; description: string; flagship?: boolean }
 
 const DEEP_SKY_IMAGES: GalleryImage[] = [
-  { file: 'photo1.png', description: 'M31 | 14.08h | LRGB' },
-  { file: 'photo2.png', description: 'IC1805 | 35h | SHO' },
-  { file: 'photo3.png', description: 'Markarians Chain | 14.16h RGB + 11h Ha | HaRGB' },
-  { file: 'photo4.png', description: 'M101 | 12.5h LRGB + 5h Ha | HaLRGB' },
+  { file: 'photo6.webp', thumbFile: 'photo6-thumb.webp', description: 'W80 | 70h | SHO', flagship: true },
+  { file: 'photo1.webp', description: 'M31 | 14.08h | LRGB' },
+  { file: 'photo2.webp', description: 'IC1805 | 35h | SHO' },
+  { file: 'photo3.webp', description: 'Markarians Chain | 14.16h RGB + 11h Ha | HaRGB' },
+  { file: 'photo4.webp', description: 'M101 | 12.5h LRGB + 5h Ha | HaLRGB' },
 ]
 
 const PHOTOMETRY_IMAGES: GalleryImage[] = [
-  { file: 'photo5.png', description: 'V2563_Cyg_12.45-12.77:_Period_0.530922' },
+  { file: 'photo5.webp', description: 'V2563_Cyg_12.45-12.77:_Period_0.530922' },
 ]
 
 type DataCategory = 'deep_sky' | 'photometry'
@@ -32,8 +33,10 @@ export default function DataPage() {
   const entries = category === 'deep_sky' ? DEEP_SKY_IMAGES : PHOTOMETRY_IMAGES
   const images = entries.map((entry) => ({
     src: `/gallery/${entry.file}`,
-    alt: entry.file.replace(/\.[^.]+$/, ''),
+    thumbSrc: `/gallery/${entry.thumbFile ?? entry.file}`,
+    alt: entry.description,
     description: entry.description,
+    flagship: entry.flagship === true,
   }))
 
   useEffect(() => {
@@ -89,19 +92,34 @@ export default function DataPage() {
       <div className="flex-1 pb-8 min-h-0">
         <div className="mt-6">
           {images.length > 0 ? (
-            <div className="grid gap-0 sm:grid-cols-3">
+            <div className="grid gap-0 grid-cols-1 sm:grid-cols-3">
               {images.map((img, index) => (
-                <div key={img.src} className="relative overflow-visible">
+                <div
+                  key={img.thumbSrc}
+                  className={
+                    img.flagship
+                      ? 'relative overflow-visible sm:col-span-2 sm:row-span-2'
+                      : 'relative overflow-visible'
+                  }
+                >
                   <button
                     type="button"
                     onClick={() => openImage(index)}
-                    className="group relative block w-full overflow-visible text-left"
+                    className="group relative block h-full w-full overflow-visible text-left"
                   >
-                    <div className="aspect-[4/3] bg-black/80 dark:bg-black overflow-hidden">
+                    <div
+                      className={
+                        img.flagship
+                          ? 'aspect-[4/3] bg-black/80 dark:bg-black overflow-hidden sm:absolute sm:inset-0 sm:aspect-auto'
+                          : 'aspect-[4/3] bg-black/80 dark:bg-black overflow-hidden'
+                      }
+                    >
                       <img
-                        src={img.src}
+                        src={img.thumbSrc}
                         alt={img.alt}
-                        className="w-full h-full object-cover transition-transform duration-300 ease-out group-hover:scale-105 group-hover:z-10"
+                        loading="lazy"
+                        decoding="async"
+                        className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-105 group-hover:z-10"
                       />
                     </div>
                   </button>
@@ -124,6 +142,8 @@ export default function DataPage() {
             <img
               src={selectedImage.src}
               alt={selectedImage.alt}
+              loading="eager"
+              decoding="async"
               className="max-h-[70vh] w-auto max-w-full object-contain"
               onClick={(e) => e.stopPropagation()}
             />

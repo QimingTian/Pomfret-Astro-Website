@@ -209,14 +209,14 @@ export function AboutHome() {
                     className="max-w-4xl space-y-3 text-[18px] sm:text-[20px] leading-[1.4] font-normal text-white"
                     style={{ fontFamily: SF_PRO, letterSpacing: '-0.01em' }}
                   >
-                    <p>Pomfret Astro runs Pomfret Olmsted Observatory.</p>
+                    <p>Pomfret Olmsted Observatory is Pomfret School&apos;s state-of-the-art astronomical facility.</p>
                     <p className="text-white/90">
-                      The operations platform for an autonomous night. Auto-Schedule and Coordination place
-                      every session — weather gates, altitude, moon avoidance, and fair multi-user queuing —
-                      so the telescope works without someone on the dome. Members plan on Atlas and Framing,
-                      submit deep-sky, mosaic, project, and variable-star sessions on Remote, follow live
-                      schedule and mount status, and download finished data. Weather and all-sky safety
-                      close the loop; NINA executes on the observatory computer.
+                      The observatory runs on Pomfret Astro — an in-house platform developed at Pomfret
+                      to operate the dome from weather monitoring and safety checks through automated
+                      scheduling and remote control. On clear nights the telescope can observe
+                      autonomously, without staff at the site, while students and faculty plan programs,
+                      follow the night&apos;s schedule, and access finished data from anywhere in the
+                      world.
                     </p>
                   </div>
 

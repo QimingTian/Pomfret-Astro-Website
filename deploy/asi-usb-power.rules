@@ -1,0 +1,4 @@
+# Disable USB autosuspend for ZWO ASI cameras (vendor 03c3).
+# Periodic autosuspend/resume correlates with kernel "usb reset SuperSpeed" logs
+# and ASI SDK instability during long exposures on Raspberry Pi.
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="03c3", ATTR{power/control}="on", ATTR{power/autosuspend}="-1"

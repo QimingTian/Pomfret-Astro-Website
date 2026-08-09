@@ -38,17 +38,21 @@ function windKmhToMs(kmh: number | null): number {
   return kmh / 3.6
 }
 
-/** Live ASC + Open-Meteo wind gate (same rule as observatory-status-store auto weather). */
+/** Live ASC + Open-Meteo wind/precip gate (same rule as observatory-status-store auto weather). */
 export function computeAutoWeatherOverlayStatus(input: {
   cloudPct: number | null
   rainDetected: boolean | null
   windKmh: number | null
+  precipProbabilityPercent?: number | null
+  ascGateApplicable?: boolean
   now?: Date
 }): 'ready' | 'closed_weather_not_permitted' {
   const weatherOk = evaluateObservatoryReadyWeather({
     cloudCoverPercent: input.cloudPct,
     rainDetected: input.rainDetected === true,
     windSpeedMs: windKmhToMs(input.windKmh),
+    precipProbabilityPercent: input.precipProbabilityPercent,
+    ascGateApplicable: input.ascGateApplicable,
   })
   return weatherOk ? 'ready' : 'closed_weather_not_permitted'
 }
@@ -63,9 +67,20 @@ export function computeOverlayObservatoryStatus(input: {
   cloudPct: number | null
   rainDetected: boolean | null
   windKmh: number | null
+  precipProbabilityPercent?: number | null
+  ascGateApplicable?: boolean
   now?: Date
 }): ObservatoryOverlayStatus | null {
-  const { mode, serverStatus, cloudPct, rainDetected, windKmh, now = new Date() } = input
+  const {
+    mode,
+    serverStatus,
+    cloudPct,
+    rainDetected,
+    windKmh,
+    precipProbabilityPercent,
+    ascGateApplicable,
+    now = new Date(),
+  } = input
   if (!serverStatus) return null
   if (mode === 'manual') return serverStatus
 
@@ -74,5 +89,12 @@ export function computeOverlayObservatoryStatus(input: {
   if (serverStatus === 'closed_observatory_maintenance') return 'closed_observatory_maintenance'
   if (isWithinDaytimeClosedWindow(now)) return 'closed_daytime'
 
-  return computeAutoWeatherOverlayStatus({ cloudPct, rainDetected, windKmh, now })
+  return computeAutoWeatherOverlayStatus({
+    cloudPct,
+    rainDetected,
+    windKmh,
+    precipProbabilityPercent,
+    ascGateApplicable,
+    now,
+  })
 }

@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, Literal, Optional
 
 IMAGING_FOLDER_AUTO = 'Auto'
-IMAGING_FOLDER_HALF_HOUR = 'Half Hour'
+IMAGING_FOLDER_HALF_HOUR = 'half hour'
 IMAGING_FOLDER_HOUR = 'Hour'
 IMAGING_FILE_FORMAT = 'TIFF'
 
@@ -195,8 +195,15 @@ def ensure_scheduler_running() -> None:
     sync_from_camera_mode(cam_mode)
 
 
+def _sequence_active() -> bool:
+    cam = _get_camera_module()
+    return bool(getattr(cam, 'sequence_state', {}).get('active'))
+
+
 def after_auto_capture(img, camera_mode: str) -> None:
     """Upload frame when camera mode is auto (every capture)."""
+    if _sequence_active():
+        return
     if (camera_mode or 'off') != 'auto':
         return
     try:
@@ -296,6 +303,9 @@ def _catch_up_current_slot(mode: DriveMode) -> None:
 def _upload_scheduled(mode: DriveMode) -> None:
     cam = _get_camera_module()
 
+    if _sequence_active():
+        print(f"[Imaging] Skip scheduled {mode}: sequence active")
+        return
     if not cam.auto_state.get('active'):
         print(f"[Imaging] Skip scheduled {mode}: auto loop not active")
         return

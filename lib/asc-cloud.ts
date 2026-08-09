@@ -59,38 +59,87 @@ export function parseAscCloudFromStatus(data: unknown): AscCloudInference | null
   return ascCloud
 }
 
-export async function fetchAscCloud(statusUrl?: string | null): Promise<AscCloudInference | null> {
-  const url = statusUrl ?? defaultAllSkyStatusUrl()
+function allSkySequenceStatusUrlFromStatusUrl(statusUrl: string): string {
   try {
-    const res = await fetch(url, {
-      mode: 'cors',
-      credentials: 'omit',
-      cache: 'no-store',
-    })
-    if (!res.ok) return null
-    const data = (await res.json()) as unknown
-    return parseAscCloudFromStatus(data)
+    const u = new URL(statusUrl)
+    if (u.pathname.endsWith('/status')) {
+      return new URL(u.pathname.replace(/\/status$/, '/sequence/status'), u.origin).href
+    }
+    if (u.pathname.includes('/camera/')) {
+      return new URL('sequence/status', statusUrl).href
+    }
+    return new URL('/camera/sequence/status', u.origin).href
   } catch {
-    return null
+    return defaultAllSkySequenceStatusUrl()
   }
 }
 
-/** Observatory Ready weather gate — cloud/rain from ASC AI; wind checked separately (Open-Meteo). */
+/** True when ASC cloud/rain may gate observatory Ready (not stale, sequence idle). */
+export function isAscCloudGateApplicable(
+  ascCloud: AscCloudInference | null | undefined,
+  sequenceActive: boolean
+): boolean {
+  if (sequenceActive) return false
+  if (ascCloud?.stale === true) return false
+  return true
+}
+
+export async function fetchAllSkyCamGateState(statusUrl?: string | null): Promise<{
+  ascCloud: AscCloudInference | null
+  sequenceActive: boolean
+}> {
+  const url = statusUrl ?? defaultAllSkyStatusUrl()
+  const seqUrl = allSkySequenceStatusUrlFromStatusUrl(url)
+  try {
+    const [statusRes, seqRes] = await Promise.all([
+      fetch(url, { mode: 'cors', credentials: 'omit', cache: 'no-store' }),
+      fetch(seqUrl, { mode: 'cors', credentials: 'omit', cache: 'no-store' }),
+    ])
+    const ascCloud = statusRes.ok ? parseAscCloudFromStatus((await statusRes.json()) as unknown) : null
+    let sequenceActive = false
+    if (seqRes.ok) {
+      const seq = (await seqRes.json()) as { active?: unknown }
+      sequenceActive = seq.active === true
+    }
+    return { ascCloud, sequenceActive }
+  } catch {
+    return { ascCloud: null, sequenceActive: false }
+  }
+}
+
+export async function fetchAscCloud(statusUrl?: string | null): Promise<AscCloudInference | null> {
+  const { ascCloud } = await fetchAllSkyCamGateState(statusUrl)
+  return ascCloud
+}
+
+/** Observatory Ready weather gate — cloud/rain from ASC AI; wind/precip from Open-Meteo current. */
 export const OBSERVATORY_READY_MAX_CLOUD_PERCENT = 20
 export const OBSERVATORY_READY_MAX_WIND_MS = 10
+export const OBSERVATORY_READY_MAX_PRECIP_PROBABILITY = 20
 export const OBSERVATORY_READY_GATE_RULE =
-  'ASC AI cloud < 20% and no rain detected and wind_speed_10m < 10 m/s (Open-Meteo)'
+  'ASC AI cloud < 20% and no rain detected (when ASC gate applies) and wind_speed_10m < 10 m/s and precipitation_probability <= 20% (Open-Meteo current)'
 
 export function evaluateObservatoryReadyWeather(args: {
   cloudCoverPercent: number | null | undefined
   rainDetected: boolean | undefined
   windSpeedMs: number
+  precipProbabilityPercent?: number | null | undefined
+  /** When false, skip ASC cloud/rain (sequence active or stale inference). */
+  ascGateApplicable?: boolean
 }): boolean {
-  const cloud = args.cloudCoverPercent
-  if (cloud == null || !Number.isFinite(cloud)) return false
-  if (args.rainDetected === true) return false
+  const ascGateApplicable = args.ascGateApplicable !== false
+  if (ascGateApplicable) {
+    const cloud = args.cloudCoverPercent
+    if (cloud == null || !Number.isFinite(cloud)) return false
+    if (args.rainDetected === true) return false
+    if (cloud >= OBSERVATORY_READY_MAX_CLOUD_PERCENT) return false
+  }
   if (!Number.isFinite(args.windSpeedMs) || args.windSpeedMs >= OBSERVATORY_READY_MAX_WIND_MS) {
     return false
   }
-  return cloud < OBSERVATORY_READY_MAX_CLOUD_PERCENT
+  const precip = args.precipProbabilityPercent
+  if (precip == null || !Number.isFinite(precip) || precip > OBSERVATORY_READY_MAX_PRECIP_PROBABILITY) {
+    return false
+  }
+  return true
 }

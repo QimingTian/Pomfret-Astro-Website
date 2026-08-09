@@ -1010,38 +1010,64 @@ export function AllSkyCameraControlPanel() {
           void loadSettings()
         }
       } catch (e) {
-        setError(e instanceof Error ? e.message : 'Mode change failed')
+        const msg = e instanceof Error ? e.message : 'Mode change failed'
+        // Expected when a sequence owns the camera (e.g. localStorage mode restore on refresh).
+        if (msg.includes('409') && /sequence/i.test(msg)) {
+          return
+        }
+        setError(msg)
       }
     },
     [base, pollStatus, refreshStream, refreshAutoStats, loadSettings],
   )
 
-  // Restore mode after refresh when camera is connected
+  // Restore mode after refresh when camera is connected (never while a sequence is running).
   useEffect(() => {
     if (!base || !camStatus.connected) {
       if (!camStatus.connected) modeRestoredRef.current = false
       return
     }
     if (modeRestoredRef.current) return
-    modeRestoredRef.current = true
 
-    const serverMode = camStatus.mode
-    if (serverMode === 'stream' || isAutoLikeMode(serverMode)) {
-      setMode(serverMode)
-      writeSavedMode(serverMode)
-      if (serverMode === 'stream' || isAutoLikeMode(serverMode)) refreshStream()
-      if (isAutoLikeMode(serverMode)) {
-        void refreshAutoStats()
-        void loadSettings()
+    let cancelled = false
+    void (async () => {
+      let seqActive = false
+      try {
+        const s = await camJson<SeqStatus>(base, '/camera/sequence/status')
+        if (!cancelled) setSeqStatus(s)
+        seqActive = Boolean(s.active)
+      } catch {
+        // Proceed with restore if sequence status is unreachable.
       }
-      return
-    }
+      if (cancelled || modeRestoredRef.current) return
+      modeRestoredRef.current = true
 
-    const saved = readSavedMode()
-    if (saved !== 'off') {
-      void switchMode(saved)
-    } else {
-      setMode('off')
+      if (seqActive) {
+        return
+      }
+
+      const serverMode = camStatus.mode
+      if (serverMode === 'stream' || isAutoLikeMode(serverMode)) {
+        setMode(serverMode)
+        writeSavedMode(serverMode)
+        if (serverMode === 'stream' || isAutoLikeMode(serverMode)) refreshStream()
+        if (isAutoLikeMode(serverMode)) {
+          void refreshAutoStats()
+          void loadSettings()
+        }
+        return
+      }
+
+      const saved = readSavedMode()
+      if (saved !== 'off') {
+        void switchMode(saved)
+      } else {
+        setMode('off')
+      }
+    })()
+
+    return () => {
+      cancelled = true
     }
   }, [
     base,
@@ -1052,6 +1078,10 @@ export function AllSkyCameraControlPanel() {
     refreshAutoStats,
     loadSettings,
   ])
+
+  useEffect(() => {
+    if (seqStatus?.active) setError(null)
+  }, [seqStatus?.active])
 
   // Refresh histogram/stats when server captures a new auto frame
   useEffect(() => {
@@ -1191,6 +1221,7 @@ export function AllSkyCameraControlPanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
+      modeRestoredRef.current = true
       await pollSeqStatus()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Sequence start failed')
@@ -1300,7 +1331,7 @@ export function AllSkyCameraControlPanel() {
                   disabled={busy || !camStatus.connected || mode === 'half_hour'}
                   onClick={() => void switchMode('half_hour')}
                 >
-                  Half Hour
+                  half hour
                 </button>
                 <button
                   type="button"

@@ -4,6 +4,7 @@ import {
   allSkyCameraStatusUrl,
   defaultAllSkyStatusUrl,
   evaluateObservatoryReadyWeather,
+  isAscCloudGateApplicable,
   parseAscCloudFromStatus,
 } from '@/lib/asc-cloud'
 
@@ -44,20 +45,51 @@ test('parseAscCloudFromStatus returns null when missing', () => {
   assert.equal(parseAscCloudFromStatus({ sensors: {} }), null)
 })
 
-test('evaluateObservatoryReadyWeather uses ASC cloud and rain with Open-Meteo wind', () => {
+test('evaluateObservatoryReadyWeather uses ASC cloud and rain with Open-Meteo wind and precip', () => {
   assert.equal(
     evaluateObservatoryReadyWeather({
       cloudCoverPercent: 19,
       rainDetected: false,
       windSpeedMs: 9,
+      precipProbabilityPercent: 20,
     }),
     true
+  )
+  assert.equal(
+    evaluateObservatoryReadyWeather({
+      cloudCoverPercent: 99,
+      rainDetected: true,
+      windSpeedMs: 9,
+      precipProbabilityPercent: 0,
+      ascGateApplicable: false,
+    }),
+    true
+  )
+  assert.equal(
+    evaluateObservatoryReadyWeather({
+      cloudCoverPercent: 19,
+      rainDetected: false,
+      windSpeedMs: 9,
+      precipProbabilityPercent: 21,
+      ascGateApplicable: false,
+    }),
+    false
+  )
+  assert.equal(
+    evaluateObservatoryReadyWeather({
+      cloudCoverPercent: 19,
+      rainDetected: false,
+      windSpeedMs: 9,
+      precipProbabilityPercent: 21,
+    }),
+    false
   )
   assert.equal(
     evaluateObservatoryReadyWeather({
       cloudCoverPercent: 20,
       rainDetected: false,
       windSpeedMs: 5,
+      precipProbabilityPercent: 0,
     }),
     false
   )
@@ -66,6 +98,7 @@ test('evaluateObservatoryReadyWeather uses ASC cloud and rain with Open-Meteo wi
       cloudCoverPercent: 10,
       rainDetected: true,
       windSpeedMs: 5,
+      precipProbabilityPercent: 0,
     }),
     false
   )
@@ -74,6 +107,7 @@ test('evaluateObservatoryReadyWeather uses ASC cloud and rain with Open-Meteo wi
       cloudCoverPercent: null,
       rainDetected: false,
       windSpeedMs: 5,
+      precipProbabilityPercent: 0,
     }),
     false
   )
@@ -82,7 +116,11 @@ test('evaluateObservatoryReadyWeather uses ASC cloud and rain with Open-Meteo wi
       cloudCoverPercent: 10,
       rainDetected: false,
       windSpeedMs: 10,
+      precipProbabilityPercent: 0,
     }),
     false
   )
+  assert.equal(isAscCloudGateApplicable({ stale: true }, false), false)
+  assert.equal(isAscCloudGateApplicable({ cloudCoverPercent: 10 }, true), false)
+  assert.equal(isAscCloudGateApplicable({ cloudCoverPercent: 10 }, false), true)
 })

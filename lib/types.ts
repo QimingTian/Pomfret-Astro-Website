@@ -58,6 +58,9 @@ export interface AscCloudInference {
   frameIso?: string | null
   rain?: AscCloudRainInference | null
   lastError?: string | null
+  /** When true, cloud/rain must not drive observatory gates (e.g. sequence active). */
+  stale?: boolean
+  staleReason?: string | null
 }
 
 export interface AlertResponse {

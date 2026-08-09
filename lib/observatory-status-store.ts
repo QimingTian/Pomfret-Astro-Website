@@ -19,9 +19,11 @@ import {
 import { emitLiveEvent } from '@/lib/imaging/live-bus'
 import {
   evaluateObservatoryReadyWeather,
-  fetchAscCloud,
+  fetchAllSkyCamGateState,
+  isAscCloudGateApplicable,
   OBSERVATORY_READY_GATE_RULE,
 } from '@/lib/asc-cloud'
+import { fetchOpenMeteoCurrentWeather } from '@/lib/open-meteo-current'
 
 export type ObservatoryStatus =
   | 'ready'
@@ -108,6 +110,10 @@ let weatherCache:
       rainDetected: boolean
       precipitation: number
       windSpeed: number
+      precipProbability: number
+      ascGateApplicable: boolean
+      sequenceActive: boolean
+      ascStaleReason: string | null
       weatherAllowed: boolean
       ascAvailable: boolean
       ascFrameIso: string | null
@@ -128,15 +134,16 @@ function currentMode(): ObservatoryMode {
   return memory().__pomfret_mode__ ?? 'manual'
 }
 
-async function fetchOpenMeteoWindSpeedMs(): Promise<number> {
-  const url =
-    `https://api.open-meteo.com/v1/forecast?latitude=${OBS_LAT_DEG}&longitude=${OBS_LON_DEG}` +
-    '&current=wind_speed_10m&timezone=UTC'
-  const res = await fetch(url, { cache: 'no-store' })
-  if (!res.ok) throw new Error(`weather http ${res.status}`)
-  const data = (await res.json()) as { current?: { wind_speed_10m?: number } }
-  const windSpeedRaw = Number(data.current?.wind_speed_10m ?? 999)
-  return Number.isFinite(windSpeedRaw) ? windSpeedRaw * KMH_TO_MS : 999
+async function fetchOpenMeteoObservatoryGate(): Promise<{ windSpeedMs: number; precipProbability: number }> {
+  const wx = await fetchOpenMeteoCurrentWeather()
+  const windKmh = wx.windSpeedKmh
+  const windSpeedMs =
+    windKmh != null && Number.isFinite(windKmh) ? windKmh * KMH_TO_MS : 999
+  const precipProbability =
+    wx.precipProbabilityPercent != null && Number.isFinite(wx.precipProbabilityPercent)
+      ? wx.precipProbabilityPercent
+      : 100
+  return { windSpeedMs, precipProbability }
 }
 
 async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
@@ -145,7 +152,9 @@ async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
   }
 
   try {
-    const [ascCloud, windSpeed] = await Promise.all([fetchAscCloud(), fetchOpenMeteoWindSpeedMs()])
+    const [gate, openMeteo] = await Promise.all([fetchAllSkyCamGateState(), fetchOpenMeteoObservatoryGate()])
+    const ascCloud = gate.ascCloud
+    const ascGateApplicable = isAscCloudGateApplicable(ascCloud, gate.sequenceActive)
     const ascCloudCover = ascCloud?.cloudCoverPercent
     const cloudCover =
       ascCloudCover != null && Number.isFinite(ascCloudCover) ? ascCloudCover : null
@@ -153,16 +162,22 @@ async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
     const weatherAllowed = evaluateObservatoryReadyWeather({
       cloudCoverPercent: cloudCover,
       rainDetected,
-      windSpeedMs: windSpeed,
+      windSpeedMs: openMeteo.windSpeedMs,
+      precipProbabilityPercent: openMeteo.precipProbability,
+      ascGateApplicable,
     })
     weatherCache = {
       ts: now,
       cloudCover: cloudCover ?? 100,
       rainDetected,
       precipitation: rainDetected ? 1 : 0,
-      windSpeed,
+      windSpeed: openMeteo.windSpeedMs,
+      precipProbability: openMeteo.precipProbability,
+      ascGateApplicable,
+      sequenceActive: gate.sequenceActive,
+      ascStaleReason: ascGateApplicable ? null : (ascCloud?.staleReason ?? (gate.sequenceActive ? 'sequence_active' : 'stale')),
       weatherAllowed,
-      ascAvailable: cloudCover != null,
+      ascAvailable: ascGateApplicable && cloudCover != null,
       ascFrameIso: ascCloud?.frameIso ?? null,
       ascModelPhase: ascCloud?.modelPhase ?? null,
       ascLastError: ascCloud?.lastError ?? null,
@@ -179,6 +194,10 @@ async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
       rainDetected: true,
       precipitation: 1,
       windSpeed: 999,
+      precipProbability: 100,
+      ascGateApplicable: false,
+      sequenceActive: false,
+      ascStaleReason: 'fetch_failed',
       weatherAllowed: false,
       ascAvailable: false,
       ascFrameIso: null,
@@ -200,6 +219,11 @@ function weatherDetailForAudit(now: number): Record<string, unknown> | null {
     rainDetected: weatherCache.rainDetected,
     precipitationMm: weatherCache.precipitation,
     windSpeedMs: weatherCache.windSpeed,
+    precipProbabilityPercent: weatherCache.precipProbability,
+    precipSource: 'open_meteo_current',
+    ascGateApplicable: weatherCache.ascGateApplicable,
+    sequenceActive: weatherCache.sequenceActive,
+    ascStaleReason: weatherCache.ascStaleReason,
     windSource: 'open_meteo',
     gateOk: weatherCache.weatherAllowed,
     gateRule: OBSERVATORY_READY_GATE_RULE,

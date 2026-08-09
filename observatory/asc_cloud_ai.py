@@ -253,8 +253,19 @@ def analyze_and_store(img, now: datetime | None = None) -> None:
         )
 
 
-def status_payload() -> Optional[Dict[str, Any]]:
+def status_payload(sequence_active: bool = False) -> Optional[Dict[str, Any]]:
     """Latest inference for allSkyCam.ascCloud in /status."""
+    if sequence_active:
+        return _with_model_version({
+            'cloudCoverPercent': None,
+            'cloudConfidence': None,
+            'modelPhase': None,
+            'frameIso': None,
+            'rain': None,
+            'lastError': None,
+            'stale': True,
+            'staleReason': 'sequence_active',
+        })
     with _lock:
         if _last_result is None:
             if _load_error:

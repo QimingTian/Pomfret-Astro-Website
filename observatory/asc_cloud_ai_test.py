@@ -85,6 +85,21 @@ class TestAscPreprocess(unittest.TestCase):
         self.assertAlmostEqual(float(batch[0, 112, 112, 0]), 0.0, delta=0.05)
 
 
+class TestAscStatusPayload(unittest.TestCase):
+    def test_status_payload_stale_during_sequence(self):
+        import asc_cloud_ai
+
+        asc_cloud_ai._last_result = {
+            'cloudCoverPercent': 80,
+            'rain': {'detected': True},
+        }
+        payload = asc_cloud_ai.status_payload(sequence_active=True)
+        self.assertIsNotNone(payload)
+        self.assertTrue(payload.get('stale'))
+        self.assertEqual(payload.get('staleReason'), 'sequence_active')
+        self.assertIsNone(payload.get('cloudCoverPercent'))
+
+
 class TestAscInference(unittest.TestCase):
     def test_analyze_frame_with_dummy_image(self):
         try:

@@ -83,7 +83,7 @@ You **request** imaging on the website; the observatory computer and NINA **exec
 
 ## 3. Weather page
 
-**What this page tells you:** conditions at Pomfret right now. The **scheduler uses separate hourly rules** (Part III); this page is not the exact robot gate.
+**What this page tells you:** real-time conditions at Pomfret right now — a live window on the site. It is **not** for deciding whether to submit a session tonight; members submit on Remote anytime and **Auto-Schedule** places work across nights. The **scheduler uses separate hourly rules** (Part III); this page is not the robot gate.
 
 | Section | Information |
 |---------|-------------|
@@ -103,22 +103,20 @@ UI uses unified pill / 1rem corner radius site-wide (v6).
 
 ### Atlas mode
 
-Pick a target, inspect FOV overlays, preview tonight’s weather ribbon. Does **not** submit a session by itself.
+Free-pan sky map: find and inspect targets, preview tonight’s weather ribbon. Does **not** show a camera frame, pick a rig, or send to Remote.
 
 | Control | What it does |
 |---------|--------------|
 | **Sky search** | Object name → catalog resolve → center map |
 | **Click object** | Name, type, mag, coordinates |
-| **Telescope dropdown** | Camera frame for observatory / portable scopes |
 | **Layer toggles** | Ground, atmosphere, DSO, DSS, grids |
 | **30° altitude ring** | Scheduler minimum altitude |
 | **Orbit track** | Selected object tonight |
 | **Tonight schedule ribbon** | Same twilight / weather bands as Remote |
-| **Send to Remote** | Prefills Remote with name + RA/Dec |
 
 ### Framing mode
 
-NINA Framing Assistant–style planning on a **locked** sky:
+NINA Framing Assistant–style planning on a **locked** sky. Imaging **rig / camera frame**, mosaic tools, and **Send to Remote** live here only.
 
 | Mode | Behavior |
 |------|----------|
@@ -131,7 +129,7 @@ NINA Framing Assistant–style planning on a **locked** sky:
 - Drag uses screen pixels (smooth); pointer-up commits with a corrected **front-hemisphere** inverse (no antipodal RA flips)
 - Frame-center coordinates match NINA for the same on-sky placement
 
-**Send** from Framing carries the mosaic draft into Remote with **Mosaic On** (`?mosaic=1`).
+**Send to Remote** / **Send mosaic** (Framing only) prefills Remote; a mosaic draft opens with **Mosaic On** (`?mosaic=1`).
 
 ---
 
@@ -245,7 +243,7 @@ Observatory status, 3D mount attitude, live RA/Dec/Alt/Az when mount telemetry i
 
 **Single-night DSO**
 
-1. Plan (Atlas) → target → **Send to Remote**, or search on Remote.
+1. Plan: Atlas to find the target → Framing to place the frame → **Send to Remote**, or search on Remote.
 2. Filters + **Raw ZIP** → **Start Session** while **Ready**.
 3. Watch schedule → **Check progress** → **Download**.
 

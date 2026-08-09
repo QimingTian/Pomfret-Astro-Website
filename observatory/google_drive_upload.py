@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import io
 import os
+import threading
 from typing import Optional, Tuple
+
+_folder_create_lock = threading.Lock()
 
 # All Sky Camera — https://drive.google.com/drive/folders/1aRm-ly3N8CxEUKwUzHQzvumySJrNKXDV
 DEFAULT_SEQUENCE_ROOT_FOLDER_ID = '1aRm-ly3N8CxEUKwUzHQzvumySJrNKXDV'
@@ -59,8 +62,7 @@ def get_drive_service():
     return _DRIVE_SERVICE
 
 
-def get_or_create_folder(parent_id: str, name: str) -> str:
-    """Return existing subfolder by name under parent, or create it."""
+def _list_folders_by_name(parent_id: str, name: str) -> list[dict]:
     service = get_drive_service()
     safe_name = name.replace("'", "\\'")
     query = (
@@ -71,17 +73,29 @@ def get_or_create_folder(parent_id: str, name: str) -> str:
         service.files()
         .list(
             q=query,
-            fields='files(id,name)',
+            fields='files(id,name,createdTime)',
             supportsAllDrives=True,
             includeItemsFromAllDrives=True,
-            pageSize=1,
+            pageSize=100,
+            orderBy='createdTime',
         )
         .execute()
     )
-    files = results.get('files', [])
-    if files:
-        return files[0]['id']
-    return create_folder(parent_id, name)
+    return results.get('files', [])
+
+
+def get_or_create_folder(parent_id: str, name: str) -> str:
+    """Return existing subfolder by name under parent, or create it."""
+    with _folder_create_lock:
+        files = _list_folders_by_name(parent_id, name)
+        if len(files) > 1:
+            print(
+                f"[Drive] Warning: {len(files)} folders named {name!r} under {parent_id}; "
+                f"using oldest ({files[0]['id']})"
+            )
+        if files:
+            return files[0]['id']
+        return create_folder(parent_id, name)
 
 
 def create_folder(parent_id: str, name: str) -> str:

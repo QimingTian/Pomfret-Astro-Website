@@ -1,17 +1,24 @@
 [Unit]
-Description=Pomfret Astro ASI camera service
-After=network.target
+Description=Pomfret VISTA camera service
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=pomfretastro
+Group=pomfretastro
 WorkingDirectory=/home/pomfretastro/Pomfret-School-VISTA-Balcony-Project
-# Use venv Python (run scripts/setup-camera-venv.sh first)
-ExecStart=/home/pomfretastro/Pomfret-School-VISTA-Balcony-Project/.venv-camera/bin/python3 /home/pomfretastro/Pomfret-School-VISTA-Balcony-Project/camera_service.py
+ExecStart=/home/pomfretastro/Pomfret-School-VISTA-Balcony-Project/.venv-camera/bin/python3 -u /home/pomfretastro/Pomfret-School-VISTA-Balcony-Project/camera_service.py
 Restart=on-failure
 RestartSec=5
 
-# Google Drive sequence uploads
+# Unbuffered stdout/stderr for journalctl diagnostics
+Environment=PYTHONUNBUFFERED=1
+
+# Optional: exit cleanly for restart after 48h idle (see camera_service maintenance watchdog)
+Environment=ASC_MAINTENANCE_MAX_UPTIME_HOURS=48
+Environment=ASC_MAINTENANCE_IDLE_MINUTES=10
+
 Environment=GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON=/home/pomfretastro/.config/pomfret-drive-sa.json
 Environment=GOOGLE_DRIVE_SEQUENCE_FOLDER_ID=1aRm-ly3N8CxEUKwUzHQzvumySJrNKXDV
 

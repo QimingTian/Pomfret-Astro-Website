@@ -1,5 +1,5 @@
 import { appendAuditLog } from '@/lib/imaging-audit-log'
-import { fetchAscCloud } from '@/lib/asc-cloud'
+import { fetchAllSkyCamGateState, isAscCloudGateApplicable } from '@/lib/asc-cloud'
 import {
   armEmergencyStop,
   emergencyStopAuditDetail,
@@ -315,9 +315,11 @@ async function fetchRingForecasts(): Promise<LocationForecast[] | null> {
 }
 
 export async function evaluateWeatherSafetyThreat(): Promise<WeatherSafetyThreat | null> {
-  const [ascCloud, ringLocations] = await Promise.all([fetchAscCloud(), fetchRingForecasts()])
-  const ascRainDetected = ascCloud?.rain?.detected === true
-  const ascRainConfidence = ascCloud?.rain?.confidence
+  const [gate, ringLocations] = await Promise.all([fetchAllSkyCamGateState(), fetchRingForecasts()])
+  const ascGateApplicable = isAscCloudGateApplicable(gate.ascCloud, gate.sequenceActive)
+  const ascRainDetected =
+    ascGateApplicable && gate.ascCloud?.rain?.detected === true
+  const ascRainConfidence = ascGateApplicable ? gate.ascCloud?.rain?.confidence : undefined
   if (!ringLocations) {
     if (ascRainThreat({ detected: ascRainDetected, confidence: ascRainConfidence })) {
       return {

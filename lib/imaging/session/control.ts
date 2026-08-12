@@ -37,6 +37,10 @@ import {
 } from '@/lib/imaging-session-board'
 import { removePreviewImage } from '@/lib/imaging-preview-store'
 import { deleteR2ObjectForQueueId } from '@/lib/r2-session-download'
+import {
+  ADMIN_MARK_SESSION_FAILED_REASON,
+  lockObservatoryAfterSessionFailure,
+} from '@/lib/imaging/session/failure-observatory-lock'
 import { deleteProjectCascade } from '@/lib/imaging-project-delete'
 import { adminRunSession } from '@/lib/imaging/admin-force-run'
 import { adminHoldSession, adminReleaseSessionHold } from '@/lib/imaging/session-hold'
@@ -336,7 +340,7 @@ export async function adminMarkSessionFailed(sessionId: string): Promise<{ ok: t
       },
       new Date().toISOString()
     )
-    void reconcilePendingScheduleStatus({ force: true })
+    await lockObservatoryAfterSessionFailure(ADMIN_MARK_SESSION_FAILED_REASON)
     return { ok: true }
   }
 
@@ -357,6 +361,7 @@ export async function adminMarkSessionFailed(sessionId: string): Promise<{ ok: t
       firstName: board.firstName,
       failedAtIso: new Date().toISOString(),
     })
+    await lockObservatoryAfterSessionFailure(ADMIN_MARK_SESSION_FAILED_REASON)
     return { ok: true }
   }
 
@@ -378,6 +383,7 @@ export async function adminMarkSessionFailed(sessionId: string): Promise<{ ok: t
     firstName: forced.firstName,
     failedAtIso: new Date().toISOString(),
   })
+  await lockObservatoryAfterSessionFailure(ADMIN_MARK_SESSION_FAILED_REASON)
   return { ok: true }
 }
 

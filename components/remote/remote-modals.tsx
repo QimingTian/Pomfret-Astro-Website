@@ -353,7 +353,9 @@ export function RemoteModals({
                 projectFilterProgress.length > 0
               const pickerNights = (projectItem?.nights ?? []).filter((n) => {
                 if (nightPickerPurpose === 'download') {
-                  return n.status === 'completed' && n.hasDownload === true
+                  return (
+                    (n.status === 'completed' || n.status === 'failed') && n.hasDownload === true
+                  )
                 }
                 return (
                   n.status === 'scheduled' ||
@@ -367,7 +369,7 @@ export function RemoteModals({
                 return (
                   <p className="text-sm text-gray-400 py-2">
                     {nightPickerPurpose === 'download'
-                      ? 'No completed session with a download yet.'
+                      ? 'No session with a download yet.'
                       : 'No Session Scheduled'}
                   </p>
                 )

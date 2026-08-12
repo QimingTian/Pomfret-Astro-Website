@@ -108,7 +108,7 @@ export async function GET(request: NextRequest) {
     if (outputMode === 'none') return nights
     return Promise.all(
       nights.map(async (n) => {
-        if (n.status !== 'completed') return n
+        if (n.status !== 'completed' && n.status !== 'failed') return n
         const hasDownload = await hasR2ObjectForQueueId(n.id)
         if (!hasDownload) return n
         return {

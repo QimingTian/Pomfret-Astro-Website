@@ -12,6 +12,7 @@ import {
   type FailedBoardSnapshot,
 } from '@/lib/imaging-session-board'
 import { kvDel, kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
+import { lockObservatoryAfterSessionFailure } from '@/lib/imaging/session/failure-observatory-lock'
 
 export const SESSION_FAILED_TERMINAL_MESSAGE = 'Session failed -- contact support.'
 
@@ -178,6 +179,9 @@ export async function failInProgressProjectSubSessions(reason: string): Promise<
       )
     }
   }
+  if (failed.length > 0) {
+    await lockObservatoryAfterSessionFailure(reason)
+  }
   return failed
 }
 
@@ -190,6 +194,9 @@ export async function failInProgressBoardSessions(
   const failed = await boardFailAllInProgress(exceptId, skipIds)
   for (const snapshot of failed) {
     await notifySessionFailed(snapshot, reason)
+  }
+  if (failed.length > 0) {
+    await lockObservatoryAfterSessionFailure(reason)
   }
   return failed.map((s) => s.id)
 }

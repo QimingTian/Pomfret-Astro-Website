@@ -1881,63 +1881,62 @@ export default function RemotePage() {
       kind: 'permitted' | 'not_permitted'
       reasons: Array<'cloud' | 'rain' | 'wind'>
     }> = []
+    const reasonOrder = { cloud: 0, rain: 1, wind: 2 } as const
+    const normalizeReasons = (reasons: Array<'cloud' | 'rain' | 'wind'>) =>
+      Array.from(new Set(reasons)).sort((a, b) => reasonOrder[a] - reasonOrder[b])
+    const sameReasonSet = (
+      a: Array<'cloud' | 'rain' | 'wind'>,
+      b: Array<'cloud' | 'rain' | 'wind'>
+    ) => {
+      if (a.length !== b.length) return false
+      return a.every((reason, i) => reason === b[i])
+    }
+    const flushRun = () => {
+      if (runStartMs == null || runEndMsExclusive == null || runKind == null) return
+      const clampedEnd = Math.min(runEndMsExclusive, tonightSchedule.end.getTime())
+      const topPct =
+        ((runStartMs - tonightSchedule.start.getTime()) /
+          (tonightSchedule.end.getTime() - tonightSchedule.start.getTime())) *
+        100
+      const heightPct =
+        ((clampedEnd - runStartMs) / (tonightSchedule.end.getTime() - tonightSchedule.start.getTime())) * 100
+      if (heightPct > 0) {
+        blocks.push({ topPct, heightPct, kind: runKind, reasons: [...runReasons] })
+      }
+      runStartMs = null
+      runEndMsExclusive = null
+      runKind = null
+      runReasons = []
+    }
+
     let runStartMs: number | null = null
     let runEndMsExclusive: number | null = null
     let runKind: 'permitted' | 'not_permitted' | null = null
-    let runReasons = new Set<'cloud' | 'rain' | 'wind'>()
+    let runReasons: Array<'cloud' | 'rain' | 'wind'> = []
 
     for (const slot of tonightSchedule.hours) {
       if (!nightKeySet.has(slot.hourKey)) {
-        if (runStartMs != null && runEndMsExclusive != null && runKind) {
-          const clampedEnd = Math.min(runEndMsExclusive, tonightSchedule.end.getTime())
-          const topPct =
-            ((runStartMs - tonightSchedule.start.getTime()) /
-              (tonightSchedule.end.getTime() - tonightSchedule.start.getTime())) *
-            100
-          const heightPct =
-            ((clampedEnd - runStartMs) / (tonightSchedule.end.getTime() - tonightSchedule.start.getTime())) * 100
-          if (heightPct > 0) blocks.push({ topPct, heightPct, kind: runKind, reasons: Array.from(runReasons) })
-        }
-        runStartMs = null
-        runEndMsExclusive = null
-        runKind = null
-        runReasons = new Set<'cloud' | 'rain' | 'wind'>()
+        flushRun()
         continue
       }
 
       const kind: 'permitted' | 'not_permitted' = readyKeySet.has(slot.hourKey) ? 'permitted' : 'not_permitted'
-      const reasonsForHour = kind === 'not_permitted' ? (notPermittedReasonByHourKey[slot.hourKey] ?? []) : []
-      if (runStartMs == null) {
-        if (runStartMs == null) runStartMs = slot.hourStartMs
+      const reasonsForHour = normalizeReasons(
+        kind === 'not_permitted' ? (notPermittedReasonByHourKey[slot.hourKey] ?? []) : []
+      )
+      // Merge only when kind and exact reason set match (e.g. cloud-only stays separate from cloud/rain).
+      if (runStartMs != null && runKind === kind && sameReasonSet(runReasons, reasonsForHour)) {
         runEndMsExclusive = slot.hourStartMs + 60 * 60 * 1000
-        runKind = kind
-        runReasons = new Set<'cloud' | 'rain' | 'wind'>(reasonsForHour)
-      } else if (runKind === kind) {
-        runEndMsExclusive = slot.hourStartMs + 60 * 60 * 1000
-        for (const reason of reasonsForHour) runReasons.add(reason)
-      } else if (runEndMsExclusive != null && runKind) {
-        const clampedEnd = Math.min(runEndMsExclusive, tonightSchedule.end.getTime())
-        const topPct =
-          ((runStartMs - tonightSchedule.start.getTime()) /
-            (tonightSchedule.end.getTime() - tonightSchedule.start.getTime())) *
-          100
-        const heightPct = ((clampedEnd - runStartMs) / (tonightSchedule.end.getTime() - tonightSchedule.start.getTime())) * 100
-        if (heightPct > 0) blocks.push({ topPct, heightPct, kind: runKind, reasons: Array.from(runReasons) })
-        runStartMs = slot.hourStartMs
-        runEndMsExclusive = slot.hourStartMs + 60 * 60 * 1000
-        runKind = kind
-        runReasons = new Set<'cloud' | 'rain' | 'wind'>(reasonsForHour)
+        continue
       }
+      flushRun()
+      runStartMs = slot.hourStartMs
+      runEndMsExclusive = slot.hourStartMs + 60 * 60 * 1000
+      runKind = kind
+      runReasons = reasonsForHour
     }
 
-    if (runStartMs != null && runEndMsExclusive != null && runKind) {
-      const clampedEnd = Math.min(runEndMsExclusive, tonightSchedule.end.getTime())
-      const topPct =
-        ((runStartMs - tonightSchedule.start.getTime()) / (tonightSchedule.end.getTime() - tonightSchedule.start.getTime())) *
-        100
-      const heightPct = ((clampedEnd - runStartMs) / (tonightSchedule.end.getTime() - tonightSchedule.start.getTime())) * 100
-      if (heightPct > 0) blocks.push({ topPct, heightPct, kind: runKind, reasons: Array.from(runReasons) })
-    }
+    flushRun()
 
     return blocks
   }, [readyWeatherHourKeys, nightWeatherHourKeys, tonightSchedule, tonightWeatherPrediction, notPermittedReasonByHourKey])

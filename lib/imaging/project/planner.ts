@@ -9,6 +9,7 @@ import {
   buildNightNinaJson,
   compactOrphanProjects,
   compactStaleProjectNights,
+  dropUndeliveredSubsBeforeNightKey,
   getBlockingInProgressProject,
   getDeliverableNight,
   getNextPendingProject,
@@ -1278,8 +1279,13 @@ export function plansToScheduledNights(
   const nightKey = plans[0]?.nightKey
   if (!nightKey) return []
   const autoHoldAfterFailed = hasFailedSubTonight(project, nightKey)
-  const existingScheduled = project.nights
-    .filter((n) => n.nightKey === nightKey && n.status === 'scheduled')
+  // Reuse tonight scheduled *and* planned rows. Unhold restores remaining
+  // subs to planned; treating them as new would mint a later index and skip
+  // the operator-released session.
+  const existingReusable = project.nights
+    .filter(
+      (n) => n.nightKey === nightKey && (n.status === 'scheduled' || n.status === 'planned')
+    )
     .sort((a, b) => {
       const ta = Date.parse(a.plannedStartIso ?? '')
       const tb = Date.parse(b.plannedStartIso ?? '')
@@ -1287,24 +1293,24 @@ export function plansToScheduledNights(
       return a.nightIndex - b.nightIndex
     })
 
-  const nonScheduledMaxIndex = Math.max(
+  const reusableIds = new Set(existingReusable.map((n) => n.id))
+  const nonReusableMaxIndex = Math.max(
     0,
-    ...project.nights
-      .filter((n) => n.nightKey !== nightKey || n.status !== 'scheduled')
-      .map((n) => n.nightIndex)
+    ...project.nights.filter((n) => !reusableIds.has(n.id)).map((n) => n.nightIndex)
   )
   const reusedMaxIndex = Math.max(
     0,
-    ...existingScheduled.slice(0, plans.length).map((n) => n.nightIndex)
+    ...existingReusable.slice(0, plans.length).map((n) => n.nightIndex)
   )
-  let nextFreshIndex = Math.max(nonScheduledMaxIndex, reusedMaxIndex) + 1
+  let nextFreshIndex = Math.max(nonReusableMaxIndex, reusedMaxIndex) + 1
 
   const subs = plans.map((plan, i) => {
-    const reuse = existingScheduled[i]
+    const reuse = existingReusable[i]
     const nightIndex = reuse?.nightIndex ?? nextFreshIndex++
     const nightId = reuse?.id ?? projectNightSubId(project.id, nightIndex)
     const forceRunReuse = reuse != null && isAdminForceRunActive(reuse)
-    if (autoHoldAfterFailed && !forceRunReuse) {
+    const resumeReleased = reuse?.status === 'planned'
+    if (autoHoldAfterFailed && !forceRunReuse && !resumeReleased) {
       return {
         id: nightId,
         nightKey: plan.nightKey,
@@ -1408,7 +1414,8 @@ export async function applyProjectTonightPlans(
   const existingSorted = project.nights
     .filter(
       (n) =>
-        n.nightKey === nightKey && (n.status === 'scheduled' || n.status === 'on_hold')
+        n.nightKey === nightKey &&
+        (n.status === 'scheduled' || n.status === 'planned' || n.status === 'on_hold')
     )
     .sort((a, b) => a.nightIndex - b.nightIndex)
   const unchanged =
@@ -1556,8 +1563,9 @@ export async function reconcileActiveInProgressProjectTonight(
 ): Promise<ImagingProject | undefined> {
   await compactStaleProjectNights()
   await compactOrphanProjects()
-  let projects = await listProjects()
   const nightKey = getTonightScheduleStrip(now).nightKey
+  await dropUndeliveredSubsBeforeNightKey(nightKey)
+  let projects = await listProjects()
 
   const inProgressRows = projects
     .filter((p) => p.status === 'in_progress')

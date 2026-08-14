@@ -180,7 +180,15 @@ export async function failInProgressProjectSubSessions(reason: string): Promise<
     }
   }
   if (failed.length > 0) {
-    await lockObservatoryAfterSessionFailure(reason)
+    try {
+      await lockObservatoryAfterSessionFailure(reason)
+    } catch (error) {
+      void appendAuditLog({
+        kind: 'queue.status',
+        message: `Session failure (${reason}): observatory lock threw.`,
+        detail: { reason, error: error instanceof Error ? error.message : String(error) },
+      })
+    }
   }
   return failed
 }
@@ -196,7 +204,15 @@ export async function failInProgressBoardSessions(
     await notifySessionFailed(snapshot, reason)
   }
   if (failed.length > 0) {
-    await lockObservatoryAfterSessionFailure(reason)
+    try {
+      await lockObservatoryAfterSessionFailure(reason)
+    } catch (error) {
+      void appendAuditLog({
+        kind: 'queue.status',
+        message: `Session failure (${reason}): observatory lock threw.`,
+        detail: { reason, error: error instanceof Error ? error.message : String(error) },
+      })
+    }
   }
   return failed.map((s) => s.id)
 }

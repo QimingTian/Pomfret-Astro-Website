@@ -125,7 +125,7 @@ export async function releaseProjectNightHold(
   if (night.status !== 'on_hold') {
     return { error: 'Sub-session is not on hold.' }
   }
-  /* Always planned — reconcile promotes to scheduled with a fresh start. */
+  /* Always planned — reconcile reuses this same sub as scheduled (does not mint a later index). */
   const restore: ProjectNightStatus = 'planned'
 
   const project = (await getProjectByNightSubId(nightId))?.project

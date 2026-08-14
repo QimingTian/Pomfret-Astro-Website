@@ -1,4 +1,4 @@
-import { logSessionStatusChange } from '@/lib/imaging/session/status-audit'
+import { logSessionStatusChange, projectNightStatusToAuditStatus } from '@/lib/imaging/session/status-audit'
 import { buildNinaSequenceJson } from '@/lib/build-nina-sequence-json'
 import { projectNightSubId } from '@/lib/imaging-project-ids'
 import { dsoSessionDurationSeconds } from '@/lib/imaging-session-overhead'
@@ -258,6 +258,67 @@ export async function compactStaleProjectNights(): Promise<void> {
     return { ...p, nights: deduped }
   })
   if (changed) await writeProjects(next)
+}
+
+const STALE_UNDELIVERED_STATUSES = new Set<ProjectNightStatus>(['scheduled', 'planned', 'on_hold'])
+
+function isForceRunStillActive(n: ProjectNight, nowMs: number): boolean {
+  return (
+    n.status === 'scheduled' &&
+    n.adminForceRunUntilIso != null &&
+    Number.isFinite(Date.parse(n.adminForceRunUntilIso)) &&
+    Date.parse(n.adminForceRunUntilIso) > nowMs
+  )
+}
+
+/** Undelivered row left on a previous strip night (not tonight's scheduled/planned/on_hold). */
+export function isStaleUndeliveredNight(
+  night: ProjectNight,
+  currentNightKey: string,
+  nowMs = Date.now()
+): boolean {
+  if (night.nightKey === currentNightKey) return false
+  if (!STALE_UNDELIVERED_STATUSES.has(night.status)) return false
+  if (isForceRunStillActive(night, nowMs)) return false
+  return true
+}
+
+/** Drop leftover scheduled / planned / on_hold rows from previous nights. Frames stay in remainingByFilter. */
+export async function dropUndeliveredSubsBeforeNightKey(currentNightKey: string): Promise<number> {
+  if (!currentNightKey) return 0
+  const all = await readProjects()
+  const nowMs = Date.now()
+  const dropped: Array<{ project: ImagingProject; night: ProjectNight }> = []
+  const next = all.map((p) => {
+    const stale = p.nights.filter((n) => isStaleUndeliveredNight(n, currentNightKey, nowMs))
+    if (stale.length === 0) return p
+    for (const night of stale) dropped.push({ project: p, night })
+    return {
+      ...p,
+      nights: p.nights.filter((n) => !isStaleUndeliveredNight(n, currentNightKey, nowMs)),
+    }
+  })
+  if (dropped.length === 0) return 0
+  await writeProjects(next)
+  for (const { project, night } of dropped) {
+    await logSessionStatusChange({
+      subject: {
+        id: night.id,
+        target: project.target,
+        projectMode: true,
+        projectId: project.id,
+        nightSubId: night.id,
+        nightIndex: night.nightIndex,
+        nightKey: night.nightKey,
+      },
+      previousStatus: projectNightStatusToAuditStatus(night.status),
+      nextStatus: 'pending',
+      reason: `Dropped leftover ${night.status} sub from previous night ${night.nightKey}.`,
+      previousPlannedStartIso: night.plannedStartIso ?? null,
+      source: 'dropUndeliveredSubsBeforeNightKey',
+    })
+  }
+  return dropped.length
 }
 
 /** Planned window end for a sub-session (planned start + duration, or frozen schedule bar end). */
@@ -918,7 +979,7 @@ export async function upsertPlannedNight(
   return patchProject(projectId, { nights })
 }
 
-/** Replace all `scheduled` sub-sessions for a calendar night (keeps in_progress / completed / failed). */
+/** Replace tonight `scheduled` / `planned` sub-sessions (keeps in_progress / completed / failed / on_hold). */
 export async function replaceScheduledSubsForNightKey(
   projectId: string,
   nightKey: string,
@@ -935,18 +996,12 @@ export async function replaceScheduledSubsForNightKey(
     n.adminForceRunUntilIso != null &&
     Number.isFinite(Date.parse(n.adminForceRunUntilIso)) &&
     Date.parse(n.adminForceRunUntilIso) > nowMs
-  const removed = deduped.filter(
-    (n) =>
-      n.nightKey === nightKey &&
-      n.status === 'scheduled' &&
-      !isForceRunScheduled(n)
-  )
-  const kept = deduped.filter(
-    (n) =>
-      n.nightKey !== nightKey ||
-      n.status !== 'scheduled' ||
-      isForceRunScheduled(n)
-  )
+  const isReplaceableTonightSub = (n: ProjectNight) =>
+    n.nightKey === nightKey &&
+    (n.status === 'scheduled' || n.status === 'planned') &&
+    !isForceRunScheduled(n)
+  const removed = deduped.filter(isReplaceableTonightSub)
+  const kept = deduped.filter((n) => !isReplaceableTonightSub(n))
   const merged: ProjectNight[] = [
     ...kept,
     ...subs.map((s) => ({
@@ -977,7 +1032,7 @@ export async function replaceScheduledSubsForNightKey(
           nightIndex: night.nightIndex,
           nightKey,
         },
-        previousStatus: 'scheduled',
+        previousStatus: projectNightStatusToAuditStatus(night.status),
         nextStatus: 'pending',
         reason,
         previousPlannedStartIso: night.plannedStartIso ?? null,

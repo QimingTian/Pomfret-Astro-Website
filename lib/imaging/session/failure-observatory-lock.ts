@@ -3,15 +3,10 @@ import {
   armEmergencyStop,
   getEmergencyStopState,
   isEmergencyStopBlocking,
-  markEmergencyStopCompleted,
   updateEmergencyStopHeldSessionIds,
 } from '@/lib/imaging-emergency-stop'
 import { applyEmergencyStopHolds } from '@/lib/imaging-emergency-stop-holds'
-import {
-  isObservatoryAgentConnected,
-  setObservatoryMode,
-  setObservatoryStatus,
-} from '@/lib/observatory-status-store'
+import { setObservatoryMode, setObservatoryStatus } from '@/lib/observatory-status-store'
 
 /** Fail reasons that already run ESTOP or are intentional handoffs — do not arm again. */
 const SKIP_LOCK_REASONS = new Set([
@@ -27,51 +22,64 @@ export function shouldLockObservatoryOnSessionFailure(reason: string): boolean {
 }
 
 /**
- * After a real session failure: hold pending/scheduled work, arm ESTOP (dome close),
- * then lock manual Closed — Maintenance when the dome closes (or immediately if agent is offline).
+ * After a real session failure: immediately lock Manual + Closed — Maintenance,
+ * hold remaining work, and arm ESTOP so the agent still closes the dome.
+ * Status must not wait for the dome-closed progress line.
  */
 export async function lockObservatoryAfterSessionFailure(reason: string): Promise<void> {
   if (!shouldLockObservatoryOnSessionFailure(reason)) return
 
-  const heldSessionIds = await applyEmergencyStopHolds()
-
-  if (await isEmergencyStopBlocking()) {
-    const state = await getEmergencyStopState()
-    if (state && heldSessionIds.length > state.heldSessionIds.length) {
-      const merged = [...new Set([...state.heldSessionIds, ...heldSessionIds])]
-      await updateEmergencyStopHeldSessionIds(merged)
-    }
-    void appendAuditLog({
-      kind: 'session.progress',
-      message: `Session failure (${reason}): refreshed holds while observatory stop already active (${heldSessionIds.length} session(s)).`,
-      detail: { reason, heldSessionIds },
-    })
-    return
-  }
-
-  const actorLabel = `session_failure:${reason}`
-  const { state, newlyArmed } = await armEmergencyStop(actorLabel, heldSessionIds)
-  if (newlyArmed && heldSessionIds.length !== state.heldSessionIds.length) {
-    await updateEmergencyStopHeldSessionIds(heldSessionIds)
-  }
-
-  void appendAuditLog({
-    kind: 'session.progress',
-    message: newlyArmed
-      ? `Session failure (${reason}): observatory stop armed (${state.queueId}); ${heldSessionIds.length} session(s) on hold pending dome close.`
-      : `Session failure (${reason}): observatory stop already armed (${state.queueId}).`,
-    detail: { reason, queueId: state.queueId, heldSessionIds, newlyArmed },
-  })
-
-  const agentConnected = await isObservatoryAgentConnected()
-  if (!agentConnected && newlyArmed) {
+  try {
     await setObservatoryMode('manual')
     await setObservatoryStatus('closed_observatory_maintenance')
-    await markEmergencyStopCompleted(state.queueId)
     void appendAuditLog({
-      kind: 'session.progress',
-      message: `Session failure (${reason}): agent offline — observatory locked to manual Closed — Maintenance without waiting for dome close.`,
-      detail: { reason, queueId: state.queueId },
+      kind: 'queue.status',
+      message: `Session failure (${reason}): observatory locked to manual Closed — Maintenance.`,
+      detail: { reason },
+    })
+  } catch (error) {
+    void appendAuditLog({
+      kind: 'queue.status',
+      message: `Session failure (${reason}): failed to lock observatory mode/status.`,
+      detail: { reason, error: error instanceof Error ? error.message : String(error) },
+    })
+  }
+
+  try {
+    const heldSessionIds = await applyEmergencyStopHolds()
+
+    if (await isEmergencyStopBlocking()) {
+      const state = await getEmergencyStopState()
+      if (state && heldSessionIds.length > state.heldSessionIds.length) {
+        const merged = [...new Set([...state.heldSessionIds, ...heldSessionIds])]
+        await updateEmergencyStopHeldSessionIds(merged)
+      }
+      void appendAuditLog({
+        kind: 'queue.status',
+        message: `Session failure (${reason}): refreshed holds while observatory stop already active (${heldSessionIds.length} session(s)).`,
+        detail: { reason, heldSessionIds },
+      })
+      return
+    }
+
+    const actorLabel = `session_failure:${reason}`
+    const { state, newlyArmed } = await armEmergencyStop(actorLabel, heldSessionIds)
+    if (newlyArmed && heldSessionIds.length !== state.heldSessionIds.length) {
+      await updateEmergencyStopHeldSessionIds(heldSessionIds)
+    }
+
+    void appendAuditLog({
+      kind: 'emergency_stop',
+      message: newlyArmed
+        ? `Session failure (${reason}): observatory stop armed (${state.queueId}); ${heldSessionIds.length} session(s) on hold; dome close pending.`
+        : `Session failure (${reason}): observatory stop already armed (${state.queueId}).`,
+      detail: { reason, queueId: state.queueId, heldSessionIds, newlyArmed },
+    })
+  } catch (error) {
+    void appendAuditLog({
+      kind: 'queue.status',
+      message: `Session failure (${reason}): observatory locked but ESTOP/hold follow-up failed.`,
+      detail: { reason, error: error instanceof Error ? error.message : String(error) },
     })
   }
 }

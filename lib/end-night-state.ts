@@ -63,6 +63,13 @@ async function writeSentFlag(nightKey: string, mem: Record<string, boolean>, kvK
   await kvSetJson(kvKey, { sent: true, at: new Date().toISOString() })
 }
 
+async function clearSentFlag(nightKey: string, mem: Record<string, boolean>, kvKey: string): Promise<void> {
+  if (!nightKey) return
+  delete mem[nightKey]
+  if (!kvEnabled()) return
+  await kvSetJson(kvKey, { sent: false, clearedAt: new Date().toISOString() })
+}
+
 export async function wasEndNightAfterSessionsSent(nightKey: string): Promise<boolean> {
   return readSentFlag(nightKey, afterSessionsMemory(), keyAfterSessions(nightKey))
 }
@@ -71,11 +78,21 @@ export async function wasEndNightDawnSent(nightKey: string): Promise<boolean> {
   return readSentFlag(nightKey, dawnMemory(), keyDawn(nightKey))
 }
 
+/**
+ * Allow after-sessions End Night to be delivered again.
+ * Needed when a premature after-sessions close already ran, then more imaging finished.
+ */
+export async function clearEndNightAfterSessionsSent(nightKey: string): Promise<void> {
+  await clearSentFlag(nightKey, afterSessionsMemory(), keyAfterSessions(nightKey))
+}
+
 /** Set when the last scheduled session for this night was consumed — next poll should deliver end night. */
 export async function markEndNightDue(nightKey: string): Promise<void> {
   if (!nightKey) return
   const mem = dueMemoryMap()
   mem[nightKey] = true
+  /* Re-arm after-sessions close if a previous (possibly premature) close already ran. */
+  await clearEndNightAfterSessionsSent(nightKey)
   if (!kvEnabled()) return
   await kvSetJson(dueKeyForNight(nightKey), { due: true, at: new Date().toISOString() })
 }

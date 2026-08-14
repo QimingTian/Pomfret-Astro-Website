@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { plansToScheduledNights, type ProjectTonightPlan } from './planner'
-import { getDeliverableNight, type ImagingProject } from './store'
+import { getDeliverableNight, isStaleUndeliveredNight, type ImagingProject } from './store'
 
 const nightKey = '2026-06-04'
 const projectId = 'a9a609e6-0e7c-41e7-a1b0-857ae61105d7'
@@ -119,4 +119,70 @@ test('getDeliverableNight ignores on_hold subs', () => {
     },
   ])
   assert.equal(getDeliverableNight(project, nightKey), undefined)
+})
+
+test('plansToScheduledNights resumes released planned sub as scheduled after a failed sub tonight', () => {
+  const plannedId = `${projectId}::night-6`
+  const project = baseProject([
+    {
+      id: `${projectId}::night-5`,
+      nightKey,
+      nightIndex: 5,
+      status: 'failed',
+      filterPlansTonight: [{ filterName: 'R', exposureSeconds: 600, count: 10 }],
+      failedAt: '2026-06-05T01:51:15.166Z',
+    },
+    {
+      id: plannedId,
+      nightKey,
+      nightIndex: 6,
+      status: 'planned',
+      filterPlansTonight: [{ filterName: 'R', exposureSeconds: 600, count: 2 }],
+      plannedStartIso: null,
+    },
+  ])
+  const subs = plansToScheduledNights(project, [samplePlan()])
+  assert.equal(subs.length, 1)
+  const sub = subs[0]!
+  assert.equal(sub.id, plannedId)
+  assert.equal(sub.nightIndex, 6)
+  assert.equal(sub.status, 'scheduled')
+  assert.equal(sub.plannedStartIso, samplePlan().plannedStartIso)
+})
+
+test('plansToScheduledNights does not reuse planned rows from a previous nightKey', () => {
+  const project = baseProject([
+    {
+      id: `${projectId}::night-15`,
+      nightKey,
+      nightIndex: 15,
+      status: 'failed',
+      filterPlansTonight: [{ filterName: 'R', exposureSeconds: 600, count: 10 }],
+    },
+    {
+      id: `${projectId}::night-16`,
+      nightKey: '2026-06-03',
+      nightIndex: 16,
+      status: 'planned',
+      filterPlansTonight: [{ filterName: 'R', exposureSeconds: 600, count: 2 }],
+    },
+  ])
+  const subs = plansToScheduledNights(project, [samplePlan()])
+  assert.equal(subs[0]!.nightIndex, 17)
+  assert.equal(subs[0]!.status, 'on_hold')
+})
+
+test('isStaleUndeliveredNight drops leftover planned/scheduled/on_hold from previous nights', () => {
+  const leftover = {
+    id: `${projectId}::night-16`,
+    nightKey: '2026-06-03',
+    nightIndex: 16,
+    status: 'planned' as const,
+    filterPlansTonight: [{ filterName: 'R', exposureSeconds: 600, count: 2 }],
+  }
+  assert.equal(isStaleUndeliveredNight(leftover, nightKey), true)
+  assert.equal(isStaleUndeliveredNight({ ...leftover, status: 'scheduled' }, nightKey), true)
+  assert.equal(isStaleUndeliveredNight({ ...leftover, status: 'on_hold' }, nightKey), true)
+  assert.equal(isStaleUndeliveredNight({ ...leftover, status: 'failed' }, nightKey), false)
+  assert.equal(isStaleUndeliveredNight({ ...leftover, nightKey }, nightKey), false)
 })

@@ -13,6 +13,7 @@ import {
 } from '@/lib/imaging-project-planner'
 import {
   collectTonightProjectSubSessionOccupancy,
+  dropUndeliveredSubsBeforeNightKey,
   getProjectById,
   listProjects,
   projectHasOpenSessionsForNightKey,
@@ -93,6 +94,7 @@ export async function reconcilePendingScheduleStatus(options?: ReconcileSchedule
 
   const strip = getTonightScheduleStrip(now)
   const nightKey = strip.nightKey
+  await dropUndeliveredSubsBeforeNightKey(nightKey)
 
   const nextById = new Map<
     string,

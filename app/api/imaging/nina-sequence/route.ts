@@ -537,7 +537,7 @@ export async function GET(request: NextRequest) {
     const afterSessionsEligible = endNightDue || hasTonightActivity
 
     if (afterSessionsEligible && !(await wasEndNightAfterSessionsSent(nightKey))) {
-      const queueId = `end-night-${nightKey}`
+      const queueId = `end-night-${nightKey}-${Date.now()}`
       const payload = endNightSequenceJson(queueId, 'after_sessions')
       await markEndNightAfterSessionsSent(nightKey)
       void logEndNightDelivered({ nightKey, queueId, trigger: 'after_sessions' })

@@ -51,7 +51,7 @@ export async function lockObservatoryAfterSessionFailure(reason: string): Promis
     if (await isEmergencyStopBlocking()) {
       const state = await getEmergencyStopState()
       if (state && heldSessionIds.length > state.heldSessionIds.length) {
-        const merged = [...new Set([...state.heldSessionIds, ...heldSessionIds])]
+        const merged = Array.from(new Set(state.heldSessionIds.concat(heldSessionIds)))
         await updateEmergencyStopHeldSessionIds(merged)
       }
       void appendAuditLog({

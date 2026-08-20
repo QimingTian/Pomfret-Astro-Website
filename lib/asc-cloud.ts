@@ -1,4 +1,3 @@
-import { astroConditionIsReady, type AstroConditionScale } from '@/lib/astro-conditions'
 import type { AscCloudInference } from '@/lib/types'
 
 export const DEFAULT_ALL_SKY_STREAM_URL = 'https://cam.pomfretastro.org/camera/stream'
@@ -113,12 +112,12 @@ export async function fetchAscCloud(statusUrl?: string | null): Promise<AscCloud
   return ascCloud
 }
 
-/** Observatory Ready weather gate — ASC or Open-Meteo cloud; wind/precip from Open-Meteo; 7Timer transparency/seeing. */
+/** Observatory Ready weather gate — ASC or Open-Meteo cloud; wind/precip from Open-Meteo. */
 export const OBSERVATORY_READY_MAX_CLOUD_PERCENT = 10
 export const OBSERVATORY_READY_MAX_WIND_MS = 10
 export const OBSERVATORY_READY_MAX_PRECIP_PROBABILITY = 20
 export const OBSERVATORY_READY_GATE_RULE =
-  'ASC AI cloud < 10% and no rain (when ASC gate applies) OR Open-Meteo cloud_cover < 10% (when ASC unavailable); wind_speed_10m < 10 m/s; precipitation_probability <= 20%; 7Timer transparency and seeing <= 4 (Average or better)'
+  'ASC AI cloud < 10% and no rain (when ASC gate applies) OR Open-Meteo cloud_cover < 10% (when ASC unavailable); wind_speed_10m < 10 m/s; precipitation_probability <= 20%'
 
 export function evaluateObservatoryReadyWeather(args: {
   cloudCoverPercent: number | null | undefined
@@ -127,8 +126,6 @@ export function evaluateObservatoryReadyWeather(args: {
   rainDetected: boolean | undefined
   windSpeedMs: number
   precipProbabilityPercent?: number | null | undefined
-  transparency?: AstroConditionScale | null | undefined
-  seeing?: AstroConditionScale | null | undefined
   /** When false, skip ASC cloud/rain (sequence active or stale inference). */
   ascGateApplicable?: boolean
 }): boolean {
@@ -150,7 +147,5 @@ export function evaluateObservatoryReadyWeather(args: {
   if (precip == null || !Number.isFinite(precip) || precip > OBSERVATORY_READY_MAX_PRECIP_PROBABILITY) {
     return false
   }
-  if (!astroConditionIsReady(args.transparency)) return false
-  if (!astroConditionIsReady(args.seeing)) return false
   return true
 }

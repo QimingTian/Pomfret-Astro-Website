@@ -1,5 +1,4 @@
 import { evaluateObservatoryReadyWeather } from '@/lib/asc-cloud'
-import type { AstroConditionScale } from '@/lib/astro-conditions'
 import { isWithinDaytimeClosedWindow } from '@/lib/sunrise-window'
 
 export type ObservatoryOverlayStatus =
@@ -39,15 +38,13 @@ function windKmhToMs(kmh: number | null): number {
   return kmh / 3.6
 }
 
-/** Live ASC + Open-Meteo wind/precip/cloud + 7Timer gate (same rule as observatory-status-store auto weather). */
+/** Live ASC + Open-Meteo wind/precip/cloud gate (same rule as observatory-status-store auto weather). */
 export function computeAutoWeatherOverlayStatus(input: {
   cloudPct: number | null
   openMeteoCloudPct?: number | null
   rainDetected: boolean | null
   windKmh: number | null
   precipProbabilityPercent?: number | null
-  transparency?: AstroConditionScale | null
-  seeing?: AstroConditionScale | null
   ascGateApplicable?: boolean
   now?: Date
 }): 'ready' | 'closed_weather_not_permitted' {
@@ -57,8 +54,6 @@ export function computeAutoWeatherOverlayStatus(input: {
     rainDetected: input.rainDetected === true,
     windSpeedMs: windKmhToMs(input.windKmh),
     precipProbabilityPercent: input.precipProbabilityPercent,
-    transparency: input.transparency,
-    seeing: input.seeing,
     ascGateApplicable: input.ascGateApplicable,
   })
   return weatherOk ? 'ready' : 'closed_weather_not_permitted'
@@ -76,8 +71,6 @@ export function computeOverlayObservatoryStatus(input: {
   rainDetected: boolean | null
   windKmh: number | null
   precipProbabilityPercent?: number | null
-  transparency?: AstroConditionScale | null
-  seeing?: AstroConditionScale | null
   ascGateApplicable?: boolean
   now?: Date
 }): ObservatoryOverlayStatus | null {
@@ -89,8 +82,6 @@ export function computeOverlayObservatoryStatus(input: {
     rainDetected,
     windKmh,
     precipProbabilityPercent,
-    transparency,
-    seeing,
     ascGateApplicable,
     now = new Date(),
   } = input
@@ -108,8 +99,6 @@ export function computeOverlayObservatoryStatus(input: {
     rainDetected,
     windKmh,
     precipProbabilityPercent,
-    transparency,
-    seeing,
     ascGateApplicable,
     now,
   })

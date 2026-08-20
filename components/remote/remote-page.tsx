@@ -1041,11 +1041,7 @@ export default function RemotePage() {
               if (hourStartSec == null || !Array.isArray(reasonsRaw)) continue
               const reasons = reasonsRaw.filter(
                 (r): r is WeatherNotPermittedReason =>
-                  r === 'cloud' ||
-                  r === 'rain' ||
-                  r === 'wind' ||
-                  r === 'transparency' ||
-                  r === 'seeing'
+                  r === 'cloud' || r === 'rain' || r === 'wind'
               )
               if (reasons.length === 0) continue
               mapped[buildHourKey(new Date(hourStartSec * 1000))] = reasons
@@ -1887,7 +1883,7 @@ export default function RemotePage() {
       kind: 'permitted' | 'not_permitted'
       reasons: WeatherNotPermittedReason[]
     }> = []
-    const reasonOrder = { cloud: 0, rain: 1, wind: 2, transparency: 3, seeing: 4 } as const
+    const reasonOrder = { cloud: 0, rain: 1, wind: 2 } as const
     const normalizeReasons = (reasons: WeatherNotPermittedReason[]) =>
       Array.from(new Set(reasons)).sort((a, b) => reasonOrder[a] - reasonOrder[b])
     const sameReasonSet = (a: WeatherNotPermittedReason[], b: WeatherNotPermittedReason[]) => {

@@ -1,11 +1,4 @@
 import { getAdminClosedWindowsInRange } from '@/lib/admin-closed-window-store'
-import {
-  astroConditionIsReady,
-  astroConditionsForInstant,
-  fetchSevenTimerAstroSeries,
-  type AstroConditionScale,
-  type SevenTimerAstroSeries,
-} from '@/lib/astro-conditions'
 import { subtractOccupiedFromFree } from '@/lib/imaging-queue-free-intervals'
 
 const LAT = 41.9159
@@ -18,14 +11,12 @@ export const TONIGHT_WEATHER_MAX_CLOUD_PERCENT = 10
 export const TONIGHT_WEATHER_MAX_PRECIP_PROBABILITY = 10
 export const TONIGHT_WEATHER_MAX_WIND_MS = 10
 
-export type WeatherNotPermittedReason = 'cloud' | 'rain' | 'wind' | 'transparency' | 'seeing'
+export type WeatherNotPermittedReason = 'cloud' | 'rain' | 'wind'
 
 export type HourWeatherSample = {
   cloudCover: number
   precipProbability: number
   windSpeedMs: number
-  transparency?: AstroConditionScale | null
-  seeing?: AstroConditionScale | null
 }
 
 export type HourlyForecastSample = HourWeatherSample & {
@@ -46,21 +37,11 @@ export function weatherNotPermittedReasons(sample: HourWeatherSample): WeatherNo
   if (!Number.isFinite(sample.windSpeedMs) || sample.windSpeedMs > TONIGHT_WEATHER_MAX_WIND_MS) {
     reasons.push('wind')
   }
-  if (!astroConditionIsReady(sample.transparency)) reasons.push('transparency')
-  if (!astroConditionIsReady(sample.seeing)) reasons.push('seeing')
   return reasons
 }
 
 export function isHourWeatherPermitted(sample: HourWeatherSample): boolean {
   return weatherNotPermittedReasons(sample).length === 0
-}
-
-export function astroForHourStartSec(
-  series: SevenTimerAstroSeries | null,
-  hourStartSec: number
-): Pick<HourWeatherSample, 'transparency' | 'seeing'> {
-  if (!series) return { transparency: null, seeing: null }
-  return astroConditionsForInstant(series, new Date(hourStartSec * 1000))
 }
 
 /**
@@ -154,7 +135,7 @@ export type TonightWeatherIntervalsResult = {
 /**
  * Rule (Pomfret tonight, sunset -> next sunrise):
  * 1) some run of MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS consecutive hours passing hourly weather checks
- *    (cloud, precip, wind, 7Timer transparency/seeing)
+ *    (cloud, precip, wind)
  * 2) every hour precipitation_probability < 10%
  * 3) hours with wind_speed_10m > 10 m/s must be <= 3
  *
@@ -248,9 +229,8 @@ export async function getTonightWeatherPermittedIntervals(): Promise<TonightWeat
     '&past_days=1&forecast_days=2&timezone=America/New_York&timeformat=unixtime'
 
   try {
-    const [res, astroSeries] = await Promise.all([
+    const [res] = await Promise.all([
       fetch(url, { cache: 'no-store' }),
-      fetchSevenTimerAstroSeries(),
     ])
     if (!res.ok) {
       return { status: 'unknown', permittedIntervals: [], reason: 'Weather forecast unavailable' }
@@ -304,13 +284,10 @@ export async function getTonightWeatherPermittedIntervals(): Promise<TonightWeat
       const p = Number(precip[i])
       const wKmh = Number(wind[i])
       const wMs = Number.isFinite(wKmh) ? wKmh * KMH_TO_MS : Number.NaN
-      const astro = astroForHourStartSec(astroSeries, times[i])
       const hourSample: HourWeatherSample = {
         cloudCover: c,
         precipProbability: p,
         windSpeedMs: wMs,
-        transparency: astro.transparency,
-        seeing: astro.seeing,
       }
       if (countsTowardGlobalHard) {
         if (!Number.isFinite(p) || p >= TONIGHT_WEATHER_MAX_PRECIP_PROBABILITY) anyPrecipOver10 = true
@@ -337,7 +314,7 @@ export async function getTonightWeatherPermittedIntervals(): Promise<TonightWeat
       : windTooMuch
         ? 'Global weather trigger: more than 3 night hours have wind speed > 10 m/s.'
         : cloudRunMissing
-          ? `Global weather trigger: no ${MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS}-hour consecutive run passing hourly weather checks (cloud, precip, wind, transparency, seeing).`
+          ? `Global weather trigger: no ${MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS}-hour consecutive run passing hourly weather checks (cloud, precip, wind).`
           : ''
 
     let effectivePermittedIntervals: TimeInterval[] = [...permittedIntervals]

@@ -24,7 +24,6 @@ import {
   OBSERVATORY_READY_GATE_RULE,
 } from '@/lib/asc-cloud'
 import { fetchOpenMeteoCurrentWeather } from '@/lib/open-meteo-current'
-import { fetchAstroConditions, type AstroConditionScale } from '@/lib/astro-conditions'
 import { isEmergencyStopBlocking } from '@/lib/imaging-emergency-stop'
 
 export type ObservatoryStatus =
@@ -114,8 +113,6 @@ let weatherCache:
       precipitation: number
       windSpeed: number
       precipProbability: number
-      transparency: AstroConditionScale | null
-      seeing: AstroConditionScale | null
       ascGateApplicable: boolean
       sequenceActive: boolean
       ascStaleReason: string | null
@@ -163,10 +160,9 @@ async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
   }
 
   try {
-    const [gate, openMeteo, astro] = await Promise.all([
+    const [gate, openMeteo] = await Promise.all([
       fetchAllSkyCamGateState(),
       fetchOpenMeteoObservatoryGate(),
-      fetchAstroConditions(new Date(now)),
     ])
     const ascCloud = gate.ascCloud
     const ascGateApplicable = isAscCloudGateApplicable(ascCloud, gate.sequenceActive)
@@ -180,8 +176,6 @@ async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
       rainDetected,
       windSpeedMs: openMeteo.windSpeedMs,
       precipProbabilityPercent: openMeteo.precipProbability,
-      transparency: astro.transparency,
-      seeing: astro.seeing,
       ascGateApplicable,
     })
     weatherCache = {
@@ -192,8 +186,6 @@ async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
       precipitation: rainDetected ? 1 : 0,
       windSpeed: openMeteo.windSpeedMs,
       precipProbability: openMeteo.precipProbability,
-      transparency: astro.transparency,
-      seeing: astro.seeing,
       ascGateApplicable,
       sequenceActive: gate.sequenceActive,
       ascStaleReason: ascGateApplicable ? null : (ascCloud?.staleReason ?? (gate.sequenceActive ? 'sequence_active' : 'stale')),
@@ -217,8 +209,6 @@ async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
       precipitation: 1,
       windSpeed: 999,
       precipProbability: 100,
-      transparency: null,
-      seeing: null,
       ascGateApplicable: false,
       sequenceActive: false,
       ascStaleReason: 'fetch_failed',
@@ -246,9 +236,6 @@ function weatherDetailForAudit(now: number): Record<string, unknown> | null {
     windSpeedMs: weatherCache.windSpeed,
     precipProbabilityPercent: weatherCache.precipProbability,
     precipSource: 'open_meteo_current',
-    transparency: weatherCache.transparency,
-    seeing: weatherCache.seeing,
-    astroSource: '7timer',
     ascGateApplicable: weatherCache.ascGateApplicable,
     sequenceActive: weatherCache.sequenceActive,
     ascStaleReason: weatherCache.ascStaleReason,

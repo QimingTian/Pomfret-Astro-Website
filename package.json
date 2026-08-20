@@ -1,6 +1,6 @@
 {
   "name": "pomfret-astro-website",
-  "version": "6.2.11",
+  "version": "6.3.0",
   "description": "Pomfret Astro Website",
   "private": true,
   "scripts": {

@@ -1,3 +1,4 @@
+import { astroConditionIsReady, type AstroConditionScale } from '@/lib/astro-conditions'
 import type { AscCloudInference } from '@/lib/types'
 
 export const DEFAULT_ALL_SKY_STREAM_URL = 'https://cam.pomfretastro.org/camera/stream'
@@ -112,18 +113,22 @@ export async function fetchAscCloud(statusUrl?: string | null): Promise<AscCloud
   return ascCloud
 }
 
-/** Observatory Ready weather gate — cloud/rain from ASC AI; wind/precip from Open-Meteo current. */
-export const OBSERVATORY_READY_MAX_CLOUD_PERCENT = 20
+/** Observatory Ready weather gate — ASC or Open-Meteo cloud; wind/precip from Open-Meteo; 7Timer transparency/seeing. */
+export const OBSERVATORY_READY_MAX_CLOUD_PERCENT = 10
 export const OBSERVATORY_READY_MAX_WIND_MS = 10
 export const OBSERVATORY_READY_MAX_PRECIP_PROBABILITY = 20
 export const OBSERVATORY_READY_GATE_RULE =
-  'ASC AI cloud < 20% and no rain detected (when ASC gate applies) and wind_speed_10m < 10 m/s and precipitation_probability <= 20% (Open-Meteo current)'
+  'ASC AI cloud < 10% and no rain (when ASC gate applies) OR Open-Meteo cloud_cover < 10% (when ASC unavailable); wind_speed_10m < 10 m/s; precipitation_probability <= 20%; 7Timer transparency and seeing <= 4 (Average or better)'
 
 export function evaluateObservatoryReadyWeather(args: {
   cloudCoverPercent: number | null | undefined
+  /** Open-Meteo cloud_cover when ASC cloud/rain gate does not apply. */
+  openMeteoCloudCoverPercent?: number | null | undefined
   rainDetected: boolean | undefined
   windSpeedMs: number
   precipProbabilityPercent?: number | null | undefined
+  transparency?: AstroConditionScale | null | undefined
+  seeing?: AstroConditionScale | null | undefined
   /** When false, skip ASC cloud/rain (sequence active or stale inference). */
   ascGateApplicable?: boolean
 }): boolean {
@@ -133,6 +138,10 @@ export function evaluateObservatoryReadyWeather(args: {
     if (cloud == null || !Number.isFinite(cloud)) return false
     if (args.rainDetected === true) return false
     if (cloud >= OBSERVATORY_READY_MAX_CLOUD_PERCENT) return false
+  } else {
+    const omCloud = args.openMeteoCloudCoverPercent
+    if (omCloud == null || !Number.isFinite(omCloud)) return false
+    if (omCloud >= OBSERVATORY_READY_MAX_CLOUD_PERCENT) return false
   }
   if (!Number.isFinite(args.windSpeedMs) || args.windSpeedMs >= OBSERVATORY_READY_MAX_WIND_MS) {
     return false
@@ -141,5 +150,7 @@ export function evaluateObservatoryReadyWeather(args: {
   if (precip == null || !Number.isFinite(precip) || precip > OBSERVATORY_READY_MAX_PRECIP_PROBABILITY) {
     return false
   }
+  if (!astroConditionIsReady(args.transparency)) return false
+  if (!astroConditionIsReady(args.seeing)) return false
   return true
 }

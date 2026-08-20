@@ -5,11 +5,15 @@ import {
 } from '@/lib/imaging-queue-weather-column-reconcile'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
+import { fetchSevenTimerAstroSeries } from '@/lib/astro-conditions'
 import {
+  astroForHourStartSec,
   evaluateGlobalTonightWeatherPermitted,
   MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS,
   pickOpenMeteoImagingNightBounds,
   type HourlyForecastSample,
+  type WeatherNotPermittedReason,
+  weatherNotPermittedReasons,
 } from '@/lib/tonight-weather-gate'
 
 export const runtime = 'nodejs'
@@ -63,7 +67,10 @@ export async function GET(request: Request) {
     '&past_days=1&forecast_days=2&timezone=America/New_York&timeformat=unixtime'
 
   try {
-    const response = await fetch(url, { cache: 'no-store' })
+    const [response, astroSeries] = await Promise.all([
+      fetch(url, { cache: 'no-store' }),
+      fetchSevenTimerAstroSeries(),
+    ])
     if (!response.ok) {
       return NextResponse.json({ ok: false as const, error: 'Failed to fetch weather forecast' }, { status: 502 })
     }
@@ -123,17 +130,21 @@ export async function GET(request: Request) {
     const nightHourStartsSec = nightIndices.map((i) => times[i])
 
     const readyHourStartsSec: number[] = []
-    const notPermittedHourReasons: Array<{ hourStartSec: number; reasons: Array<'cloud' | 'rain' | 'wind'> }> = []
+    const notPermittedHourReasons: Array<{ hourStartSec: number; reasons: WeatherNotPermittedReason[] }> = []
     for (const i of nightIndices) {
       const cloud = Number(clouds[i])
       const precip = Number(precipProb[i])
       const windRaw = Number(windSpeed[i])
       const wind = Number.isFinite(windRaw) ? windRaw * KMH_TO_MS : Number.NaN
-      const reasons: Array<'cloud' | 'rain' | 'wind'> = []
-      if (!Number.isFinite(cloud) || cloud >= 10) reasons.push('cloud')
-      if (!Number.isFinite(precip) || precip >= 10) reasons.push('rain')
-      if (!Number.isFinite(wind) || wind > 10) reasons.push('wind')
-      if (Number.isFinite(cloud) && Number.isFinite(precip) && Number.isFinite(wind) && cloud < 10 && precip < 10 && wind <= 10) {
+      const astro = astroForHourStartSec(astroSeries, times[i])
+      const reasons = weatherNotPermittedReasons({
+        cloudCover: cloud,
+        precipProbability: precip,
+        windSpeedMs: wind,
+        transparency: astro.transparency,
+        seeing: astro.seeing,
+      })
+      if (reasons.length === 0) {
         readyHourStartsSec.push(times[i])
       } else {
         notPermittedHourReasons.push({ hourStartSec: times[i], reasons })
@@ -229,11 +240,14 @@ export async function GET(request: Request) {
 
     const hourlySamples: HourlyForecastSample[] = times.map((hourStartSec, i) => {
       const windRaw = Number(windSpeed[i])
+      const astro = astroForHourStartSec(astroSeries, hourStartSec)
       return {
         hourStartSec,
         cloudCover: Number(clouds[i]),
         precipProbability: Number(precipProb[i]),
         windSpeedMs: Number.isFinite(windRaw) ? windRaw * KMH_TO_MS : Number.NaN,
+        transparency: astro.transparency,
+        seeing: astro.seeing,
       }
     })
     const permitted = evaluateGlobalTonightWeatherPermitted({
@@ -263,7 +277,7 @@ export async function GET(request: Request) {
       hasAnyPrecipitationTonight,
       precipitationHits,
       rule:
-        `Tonight (nautical dusk → nautical dawn, Pomfret): (1) some run of ${MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS} consecutive hours with cloud_cover < 10%; ` +
+        `Tonight (nautical dusk → nautical dawn, Pomfret): (1) some run of ${MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS} consecutive hours passing hourly weather checks (cloud, precip, wind, 7Timer transparency/seeing); ` +
         '(2) every hour precipitation_probability < 10%; (3) hours with wind_speed_10m > 10 m/s must be <= 3. ' +
         'After nautical dusk, only remaining imaging-night hours count for (1)–(3) (fully past hours are ignored). Pre-dusk schedule-strip hours do not count.',
     })

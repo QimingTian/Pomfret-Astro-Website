@@ -10,6 +10,8 @@ test('computeOverlayObservatoryStatus uses live weather in auto when server stat
     rainDetected: false,
     windKmh: 11,
     precipProbabilityPercent: 0,
+    transparency: 4,
+    seeing: 4,
     now: new Date('2026-07-02T02:54:51.000Z'),
   })
   assert.equal(status, 'closed_weather_not_permitted')

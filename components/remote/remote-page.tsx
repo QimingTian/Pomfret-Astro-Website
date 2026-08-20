@@ -22,6 +22,7 @@ import {
   pomfretTargetObservabilityError,
 } from '@/lib/target-altitude'
 import { getTonightScheduleStrip, isBeforeTonightWeatherHeadline } from '@/lib/schedule-strip'
+import type { WeatherNotPermittedReason } from '@/lib/tonight-weather-gate'
 import {
   getTonightAstronomicalNightWindow,
   getTonightScheduleEveningAstronomyUtc,
@@ -358,7 +359,7 @@ export default function RemotePage() {
   const [readyWeatherHourKeys, setReadyWeatherHourKeys] = useState<string[]>([])
   const [nightWeatherHourKeys, setNightWeatherHourKeys] = useState<string[]>([])
   const [notPermittedReasonByHourKey, setNotPermittedReasonByHourKey] = useState<
-    Record<string, Array<'cloud' | 'rain' | 'wind'>>
+    Record<string, WeatherNotPermittedReason[]>
   >({})
   const [scheduleNowMs, setScheduleNowMs] = useState(() => Date.now())
   const [hasAnyPrecipitationTonight, setHasAnyPrecipitationTonight] = useState(false)
@@ -1029,7 +1030,7 @@ export default function RemotePage() {
             setReadyWeatherHourKeys((prev) => mergeWithFrozenPastHours(prev, [], nowForMerge))
           }
           if (Array.isArray(data.notPermittedHourReasons)) {
-            const mapped: Record<string, Array<'cloud' | 'rain' | 'wind'>> = {}
+            const mapped: Record<string, WeatherNotPermittedReason[]> = {}
             for (const row of data.notPermittedHourReasons) {
               if (!row || typeof row !== 'object') continue
               const hourStartSec =
@@ -1039,7 +1040,12 @@ export default function RemotePage() {
               const reasonsRaw = (row as { reasons?: unknown }).reasons
               if (hourStartSec == null || !Array.isArray(reasonsRaw)) continue
               const reasons = reasonsRaw.filter(
-                (r): r is 'cloud' | 'rain' | 'wind' => r === 'cloud' || r === 'rain' || r === 'wind'
+                (r): r is WeatherNotPermittedReason =>
+                  r === 'cloud' ||
+                  r === 'rain' ||
+                  r === 'wind' ||
+                  r === 'transparency' ||
+                  r === 'seeing'
               )
               if (reasons.length === 0) continue
               mapped[buildHourKey(new Date(hourStartSec * 1000))] = reasons
@@ -1870,7 +1876,7 @@ export default function RemotePage() {
         topPct: number
         heightPct: number
         kind: 'permitted' | 'not_permitted'
-        reasons: Array<'cloud' | 'rain' | 'wind'>
+        reasons: WeatherNotPermittedReason[]
       }>
     }
     const readyKeySet = new Set(readyWeatherHourKeys)
@@ -1879,15 +1885,12 @@ export default function RemotePage() {
       topPct: number
       heightPct: number
       kind: 'permitted' | 'not_permitted'
-      reasons: Array<'cloud' | 'rain' | 'wind'>
+      reasons: WeatherNotPermittedReason[]
     }> = []
-    const reasonOrder = { cloud: 0, rain: 1, wind: 2 } as const
-    const normalizeReasons = (reasons: Array<'cloud' | 'rain' | 'wind'>) =>
+    const reasonOrder = { cloud: 0, rain: 1, wind: 2, transparency: 3, seeing: 4 } as const
+    const normalizeReasons = (reasons: WeatherNotPermittedReason[]) =>
       Array.from(new Set(reasons)).sort((a, b) => reasonOrder[a] - reasonOrder[b])
-    const sameReasonSet = (
-      a: Array<'cloud' | 'rain' | 'wind'>,
-      b: Array<'cloud' | 'rain' | 'wind'>
-    ) => {
+    const sameReasonSet = (a: WeatherNotPermittedReason[], b: WeatherNotPermittedReason[]) => {
       if (a.length !== b.length) return false
       return a.every((reason, i) => reason === b[i])
     }
@@ -1912,7 +1915,7 @@ export default function RemotePage() {
     let runStartMs: number | null = null
     let runEndMsExclusive: number | null = null
     let runKind: 'permitted' | 'not_permitted' | null = null
-    let runReasons: Array<'cloud' | 'rain' | 'wind'> = []
+    let runReasons: WeatherNotPermittedReason[] = []
 
     for (const slot of tonightSchedule.hours) {
       if (!nightKeySet.has(slot.hourKey)) {

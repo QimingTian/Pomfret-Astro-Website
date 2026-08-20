@@ -331,6 +331,9 @@ export async function armEmergencyStop(
     return { state, newlyArmed: false }
   }
   await notifyEstopChanged(true)
+  const { getTonightScheduleStrip } = await import('@/lib/schedule-strip')
+  const { prepareEndNightAfterEstop } = await import('@/lib/end-night-state')
+  await prepareEndNightAfterEstop(getTonightScheduleStrip().nightKey)
   return { state, newlyArmed: true }
 }
 

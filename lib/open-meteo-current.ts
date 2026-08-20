@@ -6,12 +6,13 @@ export type OpenMeteoCurrentWeather = {
   windSpeedKmh: number | null
   windGustKmh: number | null
   precipProbabilityPercent: number | null
+  cloudCoverPercent: number | null
 }
 
 export function openMeteoCurrentWeatherUrl(): string {
   return (
     `https://api.open-meteo.com/v1/forecast?latitude=${OBS_LAT_DEG}&longitude=${OBS_LON_DEG}` +
-    '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_gusts_10m,precipitation_probability&timezone=auto'
+    '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_gusts_10m,precipitation_probability,cloud_cover&timezone=auto'
   )
 }
 
@@ -25,6 +26,7 @@ export async function fetchOpenMeteoCurrentWeather(): Promise<OpenMeteoCurrentWe
         wind_speed_10m?: number
         wind_gusts_10m?: number
         precipitation_probability?: number
+        cloud_cover?: number
       }
     }
     const c = data.current
@@ -35,6 +37,7 @@ export async function fetchOpenMeteoCurrentWeather(): Promise<OpenMeteoCurrentWe
         windSpeedKmh: null,
         windGustKmh: null,
         precipProbabilityPercent: null,
+        cloudCoverPercent: null,
       }
     }
     return {
@@ -58,6 +61,8 @@ export async function fetchOpenMeteoCurrentWeather(): Promise<OpenMeteoCurrentWe
         typeof c.precipitation_probability === 'number' && Number.isFinite(c.precipitation_probability)
           ? c.precipitation_probability
           : null,
+      cloudCoverPercent:
+        typeof c.cloud_cover === 'number' && Number.isFinite(c.cloud_cover) ? c.cloud_cover : null,
     }
   } catch {
     return {
@@ -66,6 +71,7 @@ export async function fetchOpenMeteoCurrentWeather(): Promise<OpenMeteoCurrentWe
       windSpeedKmh: null,
       windGustKmh: null,
       precipProbabilityPercent: null,
+      cloudCoverPercent: null,
     }
   }
 }

@@ -21,6 +21,25 @@ export function shouldLockObservatoryOnSessionFailure(reason: string): boolean {
   return !SKIP_LOCK_REASONS.has(reason)
 }
 
+/** Immediately lock Manual + Closed — Maintenance (do not wait for dome-closed progress). */
+export async function lockObservatoryForEmergencyStop(source: string): Promise<void> {
+  try {
+    await setObservatoryMode('manual')
+    await setObservatoryStatus('closed_observatory_maintenance')
+    void appendAuditLog({
+      kind: 'emergency_stop',
+      message: `Emergency STOP (${source}): observatory locked to manual Closed — Maintenance.`,
+      detail: { source },
+    })
+  } catch (error) {
+    void appendAuditLog({
+      kind: 'emergency_stop',
+      message: `Emergency STOP (${source}): failed to lock observatory mode/status.`,
+      detail: { source, error: error instanceof Error ? error.message : String(error) },
+    })
+  }
+}
+
 /**
  * After a real session failure: immediately lock Manual + Closed — Maintenance,
  * hold remaining work, and arm ESTOP so the agent still closes the dome.

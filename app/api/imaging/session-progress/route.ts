@@ -28,10 +28,7 @@ import {
   clearNinaStoppedPendingFail,
   maybeFailSessionsAfterNinaStopped,
 } from '@/lib/imaging-session-failure'
-import {
-  setObservatoryMode,
-  setObservatoryStatus,
-} from '@/lib/observatory-status-store'
+import { lockObservatoryForEmergencyStop } from '@/lib/imaging/session/failure-observatory-lock'
 import { isSessionCompletedSignal, progressLineText } from '@/lib/session-progress-signal'
 
 export const runtime = 'nodejs'
@@ -196,8 +193,7 @@ export async function POST(request: NextRequest) {
     if (line.includes('dome closed')) {
       const estopState = await getEmergencyStopState()
       const persisted = await markEmergencyStopCompleted(queueId)
-      await setObservatoryMode('manual')
-      await setObservatoryStatus('closed_observatory_maintenance')
+      await lockObservatoryForEmergencyStop('session_progress_dome_closed')
       void appendAuditLog({
         kind: 'emergency_stop',
         message: persisted

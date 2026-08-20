@@ -24,6 +24,8 @@ import {
   OBSERVATORY_READY_GATE_RULE,
 } from '@/lib/asc-cloud'
 import { fetchOpenMeteoCurrentWeather } from '@/lib/open-meteo-current'
+import { fetchAstroConditions, type AstroConditionScale } from '@/lib/astro-conditions'
+import { isEmergencyStopBlocking } from '@/lib/imaging-emergency-stop'
 
 export type ObservatoryStatus =
   | 'ready'
@@ -107,10 +109,13 @@ let weatherCache:
   | {
       ts: number
       cloudCover: number
+      openMeteoCloudCover: number | null
       rainDetected: boolean
       precipitation: number
       windSpeed: number
       precipProbability: number
+      transparency: AstroConditionScale | null
+      seeing: AstroConditionScale | null
       ascGateApplicable: boolean
       sequenceActive: boolean
       ascStaleReason: string | null
@@ -134,7 +139,11 @@ function currentMode(): ObservatoryMode {
   return memory().__pomfret_mode__ ?? 'manual'
 }
 
-async function fetchOpenMeteoObservatoryGate(): Promise<{ windSpeedMs: number; precipProbability: number }> {
+async function fetchOpenMeteoObservatoryGate(): Promise<{
+  windSpeedMs: number
+  precipProbability: number
+  cloudCoverPercent: number | null
+}> {
   const wx = await fetchOpenMeteoCurrentWeather()
   const windKmh = wx.windSpeedKmh
   const windSpeedMs =
@@ -143,7 +152,9 @@ async function fetchOpenMeteoObservatoryGate(): Promise<{ windSpeedMs: number; p
     wx.precipProbabilityPercent != null && Number.isFinite(wx.precipProbabilityPercent)
       ? wx.precipProbabilityPercent
       : 100
-  return { windSpeedMs, precipProbability }
+  const cloudCoverPercent =
+    wx.cloudCoverPercent != null && Number.isFinite(wx.cloudCoverPercent) ? wx.cloudCoverPercent : null
+  return { windSpeedMs, precipProbability, cloudCoverPercent }
 }
 
 async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
@@ -152,7 +163,11 @@ async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
   }
 
   try {
-    const [gate, openMeteo] = await Promise.all([fetchAllSkyCamGateState(), fetchOpenMeteoObservatoryGate()])
+    const [gate, openMeteo, astro] = await Promise.all([
+      fetchAllSkyCamGateState(),
+      fetchOpenMeteoObservatoryGate(),
+      fetchAstroConditions(new Date(now)),
+    ])
     const ascCloud = gate.ascCloud
     const ascGateApplicable = isAscCloudGateApplicable(ascCloud, gate.sequenceActive)
     const ascCloudCover = ascCloud?.cloudCoverPercent
@@ -161,18 +176,24 @@ async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
     const rainDetected = ascCloud?.rain?.detected === true
     const weatherAllowed = evaluateObservatoryReadyWeather({
       cloudCoverPercent: cloudCover,
+      openMeteoCloudCoverPercent: openMeteo.cloudCoverPercent,
       rainDetected,
       windSpeedMs: openMeteo.windSpeedMs,
       precipProbabilityPercent: openMeteo.precipProbability,
+      transparency: astro.transparency,
+      seeing: astro.seeing,
       ascGateApplicable,
     })
     weatherCache = {
       ts: now,
       cloudCover: cloudCover ?? 100,
+      openMeteoCloudCover: openMeteo.cloudCoverPercent,
       rainDetected,
       precipitation: rainDetected ? 1 : 0,
       windSpeed: openMeteo.windSpeedMs,
       precipProbability: openMeteo.precipProbability,
+      transparency: astro.transparency,
+      seeing: astro.seeing,
       ascGateApplicable,
       sequenceActive: gate.sequenceActive,
       ascStaleReason: ascGateApplicable ? null : (ascCloud?.staleReason ?? (gate.sequenceActive ? 'sequence_active' : 'stale')),
@@ -191,10 +212,13 @@ async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
     weatherCache = {
       ts: now,
       cloudCover: 100,
+      openMeteoCloudCover: null,
       rainDetected: true,
       precipitation: 1,
       windSpeed: 999,
       precipProbability: 100,
+      transparency: null,
+      seeing: null,
       ascGateApplicable: false,
       sequenceActive: false,
       ascStaleReason: 'fetch_failed',
@@ -215,12 +239,16 @@ function weatherDetailForAudit(now: number): Record<string, unknown> | null {
   if (!weatherCache) return null
   return {
     cloudCoverPercent: weatherCache.cloudCover,
-    cloudSource: 'asc_ai',
+    cloudSource: weatherCache.ascGateApplicable ? 'asc_ai' : 'open_meteo_current',
+    openMeteoCloudCoverPercent: weatherCache.openMeteoCloudCover,
     rainDetected: weatherCache.rainDetected,
     precipitationMm: weatherCache.precipitation,
     windSpeedMs: weatherCache.windSpeed,
     precipProbabilityPercent: weatherCache.precipProbability,
     precipSource: 'open_meteo_current',
+    transparency: weatherCache.transparency,
+    seeing: weatherCache.seeing,
+    astroSource: '7timer',
     ascGateApplicable: weatherCache.ascGateApplicable,
     sequenceActive: weatherCache.sequenceActive,
     ascStaleReason: weatherCache.ascStaleReason,
@@ -416,6 +444,55 @@ function applyObservatoryPayload(parsed: { status?: unknown; mode?: unknown; las
   }
 }
 
+/** While ESTOP is active, never revert manual/maintenance from stale KV `auto`. */
+export function applyRemoteObservatoryModeStatus(
+  remote: { mode?: unknown; status?: unknown },
+  estopBlocking: boolean
+): void {
+  if (estopBlocking) {
+    if (remote.mode === 'manual') {
+      memory().__pomfret_mode__ = 'manual'
+    }
+    if (remote.status === 'closed_observatory_maintenance') {
+      memory().__pomfret_manual_status__ = 'closed_observatory_maintenance'
+    }
+    return
+  }
+  if (remote.mode === 'manual' || remote.mode === 'auto') {
+    applyObservatoryPayload(remote)
+  }
+}
+
+function mergeObservatoryTelemetry(remote: {
+  lastPollTs?: unknown
+  lastAgentSeenTs?: unknown
+  ninaRunning?: unknown
+  ninaRunningReportedAt?: unknown
+}): void {
+  if (typeof remote.lastPollTs === 'number' && Number.isFinite(remote.lastPollTs)) {
+    memory().__pomfret_last_poll_ts__ = remote.lastPollTs
+  }
+  if (typeof remote.lastAgentSeenTs === 'number' && Number.isFinite(remote.lastAgentSeenTs)) {
+    memory().__pomfret_last_agent_seen_ts__ = remote.lastAgentSeenTs
+  }
+  if (typeof remote.ninaRunning === 'boolean') {
+    memory().__pomfret_nina_running__ = remote.ninaRunning
+  }
+  if (typeof remote.ninaRunningReportedAt === 'number' && Number.isFinite(remote.ninaRunningReportedAt)) {
+    memory().__pomfret_nina_running_reported_at__ = remote.ninaRunningReportedAt
+  }
+}
+
+async function enforceEmergencyStopObservatoryLock(): Promise<void> {
+  if (!(await isEmergencyStopBlocking())) return
+  if (currentMode() !== 'manual') {
+    memory().__pomfret_mode__ = 'manual'
+  }
+  if (currentManualStatus() !== 'closed_observatory_maintenance') {
+    memory().__pomfret_manual_status__ = 'closed_observatory_maintenance'
+  }
+}
+
 async function ensureLoaded() {
   if (loaded) return
 
@@ -459,13 +536,18 @@ async function syncObservatoryFromKv(): Promise<void> {
   }>('observatory-status')
   if (!remote) return
 
+  const estopBlocking = await isEmergencyStopBlocking()
+  applyRemoteObservatoryModeStatus(remote, estopBlocking)
+  if (estopBlocking) {
+    mergeObservatoryTelemetry(remote)
+  } else if (remote.mode !== 'manual' && remote.mode !== 'auto') {
+    mergeObservatoryTelemetry(remote)
+  }
+
   const prevPoll = memory().__pomfret_last_poll_ts__ ?? 0
   const prevAgentSeen = memory().__pomfret_last_agent_seen_ts__ ?? 0
   const prevReportedAt = memory().__pomfret_nina_running_reported_at__ ?? 0
 
-  if (remote.mode === 'manual' || remote.mode === 'auto') {
-    applyObservatoryPayload(remote)
-  }
   if (typeof remote.lastPollTs === 'number' && Number.isFinite(remote.lastPollTs)) {
     memory().__pomfret_last_poll_ts__ = Math.max(remote.lastPollTs, prevPoll)
   }
@@ -515,7 +597,9 @@ export async function getObservatoryStatus(
 ): Promise<ObservatoryStatus> {
   await ensureLoaded()
   await syncObservatoryFromKv()
-  const mode = currentMode()
+  await enforceEmergencyStopObservatoryLock()
+  const estopBlocking = await isEmergencyStopBlocking()
+  const mode = estopBlocking ? 'manual' : currentMode()
   const now = Date.now()
   const lastAgentSeenTs = memory().__pomfret_last_agent_seen_ts__ ?? 0
   const ninaRunning = memory().__pomfret_nina_running__ ?? false
@@ -587,6 +671,8 @@ export async function setObservatoryMode(mode: ObservatoryMode): Promise<Observa
 export async function getObservatoryMode(): Promise<ObservatoryMode> {
   await ensureLoaded()
   await syncObservatoryFromKv()
+  await enforceEmergencyStopObservatoryLock()
+  if (await isEmergencyStopBlocking()) return 'manual'
   return currentMode()
 }
 
@@ -594,6 +680,7 @@ export async function getObservatoryMode(): Promise<ObservatoryMode> {
 export async function touchObservatoryPoll(): Promise<void> {
   await ensureLoaded()
   await syncObservatoryFromKv()
+  await enforceEmergencyStopObservatoryLock()
   const now = Date.now()
   memory().__pomfret_last_poll_ts__ = now
   memory().__pomfret_last_agent_seen_ts__ = now

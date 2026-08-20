@@ -9,6 +9,7 @@ import {
   updateEmergencyStopHeldSessionIds,
 } from '@/lib/imaging-emergency-stop'
 import { applyEmergencyStopHolds } from '@/lib/imaging-emergency-stop-holds'
+import { lockObservatoryForEmergencyStop } from '@/lib/imaging/session/failure-observatory-lock'
 import { requireImagingAdmin, imagingAdminActorFromUser } from '@/lib/imaging-admin-auth'
 import {
   clearNinaStoppedPendingFail,
@@ -57,6 +58,9 @@ export async function POST(request: NextRequest) {
   const heldSessionIds = await applyEmergencyStopHolds()
   const actor = imagingAdminActorFromUser(admin.user)
   const { state, newlyArmed } = await armEmergencyStop(actor, heldSessionIds)
+  await lockObservatoryForEmergencyStop(
+    newlyArmed ? 'admin_dashboard_post' : 'admin_dashboard_post_already_blocking'
+  )
   if (!newlyArmed) {
     const publicState = await getEmergencyStopPublicState(agentConnected)
     return withImagingCors({

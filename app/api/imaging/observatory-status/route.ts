@@ -10,7 +10,7 @@ import {
   emergencyStopAuditDetailFromState,
   emergencyStopTriggeredBySuffix,
 } from '@/lib/imaging-emergency-stop'
-import { releaseEmergencyStopHolds } from '@/lib/imaging-emergency-stop-holds'
+import { releaseEmergencyStopHolds, releaseFailedSubTonightAutoHolds } from '@/lib/imaging-emergency-stop-holds'
 import { reconcilePendingScheduleStatus } from '@/lib/imaging-queue-reconcile'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import {
@@ -96,9 +96,16 @@ export async function PATCH(request: NextRequest) {
 
   if ((shouldClearStopped || shouldClearStopping) && (await isEmergencyStopBlocking())) {
     const cleared = await clearEmergencyStopAfterManualUnlock()
+    const releasedHolds: string[] = []
     if (cleared?.heldSessionIds.length) {
       await releaseEmergencyStopHolds(cleared.heldSessionIds)
-    } else {
+      releasedHolds.push(...cleared.heldSessionIds)
+    }
+    const failedSubHolds = await releaseFailedSubTonightAutoHolds()
+    if (failedSubHolds.length) {
+      releasedHolds.push(...failedSubHolds)
+    }
+    if (!releasedHolds.length) {
       /* Still replan: holds may have been empty / already released while ESTOP blocked reconcile. */
       await reconcilePendingScheduleStatus({ force: true })
     }
@@ -117,7 +124,7 @@ export async function PATCH(request: NextRequest) {
         clearedBy: formatImagingAdminActor(admin.user),
         mode: nextMode,
         status: nextStatus,
-        releasedHolds: cleared?.heldSessionIds ?? [],
+        releasedHolds,
         previousPhase: cleared?.phase ?? null,
       }),
     })

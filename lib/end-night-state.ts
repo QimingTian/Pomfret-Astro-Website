@@ -4,6 +4,7 @@ type GlobalState = typeof globalThis & {
   __pomfret_end_night_sent_after_sessions__?: Record<string, boolean>
   __pomfret_end_night_sent_dawn__?: Record<string, boolean>
   __pomfret_end_night_due__?: Record<string, boolean>
+  __pomfret_end_night_estop_suppress__?: Record<string, boolean>
 }
 
 /** After last scheduled session is consumed for the night. */
@@ -11,6 +12,7 @@ const KEY_AFTER_SESSIONS = 'imaging-end-night-sent'
 /** Nautical dawn shutdown — independent; may run even if after-sessions end night already ran. */
 const KEY_DAWN = 'imaging-end-night-sent-dawn'
 const DUE_KEY_PREFIX = 'imaging-end-night-due'
+const ESTOP_SUPPRESS_PREFIX = 'imaging-end-night-estop-suppress'
 
 function afterSessionsMemory(): Record<string, boolean> {
   const g = globalThis as GlobalState
@@ -28,6 +30,16 @@ function dueMemoryMap(): Record<string, boolean> {
   const g = globalThis as GlobalState
   if (!g.__pomfret_end_night_due__) g.__pomfret_end_night_due__ = {}
   return g.__pomfret_end_night_due__
+}
+
+function estopSuppressMemory(): Record<string, boolean> {
+  const g = globalThis as GlobalState
+  if (!g.__pomfret_end_night_estop_suppress__) g.__pomfret_end_night_estop_suppress__ = {}
+  return g.__pomfret_end_night_estop_suppress__
+}
+
+function keyEstopSuppress(nightKey: string): string {
+  return `${ESTOP_SUPPRESS_PREFIX}:${nightKey}`
 }
 
 function keyAfterSessions(nightKey: string): string {
@@ -126,4 +138,29 @@ export async function markEndNightAfterSessionsSent(nightKey: string): Promise<v
 export async function markEndNightDawnSent(nightKey: string): Promise<void> {
   if (!nightKey) return
   await writeSentFlag(nightKey, dawnMemory(), keyDawn(nightKey))
+}
+
+/** Block hasTonightActivity-only end-night after ESTOP (ESTOP already closed the dome). */
+export async function markEndNightSuppressedAfterEstop(nightKey: string): Promise<void> {
+  if (!nightKey) return
+  estopSuppressMemory()[nightKey] = true
+  if (!kvEnabled()) return
+  await kvSetJson(keyEstopSuppress(nightKey), { suppressed: true, at: new Date().toISOString() })
+}
+
+export async function isEndNightSuppressedAfterEstop(nightKey: string): Promise<boolean> {
+  if (!nightKey) return false
+  const mem = estopSuppressMemory()
+  if (mem[nightKey]) return true
+  if (!kvEnabled()) return false
+  const remote = await kvGetJson<{ suppressed?: unknown }>(keyEstopSuppress(nightKey))
+  const suppressed = remote?.suppressed === true
+  if (suppressed) mem[nightKey] = true
+  return suppressed
+}
+
+/** Cancel any armed end-night and suppress activity-only fallback when ESTOP arms. */
+export async function prepareEndNightAfterEstop(nightKey: string): Promise<void> {
+  await clearEndNightDue(nightKey)
+  await markEndNightSuppressedAfterEstop(nightKey)
 }

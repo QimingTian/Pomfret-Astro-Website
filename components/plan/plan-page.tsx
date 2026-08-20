@@ -37,7 +37,7 @@ type WeatherPrediction = {
   prediction?: 'permitted' | 'not_permitted' | 'unavailable'
   nightHourStartsSec?: number[]
   readyHourStartsSec?: number[]
-  notPermittedHourReasons?: Array<{ hourStartSec: number; reasons: Array<'cloud' | 'rain' | 'wind'> }>
+  notPermittedHourReasons?: Array<{ hourStartSec: number; reasons: import('@/lib/tonight-weather-gate').WeatherNotPermittedReason[] }>
 }
 
 type ResolvedCatalogObject = {

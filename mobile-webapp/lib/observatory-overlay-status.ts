@@ -6,7 +6,7 @@ export type ObservatoryOverlayStatus =
   | "closed_daytime"
   | "closed_observatory_maintenance"
 
-const MAX_CLOUD_PERCENT = 20
+const MAX_CLOUD_PERCENT = 10
 const MAX_WIND_MS = 10
 const MAX_PRECIP_PROBABILITY = 20
 

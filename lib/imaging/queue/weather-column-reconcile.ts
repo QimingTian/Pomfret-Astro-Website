@@ -7,12 +7,14 @@ import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 
 const KV_KEY = 'imaging-queue-schedule-weather-fingerprint'
 
+import type { WeatherNotPermittedReason } from '@/lib/tonight-weather-gate'
+
 export type ScheduleWeatherColumnPayload = {
   prediction: 'permitted' | 'not_permitted' | 'unavailable'
   hasAnyPrecipitationTonight: boolean
   readyHourStartsSec: number[]
   nightHourStartsSec: number[]
-  notPermittedHourReasons: Array<{ hourStartSec: number; reasons: Array<'cloud' | 'rain' | 'wind'> }>
+  notPermittedHourReasons: Array<{ hourStartSec: number; reasons: WeatherNotPermittedReason[] }>
   /** Same hours as `precipitationHits` in tonight-weather-prediction — drives precip overlay. */
   precipitationHitHourStartsSec: number[]
 }

@@ -8,6 +8,8 @@ import {
   parseAscCloudFromStatus,
 } from '@/lib/asc-cloud'
 
+const goodAstro = { transparency: 4 as const, seeing: 4 as const }
+
 test('allSkyCameraStatusUrl resolves /camera/stream to /camera/status', () => {
   assert.equal(
     allSkyCameraStatusUrl('https://cam.pomfretastro.org/camera/stream'),
@@ -48,41 +50,79 @@ test('parseAscCloudFromStatus returns null when missing', () => {
 test('evaluateObservatoryReadyWeather uses ASC cloud and rain with Open-Meteo wind and precip', () => {
   assert.equal(
     evaluateObservatoryReadyWeather({
-      cloudCoverPercent: 19,
+      cloudCoverPercent: 9,
       rainDetected: false,
       windSpeedMs: 9,
       precipProbabilityPercent: 20,
+      ...goodAstro,
     }),
     true
   )
   assert.equal(
     evaluateObservatoryReadyWeather({
       cloudCoverPercent: 99,
+      openMeteoCloudCoverPercent: 9,
       rainDetected: true,
       windSpeedMs: 9,
       precipProbabilityPercent: 0,
       ascGateApplicable: false,
+      ...goodAstro,
     }),
     true
   )
   assert.equal(
     evaluateObservatoryReadyWeather({
-      cloudCoverPercent: 19,
-      rainDetected: false,
+      cloudCoverPercent: 99,
+      openMeteoCloudCoverPercent: 12,
+      rainDetected: true,
       windSpeedMs: 9,
-      precipProbabilityPercent: 21,
+      precipProbabilityPercent: 0,
       ascGateApplicable: false,
+      ...goodAstro,
     }),
     false
   )
   assert.equal(
     evaluateObservatoryReadyWeather({
-      cloudCoverPercent: 19,
+      cloudCoverPercent: 9,
       rainDetected: false,
       windSpeedMs: 9,
       precipProbabilityPercent: 21,
+      ascGateApplicable: false,
+      openMeteoCloudCoverPercent: 5,
+      ...goodAstro,
     }),
     false
+  )
+  assert.equal(
+    evaluateObservatoryReadyWeather({
+      cloudCoverPercent: 9,
+      rainDetected: false,
+      windSpeedMs: 9,
+      precipProbabilityPercent: 21,
+      ...goodAstro,
+    }),
+    false
+  )
+  assert.equal(
+    evaluateObservatoryReadyWeather({
+      cloudCoverPercent: 10,
+      rainDetected: false,
+      windSpeedMs: 5,
+      precipProbabilityPercent: 0,
+      ...goodAstro,
+    }),
+    false
+  )
+  assert.equal(
+    evaluateObservatoryReadyWeather({
+      cloudCoverPercent: 9,
+      rainDetected: false,
+      windSpeedMs: 5,
+      precipProbabilityPercent: 0,
+      ...goodAstro,
+    }),
+    true
   )
   assert.equal(
     evaluateObservatoryReadyWeather({
@@ -90,6 +130,7 @@ test('evaluateObservatoryReadyWeather uses ASC cloud and rain with Open-Meteo wi
       rainDetected: false,
       windSpeedMs: 5,
       precipProbabilityPercent: 0,
+      ...goodAstro,
     }),
     false
   )
@@ -99,6 +140,7 @@ test('evaluateObservatoryReadyWeather uses ASC cloud and rain with Open-Meteo wi
       rainDetected: true,
       windSpeedMs: 5,
       precipProbabilityPercent: 0,
+      ...goodAstro,
     }),
     false
   )
@@ -108,6 +150,7 @@ test('evaluateObservatoryReadyWeather uses ASC cloud and rain with Open-Meteo wi
       rainDetected: false,
       windSpeedMs: 5,
       precipProbabilityPercent: 0,
+      ...goodAstro,
     }),
     false
   )
@@ -117,6 +160,29 @@ test('evaluateObservatoryReadyWeather uses ASC cloud and rain with Open-Meteo wi
       rainDetected: false,
       windSpeedMs: 10,
       precipProbabilityPercent: 0,
+      ...goodAstro,
+    }),
+    false
+  )
+  assert.equal(
+    evaluateObservatoryReadyWeather({
+      cloudCoverPercent: 10,
+      rainDetected: false,
+      windSpeedMs: 5,
+      precipProbabilityPercent: 0,
+      transparency: 5,
+      seeing: 4,
+    }),
+    false
+  )
+  assert.equal(
+    evaluateObservatoryReadyWeather({
+      cloudCoverPercent: 10,
+      rainDetected: false,
+      windSpeedMs: 5,
+      precipProbabilityPercent: 0,
+      transparency: null,
+      seeing: 4,
     }),
     false
   )

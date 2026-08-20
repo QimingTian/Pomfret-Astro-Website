@@ -79,6 +79,49 @@ export function astroConditionIsRed(scale: AstroConditionScale | null): boolean 
   return scale != null && scale >= 5
 }
 
+/** Observatory Ready gate: Average (4) or better; null fails closed. */
+export const OBSERVATORY_READY_MAX_ASTRO_CONDITION = 4
+
+export function astroConditionIsReady(scale: AstroConditionScale | null | undefined): boolean {
+  return scale != null && scale <= OBSERVATORY_READY_MAX_ASTRO_CONDITION
+}
+
+export type SevenTimerAstroSeries = {
+  init: string
+  dataseries: Array<{ timepoint?: number; seeing?: number; transparency?: number }>
+}
+
+export async function fetchSevenTimerAstroSeries(): Promise<SevenTimerAstroSeries | null> {
+  try {
+    const res = await fetch(sevenTimerAstroUrl(), {
+      cache: 'no-store',
+      headers: { Accept: 'application/json' },
+    })
+    if (!res.ok) return null
+    const data = (await res.json()) as {
+      init?: string
+      dataseries?: Array<{ timepoint?: number; seeing?: number; transparency?: number }>
+    }
+    const init = typeof data.init === 'string' ? data.init : null
+    if (!init || !Array.isArray(data.dataseries) || data.dataseries.length === 0) return null
+    return { init, dataseries: data.dataseries }
+  } catch {
+    return null
+  }
+}
+
+export function astroConditionsForInstant(
+  series: SevenTimerAstroSeries,
+  instant: Date
+): Pick<AstroConditions, 'transparency' | 'seeing'> {
+  const entry = pickCurrentAstroSeriesEntry(series.init, series.dataseries, instant)
+  if (!entry) return { transparency: null, seeing: null }
+  return {
+    transparency: asScale(entry.transparency),
+    seeing: asScale(entry.seeing),
+  }
+}
+
 export async function fetchAstroConditions(now: Date = new Date()): Promise<AstroConditions> {
   const empty: AstroConditions = {
     transparency: null,
@@ -86,30 +129,17 @@ export async function fetchAstroConditions(now: Date = new Date()): Promise<Astr
     init: null,
     timepointHours: null,
   }
-  try {
-    const res = await fetch(sevenTimerAstroUrl(), {
-      cache: 'no-store',
-      headers: { Accept: 'application/json' },
-    })
-    if (!res.ok) return empty
-    const data = (await res.json()) as {
-      init?: string
-      dataseries?: Array<{ timepoint?: number; seeing?: number; transparency?: number }>
-    }
-    const init = typeof data.init === 'string' ? data.init : null
-    if (!init || !Array.isArray(data.dataseries)) return empty
-    const entry = pickCurrentAstroSeriesEntry(init, data.dataseries, now)
-    if (!entry) return empty
-    return {
-      transparency: asScale(entry.transparency),
-      seeing: asScale(entry.seeing),
-      init,
-      timepointHours:
-        typeof entry.timepoint === 'number' && Number.isFinite(entry.timepoint)
-          ? entry.timepoint
-          : null,
-    }
-  } catch {
-    return empty
+  const series = await fetchSevenTimerAstroSeries()
+  if (!series) return empty
+  const entry = pickCurrentAstroSeriesEntry(series.init, series.dataseries, now)
+  if (!entry) return empty
+  return {
+    transparency: asScale(entry.transparency),
+    seeing: asScale(entry.seeing),
+    init: series.init,
+    timepointHours:
+      typeof entry.timepoint === 'number' && Number.isFinite(entry.timepoint)
+        ? entry.timepoint
+        : null,
   }
 }

@@ -350,7 +350,7 @@ export default function AllSkyCameraView() {
         ? '—'
         : `${Math.round(cloudPct)}%`
     const cloudValueRed =
-      !ascUnavailable && cloudPct != null && Number.isFinite(cloudPct) && cloudPct > 20
+      !ascUnavailable && cloudPct != null && Number.isFinite(cloudPct) && cloudPct > 10
 
     const transparencyText = formatAstroConditionLabel(transparency)
     const transparencyValueRed = astroConditionIsRed(transparency)

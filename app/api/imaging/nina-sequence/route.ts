@@ -51,6 +51,7 @@ import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import { logEndNightDelivered, logEndNightDue } from '@/lib/imaging-end-night-audit'
 import {
   isEndNightDue,
+  isEndNightSuppressedAfterEstop,
   markEndNightAfterSessionsSent,
   markEndNightDawnSent,
   wasEndNightAfterSessionsSent,
@@ -60,6 +61,7 @@ import { getAdminClosedWindowAt } from '@/lib/admin-closed-window-store'
 import { tryDeliverActiveAdminForceRun } from '@/lib/imaging/admin-force-run'
 import { isEmergencyStopBlocking } from '@/lib/imaging-emergency-stop'
 import { tryDeliverEmergencyStop } from '@/lib/imaging/session/estop-delivery'
+import { plannedStartIsDue } from '@/lib/imaging/planned-start-due'
 import {
   END_NIGHT_DISCORD_AFTER_SESSIONS,
   END_NIGHT_DISCORD_DAWN,
@@ -114,7 +116,8 @@ async function tryDeliverProjectSubSessionTonight(
   nightKey: string,
   project: ImagingProject,
   activeOnBoard: ImagingProject | undefined,
-  allowRedeliverInProgress: boolean
+  allowRedeliverInProgress: boolean,
+  nowMs: number
 ): Promise<NextResponse | null> {
   const night = getNightForNinaDelivery(project, nightKey, { allowRedeliverInProgress })
   if (!night?.ninaSequenceJson) {
@@ -127,6 +130,14 @@ async function tryDeliverProjectSubSessionTonight(
       )
     }
     return null
+  }
+  if (night.status === 'scheduled' && !plannedStartIsDue(night.plannedStartIso, nowMs)) {
+    return NextResponse.json(
+      {
+        error: `Project sub-session is scheduled for ${night.plannedStartIso ?? 'unknown'}; delivery waits until planned start.`,
+      },
+      { status: 409, headers: imagingCorsHeadersResolved() }
+    )
   }
   if (!isObservatoryReady(status)) {
     return NextResponse.json(
@@ -215,6 +226,14 @@ async function deliverProjectSubSessionJson(
   const projectRef = match?.project ?? project
   const nightRef = match?.night ?? night
   const redeliver = options?.redeliver === true
+  if (nightRef.status === 'scheduled' && !plannedStartIsDue(nightRef.plannedStartIso, Date.now())) {
+    return NextResponse.json(
+      {
+        error: `Project sub-session is scheduled for ${nightRef.plannedStartIso ?? 'unknown'}; delivery waits until planned start.`,
+      },
+      { status: 409, headers: imagingCorsHeadersResolved() }
+    )
+  }
   if (nightRef.status !== 'scheduled') {
     if (!(redeliver && nightRef.status === 'in_progress')) {
       return NextResponse.json(
@@ -338,8 +357,9 @@ function endNightSequenceJson(
  * Returns the next **scheduled** pending session's NINA sequence JSON in `plannedStartIso` order.
  * Schedule feasibility (weather, full-night altitude coverage, dawn window, etc.) is handled by reconcile /
  * `computeScheduleInsight`; this endpoint enforces observatory readiness (for user sessions only), admin
- * closed windows, and current target altitude ≥ 30° before handing JSON to NINA. End-night shutdown JSON
- * bypasses observatory readiness; empty nights are offered at nautical dawn only.
+ * closed windows, current target altitude ≥ 30°, and `now >= plannedStartIso` before handing JSON to NINA.
+ * Early starts come only from reconcile moving planned start earlier — not from transient Ready windows.
+ * End-night shutdown JSON bypasses observatory readiness; empty nights are offered at nautical dawn only.
  * While agent pulse reports NINA running, polls deliver Emergency STOP only (409 for all other work).
  */
 export async function GET(request: NextRequest) {
@@ -402,7 +422,8 @@ export async function GET(request: NextRequest) {
       nightKey,
       directProject,
       activeOnBoardAfterRelease,
-      allowRedeliverInProgress
+      allowRedeliverInProgress,
+      nowMs
     )
     if (delivered) return delivered
   }
@@ -420,6 +441,12 @@ export async function GET(request: NextRequest) {
   let blockingError: string | null = null
 
   for (const candidate of scheduledTonight) {
+    if (!plannedStartIsDue(candidate.plannedStartIso, nowMs)) {
+      if (!blockingError) {
+        blockingError = `Session "${candidate.target}" is scheduled for ${candidate.plannedStartIso}; delivery waits until planned start.`
+      }
+      continue
+    }
     if (activeOnBoardAfterRelease && projectHoldsQueueTonight(activeOnBoardAfterRelease, nightKey)) {
       const projectAlt = isAltitudeAllowed(
         activeOnBoardAfterRelease.raHours,
@@ -467,7 +494,8 @@ export async function GET(request: NextRequest) {
         nightKey,
         projectForSubDeliveryFresh,
         activeOnBoardAfterRelease,
-        allowRedeliverInProgress
+        allowRedeliverInProgress,
+        nowMs
       )
       if (delivered) return delivered
     }
@@ -483,7 +511,8 @@ export async function GET(request: NextRequest) {
             nightKey,
             activeOnBoardAfterRelease,
             activeOnBoardAfterRelease,
-            allowRedeliverInProgress
+            allowRedeliverInProgress,
+            nowMs
           )
           if (delivered) return delivered
         }
@@ -510,7 +539,8 @@ export async function GET(request: NextRequest) {
           nightKey,
           stuckProject,
           activeOnBoardAfterRelease,
-          allowRedeliverInProgress
+          allowRedeliverInProgress,
+          nowMs
         )
         if (delivered) return delivered
       }
@@ -534,7 +564,9 @@ export async function GET(request: NextRequest) {
       })
     })
     const endNightDue = await isEndNightDue(nightKey)
-    const afterSessionsEligible = endNightDue || hasTonightActivity
+    const estopSuppressesActivityFallback = await isEndNightSuppressedAfterEstop(nightKey)
+    const afterSessionsEligible =
+      endNightDue || (hasTonightActivity && !estopSuppressesActivityFallback)
 
     if (afterSessionsEligible && !(await wasEndNightAfterSessionsSent(nightKey))) {
       const queueId = `end-night-${nightKey}-${Date.now()}`
@@ -596,7 +628,8 @@ export async function GET(request: NextRequest) {
           nightKey,
           project,
           activeOnBoardAfterRelease,
-          allowRedeliverInProgress
+          allowRedeliverInProgress,
+          nowMs
         )
         if (delivered) return delivered
       }

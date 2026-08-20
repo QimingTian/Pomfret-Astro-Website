@@ -2,6 +2,7 @@ import { parseProjectNightSubId } from '@/lib/imaging-project-ids'
 import { getProjectByNightSubId, listProjects } from '@/lib/imaging-project-store'
 import { reconcilePendingScheduleStatus } from '@/lib/imaging-queue-reconcile'
 import { getRequestById, listAll } from '@/lib/imaging-queue-store'
+import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import {
   releaseProjectNightHold,
   releaseQueueSessionHold,
@@ -52,4 +53,35 @@ export async function releaseEmergencyStopHolds(heldSessionIds: string[]): Promi
   }
   /* One force reconcile after all rows are pending/planned again. */
   await reconcilePendingScheduleStatus({ force: true })
+}
+
+function projectHasFailedSubTonight(
+  project: Awaited<ReturnType<typeof listProjects>>[number],
+  nightKey: string
+): boolean {
+  return project.nights.some((n) => n.nightKey === nightKey && n.status === 'failed')
+}
+
+/** Release auto-holds from failed_sub_tonight (not tracked in ESTOP heldSessionIds). */
+export async function releaseFailedSubTonightAutoHolds(): Promise<string[]> {
+  const releasedSessionIds: string[] = []
+  const skip = { skipReconcile: true as const }
+  const nightKey = getTonightScheduleStrip().nightKey
+
+  for (const project of await listProjects()) {
+    if (!projectHasFailedSubTonight(project, nightKey)) continue
+    for (const night of project.nights) {
+      if (night.nightKey !== nightKey || night.status !== 'on_hold') continue
+      const match = await getProjectByNightSubId(night.id)
+      if (!match || match.night.status !== 'on_hold') continue
+      const result = await releaseProjectNightHold(match.project.id, night.id, match.night, skip)
+      if ('ok' in result) releasedSessionIds.push(night.id)
+    }
+  }
+
+  if (releasedSessionIds.length) {
+    await reconcilePendingScheduleStatus({ force: true })
+  }
+
+  return releasedSessionIds
 }

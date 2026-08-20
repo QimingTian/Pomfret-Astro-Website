@@ -11,6 +11,7 @@ import {
   allSkyCameraStatusUrl,
   DEFAULT_ALL_SKY_STREAM_URL,
   defaultAllSkySequenceStatusUrl,
+  OBSERVATORY_READY_MAX_ASC_CLOUD_PERCENT,
 } from '@/lib/asc-cloud'
 import { moonPhaseInfo } from '@/lib/moon-avoidance'
 import {
@@ -350,7 +351,10 @@ export default function AllSkyCameraView() {
         ? '—'
         : `${Math.round(cloudPct)}%`
     const cloudValueRed =
-      !ascUnavailable && cloudPct != null && Number.isFinite(cloudPct) && cloudPct > 10
+      !ascUnavailable &&
+      cloudPct != null &&
+      Number.isFinite(cloudPct) &&
+      cloudPct >= OBSERVATORY_READY_MAX_ASC_CLOUD_PERCENT
 
     const transparencyText = formatAstroConditionLabel(transparency)
     const transparencyValueRed = astroConditionIsRed(transparency)

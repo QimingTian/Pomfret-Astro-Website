@@ -288,7 +288,7 @@ Evaluated at **delivery time** via `getObservatoryStatus()` → `isObservatoryRe
 
 | Check | Threshold |
 |-------|-----------|
-| Cloud (ASC applicable) | ASC AI **< 10%**, no rain |
+| Cloud (ASC applicable) | ASC AI **< 20%**, no rain |
 | Cloud (ASC not applicable) | Open-Meteo `cloud_cover` **< 10%** |
 | Wind | **< 10 m/s** (Open-Meteo current) |
 | Precip probability | **≤ 20%** |
@@ -975,7 +975,7 @@ Max **400** entries; read via `GET /api/imaging/audit-log` (admin).
 
 | Gate | Cloud | Precip | Wind | Astro |
 |------|-------|--------|------|-------|
-| Ready (ASC) | ASC < 10%, no rain | ≤ 20% | < 10 m/s | — |
+| Ready (ASC) | ASC < 20%, no rain | ≤ 20% | < 10 m/s | — |
 | Ready (fallback) | OM < 10% | ≤ 20% | < 10 m/s | — |
 | Schedule hourly | < 10% | < 10% | ≤ 10 m/s | — |
 | Safety ESTOP | — | > 20% site | — | — |

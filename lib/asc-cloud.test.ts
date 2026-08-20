@@ -99,16 +99,7 @@ test('evaluateObservatoryReadyWeather uses ASC cloud and rain with Open-Meteo wi
   )
   assert.equal(
     evaluateObservatoryReadyWeather({
-      cloudCoverPercent: 10,
-      rainDetected: false,
-      windSpeedMs: 5,
-      precipProbabilityPercent: 0,
-    }),
-    false
-  )
-  assert.equal(
-    evaluateObservatoryReadyWeather({
-      cloudCoverPercent: 9,
+      cloudCoverPercent: 19,
       rainDetected: false,
       windSpeedMs: 5,
       precipProbabilityPercent: 0,
@@ -118,6 +109,15 @@ test('evaluateObservatoryReadyWeather uses ASC cloud and rain with Open-Meteo wi
   assert.equal(
     evaluateObservatoryReadyWeather({
       cloudCoverPercent: 20,
+      rainDetected: false,
+      windSpeedMs: 5,
+      precipProbabilityPercent: 0,
+    }),
+    false
+  )
+  assert.equal(
+    evaluateObservatoryReadyWeather({
+      cloudCoverPercent: 21,
       rainDetected: false,
       windSpeedMs: 5,
       precipProbabilityPercent: 0,

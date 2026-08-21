@@ -195,7 +195,7 @@ async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
       ascModelPhase: ascCloud?.modelPhase ?? null,
       ascLastError: ascCloud?.lastError ?? null,
     }
-    // Night weather-safety (thunder / precip>20% / ASC rain detected≥99%); daytime no-ops inside the check.
+    // Weather-safety ESTOP arm + auto-clear when Open-Meteo/ASC clear; daytime arm is no-op.
     void import('@/lib/imaging/weather-safety-estop').then((m) =>
       m.triggerWeatherSafetyEmergencyStopCheck()
     )

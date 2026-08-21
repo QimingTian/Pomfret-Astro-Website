@@ -6,6 +6,7 @@ import {
   STORM_APPROACH_RADIUS_KM,
   ascRainThreat,
   isThunderstormWeatherCode,
+  isWeatherSafetyClearForAutoUnlock,
   pickSitePrecipThreat,
   pickStormApproachThreat,
   pickWeatherSafetyThreat,
@@ -236,4 +237,43 @@ test('pickWeatherSafetyThreat returns null when clear', () => {
     nowSec,
   })
   assert.equal(threat, null)
+})
+
+test('isWeatherSafetyClearForAutoUnlock requires Open-Meteo and ASC both available and clear', () => {
+  assert.equal(
+    isWeatherSafetyClearForAutoUnlock({
+      threat: null,
+      openMeteoAvailable: true,
+      ascGateApplicable: true,
+    }),
+    true
+  )
+  assert.equal(
+    isWeatherSafetyClearForAutoUnlock({
+      threat: null,
+      openMeteoAvailable: false,
+      ascGateApplicable: true,
+    }),
+    false
+  )
+  assert.equal(
+    isWeatherSafetyClearForAutoUnlock({
+      threat: null,
+      openMeteoAvailable: true,
+      ascGateApplicable: false,
+    }),
+    false
+  )
+  assert.equal(
+    isWeatherSafetyClearForAutoUnlock({
+      threat: {
+        kind: 'site_precip',
+        reason: 'precip',
+        detail: {},
+      },
+      openMeteoAvailable: true,
+      ascGateApplicable: true,
+    }),
+    false
+  )
 })

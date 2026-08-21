@@ -325,7 +325,7 @@ Hourly Open-Meteo at **41.9159, −71.9626** for reconcile and Remote weather co
 
 ### 7.3 Weather-safety auto-ESTOP (`lib/imaging/weather-safety-estop.ts`)
 
-**Nautical night only** (`isObservatoryNight`). Debounce **45 s**. Ignores in-progress session state.
+**Arm:** nautical night only (`isObservatoryNight`). Debounce **45 s**. Ignores in-progress session state.
 
 | Trigger | Condition |
 |---------|-----------|
@@ -334,6 +334,8 @@ Hourly Open-Meteo at **41.9159, −71.9626** for reconcile and Remote weather co
 | ASC rain | `detected === true` AND confidence **≥ 0.99** (when ASC gate applicable) |
 
 On arm: `applyEmergencyStopHolds` → `armEmergencyStop('weather-safety-auto')` → fail in-progress sessions → `prepareEndNightAfterEstop`.
+
+**Auto-clear (weather-safety ESTOP only):** once phase is **STOPPED**, if Open-Meteo fetch is available **and** ASC gate is applicable **and** none of the arm threats remain → clear ESTOP, release holds, restore **Auto**. Manual / session-failure ESTOP is never auto-cleared. Same 45 s debounce. Sensor outage does not unlock.
 
 Hooks: `agent-pulse`, observatory weather refresh, schedule maintenance.
 
@@ -528,7 +530,8 @@ CAS writes (`compareAndWriteState`); stale undelivered stopping cleared after **
 
 ### Clear ESTOP
 
-Admin PATCH observatory leaving lock state → `clearEmergencyStopAfterManualUnlock()` → `releaseEmergencyStopHolds` + `releaseFailedSubTonightAutoHolds`.
+- **Admin:** PATCH observatory leaving lock state → `clearEmergencyStopAfterManualUnlock()` → `releaseEmergencyStopHolds` + `releaseFailedSubTonightAutoHolds`.
+- **Weather safety auto:** when STOPPED and Open-Meteo + ASC both clear → same clear path, then restore Auto (`weather-safety-estop.ts`).
 
 ### End night (`lib/end-night-state.ts`)
 

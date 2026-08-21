@@ -2,12 +2,21 @@ import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { fetchAllSkyCamGateState, isAscCloudGateApplicable } from '@/lib/asc-cloud'
 import {
   armEmergencyStop,
+  clearEmergencyStopAfterManualUnlock,
   emergencyStopAuditDetail,
   emergencyStopTriggeredBySuffix,
+  getEmergencyStopState,
   isEmergencyStopBlocking,
+  isEmergencyStopStopped,
   updateEmergencyStopHeldSessionIds,
+  type EmergencyStopState,
 } from '@/lib/imaging-emergency-stop'
-import { applyEmergencyStopHolds } from '@/lib/imaging-emergency-stop-holds'
+import {
+  applyEmergencyStopHolds,
+  releaseEmergencyStopHolds,
+  releaseFailedSubTonightAutoHolds,
+} from '@/lib/imaging-emergency-stop-holds'
+import { isWeatherSafetyEmergencyStopActor } from '@/lib/imaging/session/estop-sequence'
 import {
   clearNinaStoppedPendingFail,
   failInProgressBoardSessions,
@@ -15,6 +24,7 @@ import {
 } from '@/lib/imaging-session-failure'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 import { isObservatoryNight } from '@/lib/observatory-poll-schedule'
+import { setObservatoryMode } from '@/lib/observatory-status-store'
 import { OBS_LAT_DEG, OBS_LON_DEG } from '@/lib/target-altitude'
 
 /** Lead-time ring for thunderstorm approach (≈30–60 min at typical summer storm speeds). */
@@ -39,9 +49,25 @@ export type WeatherSafetyThreat = {
 
 export type WeatherSafetyArmResult = {
   armed: boolean
-  skipped?: 'no_threat' | 'daytime' | 'already_blocking' | 'debounced' | 'error'
+  cleared?: boolean
+  skipped?:
+    | 'no_threat'
+    | 'daytime'
+    | 'already_blocking'
+    | 'debounced'
+    | 'error'
+    | 'not_weather_safety'
+    | 'still_stopping'
+    | 'sensors_unavailable'
+    | 'threat_present'
   threat?: WeatherSafetyThreat
   queueId?: string
+}
+
+export type WeatherSafetySensorSnapshot = {
+  threat: WeatherSafetyThreat | null
+  openMeteoAvailable: boolean
+  ascGateApplicable: boolean
 }
 
 type GlobalWithWeatherSafety = typeof globalThis & {
@@ -314,32 +340,45 @@ async function fetchRingForecasts(): Promise<LocationForecast[] | null> {
   }
 }
 
-export async function evaluateWeatherSafetyThreat(): Promise<WeatherSafetyThreat | null> {
+export async function evaluateWeatherSafetySensors(): Promise<WeatherSafetySensorSnapshot> {
   const [gate, ringLocations] = await Promise.all([fetchAllSkyCamGateState(), fetchRingForecasts()])
   const ascGateApplicable = isAscCloudGateApplicable(gate.ascCloud, gate.sequenceActive)
   const ascRainDetected =
     ascGateApplicable && gate.ascCloud?.rain?.detected === true
   const ascRainConfidence = ascGateApplicable ? gate.ascCloud?.rain?.confidence : undefined
   if (!ringLocations) {
-    if (ascRainThreat({ detected: ascRainDetected, confidence: ascRainConfidence })) {
-      return {
-        kind: 'asc_rain',
-        reason: `ASC AI detected rain with confidence ${(ascRainConfidence! * 100).toFixed(1)}% >= ${ASC_RAIN_CONFIDENCE_ESTOP_THRESHOLD * 100}% during nautical night (dusk→dawn).`,
-        detail: {
-          ascRainDetected: true,
-          ascRainConfidence,
-          threshold: ASC_RAIN_CONFIDENCE_ESTOP_THRESHOLD,
-          forecastUnavailable: true,
-        },
-      }
-    }
-    return null
+    const threat = ascRainThreat({ detected: ascRainDetected, confidence: ascRainConfidence })
+      ? ({
+          kind: 'asc_rain' as const,
+          reason: `ASC AI detected rain with confidence ${(ascRainConfidence! * 100).toFixed(1)}% >= ${ASC_RAIN_CONFIDENCE_ESTOP_THRESHOLD * 100}% during nautical night (dusk→dawn).`,
+          detail: {
+            ascRainDetected: true,
+            ascRainConfidence,
+            threshold: ASC_RAIN_CONFIDENCE_ESTOP_THRESHOLD,
+            forecastUnavailable: true,
+          },
+        } satisfies WeatherSafetyThreat)
+      : null
+    return { threat, openMeteoAvailable: false, ascGateApplicable }
   }
-  return pickWeatherSafetyThreat({
-    ascRainDetected,
-    ascRainConfidence,
-    ringLocations,
-  })
+  return {
+    threat: pickWeatherSafetyThreat({
+      ascRainDetected,
+      ascRainConfidence,
+      ringLocations,
+    }),
+    openMeteoAvailable: true,
+    ascGateApplicable,
+  }
+}
+
+export async function evaluateWeatherSafetyThreat(): Promise<WeatherSafetyThreat | null> {
+  return (await evaluateWeatherSafetySensors()).threat
+}
+
+/** Auto-unlock only when Open-Meteo and ASC both report (no storm / precip / ASC rain threat). */
+export function isWeatherSafetyClearForAutoUnlock(snap: WeatherSafetySensorSnapshot): boolean {
+  return snap.openMeteoAvailable && snap.ascGateApplicable && snap.threat == null
 }
 
 export type StormApproachStatus = {
@@ -430,9 +469,79 @@ async function armWeatherSafetyEmergencyStop(
   return { armed: true, threat, queueId: state.queueId }
 }
 
+async function clearWeatherSafetyEmergencyStop(
+  state: EmergencyStopState
+): Promise<WeatherSafetyArmResult> {
+  const cleared = await clearEmergencyStopAfterManualUnlock()
+  if (!cleared) {
+    return { armed: false, skipped: 'error', queueId: state.queueId }
+  }
+
+  const releasedHolds: string[] = []
+  if (cleared.heldSessionIds.length) {
+    await releaseEmergencyStopHolds(cleared.heldSessionIds)
+    releasedHolds.push(...cleared.heldSessionIds)
+  }
+  const failedSubHolds = await releaseFailedSubTonightAutoHolds()
+  if (failedSubHolds.length) {
+    releasedHolds.push(...failedSubHolds)
+  }
+
+  await setObservatoryMode('auto')
+  await writeDebounceMs(Date.now())
+
+  await appendAuditLog({
+    kind: 'emergency_stop',
+    message: `Emergency STOP cleared (${cleared.queueId})${emergencyStopTriggeredBySuffix(cleared)} by weather safety auto-unlock: Open-Meteo and ASC both clear (no storm / precip / ASC rain). Restored Auto; released ${releasedHolds.length} hold(s).`,
+    detail: emergencyStopAuditDetail({
+      queueId: cleared.queueId,
+      requestedAt: cleared.requestedAt,
+      requestedBy: cleared.requestedBy,
+      requestedByUserId: cleared.requestedByUserId,
+      requestedByUsername: cleared.requestedByUsername,
+      requestedByEmail: cleared.requestedByEmail,
+      event: 'cleared',
+      source: 'weather_safety_auto_unlock',
+      releasedHolds,
+      previousPhase: cleared.phase,
+      mode: 'auto',
+    }),
+  })
+
+  return { armed: false, cleared: true, queueId: cleared.queueId }
+}
+
+async function maybeClearWeatherSafetyEmergencyStop(
+  snap: WeatherSafetySensorSnapshot
+): Promise<WeatherSafetyArmResult> {
+  const state = await getEmergencyStopState()
+  if (!state) {
+    return { armed: false, skipped: 'error' }
+  }
+  if (!isWeatherSafetyEmergencyStopActor(state)) {
+    return { armed: false, skipped: 'not_weather_safety', threat: snap.threat ?? undefined }
+  }
+  if (!(await isEmergencyStopStopped())) {
+    return { armed: false, skipped: 'still_stopping', queueId: state.queueId }
+  }
+  if (!isWeatherSafetyClearForAutoUnlock(snap)) {
+    if (snap.threat) {
+      return { armed: false, skipped: 'threat_present', threat: snap.threat, queueId: state.queueId }
+    }
+    return { armed: false, skipped: 'sensors_unavailable', queueId: state.queueId }
+  }
+  const lastArm = await readDebounceMs()
+  if (Date.now() - lastArm < WEATHER_SAFETY_DEBOUNCE_MS) {
+    return { armed: false, skipped: 'debounced', queueId: state.queueId }
+  }
+  return clearWeatherSafetyEmergencyStop(state)
+}
+
 /**
- * During nautical night (dusk→dawn), arm ESTOP on thunderstorm Unsafe, site precip >20%,
- * or ASC rain detected with confidence >=99%. Daytime is a no-op. Ignores session in-progress.
+ * Weather-safety ESTOP loop:
+ * - Arm during nautical night on thunderstorm / site precip >20% / ASC rain ≥99%.
+ * - Auto-clear weather-safety ESTOP once STOPPED and Open-Meteo + ASC both report clear.
+ * Manual / session-failure ESTOP is never auto-cleared.
  */
 export async function maybeArmWeatherSafetyEmergencyStop(): Promise<WeatherSafetyArmResult> {
   const g = globalThis as GlobalWithWeatherSafety
@@ -442,24 +551,26 @@ export async function maybeArmWeatherSafetyEmergencyStop(): Promise<WeatherSafet
 
   const run = (async (): Promise<WeatherSafetyArmResult> => {
     try {
-      if (!isObservatoryNight()) {
-        return { armed: false, skipped: 'daytime' }
-      }
+      const snap = await evaluateWeatherSafetySensors()
+
       if (await isEmergencyStopBlocking()) {
-        return { armed: false, skipped: 'already_blocking' }
+        return maybeClearWeatherSafetyEmergencyStop(snap)
+      }
+
+      if (!isObservatoryNight()) {
+        return { armed: false, skipped: 'daytime', threat: snap.threat ?? undefined }
       }
       const lastArm = await readDebounceMs()
       if (Date.now() - lastArm < WEATHER_SAFETY_DEBOUNCE_MS) {
-        return { armed: false, skipped: 'debounced' }
+        return { armed: false, skipped: 'debounced', threat: snap.threat ?? undefined }
       }
-      const threat = await evaluateWeatherSafetyThreat()
-      if (!threat) {
+      if (!snap.threat) {
         return { armed: false, skipped: 'no_threat' }
       }
       if (await isEmergencyStopBlocking()) {
-        return { armed: false, skipped: 'already_blocking', threat }
+        return maybeClearWeatherSafetyEmergencyStop(snap)
       }
-      return await armWeatherSafetyEmergencyStop(threat)
+      return await armWeatherSafetyEmergencyStop(snap.threat)
     } catch {
       return { armed: false, skipped: 'error' }
     }
@@ -475,7 +586,7 @@ export async function maybeArmWeatherSafetyEmergencyStop(): Promise<WeatherSafet
   }
 }
 
-/** Fire-and-forget wrapper for status/pulse hooks. */
+/** Fire-and-forget wrapper for status/pulse hooks (arm + weather-safety auto-clear). */
 export function triggerWeatherSafetyEmergencyStopCheck(): void {
   void maybeArmWeatherSafetyEmergencyStop()
 }

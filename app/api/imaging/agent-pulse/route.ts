@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
   }
 
   await reportObservatoryAgentPulse({ ninaRunning })
-  // Night weather-safety (thunder / precip>20% / ASC rain detected≥99%); daytime no-ops inside the check.
+  // Night weather-safety (arm + auto-clear when Open-Meteo/ASC clear); daytime arm is no-op.
   triggerWeatherSafetyEmergencyStopCheck()
   return withImagingCors({ ok: true as const, ninaRunning })
 }

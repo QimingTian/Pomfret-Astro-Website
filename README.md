@@ -1,989 +1,209 @@
 # Pomfret Astro — Technical Documentation
 
-> **Version:** v6.3.1  
-> **Production:** [https://www.pomfretastro.org](https://www.pomfretastro.org)  
-> **Release:** [v6.3.1](https://github.com/QimingTian/Pomfret-Astro-Website/releases/tag/v6.3.1)
+**Version:** v6.3.3  
+**Production:** https://www.pomfretastro.org  
+**Repository:** https://github.com/QimingTian/Pomfret-Astro-Website
 
-Autonomous school observatory stack: members submit imaging requests via a Next.js web app; a server-side scheduler assigns tonight’s work; a Windows NINA agent at the dome executes sequences; results land in Cloudflare R2.
-
-This document is **technical reference only** — architecture, algorithms, APIs, persistence, and operational contracts.
-
----
-
-## Table of contents
-
-1. [System overview](#1-system-overview)
-2. [Architecture](#2-architecture)
-3. [Repository layout](#3-repository-layout)
-4. [Authentication & security](#4-authentication--security)
-5. [Persistence (Upstash KV)](#5-persistence-upstash-kv)
-6. [Observatory status](#6-observatory-status)
-7. [Weather systems](#7-weather-systems)
-8. [Autonomous scheduler](#8-autonomous-scheduler)
-9. [Session & project lifecycle](#9-session--project-lifecycle)
-10. [NINA delivery pipeline](#10-nina-delivery-pipeline)
-11. [Emergency STOP & end night](#11-emergency-stop--end-night)
-12. [Project mode, mosaic & variable stars](#12-project-mode-mosaic--variable-stars)
-13. [Moon avoidance](#13-moon-avoidance)
-14. [All-sky camera & ASC AI](#14-all-sky-camera--asc-ai)
-15. [Mount telemetry & 3D panel](#15-mount-telemetry--3d-panel)
-16. [Storage (R2) & retention](#16-storage-r2--retention)
-17. [Live updates & polling](#17-live-updates--polling)
-18. [Cron & maintenance](#18-cron--maintenance)
-19. [HTTP API reference](#19-http-api-reference)
-20. [Environment variables](#20-environment-variables)
-21. [NINA agent (`observatory/nina_agent.py`)](#21-nina-agent-observatorynina_agentpy)
-22. [Personal tenant edition (stub)](#22-personal-tenant-edition-stub)
-23. [Testing & deployment](#23-testing--deployment)
+This document describes the architecture and operating rules of the Pomfret Astro observatory stack: the cloud application, the scheduling and safety logic, the Windows NINA agent, and the all-sky camera services that support autonomous imaging nights.
 
 ---
 
 ## 1. System overview
 
-| Layer | Role | Runtime |
-|-------|------|---------|
-| **Web app** | Member UI, admin tools, scheduling API, weather gates | Vercel (Next.js 14 App Router) |
-| **KV store** | Queue, projects, board, ESTOP, observatory state, audit | Upstash Redis REST |
-| **Object storage** | Session FITS/ZIP, live previews, gallery | Cloudflare R2 (S3-compatible) |
-| **Observatory PC** | Poll sequences, run NINA, upload R2, PDU power | Windows + `nina_agent.py` |
-| **All-sky Pi** | MJPEG stream, ASC cloud/rain AI, auto exposure/WB | Raspberry Pi + `camera_service.py` |
+Pomfret Astro is an autonomous school observatory. Members submit imaging requests through a Next.js web application hosted on Vercel. A server-side scheduler decides what can run tonight under weather and altitude constraints. A Windows PC at the dome runs a Python agent that polls the cloud for NINA sequences, powers equipment through a Digital Loggers PDU, executes those sequences, and uploads results to Cloudflare R2. A Raspberry Pi beside the dome provides the all-sky camera stream and the ASC cloud and rain models used by weather decisions.
 
-**Observatory coordinates** (`lib/target-altitude.ts`):
+The observatory site is fixed in code at approximately 41.886°N, 71.965°W, in the America/New_York time zone. For both scheduling and delivery, a target must remain at least **30°** above the horizon for the entire session.
 
-- Latitude: **41°53′10″N** (41.886388…°)
-- Longitude: **71°57′54″W** (−71.965°)
-- Time zone: **America/New_York**
-
-**Minimum target altitude:** **30°** for scheduling and delivery.
+Durable imaging state that must survive serverless cold starts is stored in Upstash Redis over REST. Session files and live previews are stored in R2. The website process itself retains almost no durable imaging state on the local filesystem.
 
 ---
 
-## 2. Architecture
+## 2. Nightly imaging flow
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         Vercel (Next.js)                                 │
-│  ┌──────────────┐  ┌─────────────────┐  ┌──────────────────────────┐  │
-│  │ Remote UI    │  │ Reconcile       │  │ nina-sequence GET        │  │
-│  │ Plan/Weather │──│ planner         │──│ (deliver JSON / ESTOP /  │  │
-│  │ Admin        │  │ weather gates   │  │  end-night)              │  │
-│  └──────────────┘  └────────┬────────┘  └────────────┬─────────────┘  │
-│                             │                         │                  │
-│                    Upstash KV ◄────────────────────────┘                  │
-│  imaging-queue-requests │ imaging-projects │ imaging-session-board       │
-│  imaging-emergency-stop │ observatory-status │ imaging-audit-log         │
-└─────────────────────────┬───────────────────────────┬───────────────────┘
-                          │                           │
-              HTTPS poll  │                           │ R2 presign / upload
-                          ▼                           ▼
-              ┌───────────────────────┐       ┌─────────────────┐
-              │ Windows observatory PC │       │ Cloudflare R2   │
-              │ nina_agent.py → NINA   │       │ imaging/{id}/…  │
-              │ Digital Loggers PDU    │       └─────────────────┘
-              └───────────┬───────────┘
-                          │
-              ┌───────────▼───────────┐
-              │ Pi all-sky camera     │
-              │ ASC AI + MJPEG        │
-              │ cam.pomfretastro.org  │
-              └───────────────────────┘
-```
+A member creates a queue request. The row begins as **pending**. Periodically—from cron, weather refreshes, or session events—the server runs **reconcile**. Reconcile evaluates tonight’s weather-permitted intervals, the altitude path of each target, moon avoidance, and FIFO ownership of the sky. When a request fits, it becomes **scheduled** and receives a **planned start** time (`plannedStartIso`).
 
-**Control flow (typical imaging night):**
+The Windows agent polls `GET /api/imaging/nina-sequence` with the queue bearer secret. Work is delivered only when the observatory is **Ready**, the planned start is due, the target altitude is sufficient, and no higher-priority work such as **ESTOP** is pending. On delivery, a normal queue row moves to **in progress**. The agent writes the NINA JSON, warms the PDU, launches NINA, and reports progress through the session-progress webhook.
 
-1. Member POSTs queue row → `pending`.
-2. Cron or weather poll triggers `reconcilePendingScheduleStatus()` → `scheduled` + `plannedStartIso`.
-3. Agent GET `/api/imaging/nina-sequence` when Ready and `plannedStartIsDue`.
-4. Agent runs NINA; POST progress to `/api/imaging/session-progress`.
-5. On completion: board `completed`, reconcile next project, optionally arm end-night.
-6. Agent uploads to R2; POST `/api/imaging/session-files`; member downloads via presigned URL.
+When the session finishes, the board and queue are marked **completed**. Reconcile may place the next work. If tonight’s imaging is exhausted, the system may arm an **end-night** sequence that closes the dome. The agent post-processes frames as configured, uploads to R2, and reports object keys so members can download through short-lived presigned URLs.
+
+If weather becomes unsafe, an administrator arms **ESTOP**, or a session fails in a way that requires locking the site, the same delivery channel carries an emergency-stop sequence instead of ordinary imaging work. That path is defined in Section 11.
 
 ---
 
-## 3. Repository layout
+## 3. Repository structure
 
-```
-app/
-  api/                    # Route handlers (see §19)
-  dashboard/              # Weather, Plan, Remote, Gallery, Admin, Account
-  login/ signup/          # Auth pages
-components/
-  remote/                 # Remote page (schedule, sessions, ESTOP)
-  plan/                   # Atlas + Framing (mosaic, NINA-aligned VIEW)
-lib/
-  imaging/                # Core imaging domain (see below)
-  asc-cloud.ts            # ASC + Ready weather gate
-  tonight-weather-gate.ts # Schedule / global permitted gates
-  observatory-status-store.ts
-  schedule-strip.ts       # Remote “tonight” 4pm–8am window
-  sunrise-window.ts       # Nautical twilight boundaries
-  moon-avoidance.ts       # Lorentzian moon separation
-  kv-rest.ts              # Upstash client
-  r2-session-download.ts  # R2 presign + object map
-observatory/
-  nina_agent.py           # Windows polling agent
-  camera_service.py       # Pi MJPEG + ASC inference
-  asc_cloud_ai.py         # TensorFlow.js cloud/rain models
-  models/                 # Day/night cloud & rain weights
-End Night Session.json    # NINA end-night template (dome close + Discord)
-EStop.json                # NINA ESTOP template
-```
+The Next.js application under `app/` provides the member and admin dashboards (Weather, Plan, Remote, Gallery, Admin, Account) and the HTTP API under `app/api/`. Remote and Plan UI components live primarily in `components/remote/` and `components/plan/`.
 
-### `lib/imaging/` module map
+Domain logic resides in `lib/`. Imaging is concentrated under `lib/imaging/`: the multi-night project planner, queue store and reconcile, session board, hold and release, emergency stop, weather-safety ESTOP, and NINA JSON helpers. Related modules outside that package include `lib/asc-cloud.ts` for the **Ready** gate, `lib/tonight-weather-gate.ts` for schedule weather, `lib/observatory-status-store.ts` for mode and status, `lib/schedule-strip.ts` and `lib/sunrise-window.ts` for night windows, and `lib/moon-avoidance.ts` for filter-dependent moon separation. Persistence helpers are in `lib/kv-rest.ts`. R2 download and object maps are in `lib/r2-session-download.ts`.
 
-| Path | Responsibility |
-|------|----------------|
-| `project/planner.ts` | Multi-night DSO scheduling, mosaic interleave, auto-hold |
-| `project/store.ts` | `ImagingProject`, `ProjectNight` persistence |
-| `queue/store.ts` | `ImagingRequest` queue rows |
-| `queue/reconcile.ts` | Nightly reconcile orchestration |
-| `queue/schedule-insight.ts` | Single-target (non-project) placement |
-| `session/board.ts` | In-progress / completed / failed board |
-| `session/emergency-stop.ts` | ESTOP KV state machine (CAS) |
-| `session/emergency-stop-holds.ts` | Hold/release on ESTOP |
-| `session/failure.ts` | NINA-stopped detection, session fail |
-| `session/failure-observatory-lock.ts` | Fail → lock + arm ESTOP |
-| `session-hold.ts` | Manual / ESTOP hold & release |
-| `weather-safety-estop.ts` | Auto ESTOP (storm, precip, ASC rain) |
-| `planned-start-due.ts` | Delivery time gate |
-| `nina-discord-message.ts` | Patch Discord text in NINA JSON trees |
-| `live-bus.ts` | KV-backed live event fan-out |
+On site, `observatory/nina_agent.py` is the Windows poller. `observatory/camera_service.py` serves the all-sky MJPEG stream and status endpoints. `observatory/asc_cloud_ai.py` runs the Teachable Machine cloud and rain models. The repository-root templates `EStop.json` and `End Night Session.json` are the NINA sequences the cloud patches and delivers for emergency close and normal end-of-night shutdown.
 
-Re-exports at `lib/imaging-*.ts` preserve legacy import paths.
+Legacy import paths such as `lib/imaging-emergency-stop.ts` re-export the current module layout for compatibility.
 
 ---
 
-## 4. Authentication & security
+## 4. Authentication and trust boundaries
 
-### Member auth
+Members authenticate with an HTTP-only cookie named `pomfret_session`. Sessions and user records are stored in KV. A user is an imaging **admin** when `role` is `admin` or when the email appears in `BOOTSTRAP_ADMIN_EMAILS`. Admin-only imaging actions—**ESTOP**, observatory PATCH, session control, audit log, and schedule-control mutations—use that same admin check.
 
-- Cookie: `pomfret_session` (httpOnly, secure in production, 90-day TTL).
-- KV: `member-session:{token}` → user payload.
-- Users: `member-users` with `member-email-index`, `member-username-index`.
-- **Admin:** `role === 'admin'` OR email in `BOOTSTRAP_ADMIN_EMAILS`.
+The observatory agent does not use a member cookie. It authenticates with `IMAGING_QUEUE_SECRET` as a Bearer token on sequence poll, agent pulse, session-files, and related agent routes. Cron uses `CRON_SECRET`. The NINA progress webhook may use Basic authentication with `NINA_SESSION_PROGRESS_BASIC_PASSWORD`. Mount telemetry uses a dedicated secret. In production, missing required secrets **fail closed**; local development is more permissive.
 
-Helpers: `lib/member-auth.ts` — `requireUser`, `requireAdmin`, `getCurrentUser`.
-
-### Imaging admin
-
-Same admin check via `lib/imaging/core/admin-auth.ts` — used for ESTOP, observatory PATCH, session-control, audit-log, schedule-control mutations.
-
-### Observatory / agent secrets
-
-| Mechanism | Env var | Routes |
-|-----------|---------|--------|
-| Queue Bearer | `IMAGING_QUEUE_SECRET` | `nina-sequence`, `agent-pulse`, `session-files`, `preview` POST, `queue/[id]` PATCH, `emergency-stop/delivery` |
-| Cron Bearer | `CRON_SECRET` | `reconcile-queue-schedule`, `cleanup-sessions` |
-| Session progress | `NINA_SESSION_PROGRESS_BASIC_PASSWORD` (+ optional user) | `session-progress` POST |
-| Mount telemetry | `NINA_MOUNT_TELEMETRY_SECRET` or Basic | `mount-pointing` POST |
-| R2 manual map | `IMAGING_R2_WRITE_SECRET` | `r2-object` POST |
-
-`lib/production-secrets.ts`: production **fail-closed** if required secrets missing; dev permissive.
-
-### Session-scoped auth
-
-Download, edit, delete, progress: owner match OR admin OR `x-session-password` / edit/delete credentials (`lib/imaging-session-access.ts`).
-
-### Middleware (`middleware.ts`)
-
-Security headers only (no auth): CSP, HSTS (prod), `X-Frame-Options`, `Permissions-Policy`. Matcher excludes `_next/static`, `stellarium/`, `skydata/`.
-
-### Personal tenant
-
-`PERSONAL_TENANT_SECRETS` JSON map; Bearer must match `[tenantId]` in URL (`lib/personal/tenant-auth.ts`).
+Session-scoped routes such as download, edit, and delete allow the owning member, an admin, or an explicit session password header. Middleware does not perform login checks. It sets security headers (CSP, HSTS in production, framing and permissions policies) and excludes static and sky-data paths from its matcher.
 
 ---
 
-## 5. Persistence (Upstash KV)
+## 5. Persistence
 
-Enabled when `KV_REST_API_URL` + `KV_REST_API_TOKEN` set (`lib/kv-rest.ts`). API: `kvGetJson`, `kvSetJson`, `kvCompareAndSet`, `kvListPush`, `kvIncrWithExpire`, etc.
+When `KV_REST_API_URL` and `KV_REST_API_TOKEN` are set, Upstash is the source of truth for queues, projects, the session board, **ESTOP**, observatory status, the audit log, R2 object maps, admin closed windows, and live-bus fan-out lists. Without KV, selected paths may fall back to files (for example `IMAGING_QUEUE_FILE`), but production imaging assumes KV.
 
-### Core keys
-
-| Key | Module | Contents |
-|-----|--------|----------|
-| `imaging-queue-requests` | `queue/store.ts` | All queue rows (fallback: `IMAGING_QUEUE_FILE`) |
-| `imaging-projects` | `project/store.ts` | Multi-night project records |
-| `imaging-session-board` | `session/board.ts` | Active/completed board (max 50) |
-| `imaging-audit-log` | `core/audit-log.ts` | Admin activity (max 400, CAS append) |
-| `imaging-emergency-stop` | `session/emergency-stop.ts` | ESTOP phase + held session IDs |
-| `observatory-status` | `observatory-status-store.ts` | mode, status, agent heartbeat, ninaRunning |
-| `imaging-r2-object-map` | `r2-session-download.ts` | queueId → R2 object key |
-| `imaging-r2-preview-map` | same | queueId → live preview key |
-| `imaging-admin-closed-windows` | `admin-closed-window-store.ts` | Admin schedule blocks |
-| `imaging-reconcile-last-at` | `queue/reconcile.ts` | Debounce timestamp (15 s) |
-
-### End-night keys (per `nightKey`)
-
-| Key pattern | Purpose |
-|-------------|---------|
-| `imaging-end-night-due:{nightKey}` | Armed after last session consumed |
-| `imaging-end-night-sent:{nightKey}` | After-sessions shutdown delivered |
-| `imaging-end-night-sent-dawn:{nightKey}` | Nautical dawn shutdown delivered |
-| `imaging-end-night-estop-suppress:{nightKey}` | Block activity-only end-night after ESTOP |
-
-### Live bus keys (`lib/imaging/live-bus.ts`)
-
-`live:progress:{queueId}`, `live:preview:{queueId}`, `live:mount:{stationId}`, `live:site:observatory`, `live:site:sessions`, `live:site:estop`, `live:agent:wake`.
-
-### Other
-
-| Key | Purpose |
-|-----|---------|
-| `imaging-session-progress:{queueId}` | Progress line list |
-| `imaging-preview-meta:{queueId}` / `imaging-preview-frame:{queueId}` | Live JPEG preview |
-| `imaging-weather-safety-estop-last-arm` | Weather ESTOP debounce (45 s) |
-| `imaging-queue-schedule-weather-fingerprint` | Weather column change detection |
-| `observatory-nina-stopped-pending-fail` | Defer fail until progress reconciles |
-| `allsky-auto-tuning-history` | Camera auto exposure/WB samples |
-| `pomfret:imaging-equipment` | Rig definitions for Plan/Framing |
-| `personal-hub:{tenantId}:state` | Personal edition hub (stub) |
+Queue rows and projects are rewritten by reconcile and delivery. The **session board** is a parallel inventory of in-progress and terminal sessions for the Remote dashboard. **ESTOP** and **end-night** flags are stored separately so shutdown state is not conflated with ordinary scheduling. Keys under the `live:` prefix provide ephemeral fan-out for progress, preview, mount, site, and agent-wake signals.
 
 ---
 
-## 6. Observatory status
+## 6. Observatory mode and status
 
-### Modes
+The observatory runs in either **manual** or **auto** mode. In **manual** mode, the operator-selected status is authoritative. In **auto** mode, the server recomputes status from daytime windows, weather, agent heartbeat, and whether NINA is currently reported running.
 
-- **`manual`** — operator-selected status; no auto weather computation for display authority.
-- **`auto`** — server computes status from rules below.
+**Ready** means weather and connectivity allow work and the agent may receive sequences. **Busy** means a fresh NINA-running pulse arrived within about ninety seconds. **Disconnected** means the agent has not been heard from within that same window. **Closed — Weather** means the **Ready** gate failed. **Closed — Daytime** covers nautical dawn through nautical dusk. **Closed — Maintenance** covers operator lockouts, admin closed windows, and the **ESTOP** lock.
 
-### Status values
+Status computation syncs from KV first, then applies a hard **ESTOP** guard: while emergency stop is blocking, the site is forced to **manual** and **Closed — Maintenance**, and a stale remote `auto` value cannot undo that lock. After that guard, admin closed windows, manual status, daytime, and the **Ready** weather evaluation apply in order. **Disconnected** and **Busy** may still override the computed base when the agent is missing or NINA is running.
 
-| Status | Meaning |
-|--------|---------|
-| `ready` | Weather + connectivity OK; NINA may receive work |
-| `busy_in_use` | NINA reported running (fresh pulse ≤ 90 s) |
-| `disconnected` | No agent heartbeat ≤ 90 s |
-| `closed_weather_not_permitted` | Auto weather gate failed |
-| `closed_daytime` | Nautical dawn → nautical dusk |
-| `closed_observatory_maintenance` | Manual maintenance or admin closed window |
-
-### Computation (`lib/observatory-status-store.ts`)
-
-1. Sync from KV (`syncObservatoryFromKv`) — merges agent heartbeat without reverting ESTOP lock.
-2. **ESTOP guard:** while `isEmergencyStopBlocking()`, force `manual` + `closed_observatory_maintenance`; KV cannot revert to `auto`.
-3. Admin closed window → maintenance.
-4. Manual mode → stored manual status.
-5. Daytime window → `closed_daytime`.
-6. Else `evaluateObservatoryReadyWeather()` → ready or weather closed.
-7. Agent disconnected → `disconnected` (overrides).
-8. Fresh NINA running report → `busy_in_use`.
-
-Persist debounced 30 s (force on mode/status change).
-
-### Admin PATCH (`PATCH /api/imaging/observatory-status`)
-
-Imaging admin may set `mode` and/or `status`. Clearing ESTOP: when leaving `manual + closed_observatory_maintenance` while phase is `stopped`, calls `clearEmergencyStopAfterManualUnlock()` and releases holds.
+Administrators may PATCH mode and status. Leaving the maintenance lock while **ESTOP** is in the **stopped** phase clears the ESTOP record, releases holds (including failed-sub-tonight auto-holds), and forces schedule reconcile.
 
 ---
 
-## 7. Weather systems
+## 7. Weather decisions
 
-Three **independent** layers plus **display-only** astro data.
+Weather participates in three independent decisions, plus a display-only astro layer.
 
-### 7.1 Observatory Ready gate (`lib/asc-cloud.ts`)
+The **Ready** gate decides whether the observatory may accept work at the present moment. When the ASC gate applies, ASC cloud must be below **20%** and rain must not be detected. When ASC is stale or an all-sky sequence is active, the gate falls back to Open-Meteo cloud cover below **10%**. Wind must remain under **10 m/s**, and precipitation probability must remain at or below **20%**. Since v6.3.1, 7Timer transparency and seeing are never **Ready** gates; they appear only on the all-sky overlay and are highlighted when the scale is **5** or worse.
 
-Evaluated at **delivery time** via `getObservatoryStatus()` → `isObservatoryReady()`.
+The **tonight schedule** gate decides which hours may receive planned sessions. It uses hourly Open-Meteo near the site. An hour is permitted only when cloud cover is under **10%**, precipitation probability is under **10%**, and wind is at most **10 m/s**. Across the imaging night a global hard block also applies: every counting hour must keep precip under **10%**, at most **three** hours may exceed **10 m/s** of wind, and at least **two consecutive** hours must pass all three checks. Hours that have already fully ended after night start no longer veto the remainder of the night. Each candidate session requires at least **80%** of its duration inside permitted intervals. The Remote tonight-permitted header further restricts its counting window to nautical dusk through nautical dawn.
 
-| Check | Threshold |
-|-------|-----------|
-| Cloud (ASC applicable) | ASC AI **< 20%**, no rain |
-| Cloud (ASC not applicable) | Open-Meteo `cloud_cover` **< 10%** |
-| Wind | **< 10 m/s** (Open-Meteo current) |
-| Precip probability | **≤ 20%** |
+**Weather-safety ESTOP** is a separate safety loop that arms only during nautical night, with a **45 s** debounce. It arms if Open-Meteo reports thunderstorm weather codes **95**, **96**, or **99** on a **20 km** ring (excluding the site center) for the current or next hour; if the site’s current-hour precip probability exceeds **20%**; or if ASC reports rain detected with confidence at least **0.99** while the ASC gate applies. Arming places remaining work on hold, fails in-progress sessions, locks the observatory, and suppresses the activity-only end-night fallback.
 
-ASC gate **not applicable** when: all-sky sequence active, or ASC inference stale (`isAscCloudGateApplicable`).
-
-**v6.3.1:** 7Timer transparency/seeing are **not** Ready gates — display only (§7.4).
-
-### 7.2 Tonight schedule gate (`lib/tonight-weather-gate.ts`)
-
-Hourly Open-Meteo at **41.9159, −71.9626** for reconcile and Remote weather column.
-
-**Per-hour permitted** (`isHourWeatherPermitted`):
-
-| Field | Rule |
-|-------|------|
-| `cloud_cover` | **< 10%** |
-| `precipitation_probability` | **< 10%** |
-| `wind_speed_10m` | **≤ 10 m/s** |
-
-**Global hard block** (on imaging night sunset→sunrise):
-
-1. Every counting hour: precip **< 10%**.
-2. At most **3** hours with wind **> 10 m/s**.
-3. At least **2 consecutive** hours passing all three checks.
-
-**Forward-looking rule:** After night start, fully ended hours do not count — past bad weather cannot veto the remainder.
-
-**Permitted intervals:** union of permitted hours, minus admin closed windows.
-
-**Session placement:** each candidate session needs **≥ 80%** of its duration inside permitted intervals (`weatherCoverageOk(..., 0.8)`).
-
-**Remote header** (`evaluateGlobalTonightWeatherPermitted`): gate hours = **nautical dusk → nautical dawn** only.
-
-### 7.3 Weather-safety auto-ESTOP (`lib/imaging/weather-safety-estop.ts`)
-
-**Arm:** nautical night only (`isObservatoryNight`). Debounce **45 s**. Ignores in-progress session state.
-
-| Trigger | Condition |
-|---------|-----------|
-| Storm approach | Open-Meteo **20 km** ring; WMO codes **95, 96, 99** at ring (not center) current or next hour |
-| Site precip | Observatory hour precip probability **> 20%** |
-| ASC rain | `detected === true` AND confidence **≥ 0.99** (when ASC gate applicable) |
-
-On arm: `applyEmergencyStopHolds` → `armEmergencyStop('weather-safety-auto')` → fail in-progress sessions → `prepareEndNightAfterEstop`.
-
-**Auto-clear (weather-safety ESTOP only):** once phase is **STOPPED**, if Open-Meteo fetch is available **and** ASC gate is applicable **and** none of the arm threats remain → clear ESTOP, release holds, restore **Auto**. Manual / session-failure ESTOP is never auto-cleared. Same 45 s debounce. Sensor outage does not unlock.
-
-Hooks: `agent-pulse`, observatory weather refresh, schedule maintenance.
-
-### 7.4 Display-only astro (7Timer)
-
-`GET /api/weather/astro-conditions` → `fetchAstroConditions()` from 7Timer ASTRO API.
-
-- Scale **1–8** (lower = better).
-- All-sky overlay shows transparency/seeing; **red when ≥ 5**.
-- **Not used** for Ready, schedule, or Tonight permitted since v6.3.1.
+When that stop was armed by weather safety and has reached the **stopped** phase, the same loop may unlock automatically if Open-Meteo is available, ASC is applicable, and none of the arm threats remain. Holds are released and mode returns to **auto**. Manual **ESTOP** and session-failure **ESTOP** never auto-clear. A sensor outage never counts as clear.
 
 ---
 
-## 8. Autonomous scheduler
+## 8. Scheduling and reconcile
 
-### Night boundaries
+The Remote “tonight” strip runs from **4:00 PM** local time to **8:00 AM** the following morning. The **night key** is the calendar day on which that strip starts. Scheduling windows and nautical daytime closure use nautical dusk and dawn (zenith angle **102°**). Open-Meteo nightly weather bounds follow sunset to the following sunrise for hourly samples.
 
-| Concept | Definition | Source |
-|---------|------------|--------|
-| **Schedule strip** | 4:00 PM → next 8:00 AM local; `nightKey` = strip start calendar day | `lib/schedule-strip.ts` |
-| **Scheduling window** | Nautical dusk → nautical dawn | `lib/sunrise-window.ts` |
-| **Open-Meteo night** | Sunset[i] → sunrise[i+1] for hourly weather | `pickOpenMeteoImagingNightBounds` |
+**Reconcile** is the scheduling orchestrator. It debounces for **15 s** unless forced, performs no work while **ESTOP** is blocking, drops stale sub-sessions from prior nights, and unschedules pending work when weather is unknown or globally hard-blocked. Otherwise it first maintains any project already on the board, builds free time by subtracting altitude holds, admin force-runs, and existing occupancy, then walks pending rows in creation order. Project rows use the multi-night planner; ordinary queue rows use schedule insight. Reconcile still runs when the pending list is empty because in-progress projects may require replan. Completions, holds, weather routes, observatory changes, and cron may all trigger it.
 
-Zenith angles (NOAA): official 90.833°, civil 96°, **nautical 102°**, astronomical 108°.
+The planner adds overhead—approximately **40 minutes** base, **5 minutes** per extra filter, and **10 minutes** for a meridian flip, with a shorter **20-minute** total on the variable-star queue path—then searches free windows in **5-minute** steps. Altitude must remain at least **30°** for the entire session. Weather coverage must reach **80%**. If no full slot exists, frame counts may shrink to fit. Parent projects remain **pending** until NINA delivery marks them on board; only the head of the pending-project FIFO receives new tonight sub-sessions, and an active on-board project holds altitude-qualified sky. After a failed sub-session tonight, new subs for that project go **on hold** unless an admin force-run is active or the row was manually restored. Clearing **ESTOP** also releases those failed-sub-tonight holds.
 
-### Reconcile (`lib/imaging/queue/reconcile.ts`)
-
-Entry: `reconcilePendingScheduleStatus({ force? })`.
-
-- Debounce **15 s** unless `force: true`.
-- **No-op** while `isEmergencyStopBlocking()`.
-- Drops stale subs from prior `nightKey`.
-- If weather unknown or global hard blocked → all pending **unscheduled**, clear tonight project subs.
-- Else:
-  1. Reconcile active on-board project first.
-  2. Build FIFO free intervals (subtract altitude hold, admin force-runs, existing sub occupancy).
-  3. For each pending row in **`createdAt` order**: project → `reconcileOneProjectTonight`; queue → `computeScheduleInsight`.
-
-Runs even when pending list empty (in-progress projects need replan).
-
-Triggered by: cron, weather prediction route, session progress completion, hold/release, observatory changes.
-
-### Project planner (`lib/imaging/project/planner.ts`)
-
-**Overhead** (`lib/imaging/session/overhead.ts`):
-
-- Base **40 min** + **5 min** per extra filter + **10 min** if meridian flip.
-- Variable-star sessions: **20 min** total (queue path).
-
-**Placement:**
-
-- Search step: **5 min**.
-- Altitude: **≥ 30°** for **100%** of session duration.
-- Weather: **≥ 80%** coverage in permitted intervals.
-- `findPlacementStart` scans free windows; `placeSubSessionInFreeWindow` shrinks frame count if no slot.
-
-**FIFO:**
-
-- Parent project stays **`pending`** until NINA delivery (`markProjectOnBoard` → `in_progress`).
-- Only `getNextPendingProject()` head gets new tonight subs.
-- Active on-board project holds altitude ≥ 30° intervals (`lib/imaging/project/altitude-hold.ts`).
-
-**Auto-hold after failed sub tonight:**
-
-- `plansToScheduledNights`: if any sub tonight `failed`, new subs → `on_hold` / `onHoldFromStatus: 'scheduled'`.
-- Exception: admin force-run active, or row restored to `planned` after manual release.
-- ESTOP clear releases `failed_sub_tonight` holds (`releaseFailedSubTonightAutoHolds`).
-
-**Mosaic mode:**
-
-- `planMosaicInterleavedSubSessions`: cross-panel moon-aware interleave; picks earliest start, tie-break more frames.
-- Panel coords via `projectTargetCoordsForPanel`.
-- Sub indices durable across replan (excludes `scheduled` from index bump).
-
-### Queue scheduling (`lib/imaging/queue/schedule-insight.ts`)
-
-Same 30° / 80% weather / 5 min step / moon avoidance for non-project rows. Variable-star targets exempt from moon blocking.
-
-### Delivery timing (`lib/imaging/planned-start-due.ts`)
-
-```typescript
-plannedStartIsDue(plannedStartIso, nowMs) // true iff now >= parsed ISO
-```
-
-Reconcile sets `plannedStartIso`; **early starts only via reconcile moving start earlier** — not transient Ready windows.
+Mosaic projects interleave panels with moon-aware placement, selecting the earliest workable start and preferring more frames on ties. Ordinary queue scheduling uses the same altitude, weather, step, and moon rules; variable-star rows skip moon blocking. Delivery is gated by planned start: the agent receives a session only when the current time is at or after `plannedStartIso`. Earlier starts occur only when reconcile advances the planned start, not merely because a brief **Ready** window appeared.
 
 ---
 
-## 9. Session & project lifecycle
+## 9. Sessions, projects, and the board
 
-### Queue row statuses (`ImagingRequestStatus`)
+A queue row progresses through **pending**, **scheduled**, **on hold**, **in progress**, **completed**, **failed**, or **rejected**. A project parent remains **pending** until the first sub-session is delivered, then may become **in progress**, and becomes **completed** when no frames remain. Project night sub-sessions are **planned**, **scheduled**, **on hold**, **in progress**, **completed**, or **failed**. Holds originate from **ESTOP**, manual action, or the failed-sub-tonight rule. Releasing a project sub-session always returns it to **planned** so reconcile can retain the same sub index.
 
-`pending` | `scheduled` | `on_hold` | `in_progress` | `completed` | `failed` | `rejected`
-
-### Project parent (`ProjectStatus`)
-
-`pending` | `scheduled` | `in_progress` | `completed` | `failed`
-
-Stays `pending` until first sub delivered; `completed` when no frames remain.
-
-### Project sub-session (`ProjectNightStatus`)
-
-`planned` | `scheduled` | `on_hold` | `in_progress` | `completed` | `failed`
-
-| Status | Set by |
-|--------|--------|
-| `scheduled` | Reconcile / planner |
-| `on_hold` | ESTOP, manual hold, or `failed_sub_tonight` auto-hold |
-| `in_progress` | NINA delivery (`markNightInProgress`) |
-| `planned` | Hold release (reconcile reuses same sub index) |
-| `completed` / `failed` | Progress webhook / failure handlers |
-
-### Session board (`lib/imaging/session/board.ts`)
-
-Parallel **`in_progress` / `completed` / `failed`** view for Remote dashboard and delivery. Max **50** entries. Tracks download timestamps, schedule bar placement, session password hash.
-
-### Hold / release (`lib/imaging/session-hold.ts`)
-
-Holdable: queue `pending|scheduled`; project subs `planned|scheduled`.
-
-Release project sub → always **`planned`** (reconcile reschedules same index).
+The **session board** is the Remote inventory of in-progress and terminal sessions. It is capacity-limited and also stores download timestamps, schedule-bar placement, and session password hashes used for shared access.
 
 ---
 
-## 10. NINA delivery pipeline
+## 10. NINA delivery
 
-### `GET /api/imaging/nina-sequence` (Queue Bearer)
+The agent poll endpoint applies a fixed priority. An **ESTOP** that is **stopping** and not yet delivered is delivered first. While **ESTOP** remains blocking, or while NINA is freshly reported running, the server returns **409** so ordinary imaging cannot interrupt. Admin force-runs, closed windows, on-board project sub-sessions, and due **scheduled** queue rows follow in priority. If no imaging work remains, an armed **end-night** sequence may be delivered; otherwise the agent waits.
 
-Priority order:
-
-1. **`tryDeliverEmergencyStop()`** — if ESTOP stopping and not yet delivered.
-2. If **`isEmergencyStopBlocking()`** → **409** (no other work).
-3. If **`isNinaReportedRunningNow()`** → **409** (ESTOP-only polls until NINA stops).
-4. Admin force-run delivery (if active).
-5. Admin closed window → **409**.
-6. Project sub-session direct delivery (on-board / awaiting sub).
-7. Next **due** scheduled queue row (`plannedStartIsDue` + altitude + Ready).
-8. If no row: **end-night** or **409** (imaging still scheduled / blocking).
-
-**Consume:** normal queue rows transition `scheduled` → `in_progress` on delivery; project subs use direct JSON without consuming parent row.
-
-### Progress webhook
-
-`POST /api/imaging/session-progress` — optional Basic auth.
-
-- Parses completion / ESTOP dome-closed lines.
-- ESTOP `dome closed` → `markEmergencyStopCompleted`, `lockObservatoryForEmergencyStop`.
-- Session completion → board/queue complete, **`await markEndNightDueIfTonightComplete()`** (reconcile first).
-
-### NINA JSON templates
-
-| Template | Discord message | Purpose |
-|----------|-----------------|---------|
-| `End Night Session.json` | `Tonight's Session Completed.` | Connect → close dome → disconnect |
-| `EStop.json` | `ESTOPPED` or weather variant | Emergency dome close |
-
-Runtime text patched via `patchNinaDiscordMessageText()` (`lib/imaging/nina-discord-message.ts`).
-
-### Sequence JSON builder
-
-`lib/build-nina-sequence-json.ts`, `lib/imaging/nina/sequence-json.ts` — filter plans, targets, progress URL embedded for NINA webhook.
+Progress posts from NINA append lines on the session, complete sessions when the end marker appears, and for **ESTOP** treat a dome-closed signal as stop completion and confirmation of the maintenance lock. Session completion evaluates whether **end-night** should become due after reconcile. Discord text inside NINA JSON trees is patched at delivery time so weather-safety and manual stops can present different messages while sharing the same template files.
 
 ---
 
-## 11. Emergency STOP & end night
+## 11. Emergency stop and end night
 
-### ESTOP state machine (`lib/imaging/session/emergency-stop.ts`)
+**ESTOP** is a compare-and-swap state machine in KV with phases **stopping** and **stopped**, a queue id, the sessions held at arm time, and timestamps for delivery and dome-closed completion. An undelivered **stopping** state older than **six hours** is treated as stale and cleared.
 
-KV key: `imaging-emergency-stop`. Phases: **`stopping`** → **`stopped`**.
+There are three arm paths. An administrator may arm **ESTOP** from the dashboard. **Weather-safety ESTOP** may arm automatically under the storm, precip, or ASC rain rules in Section 7. A genuine session failure may lock the observatory and arm **ESTOP** so the dome still closes, except when the failure reason is already an emergency stop or an intentional delivery handoff. On arm, the site locks immediately to **manual** and **Closed — Maintenance**, end-night due flags are cleared, activity-only end-night is suppressed for that night, and in-progress work is failed.
 
-| Field | Purpose |
-|-------|---------|
-| `queueId` | `estop-{timestamp}` |
-| `heldSessionIds` | Sessions placed on hold at arm |
-| `deliveredAt` / `completedAt` | Agent delivery / dome closed |
+Clearing is either manual—an administrator leaves the maintenance lock—or, for weather-safety **ESTOP** only, automatic once the phase is **stopped** and both Open-Meteo and ASC report clear conditions. Holds release and scheduling resumes.
 
-CAS writes (`compareAndWriteState`); stale undelivered stopping cleared after **6 h**.
-
-### Arm paths
-
-| Source | Entry |
-|--------|-------|
-| Admin dashboard | `POST /api/imaging/emergency-stop` |
-| Weather safety | `maybeArmWeatherSafetyEmergencyStop()` |
-| Session failure | `lockObservatoryAfterSessionFailure()` (skips re-arm for `emergency_stop`, delivery handoffs) |
-
-**On arm (v6.3.0+):**
-
-- `lockObservatoryForEmergencyStop()` — immediate `manual` + `closed_observatory_maintenance`.
-- `prepareEndNightAfterEstop(nightKey)` — clear end-night due, suppress activity-only end-night.
-- Fail in-progress subs/board sessions.
-
-### Clear ESTOP
-
-- **Admin:** PATCH observatory leaving lock state → `clearEmergencyStopAfterManualUnlock()` → `releaseEmergencyStopHolds` + `releaseFailedSubTonightAutoHolds`.
-- **Weather safety auto:** when STOPPED and Open-Meteo + ASC both clear → same clear path, then restore Auto (`weather-safety-estop.ts`).
-
-### End night (`lib/end-night-state.ts`)
-
-| Trigger | Queue ID | When |
-|---------|----------|------|
-| After last session | `end-night-{nightKey}-{ts}` | `isEndNightDue` OR (legacy) activity fallback **unless ESTOP suppressed** |
-| Nautical dawn | `end-night-{nightKey}-dawn` | `now >= nauticalDawn` |
-
-Armed by: session completion (`markEndNightDueIfTonightComplete`), last queue row consumed.
-
-**v6.3.0 fix:** ESTOP suppresses spurious “Tonight's Session Completed” Discord when operator clears ESTOP without a normal completion.
+**End night** is separate from **ESTOP**. After the last real session of the night is consumed, or at nautical dawn, the agent may receive an end-night sequence that closes the dome and posts the ordinary completion Discord message. After an **ESTOP**, the activity-only fallback is suppressed so clearing the lock does not falsely announce that tonight’s session completed.
 
 ---
 
-## 12. Project mode, mosaic & variable stars
+## 12. Projects, mosaics, and variable stars
 
-### Project mode
+**Project mode** stores a parent record with remaining frames by filter and tonight’s filter plan. Sub-session identifiers follow the form `{projectId}::night-{index}`. **Mosaic mode** adds panels and remaining frames per panel. The Plan page Framing tools build grids or custom panels with a NINA-aligned VIEW projection, and the planner interleaves panels across the night.
 
-- Queue row with `projectMode: true` → parent `ImagingProject` in `imaging-projects`.
-- **`remainingByFilter`**: frames left across nights; **`filterPlansTonight`**: tonight’s sub plan.
-- **`onBoard`**: active altitude-FIFO holder when `in_progress`.
-- Sub IDs: `{projectId}::night-{index}`.
-
-### Mosaic
-
-- `mosaicMode`, `mosaicPanels[]`, `mosaicRemainingByPanel`.
-- Plan page Framing: Grid (H×V overlap) or Custom panels; **VIEW** projection aligned to NINA; front-hemisphere inverse on commit.
-- Interleaved scheduling across panels (`planMosaicInterleavedSubSessions`).
-
-### Variable stars
-
-- Catalog: `lib/variable-star/` — VSX ingest, filters (CV, RR, CEP, famous), shortlist builder.
-- `GET /api/imaging/variable-stars`, `/variable-star-lookup`.
-- Remote: type/period filters; moon avoidance **disabled** for variable-star queue rows.
-- Biweekly GitHub Action regenerates shortlist (`npm run build:variable-star-shortlist`).
+Variable stars use a VSX-derived catalog under `lib/variable-star/`, with Remote filters for types and periods and APIs for listing and lookup. Those sessions do not apply moon avoidance. A biweekly GitHub Action regenerates the shortlist via `npm run build:variable-star-shortlist`.
 
 ---
 
 ## 13. Moon avoidance
 
-`lib/moon-avoidance.ts` — Lorentzian model (ACP/NINA-compatible).
-
-**Filter separation at full moon (degrees):**
-
-| Filter | Distance |
-|--------|----------|
-| L, R, G, B | 110 |
-| O (OIII) | 95 |
-| S (SII) | 65 |
-| H (Ha) | 55 |
-
-**Width:** 14 days (half lunation). Moon below horizon → allowed. Moon alt **< 10°** → required separation × **0.5**.
-
-Variable-star sessions skip moon checks.
+Moon avoidance uses a Lorentzian separation model compatible with ACP and NINA. At full moon, broadband LRGB requires approximately **110°** of separation, OIII approximately **95°**, SII approximately **65°**, and Ha approximately **55°**. The width is **fourteen days** (half a lunation). If the moon is below the horizon the check passes. If the moon is under **10°** altitude, the required separation is halved. Variable-star sessions skip the check entirely.
 
 ---
 
-## 14. All-sky camera & ASC AI
+## 14. All-sky camera and ASC AI
 
-### Pi services
-
-| Script | Role |
-|--------|------|
-| `camera_service.py` | MJPEG stream, `/camera/status`, `/camera/sequence/status` |
-| `asc_cloud_ai.py` | Cloud + rain TensorFlow.js models (day/night phases) |
-| `auto_exposure.py` / `auto_white_balance.py` | Solar-window-driven tuning |
-| `observatory_solar.py` | Nautical dawn/dusk for camera mode |
-
-Default stream: `https://cam.pomfretastro.org/camera/stream`.
-
-### ASC inference payload
-
-```typescript
-{
-  cloudCoverPercent: number
-  rain: { detected: boolean, confidence: number, label: string }
-  modelPhase: 'day' | 'night'
-  frameIso: string
-  stale?: boolean
-  staleReason?: string
-}
-```
-
-Fetched by `fetchAllSkyCamGateState()` (`lib/asc-cloud.ts`). Sequence-active → ASC gate skipped (avoid stale cloud during imaging).
-
-### Auto-tuning history
-
-`POST/GET /api/camera/auto-tuning-history` (admin) → KV `allsky-auto-tuning-history`.
+The Pi serves the MJPEG stream at `https://cam.pomfretastro.org/camera/stream` and exposes camera and sequence status endpoints consumed by the cloud. ASC inference returns cloud cover percent, a rain detection with confidence and label, a day or night model phase, and staleness metadata. When a long all-sky sequence is running, the **Ready** and weather-safety paths treat ASC as not applicable so a frozen sky frame cannot falsely gate or arm the observatory. Auto exposure and white balance history may be recorded for administrators through the camera auto-tuning API.
 
 ---
 
-## 15. Mount telemetry & 3D panel
+## 15. Mount telemetry and Remote 3D panel
 
-- **POST** `/api/imaging/mount-pointing` — auth via mount secret; stores latest sample.
-- **GET** `/api/imaging/mount-pointing/stream` — SSE fan-out (`live:mount:{stationId}`).
-- KV: `mount-pointing:{stationId}`.
-- Remote **Telescope Status** panel: Three.js GEM model from `public/telescope-models/`, driven by telemetry (`components/remote/telescope-status-panel.tsx`).
+The observatory posts mount pointing samples to the cloud. Those samples fan out over a live stream and drive the Remote Telescope Status panel, which loads Three.js models from `public/telescope-models/`. Posting is authenticated with the mount telemetry secret.
 
 ---
 
-## 16. Storage (R2) & retention
+## 16. Object storage and retention
 
-### Layout
+Session outputs are stored under an R2 prefix (default `imaging`) keyed by queue id. Live previews use a fixed live-preview object per session. The agent uploads with boto3-compatible credentials, then posts `session-files` so KV records the object map. Members download through `GET /api/imaging/download`, which issues a short-lived presigned URL (default **five minutes**) and records that the board entry was downloaded.
 
-- Session outputs: `{R2_PREFIX}/{queueId}/…` (default prefix `imaging`).
-- Live preview: `{prefix}/{queueId}/live-preview.jpg`.
-- KV maps: `imaging-r2-object-map`, `imaging-r2-preview-map`.
-
-### Upload path
-
-Agent → boto3 upload → `POST /api/imaging/session-files` → updates KV map.
-
-### Download
-
-`GET /api/imaging/download` — presigned URL (`R2_PRESIGN_TTL_SEC`, default **300 s**); marks board downloaded.
-
-### Retention (`lib/imaging-session-maintenance.ts`)
-
-| Asset | TTL |
-|-------|-----|
-| Board completed / downloaded | **48 h** |
-| Terminal projects (completed/failed) | **48 h** after `completedAt` |
-| Member session history archive | **60 days** |
-| Resolved gallery submissions | **30 days** |
-
-Cron: `GET /api/imaging/cleanup-sessions` (Cron Bearer).
+Completed board rows and terminal projects are purged on the order of **48 hours**. Member session history is retained longer (approximately **60 days**). Resolved gallery submissions expire after approximately **30 days**. Cleanup runs through the cron-protected cleanup route and shared maintenance helpers.
 
 ---
 
-## 17. Live updates & polling
+## 17. Live updates
 
-**Remote dashboard:** adaptive HTTP polling via `GET /api/imaging/site-poll` (member) — replaces legacy SSE for most site state.
-
-**Legacy SSE (still present):**
-
-- `site-stream` — observatory + sessions (+ ESTOP for admins).
-- `queue/[id]/progress-stream`, `preview-stream`.
-- `mount-pointing/stream`.
-
-**Live bus:** `lib/imaging/live-bus.ts` publishes to KV lists; SSE handlers consume.
-
-**Agent wake:** `emitAgentWake('estop')` on ESTOP arm for faster polling.
+The Remote dashboard uses adaptive HTTP polling against `site-poll`. SSE endpoints for site events, progress, preview, and mount remain available and consume the same KV-backed live bus. Arming **ESTOP** also emits an agent wake so the Windows poller shortens its wait and retrieves the stop sequence promptly.
 
 ---
 
-## 18. Cron & maintenance
+## 18. Cron and the Windows agent
 
-| Route | Auth | Action |
-|-------|------|--------|
-| `GET /api/imaging/reconcile-queue-schedule` | Cron Bearer | Force reconcile |
-| `GET /api/imaging/cleanup-sessions` | Cron Bearer | Reconcile + 48 h purge |
-
-Agent may also hit reconcile URL with `POMFRET_CRON_SECRET` (`nina_agent.py`).
-
-`lib/imaging-session-maintenance.ts`: schedule maintenance + board/project purge.
+Cron bearer routes force reconcile and run cleanup. The agent may call the reconcile URL with `POMFRET_CRON_SECRET` as a backup. On the observatory PC, `nina_agent.py` polls the main sequence endpoint on the order of tens of seconds (longer when idle), polls **ESTOP** delivery every few seconds while NINA is running, posts an agent pulse while a sequence is active, and uploads live preview JPEGs when the frame changes. Unchanged sequence fingerprints are skipped if NINA is already running. New work writes a temporary JSON file, powers PDU outlets for mount and camera with a warmup interval, and launches NINA with exit-after-sequence. On exit, the agent stacks or zips as configured, uploads to R2, and reports files to the cloud.
 
 ---
 
-## 19. HTTP API reference
+## 19. Production configuration
 
-Auth legend: **Member**, **Admin**, **Queue**, **Cron**, **Session**, **Open**, **Tenant**.
+Production imaging requires Upstash KV credentials, the imaging queue secret, the cron secret, and full R2 access (endpoint, bucket, and keys). Observatory-facing settings include the NINA progress Basic password, optional progress username, session end marker, mount telemetry secret, and—off Vercel—an optional observatory status file path. Site mail uses Resend. Bootstrap administrators are listed in `BOOTSTRAP_ADMIN_EMAILS`. Optional settings cover file-backed queue fallback, R2 write secret, presign TTL, object prefix, Astrometry, and radar upstream.
 
-### Auth
-
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| POST | `/api/auth/signup` | Open | Register |
-| POST | `/api/auth/login` | Open | Login → cookie |
-| POST | `/api/auth/logout` | Cookie | Logout |
-| GET | `/api/auth/me` | Cookie | Current user |
-| POST | `/api/auth/change-password` | Member | Change password |
-| GET/POST | `/api/auth/verify-email` | Token / Member | Email verification |
-
-### Admin
-
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| GET | `/api/admin/members` | Admin | Member directory |
-| PATCH | `/api/admin/members` | Admin | Approve imaging / roles |
-| DELETE | `/api/admin/members` | Admin | Delete member |
-| GET/PATCH | `/api/admin/imaging-requests` | Admin | Access & large-project approvals |
-| GET/PUT/DELETE | `/api/admin/imaging-equipment` | Admin | Rig CRUD |
-| GET | `/api/admin/gallery-submissions` | Admin | List submissions |
-| GET | `/api/admin/gallery-submissions/[id]/preview` | Admin | Preview |
-| GET | `/api/admin/gallery-submissions/[id]/download` | Admin | Download |
-| POST | `/api/admin/gallery-submissions/[id]/dismiss` | Admin | Dismiss |
-
-### Imaging — core
-
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| GET/POST | `/api/imaging/queue` | Member / Queue | List / create requests |
-| PATCH/PUT/DELETE | `/api/imaging/queue/[id]` | Queue / Session | Agent update / edit / delete |
-| GET | `/api/imaging/queue/[id]/nina-sequence` | Member / Queue | Preview NINA JSON |
-| GET | `/api/imaging/queue/[id]/progress` | Session | Progress lines |
-| GET | `/api/imaging/queue/[id]/progress-stream` | Session | SSE progress |
-| GET | `/api/imaging/queue/[id]/preview-stream` | Session | SSE preview |
-| GET | `/api/imaging/current-sessions` | Open | Dashboard inventory |
-| GET | `/api/imaging/nina-sequence` | Queue | **Agent poll — deliver work** |
-| POST | `/api/imaging/session-progress` | Basic? | NINA progress webhook |
-| POST | `/api/imaging/agent-pulse` | Queue | NINA running heartbeat |
-| GET | `/api/imaging/agent-events` | Open | **410 disabled** |
-| GET | `/api/imaging/reconcile-queue-schedule` | Cron | Force reconcile |
-| GET | `/api/imaging/cleanup-sessions` | Cron | Maintenance purge |
-| GET | `/api/imaging/audit-log` | Admin | Activity log |
-| GET | `/api/imaging/download` | Session | Presigned R2 URL |
-| GET/POST | `/api/imaging/preview` | Session / Queue | Live preview |
-| POST | `/api/imaging/session-files` | Queue | Report R2 uploads |
-| POST | `/api/imaging/r2-object` | R2 secret | Manual object map |
-| GET/POST | `/api/imaging/session-control` | Admin | Hold/run/fail/complete/delete |
-| POST | `/api/imaging/session-schedule-placement` | Member | Schedule bar position |
-| GET | `/api/imaging/equipment` | Member | List rigs |
-| GET | `/api/imaging/equipment` | Member | List rigs |
-| POST | `/api/imaging/visibility` | Open | Altitude check |
-| GET | `/api/imaging/object-resolve` | Open | Name → coordinates |
-| GET | `/api/imaging/variable-stars` | Open | Variable star catalog |
-| GET | `/api/imaging/variable-star-lookup` | Open | Search catalog |
-| GET | `/api/imaging/point3d-model` | Open | Telescope OBJ models |
-
-### Imaging — observatory & weather
-
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| GET/PATCH | `/api/imaging/observatory-status` | Open / Admin | Mode & status |
-| GET/POST | `/api/imaging/emergency-stop` | Admin | ESTOP status / arm |
-| GET | `/api/imaging/emergency-stop/delivery` | Queue | ESTOP-only poll |
-| GET/POST/DELETE | `/api/imaging/schedule-control` | Open / Admin | Admin closed windows |
-| GET | `/api/imaging/tonight-weather-prediction` | Open | Weather gate + column reconcile |
-| GET | `/api/weather/astro-conditions` | Open | 7Timer transparency/seeing |
-| GET | `/api/weather/storm-approach` | Open | Thunderstorm ring |
-
-### Imaging — realtime
-
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| GET | `/api/imaging/site-poll` | Member | Lightweight state poll |
-| GET | `/api/imaging/site-stream` | Member | SSE site events |
-| POST/GET | `/api/imaging/mount-pointing` | Secret / Open | Mount telemetry |
-| GET | `/api/imaging/mount-pointing/stream` | Open | SSE mount |
-
-### Member & gallery
-
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| GET/POST/DELETE | `/api/member/saved-sessions` | Member | Form drafts |
-| GET | `/api/member/sessions` | Member | History archive |
-| POST | `/api/member/gallery-submissions` | Member | Submit gallery |
-| POST | `/api/member/gallery-submissions/[id]/upload` | Member | Upload bytes |
-| POST | `/api/member/gallery-submissions/[id]/complete` | Member | Finalize |
-
-### External proxies
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/noaa-goes` | NOAA GOES image proxy |
-| GET | `/api/noaa-goes/frames` | GOES frame list |
-| GET | `/api/librewxr/weather-maps` | Radar metadata |
-| GET | `/api/librewxr/tiles/[...path]` | Radar tiles |
-| GET | `/api/moon-svs` | NASA SVS moon frames |
-| POST | `/api/astrometry/solve` | Astrometry.net plate solve |
-| GET/POST | `/api/camera/auto-tuning-history` | All-sky tuning (admin) |
-
-### Personal tenant (`/api/personal/[tenantId]/`)
-
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| GET | `health` | Open | Edition probe |
-| GET | `station/version` | Open | OTA version info |
-| POST | `imaging/queue` | Tenant | Enqueue session |
-| GET | `imaging/current-sessions` | Tenant | List sessions |
-| GET | `imaging/nina-sequence` | Tenant | Stub 404 |
-| POST | `imaging/agent-pulse` | Tenant | Agent heartbeat |
-| GET/PATCH | `imaging/observatory-status` | Tenant | Tenant observatory |
+The Windows agent environment mirrors the queue secret, cron secret, R2 credentials, and PDU username and password.
 
 ---
 
-## 20. Environment variables
+## 20. HTTP API surface
 
-### Required for production imaging
+Public authentication routes cover signup, login, logout, current user, password change, and email verification. Admin routes manage members, imaging access and large-project approvals, equipment, and gallery moderation.
 
-| Variable | Purpose |
-|----------|---------|
-| `KV_REST_API_URL` | Upstash REST URL |
-| `KV_REST_API_TOKEN` | Upstash token |
-| `IMAGING_QUEUE_SECRET` | Agent + queue Bearer |
-| `CRON_SECRET` | Cron routes |
-| `R2_ENDPOINT` | Cloudflare R2 endpoint |
-| `R2_BUCKET` | Bucket name |
-| `R2_ACCESS_KEY_ID` | R2 access key |
-| `R2_SECRET_ACCESS_KEY` | R2 secret |
+The imaging API is larger. Members create and inspect queue rows; the agent updates them and consumes `nina-sequence`. Progress, pulse, preview, session-files, download, and R2 mapping connect NINA and storage to the cloud. Administrators control sessions, **ESTOP**, schedule closed windows, and read the audit log. Cron forces reconcile and cleanup. Observatory status is publicly readable and patchable by administrators. Weather helpers expose tonight’s prediction column, 7Timer astro conditions, and the storm-approach ring used by safety ESTOP. Member gallery and saved-session routes support the account experience. Proxies forward GOES imagery, radar tiles, moon SVS frames, and plate-solving without exposing upstream keys to the browser.
 
-### Observatory & NINA
-
-| Variable | Purpose |
-|----------|---------|
-| `NINA_SESSION_PROGRESS_BASIC_PASSWORD` | Progress webhook auth |
-| `NINA_SESSION_PROGRESS_BASIC_USER` | Basic user (optional) |
-| `NINA_SESSION_END_MARKER` | Completion signal string |
-| `NINA_MOUNT_TELEMETRY_SECRET` | Mount POST auth |
-| `OBSERVATORY_STATUS_FILE` | Filesystem fallback (non-Vercel) |
-
-### Email & site
-
-| Variable | Purpose |
-|----------|---------|
-| `RESEND_API_KEY` | Transactional email |
-| `IMAGING_MAIL_FROM` | From address |
-| `SITE_URL` / `NEXT_PUBLIC_SITE_URL` | Canonical URLs |
-| `BOOTSTRAP_ADMIN_EMAILS` | Comma-separated admin emails |
-
-### Optional
-
-| Variable | Purpose |
-|----------|---------|
-| `IMAGING_QUEUE_FILE` | File-backed queue without KV |
-| `IMAGING_R2_WRITE_SECRET` | Manual R2 map POST |
-| `R2_PRESIGN_TTL_SEC` | Presign TTL (default 300) |
-| `R2_PREFIX` | Object prefix (default `imaging`) |
-| `ASTROMETRY_API_KEY` | Plate solve |
-| `LIBREWXR_API_BASE_URL` | Radar upstream |
-| `PERSONAL_TENANT_SECRETS` | JSON tenant secrets |
-| `STATION_LATEST_VERSION` | Personal OTA version |
-
-### Windows agent env
-
-`IMAGING_QUEUE_SECRET`, `POMFRET_CRON_SECRET`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `PDU_USER`, `PDU_PASSWORD`.
+Route paths follow the `/api/...` tree in the repository. Authorization for each family follows the trust boundaries in Section 4.
 
 ---
 
-## 21. NINA agent (`observatory/nina_agent.py`)
+## 21. Development, testing, and deployment
 
-Windows service polling `https://www.pomfretastro.org/api/imaging/nina-sequence`.
+Unit tests run with `npm test` (tsx over the `lib/**/*.test.ts` tree) and cover weather gates, planner holds, ESTOP sync, planned-start due logic, moon avoidance, reconcile fingerprints, and related helpers. `npm run test:types` performs typechecking. Locally, `npm run dev` serves the site; KV is optional when a file-backed queue is configured. Production deploys with `npm run deploy` (`vercel --prod --yes`) to the project aliased as www.pomfretastro.org. Supporting scripts sync Stellarium sky data, rebuild the variable-star shortlist, and configure R2 CORS for gallery uploads.
 
-### Poll loop
-
-| Interval | Action |
-|----------|--------|
-| 45 s (300 s idle) | Main sequence poll |
-| 5 s | ESTOP delivery poll while NINA running |
-| 30 s | Agent pulse (`ninaRunning: true`) |
-| On change | Live preview JPEG upload |
-
-### Sequence handling
-
-1. Fingerprint JSON; skip if unchanged and NINA already running.
-2. If NINA running: ESTOP poll only; kill + run ESTOP sequence if armed.
-3. On new sequence: write temp JSON, PDU power (outlets 1–2, **60 s** warmup), launch NINA `--exitaftersequence`.
-4. On exit: post-process (Siril stack or raw ZIP) → R2 upload → `session-files` report.
-
-### Hardware
-
-- **PDU:** Digital Loggers @ `192.168.121.5` — outlet 1 mount, 2 camera.
-- **R2:** boto3 compatible API.
-
-### Auth header
-
-`Authorization: Bearer ${IMAGING_QUEUE_SECRET}`
+Administrator activity is appended to a bounded audit log with kinds such as emergency stop, end night, observatory transitions, queue status changes, holds, progress, plan changes, and NINA delivery. Administrators read it through the audit-log API.
 
 ---
 
-## 22. Personal tenant edition (stub)
+## 22. Delivery priority and weather gate summary
 
-Cloud hub for personal observatory tenants — **scheduling not implemented**.
+When the agent requests work, delivery follows this order. An undelivered **ESTOP** sequence is delivered immediately. While **ESTOP** blocks, or while NINA is freshly running, ordinary imaging is refused. Without **Ready**, before the planned start, below **30°** altitude, or inside an admin closed window, candidates are skipped or refused. If **end night** is due and no imaging remains, the end-night template is delivered. Otherwise a due, **Ready**, sufficiently high **scheduled** session is delivered as ordinary NINA JSON.
 
-- State: `personal-hub:{tenantId}:state` (sessions + observatory snapshot).
-- `nina-sequence` returns **404** “scheduling pending”.
-- Intended for future on-prem hub sync.
+Relative to one another, the **Ready** gate allows ASC cloud under **20%**, while the schedule hourly cloud rule requires under **10%**. Schedule precip is stricter than **Ready** precip. **Weather-safety ESTOP** uses site precip above **20%**, the storm ring, and high-confidence ASC rain. Display-only 7Timer values never change those gates.
 
 ---
 
-## 23. Testing & deployment
-
-### Tests
-
-```bash
-npm test          # tsx --test on lib/**/*.test.ts (253+ cases)
-npm run test:types  # tsc --noEmit
-```
-
-Coverage includes: weather gates, planner auto-hold, ESTOP sync, planned-start-due, moon avoidance, reconcile fingerprints, observatory overlay.
-
-### Local dev
-
-```bash
-npm install
-npm run dev       # http://localhost:3000
-```
-
-KV optional locally (`IMAGING_QUEUE_FILE` fallback for queue).
-
-### Production deploy
-
-```bash
-npm run deploy    # vercel --prod --yes
-```
-
-Vercel project linked to GitHub `main`. Production alias: **www.pomfretastro.org**.
-
-### Related scripts
-
-| Script | Purpose |
-|--------|---------|
-| `npm run sync:stellarium-skydata` | Sync Plan atlas sky data |
-| `npm run build:variable-star-shortlist` | Regenerate VSX shortlist |
-| `npm run configure:r2-gallery-cors` | R2 CORS for gallery uploads |
-
----
-
-## Appendix: audit log kinds (selected)
-
-| Kind | Source |
-|------|--------|
-| `emergency_stop` | Arm, deliver, complete, clear |
-| `end_night` | Due, delivered |
-| `observatory.patch` | Admin mode/status |
-| `observatory.auto_transition` | Auto Ready ↔ closed |
-| `queue.status` | Schedule, fail, complete |
-| `queue.on_hold` | Hold / release |
-| `session.progress` | NINA lines |
-| `session.imaging_plan_changed` | Reconcile plan updates |
-| `nina.delivered` | Sequence handed to agent |
-
-Max **400** entries; read via `GET /api/imaging/audit-log` (admin).
-
----
-
-## Appendix: status quick reference
-
-### When NINA receives JSON
-
-| Condition | Result |
-|-----------|--------|
-| ESTOP stopping, not delivered | ESTOP JSON |
-| ESTOP blocking | 409 |
-| NINA running (fresh report) | 409 (ESTOP poll only) |
-| Not Ready | 409 |
-| Before `plannedStartIso` | 409 (next candidate) |
-| Target < 30° | Skip candidate |
-| Admin closed window | 409 |
-| End night due | End Night JSON |
-| Else scheduled + due + Ready | Session JSON |
-
-### Weather gate comparison
-
-| Gate | Cloud | Precip | Wind | Astro |
-|------|-------|--------|------|-------|
-| Ready (ASC) | ASC < 20%, no rain | ≤ 20% | < 10 m/s | — |
-| Ready (fallback) | OM < 10% | ≤ 20% | < 10 m/s | — |
-| Schedule hourly | < 10% | < 10% | ≤ 10 m/s | — |
-| Safety ESTOP | — | > 20% site | — | — |
-| Display only | — | — | — | 7Timer 1–8 |
-
----
-
-*Document generated for codebase at **v6.3.1**. For release history see [GitHub Releases](https://github.com/QimingTian/Pomfret-Astro-Website/releases).*
+*Pomfret Astro Technical Documentation · v6.3.3*

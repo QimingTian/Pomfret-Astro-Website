@@ -1,6 +1,6 @@
 # Pomfret Astro — Technical Documentation
 
-**Version:** v6.3.3  
+**Version:** v6.4.0  
 **Production:** https://www.pomfretastro.org  
 **Repository:** https://github.com/QimingTian/Pomfret-Astro-Website
 
@@ -168,7 +168,7 @@ The Remote dashboard uses adaptive HTTP polling against `site-poll`. SSE endpoin
 
 ## 18. Cron and the Windows agent
 
-Cron bearer routes force reconcile and run cleanup. The agent may call the reconcile URL with `POMFRET_CRON_SECRET` as a backup. On the observatory PC, `nina_agent.py` polls the main sequence endpoint on the order of tens of seconds (longer when idle), polls **ESTOP** delivery every few seconds while NINA is running, posts an agent pulse while a sequence is active, and uploads live preview JPEGs when the frame changes. Unchanged sequence fingerprints are skipped if NINA is already running. New work writes a temporary JSON file, powers PDU outlets for mount and camera with a warmup interval, and launches NINA with exit-after-sequence. On exit, the agent stacks or zips as configured, uploads to R2, and reports files to the cloud.
+Cron bearer routes force reconcile and run cleanup. The agent may call the reconcile URL with `POMFRET_CRON_SECRET` as a backup. On the observatory PC, `nina_agent.py` polls the main sequence endpoint on the order of tens of seconds (longer when idle), polls **ESTOP** delivery every few seconds while NINA is running, posts an agent pulse while a sequence is active, and uploads live preview JPEGs when the frame changes. Unchanged sequence fingerprints are skipped if NINA is already running. New work writes a temporary JSON file, powers PDU outlets for mount and camera with a warmup interval, restores TheSky Ascom2X mount capability flags (Can Home, Pulse Guide, Can Set Tracking), and launches NINA with a pinned equipment profile and exit-after-sequence. On exit, the agent stacks or zips as configured, uploads to R2, and reports files to the cloud.
 
 ---
 
@@ -206,4 +206,4 @@ Relative to one another, the **Ready** gate allows ASC cloud under **20%**, whil
 
 ---
 
-*Pomfret Astro Technical Documentation · v6.3.3*
+*Pomfret Astro Technical Documentation · v6.4.0*

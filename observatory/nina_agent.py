@@ -108,10 +108,17 @@ SSE_CONNECTED_WAIT_SECONDS = 60
 JOBS_DIR = r"C:\Users\Observatory\Downloads\NinaJobs"
 LOCAL_SEQUENCE_FILENAME = "latest_sequence.json"
 NINA_INSTALL_DIR = r"C:\Program Files\N.I.N.A. - Nighttime Imaging 'N' Astronomy"
+# Re-apply Ascom2X CanHome / PulseGuide flags before each NINA launch (ASCOM profile).
+RESTORE_ASCOM2X_SCRIPT = r"C:\Users\Observatory\Downloads\restore-ascom2x-thesky-flags.ps1"
 
-# Optional args, for example:
-# NINA_EXTRA_ARGS = ["--profileid", "YOUR_PROFILE_GUID", "--exitaftersequence"]
-NINA_EXTRA_ARGS: list[str] = ["--exitaftersequence"]
+# Pin the observatory equipment profile so NINA auto-update cannot silently
+# switch to a new empty Default profile (Ascom2X CanHome flags then look unset).
+# Profile: ac60d72d-015e-4360-a70f-cb43a7948cf4 (DESKTOP-OQE4FJS, 2026-08).
+NINA_EXTRA_ARGS: list[str] = [
+    "--profileid",
+    "ac60d72d-015e-4360-a70f-cb43a7948cf4",
+    "--exitaftersequence",
+]
 
 # If True, do not start a new job when NINA.exe is already running.
 SKIP_WHEN_NINA_RUNNING = True
@@ -390,7 +397,37 @@ def is_nina_running() -> bool:
         return False
 
 
+def restore_ascom2x_thesky_flags() -> None:
+    """Rewrite Ascom2X capability flags so FindHome is not rejected after a driver reset."""
+    script = Path(RESTORE_ASCOM2X_SCRIPT)
+    if not script.is_file():
+        log(f"Ascom2X restore script missing: {script}")
+        return
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    if result.returncode != 0:
+        log(f"Ascom2X restore failed (code {result.returncode}).")
+        if result.stderr:
+            log(result.stderr[-800:])
+        return
+    summary = (result.stdout or "").strip().replace("\r\n", " | ")
+    log(f"Ascom2X flags restored. {summary[-500:]}")
+
+
 def start_nina(sequence_path: Path) -> subprocess.Popen[bytes]:
+    restore_ascom2x_thesky_flags()
     nina_exe = str(Path(NINA_INSTALL_DIR) / "NINA.exe")
     args = [nina_exe, "--sequencefile", str(sequence_path), "--runsequence", *NINA_EXTRA_ARGS]
     log(f"Starting NINA with sequence: {sequence_path}")

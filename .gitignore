@@ -29,6 +29,8 @@ yarn-error.log*
 pomfret-astro*.json
 .local-private/
 observatory/SSH-ACCESS.local.md
+observatory/README-SSH.local.md
+observatory/*.local.md
 
 # logs / local data
 audit-log-*.csv

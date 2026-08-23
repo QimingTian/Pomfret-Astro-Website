@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
+import { POMFRET_SITE } from '@/lib/observatory-sites'
 import {
   getTonightScheduleEveningAstronomyUtc,
   getTonightScheduleMorningAstronomyUtc,
@@ -28,9 +29,9 @@ import { PlanFramingToolbar, PlanFrameOverlays } from './plan-framing-toolbar'
 import { PlanSelectionOverlay, type LiveSkyInfo } from './plan-selection-overlay'
 import { formatDecDegDms, formatRaHoursHms } from '@/lib/format-radec'
 
-const POMFRET_LATITUDE = 41.9159
-const POMFRET_LONGITUDE = -71.9626
-const POMFRET_ALTITUDE_METERS = 150
+const POMFRET_LATITUDE = POMFRET_SITE.weatherLat
+const POMFRET_LONGITUDE = POMFRET_SITE.weatherLon
+const POMFRET_ALTITUDE_METERS = POMFRET_SITE.elevationMeters
 
 type WeatherPrediction = {
   ok: boolean

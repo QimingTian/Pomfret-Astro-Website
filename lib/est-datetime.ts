@@ -1,5 +1,7 @@
+import { POMFRET_SITE } from '@/lib/observatory-sites'
+
 /** Pomfret, CT — US Eastern (EST/EDT). */
-export const EST_TIME_ZONE = 'America/New_York'
+export const EST_TIME_ZONE = POMFRET_SITE.timezone
 
 export function formatEstDateTime(d: Date): string {
   return d.toLocaleString('en-US', {

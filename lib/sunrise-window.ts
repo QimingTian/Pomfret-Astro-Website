@@ -1,7 +1,8 @@
+import { POMFRET_SITE } from '@/lib/observatory-sites'
 import { OBS_LAT_DEG, OBS_LON_DEG } from '@/lib/target-altitude'
 
 /** Civil calendar + solar gates for Pomfret; must match Remote “tonight schedule” expectations. */
-export const OBSERVATORY_TIME_ZONE = 'America/New_York'
+export const OBSERVATORY_TIME_ZONE = POMFRET_SITE.timezone
 
 /**
  * UTC `Date` at 00:00:00 for the observatory's **local** civil calendar day containing `now`

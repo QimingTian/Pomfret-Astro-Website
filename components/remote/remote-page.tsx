@@ -14,6 +14,7 @@ import {
   type VariableStarFilterId,
 } from '@/lib/variable-star/filters'
 import { formatRaDecPair } from '@/lib/format-radec'
+import { POMFRET_SITE } from '@/lib/observatory-sites'
 import {
   MIN_ALTITUDE_DEG,
   OBS_LAT_DEG,
@@ -465,7 +466,7 @@ export default function RemotePage() {
     const fetchTemp = async () => {
       try {
         const res = await fetch(
-          'https://api.open-meteo.com/v1/forecast?latitude=41.9159&longitude=-71.9626&current=temperature_2m&timezone=UTC'
+          `https://api.open-meteo.com/v1/forecast?latitude=${POMFRET_SITE.weatherLat}&longitude=${POMFRET_SITE.weatherLon}&current=temperature_2m&timezone=UTC`
         )
         const data = await res.json()
         if (!cancelled && typeof data?.current?.temperature_2m === 'number') {

@@ -1,8 +1,10 @@
 import { getAdminClosedWindowsInRange } from '@/lib/admin-closed-window-store'
 import { subtractOccupiedFromFree } from '@/lib/imaging-queue-free-intervals'
+import { POMFRET_SITE } from '@/lib/observatory-sites'
 
-const LAT = 41.9159
-const LON = -71.9626
+const LAT = POMFRET_SITE.weatherLat
+const LON = POMFRET_SITE.weatherLon
+const WEATHER_TZ = POMFRET_SITE.timezone
 const KMH_TO_MS = 1 / 3.6
 
 /** Global hard gate: require this many consecutive fully weather-permitted night hours. */
@@ -226,7 +228,7 @@ export async function getTonightWeatherPermittedIntervals(): Promise<TonightWeat
     `?latitude=${LAT}&longitude=${LON}` +
     '&hourly=cloud_cover,precipitation_probability,wind_speed_10m' +
     '&daily=sunrise,sunset' +
-    '&past_days=1&forecast_days=2&timezone=America/New_York&timeformat=unixtime'
+    `&past_days=1&forecast_days=2&timezone=${WEATHER_TZ}&timeformat=unixtime`
 
   try {
     const [res] = await Promise.all([
@@ -352,7 +354,7 @@ export async function sessionWindowHourlyPrecipOk(
     'https://api.open-meteo.com/v1/forecast' +
     `?latitude=${LAT}&longitude=${LON}` +
     '&hourly=precipitation_probability' +
-    '&forecast_days=2&timezone=America/New_York&timeformat=unixtime'
+    `&forecast_days=2&timezone=${WEATHER_TZ}&timeformat=unixtime`
   try {
     const res = await fetch(url, { cache: 'no-store' })
     if (!res.ok) {

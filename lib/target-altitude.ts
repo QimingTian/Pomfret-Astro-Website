@@ -1,5 +1,7 @@
-export const OBS_LAT_DEG = 41 + 53 / 60 + 10 / 3600
-export const OBS_LON_DEG = -(71 + 57 / 60 + 54 / 3600) // West is negative
+import { POMFRET_SITE } from '@/lib/observatory-sites'
+
+export const OBS_LAT_DEG = POMFRET_SITE.observerLatDeg
+export const OBS_LON_DEG = POMFRET_SITE.observerLonDeg
 
 export const MIN_ALTITUDE_DEG = 30
 /** Fraction of session duration that must have target >= MIN_ALTITUDE_DEG when scheduling a slot. */

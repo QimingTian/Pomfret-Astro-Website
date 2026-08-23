@@ -25,6 +25,7 @@ import {
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 import { isObservatoryNight } from '@/lib/observatory-poll-schedule'
 import { setObservatoryMode } from '@/lib/observatory-status-store'
+import { POMFRET_SITE } from '@/lib/observatory-sites'
 import { OBS_LAT_DEG, OBS_LON_DEG } from '@/lib/target-altitude'
 
 /** Lead-time ring for thunderstorm approach (≈30–60 min at typical summer storm speeds). */
@@ -325,7 +326,7 @@ async function fetchRingForecasts(): Promise<LocationForecast[] | null> {
     'https://api.open-meteo.com/v1/forecast' +
     `?latitude=${lats}&longitude=${lons}` +
     '&hourly=precipitation_probability,weather_code' +
-    '&forecast_days=1&timezone=America/New_York&timeformat=unixtime'
+    `&forecast_days=1&timezone=${POMFRET_SITE.timezone}&timeformat=unixtime`
 
   try {
     const res = await fetch(url, { cache: 'no-store' })

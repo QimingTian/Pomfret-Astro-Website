@@ -1,4 +1,5 @@
 import { appendAuditLog } from '@/lib/imaging-audit-log'
+import { POMFRET_SITE } from '@/lib/observatory-sites'
 import {
   logSessionImagingPlanChanged,
   logSessionStatusChange,
@@ -76,7 +77,7 @@ export type ProjectTonightPlan = {
 
 const SESSION_OVERHEAD_BASE_MS = DSO_SESSION_OVERHEAD_SEC * 1000
 const PLACEMENT_STEP_MS = 5 * 60 * 1000
-const SCHEDULE_LOG_TZ = 'America/New_York'
+const SCHEDULE_LOG_TZ = POMFRET_SITE.timezone
 
 function formatScheduleEt(ms: number): string {
   return new Date(ms).toLocaleString('en-US', {
@@ -1111,7 +1112,7 @@ export function explainWhyNoPlansTonight(
     const free = sortedFree[i]!
     const cursorMs = Math.max(free.startMs, globalCursorMs)
     const planningEndMs = Math.min(free.endMs, deadlineMs)
-    const label = `Free interval ${i + 1} (${new Date(cursorMs).toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' })}–${new Date(planningEndMs).toLocaleString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' })} ET)`
+    const label = `Free interval ${i + 1} (${new Date(cursorMs).toLocaleString('en-US', { timeZone: SCHEDULE_LOG_TZ, hour: 'numeric', minute: '2-digit' })}–${new Date(planningEndMs).toLocaleString('en-US', { timeZone: SCHEDULE_LOG_TZ, hour: 'numeric', minute: '2-digit' })} ET)`
     const framesLeft = workingRemaining.reduce((s, r) => s + r.countRemaining, 0)
     if (framesLeft <= 0) break
     if (planningEndMs - cursorMs < minWindowMs) continue

@@ -36,6 +36,7 @@ import { planAndScheduleProjectTonight } from '@/lib/imaging-project-planner'
 import { getScheduleReservedIntervalsForActiveProject } from '@/lib/imaging-project-altitude-hold'
 import { computeScheduleInsight } from '@/lib/imaging-queue-schedule-insight'
 import { getObservatoryStatus, isObservatoryReady } from '@/lib/observatory-status-store'
+import { liveImagingObservatorySite } from '@/lib/observatory-sites'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import {
   getTonightWeatherPermittedIntervals,
@@ -66,12 +67,13 @@ function queueCreatedAuditDetail(result: ImagingRequest): Record<string, unknown
 }
 
 async function detectSunsetSunrisePrecipGate(): Promise<{ active: boolean | null; hitHours: number[] }> {
+  const site = liveImagingObservatorySite()
   const url =
     'https://api.open-meteo.com/v1/forecast' +
-    '?latitude=41.9159&longitude=-71.9626' +
+    `?latitude=${site.weatherLat}&longitude=${site.weatherLon}` +
     '&hourly=precipitation_probability' +
     '&daily=sunrise,sunset' +
-    '&past_days=1&forecast_days=2&timezone=America/New_York&timeformat=unixtime'
+    `&past_days=1&forecast_days=2&timezone=${site.timezone}&timeformat=unixtime`
   try {
     const res = await fetch(url, { cache: 'no-store' })
     if (!res.ok) return { active: null, hitHours: [] }

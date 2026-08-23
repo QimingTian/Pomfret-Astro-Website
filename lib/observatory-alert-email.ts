@@ -1,4 +1,5 @@
 import { listMembersForAdminDirectory } from '@/lib/member-store'
+import { POMFRET_SITE } from '@/lib/observatory-sites'
 
 function env(name: string): string {
   return (process.env[name] ?? '').trim()
@@ -47,7 +48,7 @@ export async function sendObservatoryDisconnectedAlertEmail(): Promise<{
     return { sent: false, reason: 'Mail env not configured' }
   }
 
-  const detectedLocal = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })
+  const detectedLocal = new Date().toLocaleString('en-US', { timeZone: POMFRET_SITE.timezone })
   const subject = 'Pomfret Observatory Alert: Observatory Disconnected'
   const greet = 'Hi Observatory Admin,'
   const text = [
@@ -55,7 +56,7 @@ export async function sendObservatoryDisconnectedAlertEmail(): Promise<{
     '',
     'Observatory Disconnected',
     '',
-    `Detected: ${detectedLocal} (America/New_York)`,
+    `Detected: ${detectedLocal} (${POMFRET_SITE.timezone})`,
     '',
     'You are receiving this email because you are an administrator of the Pomfret Olmsted Observatory.',
     'The website has stopped receiving heartbeats from the observatory agent.',
@@ -70,7 +71,7 @@ export async function sendObservatoryDisconnectedAlertEmail(): Promise<{
     <div style="font-family: Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #111111;">
       <p>${greet}</p>
       <p><strong>Observatory Disconnected</strong></p>
-      <p><strong>Detected:</strong> ${detectedLocal} (America/New_York)</p>
+      <p><strong>Detected:</strong> ${detectedLocal} (${POMFRET_SITE.timezone})</p>
       <p>
         You are receiving this email because you are an administrator of the Pomfret Olmsted Observatory.
         The website has stopped receiving heartbeats from the observatory agent.

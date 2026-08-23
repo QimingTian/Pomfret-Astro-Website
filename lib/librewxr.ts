@@ -1,6 +1,8 @@
-/** Pomfret School observatory coordinates. */
-export const POMFRET_LAT = 41.9159
-export const POMFRET_LON = -71.9626
+import { POMFRET_SITE } from '@/lib/observatory-sites'
+
+/** Pomfret School observatory coordinates (weather / map pin). */
+export const POMFRET_LAT = POMFRET_SITE.weatherLat
+export const POMFRET_LON = POMFRET_SITE.weatherLon
 
 const DEFAULT_BASE = 'https://api.librewxr.net'
 

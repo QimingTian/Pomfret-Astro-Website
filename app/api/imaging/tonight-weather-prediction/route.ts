@@ -13,6 +13,7 @@ import {
   type WeatherNotPermittedReason,
   weatherNotPermittedReasons,
 } from '@/lib/tonight-weather-gate'
+import { observatorySiteFromSearchParams } from '@/lib/observatory-sites'
 
 export const runtime = 'nodejs'
 
@@ -33,8 +34,6 @@ type OpenMeteoResponse = {
   }
 }
 
-const LAT = 41.9159
-const LON = -71.9626
 const KMH_TO_MS = 1 / 3.6
 
 async function reconcileIfScheduleWeatherColumnChanged(
@@ -55,14 +54,15 @@ async function reconcileIfScheduleWeatherColumnChanged(
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url)
+  const site = observatorySiteFromSearchParams(requestUrl.searchParams)
   const startSecParam = requestUrl.searchParams.get('startSec')
   const endSecParam = requestUrl.searchParams.get('endSec')
   const url =
     'https://api.open-meteo.com/v1/forecast' +
-    `?latitude=${LAT}&longitude=${LON}` +
+    `?latitude=${site.weatherLat}&longitude=${site.weatherLon}` +
     '&hourly=cloud_cover,precipitation_probability,wind_speed_10m,is_day' +
     '&daily=sunrise,sunset' +
-    '&past_days=1&forecast_days=2&timezone=America/New_York&timeformat=unixtime'
+    `&past_days=1&forecast_days=2&timezone=${site.timezone}&timeformat=unixtime`
 
   try {
     const response = await fetch(url, { cache: 'no-store' })

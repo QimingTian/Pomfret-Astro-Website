@@ -1,3 +1,5 @@
+import { POMFRET_SITE } from '@/lib/observatory-sites'
+
 type CompletionEmailInput = {
   queueId: string
   target: string
@@ -41,7 +43,7 @@ export async function sendCompletionEmail(input: CompletionEmailInput): Promise<
 
   const first = (input.firstName ?? '').trim()
   const greet = first ? `Hi ${first},` : 'Hi,'
-  const completedLocal = new Date(input.completedAtIso).toLocaleString('en-US', { timeZone: 'America/New_York' })
+  const completedLocal = new Date(input.completedAtIso).toLocaleString('en-US', { timeZone: POMFRET_SITE.timezone })
   const targetSafe = escapeHtml(input.target)
   const queueIdSafe = escapeHtml(input.queueId)
   const subject = `Pomfret Astro session completed: ${input.target}`
@@ -51,7 +53,7 @@ export async function sendCompletionEmail(input: CompletionEmailInput): Promise<
     `Your imaging session has completed.`,
     `Target: ${input.target}`,
     `Session ID: ${input.queueId}`,
-    `Completed: ${completedLocal} (America/New_York)`,
+    `Completed: ${completedLocal} (${POMFRET_SITE.timezone})`,
     '',
     'You can return to the Remote dashboard to check/download results.',
     '',
@@ -65,7 +67,7 @@ export async function sendCompletionEmail(input: CompletionEmailInput): Promise<
     <ul>
       <li><strong>Target:</strong> ${targetSafe}</li>
       <li><strong>Session ID:</strong> ${queueIdSafe}</li>
-      <li><strong>Completed:</strong> ${completedLocal} (America/New_York)</li>
+      <li><strong>Completed:</strong> ${completedLocal} (${POMFRET_SITE.timezone})</li>
     </ul>
     <p>You can return to the Remote dashboard to check/download results.</p>
     <p>Clear skies,<br/>Pomfret Astro</p>
@@ -125,7 +127,7 @@ export async function sendSessionStartedEmail(
 
   const first = (input.firstName ?? '').trim()
   const greet = first ? `Hi ${first},` : 'Hi,'
-  const startedLocal = new Date(input.startedAtIso).toLocaleString('en-US', { timeZone: 'America/New_York' })
+  const startedLocal = new Date(input.startedAtIso).toLocaleString('en-US', { timeZone: POMFRET_SITE.timezone })
   const targetSafe = escapeHtml(input.target)
   const queueIdSafe = escapeHtml(input.queueId)
   const subject = `Pomfret Astro session started: ${input.target}`
@@ -135,7 +137,7 @@ export async function sendSessionStartedEmail(
     `Your imaging session has started at the observatory (NINA sequence delivered).`,
     `Target: ${input.target}`,
     `Session ID: ${input.queueId}`,
-    `Started: ${startedLocal} (America/New_York)`,
+    `Started: ${startedLocal} (${POMFRET_SITE.timezone})`,
     '',
     'You can return to the Remote dashboard to follow progress.',
     '',
@@ -149,7 +151,7 @@ export async function sendSessionStartedEmail(
     <ul>
       <li><strong>Target:</strong> ${targetSafe}</li>
       <li><strong>Session ID:</strong> ${queueIdSafe}</li>
-      <li><strong>Started:</strong> ${startedLocal} (America/New_York)</li>
+      <li><strong>Started:</strong> ${startedLocal} (${POMFRET_SITE.timezone})</li>
     </ul>
     <p>You can return to the Remote dashboard to follow progress.</p>
     <p>Clear skies,<br/>Pomfret Astro</p>
@@ -209,7 +211,7 @@ export async function sendSessionFailedEmail(
 
   const first = (input.firstName ?? '').trim()
   const greet = first ? `Hi ${first},` : 'Hi,'
-  const failedLocal = new Date(input.failedAtIso).toLocaleString('en-US', { timeZone: 'America/New_York' })
+  const failedLocal = new Date(input.failedAtIso).toLocaleString('en-US', { timeZone: POMFRET_SITE.timezone })
   const targetSafe = escapeHtml(input.target)
   const queueIdSafe = escapeHtml(input.queueId)
   const subject = `Pomfret Astro session failed: ${input.target}`
@@ -219,7 +221,7 @@ export async function sendSessionFailedEmail(
     `Your imaging session did not complete successfully at the observatory.`,
     `Target: ${input.target}`,
     `Session ID: ${input.queueId}`,
-    `Failed: ${failedLocal} (America/New_York)`,
+    `Failed: ${failedLocal} (${POMFRET_SITE.timezone})`,
     '',
     'Please open the Remote dashboard for details, or contact support if you need help.',
     '',
@@ -233,7 +235,7 @@ export async function sendSessionFailedEmail(
     <ul>
       <li><strong>Target:</strong> ${targetSafe}</li>
       <li><strong>Session ID:</strong> ${queueIdSafe}</li>
-      <li><strong>Failed:</strong> ${failedLocal} (America/New_York)</li>
+      <li><strong>Failed:</strong> ${failedLocal} (${POMFRET_SITE.timezone})</li>
     </ul>
     <p>Please open the Remote dashboard for details, or contact support if you need help.</p>
     <p>Clear skies,<br/>Pomfret Astro</p>

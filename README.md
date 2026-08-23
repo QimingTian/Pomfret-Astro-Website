@@ -82,7 +82,7 @@ The **tonight schedule** gate decides which hours may receive planned sessions. 
 
 **Weather-safety ESTOP** is a separate safety loop that arms only during nautical night, with a **45 s** debounce. It arms if Open-Meteo reports thunderstorm weather codes **95**, **96**, or **99** on a **20 km** ring (excluding the site center) for the current or next hour; if the site’s current-hour precip probability exceeds **20%**; or if ASC reports rain detected with confidence at least **0.99** while the ASC gate applies. Arming places remaining work on hold, fails in-progress sessions, locks the observatory, and suppresses the activity-only end-night fallback.
 
-When that stop was armed by weather safety and has reached the **stopped** phase, the same loop may unlock automatically if Open-Meteo is available, ASC is applicable, and none of the arm threats remain. Holds are released and mode returns to **auto**. Manual **ESTOP** and session-failure **ESTOP** never auto-clear. A sensor outage never counts as clear.
+When that stop was armed by weather safety and has reached the **stopped** phase, the same loop may unlock automatically only after Open-Meteo is available, ASC is applicable, and none of the arm threats remain **continuously for 20 minutes**. A single clear frame does not unlock; any threat or sensor outage resets the timer. Holds are then released and mode returns to **auto**. Manual **ESTOP** and session-failure **ESTOP** never auto-clear.
 
 ---
 

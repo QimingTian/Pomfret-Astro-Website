@@ -35,8 +35,11 @@ export const PRECIP_ESTOP_THRESHOLD = 20
 /** ASC rain confidence (0–1) threshold; ESTOP only when detected=true AND confidence >= this. */
 export const ASC_RAIN_CONFIDENCE_ESTOP_THRESHOLD = 0.99
 export const WEATHER_SAFETY_DEBOUNCE_MS = 45_000
+/** Weather-safety ESTOP must stay continuously clear this long before auto-unlock. */
+export const WEATHER_SAFETY_CLEAR_HOLD_MS = 20 * 60 * 1000
 
 const DEBOUNCE_KV_KEY = 'imaging-weather-safety-estop-last-arm'
+const CLEAR_SINCE_KV_KEY = 'imaging-weather-safety-estop-clear-since'
 const EARTH_RADIUS_KM = 6371
 const THUNDERSTORM_CODES = new Set([95, 96, 99])
 
@@ -61,6 +64,7 @@ export type WeatherSafetyArmResult = {
     | 'still_stopping'
     | 'sensors_unavailable'
     | 'threat_present'
+    | 'clear_hold'
   threat?: WeatherSafetyThreat
   queueId?: string
 }
@@ -73,6 +77,7 @@ export type WeatherSafetySensorSnapshot = {
 
 type GlobalWithWeatherSafety = typeof globalThis & {
   __pomfret_weather_safety_last_arm_ms__?: number
+  __pomfret_weather_safety_clear_since_ms__?: number | null
   __pomfret_weather_safety_arm_inflight__?: Promise<WeatherSafetyArmResult> | null
 }
 
@@ -377,9 +382,19 @@ export async function evaluateWeatherSafetyThreat(): Promise<WeatherSafetyThreat
   return (await evaluateWeatherSafetySensors()).threat
 }
 
-/** Auto-unlock only when Open-Meteo and ASC both report (no storm / precip / ASC rain threat). */
+/** Instantaneous sensor snapshot is clear (Open-Meteo + ASC both available, no threat). */
 export function isWeatherSafetyClearForAutoUnlock(snap: WeatherSafetySensorSnapshot): boolean {
   return snap.openMeteoAvailable && snap.ascGateApplicable && snap.threat == null
+}
+
+/** True when a continuous clear window has lasted at least the hold duration. */
+export function weatherSafetyClearHoldElapsed(
+  clearSinceMs: number | null | undefined,
+  nowMs: number,
+  holdMs = WEATHER_SAFETY_CLEAR_HOLD_MS
+): boolean {
+  if (clearSinceMs == null || !Number.isFinite(clearSinceMs)) return false
+  return nowMs - clearSinceMs >= holdMs
 }
 
 export type StormApproachStatus = {
@@ -421,6 +436,29 @@ async function writeDebounceMs(atMs: number): Promise<void> {
   }
 }
 
+async function readClearSinceMs(): Promise<number | null> {
+  const mem = (globalThis as GlobalWithWeatherSafety).__pomfret_weather_safety_clear_since_ms__
+  if (mem === null) return null
+  if (typeof mem === 'number' && Number.isFinite(mem)) return mem
+  if (kvEnabled()) {
+    const remote = await kvGetJson<{ clearSinceMs?: number | null }>(CLEAR_SINCE_KV_KEY)
+    const value = remote?.clearSinceMs
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      ;(globalThis as GlobalWithWeatherSafety).__pomfret_weather_safety_clear_since_ms__ = value
+      return value
+    }
+  }
+  ;(globalThis as GlobalWithWeatherSafety).__pomfret_weather_safety_clear_since_ms__ = null
+  return null
+}
+
+async function writeClearSinceMs(clearSinceMs: number | null): Promise<void> {
+  ;(globalThis as GlobalWithWeatherSafety).__pomfret_weather_safety_clear_since_ms__ = clearSinceMs
+  if (kvEnabled()) {
+    await kvSetJson(CLEAR_SINCE_KV_KEY, { clearSinceMs })
+  }
+}
+
 const WEATHER_SAFETY_ACTOR = {
   displayName: 'Weather Safety (auto)',
   userId: 'weather-safety-auto',
@@ -444,6 +482,7 @@ async function armWeatherSafetyEmergencyStop(
   const failedBoard = await failInProgressBoardSessions(undefined, 'emergency_stop')
   await clearNinaStoppedPendingFail()
   await writeDebounceMs(Date.now())
+  await writeClearSinceMs(null)
 
   await appendAuditLog({
     kind: 'emergency_stop',
@@ -490,10 +529,11 @@ async function clearWeatherSafetyEmergencyStop(
 
   await setObservatoryMode('auto')
   await writeDebounceMs(Date.now())
+  await writeClearSinceMs(null)
 
   await appendAuditLog({
     kind: 'emergency_stop',
-    message: `Emergency STOP cleared (${cleared.queueId})${emergencyStopTriggeredBySuffix(cleared)} by weather safety auto-unlock: Open-Meteo and ASC both clear (no storm / precip / ASC rain). Restored Auto; released ${releasedHolds.length} hold(s).`,
+    message: `Emergency STOP cleared (${cleared.queueId})${emergencyStopTriggeredBySuffix(cleared)} by weather safety auto-unlock after ${WEATHER_SAFETY_CLEAR_HOLD_MS / 60000} min continuous clear (Open-Meteo and ASC, no storm / precip / ASC rain). Restored Auto; released ${releasedHolds.length} hold(s).`,
     detail: emergencyStopAuditDetail({
       queueId: cleared.queueId,
       requestedAt: cleared.requestedAt,
@@ -503,6 +543,7 @@ async function clearWeatherSafetyEmergencyStop(
       requestedByEmail: cleared.requestedByEmail,
       event: 'cleared',
       source: 'weather_safety_auto_unlock',
+      clearHoldMs: WEATHER_SAFETY_CLEAR_HOLD_MS,
       releasedHolds,
       previousPhase: cleared.phase,
       mode: 'auto',
@@ -526,14 +567,24 @@ async function maybeClearWeatherSafetyEmergencyStop(
     return { armed: false, skipped: 'still_stopping', queueId: state.queueId }
   }
   if (!isWeatherSafetyClearForAutoUnlock(snap)) {
+    await writeClearSinceMs(null)
     if (snap.threat) {
       return { armed: false, skipped: 'threat_present', threat: snap.threat, queueId: state.queueId }
     }
     return { armed: false, skipped: 'sensors_unavailable', queueId: state.queueId }
   }
+  const nowMs = Date.now()
   const lastArm = await readDebounceMs()
-  if (Date.now() - lastArm < WEATHER_SAFETY_DEBOUNCE_MS) {
+  if (nowMs - lastArm < WEATHER_SAFETY_DEBOUNCE_MS) {
     return { armed: false, skipped: 'debounced', queueId: state.queueId }
+  }
+  let clearSinceMs = await readClearSinceMs()
+  if (clearSinceMs == null) {
+    clearSinceMs = nowMs
+    await writeClearSinceMs(clearSinceMs)
+  }
+  if (!weatherSafetyClearHoldElapsed(clearSinceMs, nowMs)) {
+    return { armed: false, skipped: 'clear_hold', queueId: state.queueId }
   }
   return clearWeatherSafetyEmergencyStop(state)
 }
@@ -541,7 +592,7 @@ async function maybeClearWeatherSafetyEmergencyStop(
 /**
  * Weather-safety ESTOP loop:
  * - Arm during nautical night on thunderstorm / site precip >20% / ASC rain ≥99%.
- * - Auto-clear weather-safety ESTOP once STOPPED and Open-Meteo + ASC both report clear.
+ * - Auto-clear weather-safety ESTOP once STOPPED and Open-Meteo + ASC stay continuously clear for 20 min.
  * Manual / session-failure ESTOP is never auto-cleared.
  */
 export async function maybeArmWeatherSafetyEmergencyStop(): Promise<WeatherSafetyArmResult> {

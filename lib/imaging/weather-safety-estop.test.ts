@@ -7,6 +7,8 @@ import {
   ascRainThreat,
   isThunderstormWeatherCode,
   isWeatherSafetyClearForAutoUnlock,
+  weatherSafetyClearHoldElapsed,
+  WEATHER_SAFETY_CLEAR_HOLD_MS,
   pickSitePrecipThreat,
   pickStormApproachThreat,
   pickWeatherSafetyThreat,
@@ -276,4 +278,12 @@ test('isWeatherSafetyClearForAutoUnlock requires Open-Meteo and ASC both availab
     }),
     false
   )
+})
+
+test('weatherSafetyClearHoldElapsed requires 20 minutes of continuous clear', () => {
+  const start = Date.parse('2026-08-23T05:00:00.000Z')
+  assert.equal(weatherSafetyClearHoldElapsed(null, start + WEATHER_SAFETY_CLEAR_HOLD_MS), false)
+  assert.equal(weatherSafetyClearHoldElapsed(start, start + 60_000), false)
+  assert.equal(weatherSafetyClearHoldElapsed(start, start + WEATHER_SAFETY_CLEAR_HOLD_MS - 1), false)
+  assert.equal(weatherSafetyClearHoldElapsed(start, start + WEATHER_SAFETY_CLEAR_HOLD_MS), true)
 })

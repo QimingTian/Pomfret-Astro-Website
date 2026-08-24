@@ -44,7 +44,22 @@ function normalizeEntries(raw: unknown): AuditLogEntry[] {
 async function readEntries(): Promise<AuditLogEntry[]> {
   if (kvEnabled()) {
     const remote = await kvGetJson<Payload>(KEY)
-    return normalizeEntries(remote)
+    const fromKv = normalizeEntries(remote)
+    if (fromKv.length > 0) return fromKv
+    if (postgresReadsEnabled()) {
+      try {
+        const { loadJsonDocumentsFromPostgres } = await import('@/lib/db/read')
+        const pg = await loadJsonDocumentsFromPostgres<AuditLogEntry>('audit')
+        if (pg && pg.length > 0) {
+          const trimmed = pg.length > MAX_ENTRIES ? pg.slice(-MAX_ENTRIES) : pg
+          await kvSetJson(KEY, { entries: trimmed })
+          return trimmed
+        }
+      } catch (error) {
+        console.error('[pg-read] audit seed into Redis failed', error)
+      }
+    }
+    return fromKv
   }
   if (postgresReadsEnabled()) {
     try {

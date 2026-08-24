@@ -1,6 +1,6 @@
 # Pomfret Astro — Technical Documentation
 
-**Version:** v6.4.0  
+**Version:** v7.0.0  
 **Production:** https://www.pomfretastro.org  
 **Repository:** https://github.com/QimingTian/Pomfret-Astro-Website
 
@@ -22,7 +22,7 @@ Durable imaging state that must survive serverless cold starts is stored in Upst
 
 A member creates a queue request. The row begins as **pending**. Periodically—from cron, weather refreshes, or session events—the server runs **reconcile**. Reconcile evaluates tonight’s weather-permitted intervals, the altitude path of each target, moon avoidance, and FIFO ownership of the sky. When a request fits, it becomes **scheduled** and receives a **planned start** time (`plannedStartIso`).
 
-The Windows agent polls `GET /api/imaging/nina-sequence` with the queue bearer secret. Work is delivered only when the observatory is **Ready**, the planned start is due, the target altitude is sufficient, and no higher-priority work such as **ESTOP** is pending. On delivery, a normal queue row moves to **in progress**. The agent writes the NINA JSON, warms the PDU, launches NINA, and reports progress through the session-progress webhook.
+The Windows agent polls `GET /api/imaging/nina-sequence` with the queue bearer secret. Work is delivered only when the observatory is **Ready**, the planned start is due, the target altitude is sufficient, and no higher-priority work such as **ESTOP** is pending. On delivery, a normal queue row moves to **in progress**. The payload is a signed **job envelope** (coordinates, filters, exposures, ESTOP/end-night). The agent fills the same frozen NINA templates that the website uses, writes the JSON locally, warms the PDU, launches NINA, and reports progress through the session-progress webhook. Scheduling and weather decisions stay on the server.
 
 When the session finishes, the board and queue are marked **completed**. Reconcile may place the next work. If tonight’s imaging is exhausted, the system may arm an **end-night** sequence that closes the dome. The agent post-processes frames as configured, uploads to R2, and reports object keys so members can download through short-lived presigned URLs.
 
@@ -36,7 +36,7 @@ The Next.js application under `app/` provides the member and admin dashboards (W
 
 Domain logic resides in `lib/`. Imaging is concentrated under `lib/imaging/`: the multi-night project planner, queue store and reconcile, session board, hold and release, emergency stop, weather-safety ESTOP, and NINA JSON helpers. Related modules outside that package include `lib/asc-cloud.ts` for the **Ready** gate, `lib/tonight-weather-gate.ts` for schedule weather, `lib/observatory-status-store.ts` for mode and status, `lib/schedule-strip.ts` and `lib/sunrise-window.ts` for night windows, and `lib/moon-avoidance.ts` for filter-dependent moon separation. Persistence helpers are in `lib/kv-rest.ts`. R2 download and object maps are in `lib/r2-session-download.ts`.
 
-On site, `observatory/nina_agent.py` is the Windows poller. `observatory/camera_service.py` serves the all-sky MJPEG stream and status endpoints. `observatory/asc_cloud_ai.py` runs the Teachable Machine cloud and rain models. The repository-root templates `EStop.json` and `End Night Session.json` are the NINA sequences the cloud patches and delivers for emergency close and normal end-of-night shutdown.
+On site, `observatory/nina_agent.py` is the Windows poller. It builds NINA JSON from `observatory/nina_templates/` (copies of the repo-root sequence templates). `observatory/camera_service.py` serves the all-sky MJPEG stream and status endpoints. `observatory/asc_cloud_ai.py` runs the Teachable Machine cloud and rain models. The repository-root templates `EStop.json` and `End Night Session.json` are the NINA sequences used for emergency close and normal end-of-night shutdown.
 
 Legacy import paths such as `lib/imaging-emergency-stop.ts` re-export the current module layout for compatibility.
 
@@ -206,4 +206,4 @@ Relative to one another, the **Ready** gate allows ASC cloud under **20%**, whil
 
 ---
 
-*Pomfret Astro Technical Documentation · v6.4.0*
+*Pomfret Astro Technical Documentation · v7.0.0*

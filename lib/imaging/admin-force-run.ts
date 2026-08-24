@@ -1,5 +1,10 @@
 import { NextResponse } from 'next/server'
 import { buildNinaSequenceJson } from '@/lib/build-nina-sequence-json'
+import {
+  ninaAgentJobResponse,
+  runJobFromProjectNight,
+  runJobFromQueueRequest,
+} from '@/lib/imaging/nina/agent-job'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { sendSessionStartedEmail } from '@/lib/imaging-completion-email'
 import { parseProjectNightSubId } from '@/lib/imaging-project-ids'
@@ -343,14 +348,14 @@ async function deliverForceRunProjectSub(
     detail: { projectId: project.id, subSessionId: night.id, adminForceRun: true, redeliver },
   })
 
-  return new NextResponse(night.ninaSequenceJson, {
-    status: 200,
-    headers: {
-      ...imagingCorsHeadersResolved(),
-      'Content-Type': 'application/json; charset=utf-8',
-      'Cache-Control': 'no-store',
-    },
-  })
+  const job = runJobFromProjectNight(project, night)
+  if (!job) {
+    return NextResponse.json(
+      { error: 'Project sub-session sequence parameters are not available for download' },
+      { status: 404, headers: imagingCorsHeadersResolved() }
+    )
+  }
+  return ninaAgentJobResponse(job)
 }
 
 async function deliverForceRunQueueRow(row: ImagingRequest): Promise<NextResponse> {
@@ -379,8 +384,8 @@ async function deliverForceRunQueueRow(row: ImagingRequest): Promise<NextRespons
   const altitude = validateAdminForceRunAltitude(row.raHours, row.decDeg, startMs, endMs, row.target)
   if (!altitude.ok) return altitudeErrorResponse(altitude.reason)
 
-  const sequenceJson = sequenceJsonFor(row)
-  if (!sequenceJson) {
+  const job = runJobFromQueueRequest(row)
+  if (!job) {
     return NextResponse.json(
       { error: 'NINA sequence not available for this session.' },
       { status: 404, headers: imagingCorsHeadersResolved() }
@@ -432,14 +437,7 @@ async function deliverForceRunQueueRow(row: ImagingRequest): Promise<NextRespons
     detail: { queueId: consumed.id, adminForceRun: true },
   })
 
-  return new NextResponse(sequenceJson, {
-    status: 200,
-    headers: {
-      ...imagingCorsHeadersResolved(),
-      'Content-Type': 'application/json; charset=utf-8',
-      'Cache-Control': 'no-store',
-    },
-  })
+  return ninaAgentJobResponse(job)
 }
 
 /** Deliver JSON for an active admin force-run session (moon/hold bypass only; altitude rules apply). */

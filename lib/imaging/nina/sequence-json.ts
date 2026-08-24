@@ -326,13 +326,16 @@ function lastAltitudeAllowedTimeMs(
   return null
 }
 
-function applyVariableStarStartEndTimes(
-  dso: Record<string, unknown>,
+export type ObservatoryHms = { hours: number; minutes: number; seconds: number }
+
+/** Altitude-clamped start/end clocks for the variable-star template (server computes, agent applies). */
+export function computeVariableStarWindowHms(
   raHoursDecimal: number,
   decDegDecimal: number,
-  observingDurationMs?: number
-) {
-  const { astronomicalDuskUtc, astronomicalDawnUtc } = getTonightAstronomicalNightWindow(new Date())
+  observingDurationMs?: number,
+  now = new Date(),
+): { start: ObservatoryHms; end: ObservatoryHms } {
+  const { astronomicalDuskUtc, astronomicalDawnUtc } = getTonightAstronomicalNightWindow(now)
   const winStartMs = astronomicalDuskUtc.getTime()
   const winEndMs = astronomicalDawnUtc.getTime()
 
@@ -348,21 +351,32 @@ function applyVariableStarStartEndTimes(
     clampedEndMs = Math.max(clampedStartMs, Math.min(endAllowedMs, winEndMs))
   }
 
+  return {
+    start: dateToObservatoryHms(new Date(clampedStartMs)),
+    end: dateToObservatoryHms(new Date(clampedEndMs)),
+  }
+}
+
+function applyVariableStarStartEndTimes(
+  dso: Record<string, unknown>,
+  raHoursDecimal: number,
+  decDegDecimal: number,
+  observingDurationMs?: number
+) {
+  const window = computeVariableStarWindowHms(raHoursDecimal, decDegDecimal, observingDurationMs)
   const waitForTransit = findFirstByType(dso, 'NINA.Plugin.ExoPlanets.Sequencer.Utility.WaitForTransit')
   if (waitForTransit) {
-    const hms = dateToObservatoryHms(new Date(clampedStartMs))
-    waitForTransit['Hours'] = hms.hours
-    waitForTransit['Minutes'] = hms.minutes
-    waitForTransit['Seconds'] = hms.seconds
+    waitForTransit['Hours'] = window.start.hours
+    waitForTransit['Minutes'] = window.start.minutes
+    waitForTransit['Seconds'] = window.start.seconds
     waitForTransit['MinutesOffset'] = 0
   }
 
   const transitCondition = findLastByType(dso, 'NINA.Plugin.ExoPlanets.Sequencer.Conditions.TransitCondition')
   if (transitCondition) {
-    const hms = dateToObservatoryHms(new Date(clampedEndMs))
-    transitCondition['Hours'] = hms.hours
-    transitCondition['Minutes'] = hms.minutes
-    transitCondition['Seconds'] = hms.seconds
+    transitCondition['Hours'] = window.end.hours
+    transitCondition['Minutes'] = window.end.minutes
+    transitCondition['Seconds'] = window.end.seconds
     transitCondition['MinutesOffset'] = 0
   }
 }

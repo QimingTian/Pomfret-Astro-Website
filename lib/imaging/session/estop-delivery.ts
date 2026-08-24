@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
-import { imagingCorsHeadersResolved } from '@/lib/imaging-queue-auth'
+import { estopJobFromState, ninaAgentJobResponse } from '@/lib/imaging/nina/agent-job'
 import {
   getEmergencyStopState,
   isEmergencyStopStopping,
@@ -10,7 +10,6 @@ import {
   emergencyStopAuditDetailFromState,
   emergencyStopTriggeredBySuffix,
 } from '@/lib/imaging-emergency-stop'
-import { estopSequenceJson } from '@/lib/imaging/session/estop-sequence'
 
 /** Highest-priority delivery: Emergency STOP bypasses all gates while armed. */
 export async function tryDeliverEmergencyStop(): Promise<NextResponse | null> {
@@ -38,10 +37,6 @@ export async function tryDeliverEmergencyStop(): Promise<NextResponse | null> {
   const marked = await markEmergencyStopDelivered(state.queueId)
   if (!marked) return null
 
-  const payload = estopSequenceJson(state.queueId, {
-    requestedByUserId: state.requestedByUserId,
-    requestedByUsername: state.requestedByUsername,
-  })
   void appendAuditLog({
     kind: 'emergency_stop',
     message: `Emergency STOP sequence delivered to NINA agent (${state.queueId})${emergencyStopTriggeredBySuffix(state)}.`,
@@ -56,12 +51,10 @@ export async function tryDeliverEmergencyStop(): Promise<NextResponse | null> {
     }),
   })
 
-  return new NextResponse(payload, {
-    status: 200,
-    headers: {
-      ...imagingCorsHeadersResolved(),
-      'Content-Type': 'application/json; charset=utf-8',
-      'Cache-Control': 'no-store',
-    },
-  })
+  return ninaAgentJobResponse(
+    estopJobFromState(state.queueId, {
+      requestedByUserId: state.requestedByUserId,
+      requestedByUsername: state.requestedByUsername,
+    }),
+  )
 }

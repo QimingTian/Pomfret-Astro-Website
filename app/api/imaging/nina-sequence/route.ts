@@ -9,6 +9,12 @@ import {
 } from '@/lib/imaging-queue-auth'
 import { buildNinaSequenceJson } from '@/lib/build-nina-sequence-json'
 import {
+  endNightJob,
+  ninaAgentJobResponse,
+  runJobFromProjectNight,
+  runJobFromQueueRequest,
+} from '@/lib/imaging/nina/agent-job'
+import {
   getActiveOnBoardProject,
   getDeliverableNight,
   getNightForNinaDelivery,
@@ -323,14 +329,14 @@ async function deliverProjectSubSessionJson(
     },
   })
 
-  return new NextResponse(nightRef.ninaSequenceJson!, {
-    status: 200,
-    headers: {
-      ...imagingCorsHeadersResolved(),
-      'Content-Type': 'application/json; charset=utf-8',
-      'Cache-Control': 'no-store',
-    },
-  })
+  const job = runJobFromProjectNight(projectRef, nightRef)
+  if (!job) {
+    return NextResponse.json(
+      { error: 'Project sub-session sequence parameters are not available' },
+      { status: 404, headers: imagingCorsHeadersResolved() }
+    )
+  }
+  return ninaAgentJobResponse(job)
 }
 
 function endNightSequenceJson(
@@ -570,32 +576,16 @@ export async function GET(request: NextRequest) {
 
     if (afterSessionsEligible && !(await wasEndNightAfterSessionsSent(nightKey))) {
       const queueId = `end-night-${nightKey}-${Date.now()}`
-      const payload = endNightSequenceJson(queueId, 'after_sessions')
       await markEndNightAfterSessionsSent(nightKey)
       void logEndNightDelivered({ nightKey, queueId, trigger: 'after_sessions' })
-      return new NextResponse(payload, {
-        status: 200,
-        headers: {
-          ...imagingCorsHeadersResolved(),
-          'Content-Type': 'application/json; charset=utf-8',
-          'Cache-Control': 'no-store',
-        },
-      })
+      return ninaAgentJobResponse(endNightJob(queueId, 'after_sessions'))
     }
 
     if (nowMs >= nauticalDawnMs && !(await wasEndNightDawnSent(nightKey))) {
       const queueId = `end-night-${nightKey}-dawn`
-      const payload = endNightSequenceJson(queueId, 'dawn')
       await markEndNightDawnSent(nightKey)
       void logEndNightDelivered({ nightKey, queueId, trigger: 'nautical_dawn' })
-      return new NextResponse(payload, {
-        status: 200,
-        headers: {
-          ...imagingCorsHeadersResolved(),
-          'Content-Type': 'application/json; charset=utf-8',
-          'Cache-Control': 'no-store',
-        },
-      })
+      return ninaAgentJobResponse(endNightJob(queueId, 'dawn'))
     }
 
     return NextResponse.json(
@@ -669,8 +659,8 @@ export async function GET(request: NextRequest) {
     )
   }
 
-  const sequenceJson = sequenceJsonFor(consumed)
-  if (!sequenceJson) {
+  const job = runJobFromQueueRequest(consumed)
+  if (!job) {
     return NextResponse.json(
       { error: 'NINA sequence not available for latest session' },
       { status: 404, headers: imagingCorsHeadersResolved() }
@@ -730,12 +720,5 @@ export async function GET(request: NextRequest) {
     },
   })
 
-  return new NextResponse(sequenceJson, {
-    status: 200,
-    headers: {
-      ...imagingCorsHeadersResolved(),
-      'Content-Type': 'application/json; charset=utf-8',
-      'Cache-Control': 'no-store',
-    },
-  })
+  return ninaAgentJobResponse(job)
 }

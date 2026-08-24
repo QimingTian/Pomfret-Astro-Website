@@ -3,9 +3,9 @@
 Minimal NINA polling agent for Windows observatory PC.
 
 This version supports a simple workflow:
-  - Your website always publishes a complete sequence JSON at one fixed URL.
-  - Agent downloads that JSON on a polling interval.
-  - If content changed since last download, agent starts NINA with that JSON.
+  - The website publishes a signed job envelope (coords, filters, exposures, ESTOP/end-night).
+  - Agent fills the frozen NINA templates next to this file and launches NINA.
+  - Scheduling and weather stay on the server; only sequence JSON is built locally.
 
 Usage:
   1) Copy this file to the observatory PC.
@@ -30,11 +30,21 @@ import time
 import traceback
 import zipfile
 import os
+import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 from typing import Dict, Optional
+
+_AGENT_DIR = Path(__file__).resolve().parent
+if str(_AGENT_DIR) not in sys.path:
+    sys.path.insert(0, str(_AGENT_DIR))
+from nina_sequence_builder import (
+    is_estop_job_or_sequence,
+    job_fingerprint,
+    materialize_poll_payload,
+)
 
 try:
     import boto3
@@ -435,14 +445,7 @@ def start_nina(sequence_path: Path) -> subprocess.Popen[bytes]:
 
 
 def is_estop_sequence_content(content: bytes) -> bool:
-    try:
-        payload = json.loads(content.decode("utf-8"))
-    except Exception:
-        return False
-    if not isinstance(payload, dict):
-        return False
-    pomfret = payload.get("PomfretAstro")
-    return isinstance(pomfret, dict) and pomfret.get("SessionType") == "estop"
+    return is_estop_job_or_sequence(content)
 
 
 def poll_emergency_stop_sequence() -> Optional[bytes]:
@@ -458,8 +461,8 @@ def poll_emergency_stop_sequence() -> Optional[bytes]:
     except Exception as ex:
         log(f"Emergency STOP poll failed: {ex}")
         return None
-    if is_estop_sequence_content(content):
-        return content
+    if is_estop_job_or_sequence(content):
+        return materialize_poll_payload(content)
     return None
 
 
@@ -681,6 +684,9 @@ def sequence_fingerprint(content: bytes) -> str:
     try:
         payload = json.loads(content.decode("utf-8"))
         if isinstance(payload, dict):
+            job_fp = job_fingerprint(content)
+            if job_fp:
+                return job_fp
             pomfret = payload.get("PomfretAstro")
             if isinstance(pomfret, dict):
                 session_type = pomfret.get("SessionType")
@@ -1428,7 +1434,6 @@ def run_loop() -> None:
                 raise
 
             current_fingerprint = sequence_fingerprint(content)
-            session_id, output_mode, session_filter = extract_sequence_metadata(content)
             last_fingerprint = read_last_fingerprint(jobs_dir)
             if current_fingerprint == last_fingerprint:
                 if is_nina_running():
@@ -1442,7 +1447,9 @@ def run_loop() -> None:
                     sleep_between_polls()
                     continue
             else:
-                log("New sequence content detected, downloading and launching.")
+                log("New sequence job detected; building local NINA JSON and launching.")
+                content = materialize_poll_payload(content)
+                session_id, output_mode, session_filter = extract_sequence_metadata(content)
                 sequence_path.write_bytes(content)
                 write_last_fingerprint(jobs_dir, current_fingerprint)
             launch_content: bytes = content

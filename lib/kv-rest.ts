@@ -88,6 +88,7 @@ return 1`
 }
 
 export function kvEnabled(): boolean {
+  if (process.env.npm_lifecycle_event === 'test') return false
   return enabled()
 }
 

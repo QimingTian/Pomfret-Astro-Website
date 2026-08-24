@@ -143,7 +143,8 @@ test('emergency stop async state machine', async (t) => {
   })
 
   await t.test('readState prefers KV over stale in-memory copy when KV is enabled', async () => {
-    if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) return
+    const { kvEnabled } = await import('@/lib/kv-rest')
+    if (!kvEnabled()) return
 
     await resetEmergencyStopForTests()
     const { state: armed } = await armEmergencyStop('James Tian', [])

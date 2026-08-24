@@ -138,8 +138,9 @@ export async function appendAuditLog(input: {
 /** Newest first, capped. */
 export async function listAuditLog(limit = 250): Promise<AuditLogEntry[]> {
   const all = await readEntries()
+  const sorted = [...all].sort((a, b) => a.at.localeCompare(b.at))
   const n = Math.min(Math.max(1, limit), MAX_ENTRIES)
-  return [...all].slice(-n).reverse()
+  return sorted.slice(-n).reverse()
 }
 
 export type SessionProgressLine = { at: string; text: string }

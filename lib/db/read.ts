@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { asc, eq } from 'drizzle-orm'
 
 import { getDb, postgresReadsEnabled } from '@/lib/db'
 import {
@@ -99,7 +99,7 @@ export async function loadJsonDocumentsFromPostgres<T extends { id: string }>(
       const rows = await db.select().from(adminClosedWindows)
       return rows.filter((r) => r.siteId === SITE).map((r) => r.document as T)
     }
-    const rows = await db.select().from(auditLog)
+    const rows = await db.select().from(auditLog).orderBy(asc(auditLog.at))
     return rows
       .filter((r) => r.siteId === SITE)
       .map((r) => ({ id: r.id, at: r.at, kind: r.kind, message: r.message, detail: r.detail ?? undefined }) as unknown as T)

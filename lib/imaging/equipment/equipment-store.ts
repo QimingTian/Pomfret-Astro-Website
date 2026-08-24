@@ -1,3 +1,4 @@
+import { postgresReadsEnabled } from '@/lib/db'
 import { kvGetJson, kvSetJson, kvEnabled } from '@/lib/kv-rest'
 import { isEquipmentValid, normalizeEquipment, type ImagingEquipment } from './equipment'
 
@@ -62,6 +63,11 @@ async function readRigsFromKv(): Promise<Array<ImagingEquipment | null> | undefi
 }
 
 async function writeRigsToKv(rigs: Array<ImagingEquipment | null>): Promise<void> {
+  if (postgresReadsEnabled()) {
+    const { mirrorImagingEquipment } = await import('@/lib/db/mirror')
+    await mirrorImagingEquipment(rigs)
+    return
+  }
   if (!kvEnabled()) return
   await kvSetJson(IMAGING_EQUIPMENT_KV_KEY, { rigs })
   const { mirrorImagingEquipment } = await import('@/lib/db/mirror')
@@ -69,19 +75,21 @@ async function writeRigsToKv(rigs: Array<ImagingEquipment | null>): Promise<void
 }
 
 export async function listImagingRigs(): Promise<Array<ImagingEquipment | null>> {
-  const kv = await readRigsFromKv()
-  let chosen = kv
-  try {
-    const { loadEquipmentRigsFromPostgres, preferComplete } = await import('@/lib/db/read')
-    const pg = await loadEquipmentRigsFromPostgres()
-    const pgRigs = Array.isArray(pg) ? (pg as Array<ImagingEquipment | null>) : null
-    if (kv) chosen = preferComplete(pgRigs, kv)
-    else if (pgRigs) chosen = pgRigs
-  } catch {
-    chosen = kv
+  if (postgresReadsEnabled()) {
+    try {
+      const { loadEquipmentRigsFromPostgres } = await import('@/lib/db/read')
+      const pg = await loadEquipmentRigsFromPostgres()
+      if (Array.isArray(pg)) {
+        memoryRigs().splice(0, memoryRigs().length, ...(pg as Array<ImagingEquipment | null>))
+        return snapshotRigs()
+      }
+    } catch (error) {
+      console.error('[pg-read] equipment failed; using KV', error)
+    }
   }
-  if (chosen) {
-    memoryRigs().splice(0, memoryRigs().length, ...chosen)
+  const remote = await readRigsFromKv()
+  if (remote) {
+    memoryRigs().splice(0, memoryRigs().length, ...remote)
     return snapshotRigs()
   }
   return snapshotRigs()

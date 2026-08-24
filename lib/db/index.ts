@@ -16,7 +16,7 @@ export function isDatabaseConfigured(): boolean {
   return databaseUrl().length > 0
 }
 
-/** Live reads prefer Postgres when configured. Set POSTGRES_READ=0 to force KV. */
+/** Durable member/queue/gallery docs use Postgres. Set POSTGRES_READ=0 to use KV copies. */
 export function postgresReadsEnabled(): boolean {
   if (process.env.POSTGRES_READ === '0') return false
   if (process.env.npm_lifecycle_event === 'test') return false
@@ -42,6 +42,7 @@ export async function withDatabaseMirror(label: string, run: () => Promise<void>
   try {
     await run()
   } catch (error) {
+    if (postgresReadsEnabled()) throw error
     console.error(`[pg-mirror] ${label} failed (KV is still source of truth)`, error)
   }
 }

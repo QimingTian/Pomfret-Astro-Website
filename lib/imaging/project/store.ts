@@ -5,6 +5,7 @@ import { dsoSessionDurationSeconds } from '@/lib/imaging-session-overhead'
 import { boardRemove, getBoardEntry, listBoardEntries } from '@/lib/imaging-session-board'
 import { getRequestById } from '@/lib/imaging-queue-store'
 import { emitSiteSessionsChanged } from '@/lib/imaging/site-events'
+import { postgresReadsEnabled } from '@/lib/db'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 import type { ScheduleBarPlacement } from '@/lib/imaging-schedule-bar'
 
@@ -214,20 +215,20 @@ function normalizeProjects(raw: unknown): ImagingProject[] {
 }
 
 async function readProjects(): Promise<ImagingProject[]> {
-  let kv: ImagingProject[] = []
+  if (postgresReadsEnabled()) {
+    try {
+      const { loadJsonDocumentsFromPostgres } = await import('@/lib/db/read')
+      const pg = await loadJsonDocumentsFromPostgres<ImagingProject>('projects')
+      if (pg) return pg
+    } catch (error) {
+      console.error('[pg-read] projects failed; using KV', error)
+    }
+  }
   if (kvEnabled()) {
     const remote = await kvGetJson<Payload>(KEY)
-    kv = normalizeProjects(remote)
-  } else {
-    kv = [...memoryProjects()]
+    return normalizeProjects(remote)
   }
-  try {
-    const { loadJsonDocumentsFromPostgres, preferComplete } = await import('@/lib/db/read')
-    const pg = await loadJsonDocumentsFromPostgres<ImagingProject>('projects')
-    return preferComplete(pg, kv)
-  } catch {
-    return kv
-  }
+  return [...memoryProjects()]
 }
 
 function projectSessionsSignature(projects: ImagingProject[]): string {
@@ -243,6 +244,14 @@ async function writeProjects(projects: ImagingProject[]): Promise<void> {
   const trimmed = projects.length > MAX_PROJECTS ? projects.slice(-MAX_PROJECTS) : projects
   const prevSig = projectSessionsSignature(memoryProjects())
   const nextSig = projectSessionsSignature(trimmed)
+  if (postgresReadsEnabled()) {
+    const { mirrorImagingProjects } = await import('@/lib/db/mirror')
+    await mirrorImagingProjects(trimmed)
+    const g = globalThis as GlobalWithProjects
+    g.__pomfret_imaging_projects__ = trimmed
+    if (prevSig !== nextSig) emitSiteSessionsChanged('projects')
+    return
+  }
   if (kvEnabled()) {
     const ok = await kvSetJson(KEY, { projects: trimmed })
     if (ok) {

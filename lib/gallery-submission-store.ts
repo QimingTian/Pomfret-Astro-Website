@@ -13,6 +13,7 @@ import {
   pendingSubmissionStorageKey,
   putGallerySubmissionObject,
 } from '@/lib/gallery-submission-r2'
+import { postgresReadsEnabled } from '@/lib/db'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 import type { MemberUser } from '@/lib/member-store'
 
@@ -50,20 +51,20 @@ function memorySubmissions(): GallerySubmission[] {
 }
 
 async function readSubmissions(): Promise<GallerySubmission[]> {
-  let kv: GallerySubmission[] = []
+  if (postgresReadsEnabled()) {
+    try {
+      const { loadJsonDocumentsFromPostgres } = await import('@/lib/db/read')
+      const pg = await loadJsonDocumentsFromPostgres<GallerySubmission>('gallery')
+      if (pg) return pg
+    } catch (error) {
+      console.error('[pg-read] gallery failed; using KV', error)
+    }
+  }
   if (kvEnabled()) {
     const remote = await kvGetJson<Payload>(SUBMISSIONS_KEY)
-    kv = Array.isArray(remote?.submissions) ? remote.submissions : []
-  } else {
-    kv = [...memorySubmissions()]
+    return Array.isArray(remote?.submissions) ? remote.submissions : []
   }
-  try {
-    const { loadJsonDocumentsFromPostgres, preferComplete } = await import('@/lib/db/read')
-    const pg = await loadJsonDocumentsFromPostgres<GallerySubmission>('gallery')
-    return preferComplete(pg, kv)
-  } catch {
-    return kv
-  }
+  return [...memorySubmissions()]
 }
 
 async function writeSubmissions(submissions: GallerySubmission[]): Promise<void> {
@@ -75,6 +76,11 @@ async function writeSubmissions(submissions: GallerySubmission[]): Promise<void>
       return !Number.isFinite(at) || nowMs - at <= RESOLVED_RETENTION_MS
     })
     .slice(0, MAX_SUBMISSIONS)
+  if (postgresReadsEnabled()) {
+    const { mirrorGallerySubmissions } = await import('@/lib/db/mirror')
+    await mirrorGallerySubmissions(trimmed)
+    return
+  }
   if (kvEnabled()) {
     await kvSetJson(SUBMISSIONS_KEY, { submissions: trimmed })
     const { mirrorGallerySubmissions } = await import('@/lib/db/mirror')

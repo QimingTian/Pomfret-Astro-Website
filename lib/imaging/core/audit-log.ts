@@ -1,3 +1,4 @@
+import { postgresReadsEnabled } from '@/lib/db'
 import { kvCompareAndSet, kvEnabled, kvGetJson, kvGetString, kvSetJson } from '@/lib/kv-rest'
 import { auditRoutedQueueId, progressLineText, stringish } from '@/lib/session-progress-signal'
 
@@ -41,24 +42,31 @@ function normalizeEntries(raw: unknown): AuditLogEntry[] {
 }
 
 async function readEntries(): Promise<AuditLogEntry[]> {
-  let kv: AuditLogEntry[] = []
+  if (postgresReadsEnabled()) {
+    try {
+      const { loadJsonDocumentsFromPostgres } = await import('@/lib/db/read')
+      const pg = await loadJsonDocumentsFromPostgres<AuditLogEntry>('audit')
+      if (pg) return pg
+    } catch (error) {
+      console.error('[pg-read] audit failed; using KV', error)
+    }
+  }
   if (kvEnabled()) {
     const remote = await kvGetJson<Payload>(KEY)
-    kv = normalizeEntries(remote)
-  } else {
-    kv = [...memoryEntries()]
+    return normalizeEntries(remote)
   }
-  try {
-    const { loadJsonDocumentsFromPostgres, preferComplete } = await import('@/lib/db/read')
-    const pg = await loadJsonDocumentsFromPostgres<AuditLogEntry>('audit')
-    return preferComplete(pg, kv)
-  } catch {
-    return kv
-  }
+  return [...memoryEntries()]
 }
 
 async function writeEntries(entries: AuditLogEntry[]): Promise<void> {
   const trimmed = entries.length > MAX_ENTRIES ? entries.slice(-MAX_ENTRIES) : entries
+  if (postgresReadsEnabled()) {
+    const { mirrorAuditLog } = await import('@/lib/db/mirror')
+    await mirrorAuditLog(trimmed)
+    const g = globalThis as GlobalWithLog
+    g.__pomfret_imaging_audit_log__ = trimmed
+    return
+  }
   if (kvEnabled()) {
     const ok = await kvSetJson(KEY, { entries: trimmed })
     if (ok) {
@@ -76,8 +84,8 @@ async function writeEntries(entries: AuditLogEntry[]): Promise<void> {
 async function compareAndWriteEntries(
   mutate: (prev: AuditLogEntry[]) => AuditLogEntry[]
 ): Promise<void> {
-  if (!kvEnabled()) {
-    const prev = memoryEntries()
+  if (postgresReadsEnabled() || !kvEnabled()) {
+    const prev = postgresReadsEnabled() ? await readEntries() : memoryEntries()
     await writeEntries(mutate([...prev]))
     return
   }
@@ -92,6 +100,8 @@ async function compareAndWriteEntries(
     if (ok) {
       const g = globalThis as GlobalWithLog
       g.__pomfret_imaging_audit_log__ = trimmed
+      const { mirrorAuditLog } = await import('@/lib/db/mirror')
+      await mirrorAuditLog(trimmed)
       return
     }
   }

@@ -3,6 +3,7 @@ import {
   type ScheduleBarPlacement,
 } from '@/lib/imaging-schedule-bar'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
+import { postgresReadsEnabled } from '@/lib/db'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 import { emitSiteSessionsChanged } from '@/lib/imaging/site-events'
 
@@ -189,24 +190,30 @@ async function freezeScheduleBarOnTerminal(
 }
 
 async function readEntries(): Promise<SessionBoardEntry[]> {
-  let kv: SessionBoardEntry[] = []
+  if (postgresReadsEnabled()) {
+    try {
+      const { loadJsonDocumentsFromPostgres } = await import('@/lib/db/read')
+      const pg = await loadJsonDocumentsFromPostgres<SessionBoardEntry>('board')
+      if (pg) return pg
+    } catch (error) {
+      console.error('[pg-read] board failed; using KV', error)
+    }
+  }
   if (kvEnabled()) {
     const remote = await kvGetJson<Payload>(KEY)
-    kv = normalizeEntries(remote)
-  } else {
-    kv = [...memoryEntries()]
+    return normalizeEntries(remote)
   }
-  try {
-    const { loadJsonDocumentsFromPostgres, preferComplete } = await import('@/lib/db/read')
-    const pg = await loadJsonDocumentsFromPostgres<SessionBoardEntry>('board')
-    return preferComplete(pg, kv)
-  } catch {
-    return kv
-  }
+  return [...memoryEntries()]
 }
 
 async function writeEntries(entries: SessionBoardEntry[]): Promise<void> {
   const trimmed = entries.length > MAX_ENTRIES ? entries.slice(-MAX_ENTRIES) : entries
+  if (postgresReadsEnabled()) {
+    const { mirrorSessionBoard } = await import('@/lib/db/mirror')
+    await mirrorSessionBoard(trimmed)
+    emitSiteSessionsChanged('board')
+    return
+  }
   if (kvEnabled()) {
     const ok = await kvSetJson(KEY, { entries: trimmed })
     if (ok) {

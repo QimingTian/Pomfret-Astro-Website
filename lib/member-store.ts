@@ -1,5 +1,6 @@
 import crypto from 'crypto'
 
+import { postgresReadsEnabled } from '@/lib/db'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 import { hashSessionPassword, verifySessionPasswordHash } from '@/lib/session-password'
 import { isProductionRuntime, logMissingProductionSecret } from '@/lib/production-secrets'
@@ -198,31 +199,41 @@ function toPublicUser(u: MemberUser): PublicMemberUser {
   }
 }
 
-async function readUsers(): Promise<MemberUser[]> {
-  let kvUsers: MemberUser[] = []
+function hydrateUsers(list: MemberUser[]): MemberUser[] {
+  return list
+    .map((u) => hydrateLegacyUser(u as unknown as Record<string, unknown>))
+    .filter((u): u is MemberUser => u != null)
+}
+
+async function readUsersFromKvOrMemory(): Promise<MemberUser[]> {
   if (kvEnabled()) {
     const remote = await kvGetJson<UsersPayload>(USERS_KEY)
-    if (remote?.users && Array.isArray(remote.users)) {
-      kvUsers = remote.users
-        .map((u) => hydrateLegacyUser(u as unknown as Record<string, unknown>))
-        .filter((u): u is MemberUser => u != null)
+    if (remote?.users && Array.isArray(remote.users)) return hydrateUsers(remote.users)
+    return []
+  }
+  return hydrateUsers(memoryUsers())
+}
+
+async function readUsers(): Promise<MemberUser[]> {
+  if (postgresReadsEnabled()) {
+    try {
+      const { loadMembersFromPostgres } = await import('@/lib/db/read')
+      const pg = await loadMembersFromPostgres()
+      if (pg) return hydrateUsers(pg)
+    } catch (error) {
+      console.error('[pg-read] members failed; using KV', error)
     }
-  } else {
-    kvUsers = memoryUsers()
-      .map((u) => hydrateLegacyUser(u as unknown as Record<string, unknown>))
-      .filter((u): u is MemberUser => u != null)
   }
-  try {
-    const { loadMembersFromPostgres, preferComplete } = await import('@/lib/db/read')
-    const pg = await loadMembersFromPostgres()
-    return preferComplete(pg, kvUsers).map((u) => hydrateLegacyUser(u as unknown as Record<string, unknown>)).filter((u): u is MemberUser => u != null)
-  } catch {
-    return kvUsers
-  }
+  return readUsersFromKvOrMemory()
 }
 
 async function writeUsers(users: MemberUser[]): Promise<void> {
   const trimmed = users.length > MAX_USERS ? users.slice(-MAX_USERS) : users
+  if (postgresReadsEnabled()) {
+    const { mirrorMembers } = await import('@/lib/db/mirror')
+    await mirrorMembers(trimmed)
+    return
+  }
   if (kvEnabled()) {
     await kvSetJson(USERS_KEY, { users: trimmed })
     const { mirrorMembers } = await import('@/lib/db/mirror')
@@ -237,15 +248,13 @@ async function readEmailIndex(): Promise<Record<string, string>> {
   const users = await readUsers()
   const fromUsers: Record<string, string> = {}
   for (const u of users) fromUsers[u.email] = u.id
-  if (kvEnabled()) {
-    const remote = await kvGetJson<IndexPayload>(EMAIL_INDEX_KEY)
-    const kv = remote?.index && typeof remote.index === 'object' ? { ...remote.index } : {}
-    return Object.keys(fromUsers).length >= Object.keys(kv).length ? fromUsers : kv
-  }
-  return fromUsers
+  if (postgresReadsEnabled() || !kvEnabled()) return fromUsers
+  const remote = await kvGetJson<IndexPayload>(EMAIL_INDEX_KEY)
+  return remote?.index && typeof remote.index === 'object' ? { ...remote.index } : fromUsers
 }
 
 async function writeEmailIndex(index: Record<string, string>): Promise<void> {
+  if (postgresReadsEnabled()) return
   if (kvEnabled()) {
     await kvSetJson(EMAIL_INDEX_KEY, { index })
     return
@@ -258,15 +267,13 @@ async function readUsernameIndex(): Promise<Record<string, string>> {
   const users = await readUsers()
   const fromUsers: Record<string, string> = {}
   for (const u of users) fromUsers[normalizeMemberUsername(u.username)] = u.id
-  if (kvEnabled()) {
-    const remote = await kvGetJson<IndexPayload>(USERNAME_INDEX_KEY)
-    const kv = remote?.index && typeof remote.index === 'object' ? { ...remote.index } : {}
-    return Object.keys(fromUsers).length >= Object.keys(kv).length ? fromUsers : kv
-  }
-  return fromUsers
+  if (postgresReadsEnabled() || !kvEnabled()) return fromUsers
+  const remote = await kvGetJson<IndexPayload>(USERNAME_INDEX_KEY)
+  return remote?.index && typeof remote.index === 'object' ? { ...remote.index } : fromUsers
 }
 
 async function writeUsernameIndex(index: Record<string, string>): Promise<void> {
+  if (postgresReadsEnabled()) return
   if (kvEnabled()) {
     await kvSetJson(USERNAME_INDEX_KEY, { index })
     return

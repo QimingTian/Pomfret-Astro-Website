@@ -7,6 +7,7 @@ import {
   dsoSessionDurationSeconds,
 } from '@/lib/imaging-session-overhead'
 import { hashSessionPassword } from '@/lib/session-password'
+import { postgresReadsEnabled } from '@/lib/db'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 import {
   emitAgentWakePollSequenceDebounced,
@@ -142,24 +143,36 @@ let lastQueueStatusSignature = ''
 
 type QueueFilePayload = { requests?: ImagingRequest[] }
 
-async function loadQueueFromKvIntoMemory(): Promise<void> {
+async function applyQueueList(list: ImagingRequest[]): Promise<void> {
   const mem = getMemory()
-  const remote = await kvGetJson<QueueFilePayload>(KV_QUEUE_KEY)
-  const kvList = Array.isArray(remote?.requests) ? remote.requests : []
-  let list = kvList
-  try {
-    const { loadJsonDocumentsFromPostgres, preferComplete } = await import('@/lib/db/read')
-    const pg = await loadJsonDocumentsFromPostgres<ImagingRequest>('queue')
-    list = preferComplete(pg, kvList)
-  } catch {
-    list = kvList
-  }
   mem.splice(0, mem.length, ...list.slice(-MAX_QUEUE))
   diskLoaded = true
 }
 
+async function loadQueueFromKvIntoMemory(): Promise<void> {
+  const remote = await kvGetJson<QueueFilePayload>(KV_QUEUE_KEY)
+  const kvList = Array.isArray(remote?.requests) ? remote.requests : []
+  await applyQueueList(kvList)
+}
+
+async function loadQueueFromPostgresIntoMemory(): Promise<void> {
+  try {
+    const { loadJsonDocumentsFromPostgres } = await import('@/lib/db/read')
+    const pg = await loadJsonDocumentsFromPostgres<ImagingRequest>('queue')
+    if (pg) {
+      await applyQueueList(pg)
+      return
+    }
+  } catch (error) {
+    console.error('[pg-read] queue failed; using KV', error)
+  }
+  if (kvEnabled()) await loadQueueFromKvIntoMemory()
+}
+
 async function ensureLoadedFromDisk(): Promise<void> {
-  if (kvEnabled()) {
+  if (postgresReadsEnabled()) {
+    await loadQueueFromPostgresIntoMemory()
+  } else if (kvEnabled()) {
     await loadQueueFromKvIntoMemory()
   } else if (!queueFile || diskLoaded) {
     // no-op
@@ -186,6 +199,16 @@ async function persist(): Promise<void> {
   const snapshot = [...mem]
   const nextSig = queueStatusSignature(snapshot)
   const statusChanged = nextSig !== lastQueueStatusSignature
+  if (postgresReadsEnabled()) {
+    const { mirrorImagingQueue } = await import('@/lib/db/mirror')
+    await mirrorImagingQueue(snapshot)
+    if (statusChanged) {
+      lastQueueStatusSignature = nextSig
+      emitSiteSessionsChanged('queue')
+      emitAgentWakePollSequenceDebounced()
+    }
+    return
+  }
   if (kvEnabled()) {
     await kvSetJson(KV_QUEUE_KEY, { requests: snapshot })
     const { mirrorImagingQueue } = await import('@/lib/db/mirror')

@@ -161,18 +161,3 @@ export async function loadSessionHistoryFromPostgres<T>(userId: string): Promise
     return null
   }
 }
-
-export function preferComplete<T>(pg: T[] | null, kv: T[]): T[] {
-  if (!pg) return kv
-  if (pg.length >= kv.length) return pg
-  return kv
-}
-
-export function preferCompleteRecord(
-  pg: Record<string, string> | null,
-  kv: Record<string, string>
-): Record<string, string> {
-  if (!pg) return kv
-  if (Object.keys(pg).length >= Object.keys(kv).length) return pg
-  return kv
-}

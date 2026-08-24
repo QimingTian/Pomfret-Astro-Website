@@ -1,6 +1,7 @@
 import crypto from 'crypto'
 
 import type { RemoteSavedSessionFormV1 } from '@/lib/remote-saved-session'
+import { postgresReadsEnabled } from '@/lib/db'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 
 export type MemberSavedSessionEntry = {
@@ -29,24 +30,29 @@ function memoryForUser(userId: string): MemberSavedSessionEntry[] {
 }
 
 async function readSessions(userId: string): Promise<MemberSavedSessionEntry[]> {
-  let kv: MemberSavedSessionEntry[] = []
+  if (postgresReadsEnabled()) {
+    try {
+      const { loadSavedSessionsFromPostgres } = await import('@/lib/db/read')
+      const pg = await loadSavedSessionsFromPostgres<MemberSavedSessionEntry>(userId)
+      if (pg) return pg
+    } catch (error) {
+      console.error('[pg-read] saved sessions failed; using KV', error)
+    }
+  }
   if (kvEnabled()) {
     const remote = await kvGetJson<Payload>(keyForUser(userId))
-    kv = Array.isArray(remote?.sessions) ? remote.sessions : []
-  } else {
-    kv = [...memoryForUser(userId)]
+    return Array.isArray(remote?.sessions) ? remote.sessions : []
   }
-  try {
-    const { loadSavedSessionsFromPostgres, preferComplete } = await import('@/lib/db/read')
-    const pg = await loadSavedSessionsFromPostgres<MemberSavedSessionEntry>(userId)
-    return preferComplete(pg, kv)
-  } catch {
-    return kv
-  }
+  return [...memoryForUser(userId)]
 }
 
 async function writeSessions(userId: string, sessions: MemberSavedSessionEntry[]): Promise<void> {
   const trimmed = sessions.slice(0, MAX_PER_USER)
+  if (postgresReadsEnabled()) {
+    const { mirrorMemberSavedSessions } = await import('@/lib/db/mirror')
+    await mirrorMemberSavedSessions(userId, trimmed)
+    return
+  }
   if (kvEnabled()) {
     await kvSetJson(keyForUser(userId), { sessions: trimmed })
     const { mirrorMemberSavedSessions } = await import('@/lib/db/mirror')

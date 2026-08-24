@@ -1,3 +1,4 @@
+import { postgresReadsEnabled } from '@/lib/db'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 import type { MemberSessionHistoryRow } from '@/lib/member-session-history'
 
@@ -19,23 +20,28 @@ function memoryForUser(userId: string): MemberSessionHistoryRow[] {
 }
 
 async function readArchive(userId: string): Promise<MemberSessionHistoryRow[]> {
-  let kv: MemberSessionHistoryRow[] = []
+  if (postgresReadsEnabled()) {
+    try {
+      const { loadSessionHistoryFromPostgres } = await import('@/lib/db/read')
+      const pg = await loadSessionHistoryFromPostgres<MemberSessionHistoryRow>(userId)
+      if (pg) return pg
+    } catch (error) {
+      console.error('[pg-read] session history failed; using KV', error)
+    }
+  }
   if (kvEnabled()) {
     const remote = await kvGetJson<Payload>(keyForUser(userId))
-    kv = Array.isArray(remote?.sessions) ? remote.sessions : []
-  } else {
-    kv = [...memoryForUser(userId)]
+    return Array.isArray(remote?.sessions) ? remote.sessions : []
   }
-  try {
-    const { loadSessionHistoryFromPostgres, preferComplete } = await import('@/lib/db/read')
-    const pg = await loadSessionHistoryFromPostgres<MemberSessionHistoryRow>(userId)
-    return preferComplete(pg, kv)
-  } catch {
-    return kv
-  }
+  return [...memoryForUser(userId)]
 }
 
 async function writeArchive(userId: string, sessions: MemberSessionHistoryRow[]): Promise<void> {
+  if (postgresReadsEnabled()) {
+    const { mirrorMemberSessionHistory } = await import('@/lib/db/mirror')
+    await mirrorMemberSessionHistory(userId, sessions)
+    return
+  }
   if (kvEnabled()) {
     await kvSetJson(keyForUser(userId), { sessions })
     const { mirrorMemberSessionHistory } = await import('@/lib/db/mirror')

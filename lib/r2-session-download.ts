@@ -1,6 +1,7 @@
 import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
+import { postgresReadsEnabled } from '@/lib/db'
 import { kvGetJson, kvSetJson } from '@/lib/kv-rest'
 
 const KEY = 'imaging-r2-object-map'
@@ -100,6 +101,11 @@ export async function upsertR2ObjectKey(queueId: string, objectKey: string): Pro
   if (!isAllowedSessionObjectKey(queueId, objectKey)) {
     throw new Error('Invalid R2 object key for session')
   }
+  if (postgresReadsEnabled()) {
+    const { mirrorR2ObjectKey } = await import('@/lib/db/mirror')
+    await mirrorR2ObjectKey('object', queueId, objectKey)
+    return
+  }
   const current = ((await kvGetJson<MappingPayload>(KEY)) ?? { byQueueId: {} }) as MappingPayload
   current.byQueueId[queueId] = objectKey
   await kvSetJson(KEY, current)
@@ -111,6 +117,11 @@ export async function upsertR2PreviewObjectKey(queueId: string, objectKey: strin
   if (!isAllowedSessionObjectKey(queueId, objectKey)) {
     throw new Error('Invalid R2 preview object key for session')
   }
+  if (postgresReadsEnabled()) {
+    const { mirrorR2ObjectKey } = await import('@/lib/db/mirror')
+    await mirrorR2ObjectKey('preview', queueId, objectKey)
+    return
+  }
   const current = ((await kvGetJson<MappingPayload>(PREVIEW_KEY)) ?? { byQueueId: {} }) as MappingPayload
   current.byQueueId[queueId] = objectKey
   await kvSetJson(PREVIEW_KEY, current)
@@ -119,6 +130,11 @@ export async function upsertR2PreviewObjectKey(queueId: string, objectKey: strin
 }
 
 async function removeR2ObjectKeyMapping(queueId: string): Promise<void> {
+  if (postgresReadsEnabled()) {
+    const { mirrorR2ObjectKey } = await import('@/lib/db/mirror')
+    await mirrorR2ObjectKey('object', queueId, null)
+    return
+  }
   const current = ((await kvGetJson<MappingPayload>(KEY)) ?? { byQueueId: {} }) as MappingPayload
   delete current.byQueueId[queueId]
   await kvSetJson(KEY, current)
@@ -127,6 +143,11 @@ async function removeR2ObjectKeyMapping(queueId: string): Promise<void> {
 }
 
 async function removeR2PreviewObjectKeyMapping(queueId: string): Promise<void> {
+  if (postgresReadsEnabled()) {
+    const { mirrorR2ObjectKey } = await import('@/lib/db/mirror')
+    await mirrorR2ObjectKey('preview', queueId, null)
+    return
+  }
   const current = ((await kvGetJson<MappingPayload>(PREVIEW_KEY)) ?? { byQueueId: {} }) as MappingPayload
   delete current.byQueueId[queueId]
   await kvSetJson(PREVIEW_KEY, current)
@@ -135,15 +156,17 @@ async function removeR2PreviewObjectKeyMapping(queueId: string): Promise<void> {
 }
 
 async function r2MapMerged(kind: 'object' | 'preview', kvKey: string): Promise<Record<string, string>> {
-  const current = await kvGetJson<MappingPayload>(kvKey)
-  const kv = current?.byQueueId && typeof current.byQueueId === 'object' ? { ...current.byQueueId } : {}
-  try {
-    const { loadR2MapFromPostgres, preferCompleteRecord } = await import('@/lib/db/read')
-    const pg = await loadR2MapFromPostgres(kind)
-    return preferCompleteRecord(pg, kv)
-  } catch {
-    return kv
+  if (postgresReadsEnabled()) {
+    try {
+      const { loadR2MapFromPostgres } = await import('@/lib/db/read')
+      const pg = await loadR2MapFromPostgres(kind)
+      if (pg) return pg
+    } catch (error) {
+      console.error('[pg-read] r2 map failed; using KV', error)
+    }
   }
+  const current = await kvGetJson<MappingPayload>(kvKey)
+  return current?.byQueueId && typeof current.byQueueId === 'object' ? { ...current.byQueueId } : {}
 }
 
 export async function getR2ObjectKey(queueId: string): Promise<string> {

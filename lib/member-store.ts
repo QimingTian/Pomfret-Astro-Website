@@ -199,23 +199,34 @@ function toPublicUser(u: MemberUser): PublicMemberUser {
 }
 
 async function readUsers(): Promise<MemberUser[]> {
+  let kvUsers: MemberUser[] = []
   if (kvEnabled()) {
     const remote = await kvGetJson<UsersPayload>(USERS_KEY)
     if (remote?.users && Array.isArray(remote.users)) {
-      return remote.users
+      kvUsers = remote.users
         .map((u) => hydrateLegacyUser(u as unknown as Record<string, unknown>))
         .filter((u): u is MemberUser => u != null)
     }
-    return []
+  } else {
+    kvUsers = memoryUsers()
+      .map((u) => hydrateLegacyUser(u as unknown as Record<string, unknown>))
+      .filter((u): u is MemberUser => u != null)
   }
-  return memoryUsers().map((u) => hydrateLegacyUser(u as unknown as Record<string, unknown>)).filter(Boolean) as MemberUser[]
+  try {
+    const { loadMembersFromPostgres, preferComplete } = await import('@/lib/db/read')
+    const pg = await loadMembersFromPostgres()
+    return preferComplete(pg, kvUsers).map((u) => hydrateLegacyUser(u as unknown as Record<string, unknown>)).filter((u): u is MemberUser => u != null)
+  } catch {
+    return kvUsers
+  }
 }
 
 async function writeUsers(users: MemberUser[]): Promise<void> {
   const trimmed = users.length > MAX_USERS ? users.slice(-MAX_USERS) : users
   if (kvEnabled()) {
     await kvSetJson(USERS_KEY, { users: trimmed })
-    void import('@/lib/db/mirror').then((m) => m.mirrorMembers(trimmed))
+    const { mirrorMembers } = await import('@/lib/db/mirror')
+    await mirrorMembers(trimmed)
     return
   }
   const g = globalThis as GlobalMemberStore
@@ -223,11 +234,15 @@ async function writeUsers(users: MemberUser[]): Promise<void> {
 }
 
 async function readEmailIndex(): Promise<Record<string, string>> {
+  const users = await readUsers()
+  const fromUsers: Record<string, string> = {}
+  for (const u of users) fromUsers[u.email] = u.id
   if (kvEnabled()) {
     const remote = await kvGetJson<IndexPayload>(EMAIL_INDEX_KEY)
-    return remote?.index && typeof remote.index === 'object' ? { ...remote.index } : {}
+    const kv = remote?.index && typeof remote.index === 'object' ? { ...remote.index } : {}
+    return Object.keys(fromUsers).length >= Object.keys(kv).length ? fromUsers : kv
   }
-  return { ...memoryEmailIndex() }
+  return fromUsers
 }
 
 async function writeEmailIndex(index: Record<string, string>): Promise<void> {
@@ -240,11 +255,15 @@ async function writeEmailIndex(index: Record<string, string>): Promise<void> {
 }
 
 async function readUsernameIndex(): Promise<Record<string, string>> {
+  const users = await readUsers()
+  const fromUsers: Record<string, string> = {}
+  for (const u of users) fromUsers[normalizeMemberUsername(u.username)] = u.id
   if (kvEnabled()) {
     const remote = await kvGetJson<IndexPayload>(USERNAME_INDEX_KEY)
-    return remote?.index && typeof remote.index === 'object' ? { ...remote.index } : {}
+    const kv = remote?.index && typeof remote.index === 'object' ? { ...remote.index } : {}
+    return Object.keys(fromUsers).length >= Object.keys(kv).length ? fromUsers : kv
   }
-  return { ...memoryUsernameIndex() }
+  return fromUsers
 }
 
 async function writeUsernameIndex(index: Record<string, string>): Promise<void> {

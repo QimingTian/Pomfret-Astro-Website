@@ -8,6 +8,8 @@ import {
   mirrorImagingProjects,
   mirrorImagingQueue,
   mirrorMembers,
+  mirrorMemberSavedSessions,
+  mirrorMemberSessionHistory,
   mirrorR2ObjectKey,
   mirrorSessionBoard,
 } from '@/lib/db/mirror'
@@ -104,6 +106,35 @@ export async function backfillPostgresFromKv(): Promise<{ ok: true; skipped?: st
   const previews = (await kvGetJson<{ byQueueId?: Record<string, string> }>('imaging-r2-preview-map'))?.byQueueId ?? {}
   for (const [queueId, objectKey] of Object.entries(previews)) {
     await mirrorR2ObjectKey('preview', queueId, objectKey)
+  }
+
+  for (const user of members) {
+    const saved = (await kvGetJson<{ sessions?: Array<Record<string, unknown>> }>(`member-saved-sessions:${user.id}`))
+      ?.sessions ?? []
+    if (saved.length > 0) {
+      await mirrorMemberSavedSessions(
+        user.id,
+        saved.map((s) => ({
+          id: String(s.id),
+          userId: user.id,
+          name: String(s.name ?? ''),
+          updatedAt: String(s.updatedAt ?? s.savedAt ?? ''),
+          ...s,
+        })) as Parameters<typeof mirrorMemberSavedSessions>[1]
+      )
+    }
+    const hist = (await kvGetJson<{ sessions?: Array<Record<string, unknown>> }>(`member-session-history:${user.id}`))
+      ?.sessions ?? []
+    if (hist.length > 0) {
+      await mirrorMemberSessionHistory(
+        user.id,
+        hist.map((s) => ({
+          id: String(s.id),
+          updatedAt: String(s.updatedAt ?? s.createdAt ?? ''),
+          ...s,
+        })) as Parameters<typeof mirrorMemberSessionHistory>[1]
+      )
+    }
   }
 
   return { ok: true }

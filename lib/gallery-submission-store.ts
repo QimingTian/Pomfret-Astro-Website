@@ -50,11 +50,20 @@ function memorySubmissions(): GallerySubmission[] {
 }
 
 async function readSubmissions(): Promise<GallerySubmission[]> {
+  let kv: GallerySubmission[] = []
   if (kvEnabled()) {
     const remote = await kvGetJson<Payload>(SUBMISSIONS_KEY)
-    return Array.isArray(remote?.submissions) ? remote.submissions : []
+    kv = Array.isArray(remote?.submissions) ? remote.submissions : []
+  } else {
+    kv = [...memorySubmissions()]
   }
-  return [...memorySubmissions()]
+  try {
+    const { loadJsonDocumentsFromPostgres, preferComplete } = await import('@/lib/db/read')
+    const pg = await loadJsonDocumentsFromPostgres<GallerySubmission>('gallery')
+    return preferComplete(pg, kv)
+  } catch {
+    return kv
+  }
 }
 
 async function writeSubmissions(submissions: GallerySubmission[]): Promise<void> {
@@ -68,7 +77,8 @@ async function writeSubmissions(submissions: GallerySubmission[]): Promise<void>
     .slice(0, MAX_SUBMISSIONS)
   if (kvEnabled()) {
     await kvSetJson(SUBMISSIONS_KEY, { submissions: trimmed })
-    void import('@/lib/db/mirror').then((m) => m.mirrorGallerySubmissions(trimmed))
+    const { mirrorGallerySubmissions } = await import('@/lib/db/mirror')
+    await mirrorGallerySubmissions(trimmed)
     return
   }
   const g = globalThis as GlobalStore

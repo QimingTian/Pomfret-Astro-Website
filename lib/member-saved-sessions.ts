@@ -29,18 +29,28 @@ function memoryForUser(userId: string): MemberSavedSessionEntry[] {
 }
 
 async function readSessions(userId: string): Promise<MemberSavedSessionEntry[]> {
+  let kv: MemberSavedSessionEntry[] = []
   if (kvEnabled()) {
     const remote = await kvGetJson<Payload>(keyForUser(userId))
-    return Array.isArray(remote?.sessions) ? remote.sessions : []
+    kv = Array.isArray(remote?.sessions) ? remote.sessions : []
+  } else {
+    kv = [...memoryForUser(userId)]
   }
-  return [...memoryForUser(userId)]
+  try {
+    const { loadSavedSessionsFromPostgres, preferComplete } = await import('@/lib/db/read')
+    const pg = await loadSavedSessionsFromPostgres<MemberSavedSessionEntry>(userId)
+    return preferComplete(pg, kv)
+  } catch {
+    return kv
+  }
 }
 
 async function writeSessions(userId: string, sessions: MemberSavedSessionEntry[]): Promise<void> {
   const trimmed = sessions.slice(0, MAX_PER_USER)
   if (kvEnabled()) {
     await kvSetJson(keyForUser(userId), { sessions: trimmed })
-    void import('@/lib/db/mirror').then((m) => m.mirrorMemberSavedSessions(userId, trimmed))
+    const { mirrorMemberSavedSessions } = await import('@/lib/db/mirror')
+    await mirrorMemberSavedSessions(userId, trimmed)
     return
   }
   const g = globalThis as GlobalSaved

@@ -41,12 +41,21 @@ function normalize(w: AdminClosedWindow): AdminClosedWindow | null {
 }
 
 async function readAll(): Promise<AdminClosedWindow[]> {
+  let kv: AdminClosedWindow[] = []
   if (kvEnabled()) {
     const remote = await kvGetJson<Payload>(KEY)
     const windows = Array.isArray(remote?.windows) ? remote.windows : []
-    return windows.map(normalize).filter((x): x is AdminClosedWindow => x != null)
+    kv = windows.map(normalize).filter((x): x is AdminClosedWindow => x != null)
+  } else {
+    kv = [...memoryWindows()]
   }
-  return [...memoryWindows()]
+  try {
+    const { loadJsonDocumentsFromPostgres, preferComplete } = await import('@/lib/db/read')
+    const pg = await loadJsonDocumentsFromPostgres<AdminClosedWindow>('windows')
+    return preferComplete(pg, kv)
+  } catch {
+    return kv
+  }
 }
 
 async function writeAll(windows: AdminClosedWindow[]): Promise<void> {
@@ -54,7 +63,8 @@ async function writeAll(windows: AdminClosedWindow[]): Promise<void> {
   if (kvEnabled()) {
     const ok = await kvSetJson(KEY, { windows: sorted })
     if (ok) {
-      void import('@/lib/db/mirror').then((m) => m.mirrorAdminClosedWindows(sorted))
+      const { mirrorAdminClosedWindows } = await import('@/lib/db/mirror')
+      await mirrorAdminClosedWindows(sorted)
       return
     }
   }

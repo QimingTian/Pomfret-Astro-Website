@@ -64,13 +64,24 @@ async function readRigsFromKv(): Promise<Array<ImagingEquipment | null> | undefi
 async function writeRigsToKv(rigs: Array<ImagingEquipment | null>): Promise<void> {
   if (!kvEnabled()) return
   await kvSetJson(IMAGING_EQUIPMENT_KV_KEY, { rigs })
-  void import('@/lib/db/mirror').then((m) => m.mirrorImagingEquipment(rigs))
+  const { mirrorImagingEquipment } = await import('@/lib/db/mirror')
+  await mirrorImagingEquipment(rigs)
 }
 
 export async function listImagingRigs(): Promise<Array<ImagingEquipment | null>> {
-  const remote = await readRigsFromKv()
-  if (remote) {
-    memoryRigs().splice(0, memoryRigs().length, ...remote)
+  const kv = await readRigsFromKv()
+  let chosen = kv
+  try {
+    const { loadEquipmentRigsFromPostgres, preferComplete } = await import('@/lib/db/read')
+    const pg = await loadEquipmentRigsFromPostgres()
+    const pgRigs = Array.isArray(pg) ? (pg as Array<ImagingEquipment | null>) : null
+    if (kv) chosen = preferComplete(pgRigs, kv)
+    else if (pgRigs) chosen = pgRigs
+  } catch {
+    chosen = kv
+  }
+  if (chosen) {
+    memoryRigs().splice(0, memoryRigs().length, ...chosen)
     return snapshotRigs()
   }
   return snapshotRigs()

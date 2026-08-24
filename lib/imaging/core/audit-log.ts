@@ -41,11 +41,20 @@ function normalizeEntries(raw: unknown): AuditLogEntry[] {
 }
 
 async function readEntries(): Promise<AuditLogEntry[]> {
+  let kv: AuditLogEntry[] = []
   if (kvEnabled()) {
     const remote = await kvGetJson<Payload>(KEY)
-    return normalizeEntries(remote)
+    kv = normalizeEntries(remote)
+  } else {
+    kv = [...memoryEntries()]
   }
-  return [...memoryEntries()]
+  try {
+    const { loadJsonDocumentsFromPostgres, preferComplete } = await import('@/lib/db/read')
+    const pg = await loadJsonDocumentsFromPostgres<AuditLogEntry>('audit')
+    return preferComplete(pg, kv)
+  } catch {
+    return kv
+  }
 }
 
 async function writeEntries(entries: AuditLogEntry[]): Promise<void> {
@@ -55,7 +64,8 @@ async function writeEntries(entries: AuditLogEntry[]): Promise<void> {
     if (ok) {
       const g = globalThis as GlobalWithLog
       g.__pomfret_imaging_audit_log__ = trimmed
-      void import('@/lib/db/mirror').then((m) => m.mirrorAuditLog(trimmed))
+      const { mirrorAuditLog } = await import('@/lib/db/mirror')
+      await mirrorAuditLog(trimmed)
       return
     }
   }

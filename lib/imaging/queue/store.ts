@@ -145,7 +145,15 @@ type QueueFilePayload = { requests?: ImagingRequest[] }
 async function loadQueueFromKvIntoMemory(): Promise<void> {
   const mem = getMemory()
   const remote = await kvGetJson<QueueFilePayload>(KV_QUEUE_KEY)
-  const list = Array.isArray(remote?.requests) ? remote.requests : []
+  const kvList = Array.isArray(remote?.requests) ? remote.requests : []
+  let list = kvList
+  try {
+    const { loadJsonDocumentsFromPostgres, preferComplete } = await import('@/lib/db/read')
+    const pg = await loadJsonDocumentsFromPostgres<ImagingRequest>('queue')
+    list = preferComplete(pg, kvList)
+  } catch {
+    list = kvList
+  }
   mem.splice(0, mem.length, ...list.slice(-MAX_QUEUE))
   diskLoaded = true
 }
@@ -180,7 +188,8 @@ async function persist(): Promise<void> {
   const statusChanged = nextSig !== lastQueueStatusSignature
   if (kvEnabled()) {
     await kvSetJson(KV_QUEUE_KEY, { requests: snapshot })
-    void import('@/lib/db/mirror').then((m) => m.mirrorImagingQueue(snapshot))
+    const { mirrorImagingQueue } = await import('@/lib/db/mirror')
+    await mirrorImagingQueue(snapshot)
     if (statusChanged) {
       lastQueueStatusSignature = nextSig
       emitSiteSessionsChanged('queue')

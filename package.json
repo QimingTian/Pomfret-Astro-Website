@@ -11,6 +11,7 @@
     "test": "tsx --test lib/*.test.ts lib/imaging/*.test.ts lib/imaging/core/*.test.ts lib/imaging/project/*.test.ts lib/imaging/queue/*.test.ts lib/imaging/session/*.test.ts lib/mosaic/*.test.ts lib/remote/*.test.ts lib/variable-star/*.test.ts lib/observatory-overlay-status.test.ts",
     "db:migrate": "tsx scripts/pg-migrate.ts",
     "db:backfill": "tsx scripts/pg-backfill.ts",
+    "db:audit": "tsx scripts/pg-audit.ts",
     "test:types": "tsc --noEmit",
     "build:variable-star-shortlist": "tsx scripts/build-variable-star-shortlist.ts",
     "deploy": "vercel --prod --yes",

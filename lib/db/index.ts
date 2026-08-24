@@ -16,6 +16,13 @@ export function isDatabaseConfigured(): boolean {
   return databaseUrl().length > 0
 }
 
+/** Live reads prefer Postgres when configured. Set POSTGRES_READ=0 to force KV. */
+export function postgresReadsEnabled(): boolean {
+  if (process.env.POSTGRES_READ === '0') return false
+  if (process.env.npm_lifecycle_event === 'test') return false
+  return isDatabaseConfigured()
+}
+
 function createDb() {
   const url = databaseUrl()
   if (!url) throw new Error('DATABASE_URL is not configured')

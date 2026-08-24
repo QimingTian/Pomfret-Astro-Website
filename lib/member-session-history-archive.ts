@@ -19,17 +19,27 @@ function memoryForUser(userId: string): MemberSessionHistoryRow[] {
 }
 
 async function readArchive(userId: string): Promise<MemberSessionHistoryRow[]> {
+  let kv: MemberSessionHistoryRow[] = []
   if (kvEnabled()) {
     const remote = await kvGetJson<Payload>(keyForUser(userId))
-    return Array.isArray(remote?.sessions) ? remote.sessions : []
+    kv = Array.isArray(remote?.sessions) ? remote.sessions : []
+  } else {
+    kv = [...memoryForUser(userId)]
   }
-  return [...memoryForUser(userId)]
+  try {
+    const { loadSessionHistoryFromPostgres, preferComplete } = await import('@/lib/db/read')
+    const pg = await loadSessionHistoryFromPostgres<MemberSessionHistoryRow>(userId)
+    return preferComplete(pg, kv)
+  } catch {
+    return kv
+  }
 }
 
 async function writeArchive(userId: string, sessions: MemberSessionHistoryRow[]): Promise<void> {
   if (kvEnabled()) {
     await kvSetJson(keyForUser(userId), { sessions })
-    void import('@/lib/db/mirror').then((m) => m.mirrorMemberSessionHistory(userId, sessions))
+    const { mirrorMemberSessionHistory } = await import('@/lib/db/mirror')
+    await mirrorMemberSessionHistory(userId, sessions)
     return
   }
   const g = globalThis as GlobalArchive

@@ -214,11 +214,20 @@ function normalizeProjects(raw: unknown): ImagingProject[] {
 }
 
 async function readProjects(): Promise<ImagingProject[]> {
+  let kv: ImagingProject[] = []
   if (kvEnabled()) {
     const remote = await kvGetJson<Payload>(KEY)
-    return normalizeProjects(remote)
+    kv = normalizeProjects(remote)
+  } else {
+    kv = [...memoryProjects()]
   }
-  return [...memoryProjects()]
+  try {
+    const { loadJsonDocumentsFromPostgres, preferComplete } = await import('@/lib/db/read')
+    const pg = await loadJsonDocumentsFromPostgres<ImagingProject>('projects')
+    return preferComplete(pg, kv)
+  } catch {
+    return kv
+  }
 }
 
 function projectSessionsSignature(projects: ImagingProject[]): string {
@@ -239,7 +248,8 @@ async function writeProjects(projects: ImagingProject[]): Promise<void> {
     if (ok) {
       const g = globalThis as GlobalWithProjects
       g.__pomfret_imaging_projects__ = trimmed
-      void import('@/lib/db/mirror').then((m) => m.mirrorImagingProjects(trimmed))
+      const { mirrorImagingProjects } = await import('@/lib/db/mirror')
+      await mirrorImagingProjects(trimmed)
       if (prevSig !== nextSig) emitSiteSessionsChanged('projects')
       return
     }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { isDatabaseConfigured } from './db'
+import { isDatabaseConfigured, postgresReadsEnabled } from './db'
 import * as schema from './db/schema'
 
 test('Postgres is optional: missing DATABASE_URL does not configure db', () => {
@@ -13,6 +13,22 @@ test('Postgres is optional: missing DATABASE_URL does not configure db', () => {
   assert.equal(isDatabaseConfigured(), false)
   if (prev !== undefined) process.env.DATABASE_URL = prev
   if (prevPg !== undefined) process.env.POSTGRES_URL = prevPg
+})
+
+test('postgres reads stay off during npm test', () => {
+  const prevUrl = process.env.DATABASE_URL
+  const prevRead = process.env.POSTGRES_READ
+  const prevLife = process.env.npm_lifecycle_event
+  process.env.DATABASE_URL = 'postgres://example.invalid/db'
+  delete process.env.POSTGRES_READ
+  process.env.npm_lifecycle_event = 'test'
+  assert.equal(postgresReadsEnabled(), false)
+  if (prevUrl === undefined) delete process.env.DATABASE_URL
+  else process.env.DATABASE_URL = prevUrl
+  if (prevRead === undefined) delete process.env.POSTGRES_READ
+  else process.env.POSTGRES_READ = prevRead
+  if (prevLife === undefined) delete process.env.npm_lifecycle_event
+  else process.env.npm_lifecycle_event = prevLife
 })
 
 test('schema exports the planned tables', () => {

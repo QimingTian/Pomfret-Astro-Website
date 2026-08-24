@@ -189,11 +189,20 @@ async function freezeScheduleBarOnTerminal(
 }
 
 async function readEntries(): Promise<SessionBoardEntry[]> {
+  let kv: SessionBoardEntry[] = []
   if (kvEnabled()) {
     const remote = await kvGetJson<Payload>(KEY)
-    return normalizeEntries(remote)
+    kv = normalizeEntries(remote)
+  } else {
+    kv = [...memoryEntries()]
   }
-  return [...memoryEntries()]
+  try {
+    const { loadJsonDocumentsFromPostgres, preferComplete } = await import('@/lib/db/read')
+    const pg = await loadJsonDocumentsFromPostgres<SessionBoardEntry>('board')
+    return preferComplete(pg, kv)
+  } catch {
+    return kv
+  }
 }
 
 async function writeEntries(entries: SessionBoardEntry[]): Promise<void> {
@@ -202,7 +211,8 @@ async function writeEntries(entries: SessionBoardEntry[]): Promise<void> {
     const ok = await kvSetJson(KEY, { entries: trimmed })
     if (ok) {
       emitSiteSessionsChanged('board')
-      void import('@/lib/db/mirror').then((m) => m.mirrorSessionBoard(trimmed))
+      const { mirrorSessionBoard } = await import('@/lib/db/mirror')
+      await mirrorSessionBoard(trimmed)
       return
     }
   }

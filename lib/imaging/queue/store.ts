@@ -170,10 +170,10 @@ async function loadQueueFromPostgresIntoMemory(): Promise<void> {
 }
 
 async function ensureLoadedFromDisk(): Promise<void> {
-  if (postgresReadsEnabled()) {
-    await loadQueueFromPostgresIntoMemory()
-  } else if (kvEnabled()) {
+  if (kvEnabled()) {
     await loadQueueFromKvIntoMemory()
+  } else if (postgresReadsEnabled()) {
+    await loadQueueFromPostgresIntoMemory()
   } else if (!queueFile || diskLoaded) {
     // no-op
   } else {
@@ -199,9 +199,8 @@ async function persist(): Promise<void> {
   const snapshot = [...mem]
   const nextSig = queueStatusSignature(snapshot)
   const statusChanged = nextSig !== lastQueueStatusSignature
-  if (postgresReadsEnabled()) {
-    const { mirrorImagingQueue } = await import('@/lib/db/mirror')
-    await mirrorImagingQueue(snapshot)
+  if (kvEnabled()) {
+    await kvSetJson(KV_QUEUE_KEY, { requests: snapshot })
     if (statusChanged) {
       lastQueueStatusSignature = nextSig
       emitSiteSessionsChanged('queue')
@@ -209,8 +208,7 @@ async function persist(): Promise<void> {
     }
     return
   }
-  if (kvEnabled()) {
-    await kvSetJson(KV_QUEUE_KEY, { requests: snapshot })
+  if (postgresReadsEnabled()) {
     const { mirrorImagingQueue } = await import('@/lib/db/mirror')
     await mirrorImagingQueue(snapshot)
     if (statusChanged) {

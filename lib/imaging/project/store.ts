@@ -214,19 +214,36 @@ function normalizeProjects(raw: unknown): ImagingProject[] {
   )
 }
 
+function hydrateProjectSequences(project: ImagingProject): ImagingProject {
+  return {
+    ...project,
+    nights: project.nights.map((n) => {
+      if (n.ninaSequenceJson || !n.filterPlansTonight?.length) return n
+      try {
+        return {
+          ...n,
+          ninaSequenceJson: buildNightNinaJson(project, n.id, n.filterPlansTonight, n.mosaicPanelIndex),
+        }
+      } catch {
+        return n
+      }
+    }),
+  }
+}
+
 async function readProjects(): Promise<ImagingProject[]> {
+  if (kvEnabled()) {
+    const remote = await kvGetJson<Payload>(KEY)
+    return normalizeProjects(remote).map(hydrateProjectSequences)
+  }
   if (postgresReadsEnabled()) {
     try {
       const { loadJsonDocumentsFromPostgres } = await import('@/lib/db/read')
       const pg = await loadJsonDocumentsFromPostgres<ImagingProject>('projects')
-      if (pg) return pg
+      if (pg) return pg.map(hydrateProjectSequences)
     } catch (error) {
-      console.error('[pg-read] projects failed; using KV', error)
+      console.error('[pg-read] projects failed; using memory', error)
     }
-  }
-  if (kvEnabled()) {
-    const remote = await kvGetJson<Payload>(KEY)
-    return normalizeProjects(remote)
   }
   return [...memoryProjects()]
 }
@@ -244,6 +261,15 @@ async function writeProjects(projects: ImagingProject[]): Promise<void> {
   const trimmed = projects.length > MAX_PROJECTS ? projects.slice(-MAX_PROJECTS) : projects
   const prevSig = projectSessionsSignature(memoryProjects())
   const nextSig = projectSessionsSignature(trimmed)
+  if (kvEnabled()) {
+    const ok = await kvSetJson(KEY, { projects: trimmed })
+    if (ok) {
+      const g = globalThis as GlobalWithProjects
+      g.__pomfret_imaging_projects__ = trimmed
+      if (prevSig !== nextSig) emitSiteSessionsChanged('projects')
+      return
+    }
+  }
   if (postgresReadsEnabled()) {
     const { mirrorImagingProjects } = await import('@/lib/db/mirror')
     await mirrorImagingProjects(trimmed)
@@ -251,17 +277,6 @@ async function writeProjects(projects: ImagingProject[]): Promise<void> {
     g.__pomfret_imaging_projects__ = trimmed
     if (prevSig !== nextSig) emitSiteSessionsChanged('projects')
     return
-  }
-  if (kvEnabled()) {
-    const ok = await kvSetJson(KEY, { projects: trimmed })
-    if (ok) {
-      const g = globalThis as GlobalWithProjects
-      g.__pomfret_imaging_projects__ = trimmed
-      const { mirrorImagingProjects } = await import('@/lib/db/mirror')
-      await mirrorImagingProjects(trimmed)
-      if (prevSig !== nextSig) emitSiteSessionsChanged('projects')
-      return
-    }
   }
   const g = globalThis as GlobalWithProjects
   g.__pomfret_imaging_projects__ = trimmed

@@ -16,7 +16,11 @@ export function isDatabaseConfigured(): boolean {
   return databaseUrl().length > 0
 }
 
-/** Durable member/queue/gallery docs use Postgres. Set POSTGRES_READ=0 to use KV copies. */
+/**
+ * Durable cold docs (members, gallery, history, R2 maps, equipment) use Postgres.
+ * Hot imaging docs (queue, projects, board, audit, closed windows) stay on Redis when KV is configured.
+ * Set POSTGRES_READ=0 to force those cold docs onto KV copies too.
+ */
 export function postgresReadsEnabled(): boolean {
   if (process.env.POSTGRES_READ === '0') return false
   if (process.env.npm_lifecycle_event === 'test') return false
@@ -44,5 +48,15 @@ export async function withDatabaseMirror(label: string, run: () => Promise<void>
   } catch (error) {
     if (postgresReadsEnabled()) throw error
     console.error(`[pg-mirror] ${label} failed (KV is still source of truth)`, error)
+  }
+}
+
+/** Best-effort Postgres copy. Never throws — Redis remains source of truth for hot imaging docs. */
+export async function withDatabaseBackup(label: string, run: () => Promise<void>): Promise<void> {
+  if (!isDatabaseConfigured()) return
+  try {
+    await run()
+  } catch (error) {
+    console.error(`[pg-backup] ${label} failed (Redis is still source of truth)`, error)
   }
 }

@@ -42,37 +42,35 @@ function normalize(w: AdminClosedWindow): AdminClosedWindow | null {
 }
 
 async function readAll(): Promise<AdminClosedWindow[]> {
+  if (kvEnabled()) {
+    const remote = await kvGetJson<Payload>(KEY)
+    const windows = Array.isArray(remote?.windows) ? remote.windows : []
+    return windows.map(normalize).filter((x): x is AdminClosedWindow => x != null)
+  }
   if (postgresReadsEnabled()) {
     try {
       const { loadJsonDocumentsFromPostgres } = await import('@/lib/db/read')
       const pg = await loadJsonDocumentsFromPostgres<AdminClosedWindow>('windows')
       if (pg) return pg
     } catch (error) {
-      console.error('[pg-read] closed windows failed; using KV', error)
+      console.error('[pg-read] closed windows failed; using memory', error)
     }
-  }
-  if (kvEnabled()) {
-    const remote = await kvGetJson<Payload>(KEY)
-    const windows = Array.isArray(remote?.windows) ? remote.windows : []
-    return windows.map(normalize).filter((x): x is AdminClosedWindow => x != null)
   }
   return [...memoryWindows()]
 }
 
 async function writeAll(windows: AdminClosedWindow[]): Promise<void> {
   const sorted = [...windows].sort((a, b) => a.startIso.localeCompare(b.startIso))
+  if (kvEnabled()) {
+    const ok = await kvSetJson(KEY, { windows: sorted })
+    if (ok) {
+      return
+    }
+  }
   if (postgresReadsEnabled()) {
     const { mirrorAdminClosedWindows } = await import('@/lib/db/mirror')
     await mirrorAdminClosedWindows(sorted)
     return
-  }
-  if (kvEnabled()) {
-    const ok = await kvSetJson(KEY, { windows: sorted })
-    if (ok) {
-      const { mirrorAdminClosedWindows } = await import('@/lib/db/mirror')
-      await mirrorAdminClosedWindows(sorted)
-      return
-    }
   }
   const g = globalThis as GlobalState
   g.__pomfret_admin_closed_windows__ = sorted

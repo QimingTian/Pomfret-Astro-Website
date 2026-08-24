@@ -54,7 +54,9 @@ Session-scoped routes such as download, edit, and delete allow the owning member
 
 ## 5. Persistence
 
-When `KV_REST_API_URL` and `KV_REST_API_TOKEN` are set, Upstash is the source of truth for queues, projects, the session board, **ESTOP**, observatory status, the audit log, R2 object maps, admin closed windows, and live-bus fan-out lists. Without KV, selected paths may fall back to files (for example `IMAGING_QUEUE_FILE`), but production imaging assumes KV.
+When `KV_REST_API_URL` and `KV_REST_API_TOKEN` are set, **Redis is the source of truth for hot imaging state**: queue, projects, session board, audit log, admin closed windows, **ESTOP**, observatory status, and live-bus fan-out. Agent polls and schedule reconcile stay on Redis so Neon can scale to zero.
+
+**Postgres holds cold documents**: members, gallery metadata, saved-session / history archives, R2 object maps, and equipment. Login and gallery pages wake Neon; the 45-second NINA poll does not. Session files and live previews stay in R2. Without KV, selected imaging paths may fall back to files (for example `IMAGING_QUEUE_FILE`).
 
 Queue rows and projects are rewritten by reconcile and delivery. The **session board** is a parallel inventory of in-progress and terminal sessions for the Remote dashboard. **ESTOP** and **end-night** flags are stored separately so shutdown state is not conflated with ordinary scheduling. Keys under the `live:` prefix provide ephemeral fan-out for progress, preview, mount, site, and agent-wake signals.
 

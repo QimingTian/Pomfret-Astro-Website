@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { isDatabaseConfigured, postgresReadsEnabled } from './db'
+import { isDatabaseConfigured, postgresReadsEnabled, withDatabaseBackup } from './db'
 import * as schema from './db/schema'
 
 test('Postgres is optional: missing DATABASE_URL does not configure db', () => {
@@ -39,4 +39,8 @@ test('schema exports the planned tables', () => {
   assert.ok(schema.imagingProjects)
   assert.ok(schema.sessionBoard)
   assert.ok(schema.auditLog)
+})
+
+test('Postgres backup helper exists for optional cold copies', () => {
+  assert.equal(typeof withDatabaseBackup, 'function')
 })

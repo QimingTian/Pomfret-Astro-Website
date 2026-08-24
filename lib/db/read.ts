@@ -7,7 +7,6 @@ import {
   gallerySubmissions,
   imagingEquipment,
   imagingProjects,
-  imagingRequestPayloads,
   imagingRequests,
   memberSavedSessions,
   memberships,
@@ -65,22 +64,12 @@ export async function loadJsonDocumentsFromPostgres<T extends { id: string }>(
   try {
     const db = getDb()
     if (kind === 'queue') {
-      const rows = await db
-        .select({
-          request: imagingRequests,
-          payload: imagingRequestPayloads,
-        })
-        .from(imagingRequests)
-        .leftJoin(imagingRequestPayloads, eq(imagingRequests.id, imagingRequestPayloads.id))
+      const rows = await db.select().from(imagingRequests)
       return rows
-        .filter((r) => r.request.siteId === SITE)
+        .filter((r) => r.siteId === SITE)
         .map((r) => {
-          const doc = (r.request.document ?? {}) as T
-          return {
-            ...doc,
-            id: r.request.id,
-            ninaSequenceJson: r.payload?.ninaSequenceJson ?? (doc as { ninaSequenceJson?: string }).ninaSequenceJson,
-          }
+          const doc = (r.document ?? {}) as T
+          return { ...doc, id: r.id }
         }) as T[]
     }
     if (kind === 'projects') {

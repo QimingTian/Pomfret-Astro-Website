@@ -190,38 +190,36 @@ async function freezeScheduleBarOnTerminal(
 }
 
 async function readEntries(): Promise<SessionBoardEntry[]> {
+  if (kvEnabled()) {
+    const remote = await kvGetJson<Payload>(KEY)
+    return normalizeEntries(remote)
+  }
   if (postgresReadsEnabled()) {
     try {
       const { loadJsonDocumentsFromPostgres } = await import('@/lib/db/read')
       const pg = await loadJsonDocumentsFromPostgres<SessionBoardEntry>('board')
       if (pg) return pg
     } catch (error) {
-      console.error('[pg-read] board failed; using KV', error)
+      console.error('[pg-read] board failed; using memory', error)
     }
-  }
-  if (kvEnabled()) {
-    const remote = await kvGetJson<Payload>(KEY)
-    return normalizeEntries(remote)
   }
   return [...memoryEntries()]
 }
 
 async function writeEntries(entries: SessionBoardEntry[]): Promise<void> {
   const trimmed = entries.length > MAX_ENTRIES ? entries.slice(-MAX_ENTRIES) : entries
+  if (kvEnabled()) {
+    const ok = await kvSetJson(KEY, { entries: trimmed })
+    if (ok) {
+      emitSiteSessionsChanged('board')
+      return
+    }
+  }
   if (postgresReadsEnabled()) {
     const { mirrorSessionBoard } = await import('@/lib/db/mirror')
     await mirrorSessionBoard(trimmed)
     emitSiteSessionsChanged('board')
     return
-  }
-  if (kvEnabled()) {
-    const ok = await kvSetJson(KEY, { entries: trimmed })
-    if (ok) {
-      emitSiteSessionsChanged('board')
-      const { mirrorSessionBoard } = await import('@/lib/db/mirror')
-      await mirrorSessionBoard(trimmed)
-      return
-    }
   }
   const g = globalThis as GlobalWithBoard
   g.__pomfret_imaging_session_board__ = trimmed

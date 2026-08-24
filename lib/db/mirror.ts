@@ -1,6 +1,7 @@
-import { inArray, not, sql } from 'drizzle-orm'
+import { eq, inArray, not, sql } from 'drizzle-orm'
 
-import { getDb, withDatabaseMirror } from '@/lib/db'
+import { getDb, withDatabaseBackup, withDatabaseMirror } from '@/lib/db'
+import { sameJson, stripNinaJsonFromProjectDocument } from '@/lib/db/skip-unchanged'
 import {
   adminClosedWindows,
   auditLog,
@@ -94,47 +95,79 @@ type QueueRow = {
 }
 
 export async function mirrorImagingQueue(rows: QueueRow[]): Promise<void> {
-  await withDatabaseMirror('imaging-queue', async () => {
+  await withDatabaseBackup('imaging-queue', async () => {
     const db = getDb()
     const sid = siteId()
     const ids = rows.map((r) => r.id)
+    const existingDocs = await db
+      .select({
+        id: imagingRequests.id,
+        status: imagingRequests.status,
+        userId: imagingRequests.userId,
+        target: imagingRequests.target,
+        document: imagingRequests.document,
+      })
+      .from(imagingRequests)
+      .where(eq(imagingRequests.siteId, sid))
+    const existingById = new Map(existingDocs.map((r) => [r.id, r]))
+    const existingPayloads = await db
+      .select({
+        id: imagingRequestPayloads.id,
+        ninaSequenceJson: imagingRequestPayloads.ninaSequenceJson,
+      })
+      .from(imagingRequestPayloads)
+      .where(eq(imagingRequestPayloads.siteId, sid))
+    const payloadById = new Map(existingPayloads.map((r) => [r.id, r.ninaSequenceJson]))
     for (const row of rows) {
-      const { ninaSequenceJson, ...rest } = row
-      const document = JSON.parse(JSON.stringify({ ...rest, ninaSequenceJson: undefined })) as Record<string, unknown>
+      const ninaJson = row.ninaSequenceJson ?? (row as QueueRow & { ninaSequenceJson?: string }).ninaSequenceJson
+      const { ninaSequenceJson: _payload, ...rest } = row
+      const document = JSON.parse(JSON.stringify(rest)) as Record<string, unknown>
       delete document.ninaSequenceJson
-      await db
-        .insert(imagingRequests)
-        .values({
-          id: row.id,
-          siteId: sid,
-          status: row.status,
-          userId: row.userId ?? null,
-          target: row.target,
-          createdAt: row.createdAt,
-          updatedAt: row.updatedAt,
-          document,
-        })
-        .onConflictDoUpdate({
-          target: imagingRequests.id,
-          set: {
+      delete document.ninaSequenceJson
+      const prev = existingById.get(row.id)
+      const docUnchanged =
+        prev != null &&
+        prev.status === row.status &&
+        prev.userId === (row.userId ?? null) &&
+        prev.target === row.target &&
+        sameJson(prev.document, document)
+      if (!docUnchanged) {
+        await db
+          .insert(imagingRequests)
+          .values({
+            id: row.id,
+            siteId: sid,
             status: row.status,
             userId: row.userId ?? null,
             target: row.target,
+            createdAt: row.createdAt,
             updatedAt: row.updatedAt,
             document,
-          },
-        })
-      await db
-        .insert(imagingRequestPayloads)
-        .values({
-          id: row.id,
-          siteId: sid,
-          ninaSequenceJson: ninaSequenceJson ?? null,
-        })
-        .onConflictDoUpdate({
-          target: imagingRequestPayloads.id,
-          set: { ninaSequenceJson: ninaSequenceJson ?? null },
-        })
+          })
+          .onConflictDoUpdate({
+            target: imagingRequests.id,
+            set: {
+              status: row.status,
+              userId: row.userId ?? null,
+              target: row.target,
+              updatedAt: row.updatedAt,
+              document,
+            },
+          })
+      }
+      if (ninaJson !== undefined && payloadById.get(row.id) !== ninaJson) {
+        await db
+          .insert(imagingRequestPayloads)
+          .values({
+            id: row.id,
+            siteId: sid,
+            ninaSequenceJson: ninaJson ?? null,
+          })
+          .onConflictDoUpdate({
+            target: imagingRequestPayloads.id,
+            set: { ninaSequenceJson: ninaJson ?? null },
+          })
+      }
     }
     if (ids.length === 0) {
       await db.delete(imagingRequests).where(sql`${imagingRequests.siteId} = ${sid}`)
@@ -166,11 +199,33 @@ type ProjectRow = {
 }
 
 export async function mirrorImagingProjects(rows: ProjectRow[]): Promise<void> {
-  await withDatabaseMirror('imaging-projects', async () => {
+  await withDatabaseBackup('imaging-projects', async () => {
     const db = getDb()
     const sid = siteId()
     const ids = rows.map((r) => r.id)
+    const existing = await db
+      .select({
+        id: imagingProjects.id,
+        status: imagingProjects.status,
+        userId: imagingProjects.userId,
+        target: imagingProjects.target,
+        document: imagingProjects.document,
+      })
+      .from(imagingProjects)
+      .where(eq(imagingProjects.siteId, sid))
+    const existingById = new Map(existing.map((r) => [r.id, r]))
     for (const row of rows) {
+      const document = stripNinaJsonFromProjectDocument(row)
+      const prev = existingById.get(row.id)
+      if (
+        prev &&
+        prev.status === row.status &&
+        prev.userId === (row.userId ?? null) &&
+        prev.target === row.target &&
+        sameJson(prev.document, document)
+      ) {
+        continue
+      }
       await db
         .insert(imagingProjects)
         .values({
@@ -181,7 +236,7 @@ export async function mirrorImagingProjects(rows: ProjectRow[]): Promise<void> {
           target: row.target,
           createdAt: row.createdAt,
           updatedAt: row.updatedAt,
-          document: JSON.parse(JSON.stringify(row)) as Record<string, unknown>,
+          document,
         })
         .onConflictDoUpdate({
           target: imagingProjects.id,
@@ -190,7 +245,7 @@ export async function mirrorImagingProjects(rows: ProjectRow[]): Promise<void> {
             userId: row.userId ?? null,
             target: row.target,
             updatedAt: row.updatedAt,
-            document: JSON.parse(JSON.stringify(row)) as Record<string, unknown>,
+            document,
           },
         })
     }
@@ -215,7 +270,7 @@ type BoardRow = {
 }
 
 export async function mirrorSessionBoard(rows: BoardRow[]): Promise<void> {
-  await withDatabaseMirror('session-board', async () => {
+  await withDatabaseBackup('session-board', async () => {
     const db = getDb()
     const sid = siteId()
     const ids = rows.map((r) => r.id)
@@ -256,10 +311,13 @@ export async function mirrorSessionBoard(rows: BoardRow[]): Promise<void> {
 type AuditRow = { id: string; at: string; kind: string; message: string; detail?: Record<string, unknown> }
 
 export async function mirrorAuditLog(rows: AuditRow[]): Promise<void> {
-  await withDatabaseMirror('audit-log', async () => {
+  await withDatabaseBackup('audit-log', async () => {
     const db = getDb()
     const sid = siteId()
+    const existing = await db.select({ id: auditLog.id }).from(auditLog).where(eq(auditLog.siteId, sid))
+    const have = new Set(existing.map((r) => r.id))
     for (const row of rows) {
+      if (have.has(row.id)) continue
       await db
         .insert(auditLog)
         .values({
@@ -336,7 +394,7 @@ export async function mirrorImagingEquipment(rigs: unknown): Promise<void> {
 type WindowRow = { id: string; startIso: string; endIso: string }
 
 export async function mirrorAdminClosedWindows(rows: WindowRow[]): Promise<void> {
-  await withDatabaseMirror('admin-closed-windows', async () => {
+  await withDatabaseBackup('admin-closed-windows', async () => {
     const db = getDb()
     const sid = siteId()
     const ids = rows.map((r) => r.id)

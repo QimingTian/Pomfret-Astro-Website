@@ -239,6 +239,7 @@ async function writeProjects(projects: ImagingProject[]): Promise<void> {
     if (ok) {
       const g = globalThis as GlobalWithProjects
       g.__pomfret_imaging_projects__ = trimmed
+      void import('@/lib/db/mirror').then((m) => m.mirrorImagingProjects(trimmed))
       if (prevSig !== nextSig) emitSiteSessionsChanged('projects')
       return
     }

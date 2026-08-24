@@ -55,6 +55,7 @@ async function writeEntries(entries: AuditLogEntry[]): Promise<void> {
     if (ok) {
       const g = globalThis as GlobalWithLog
       g.__pomfret_imaging_audit_log__ = trimmed
+      void import('@/lib/db/mirror').then((m) => m.mirrorAuditLog(trimmed))
       return
     }
   }

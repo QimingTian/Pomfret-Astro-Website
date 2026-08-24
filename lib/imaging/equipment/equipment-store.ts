@@ -64,6 +64,7 @@ async function readRigsFromKv(): Promise<Array<ImagingEquipment | null> | undefi
 async function writeRigsToKv(rigs: Array<ImagingEquipment | null>): Promise<void> {
   if (!kvEnabled()) return
   await kvSetJson(IMAGING_EQUIPMENT_KV_KEY, { rigs })
+  void import('@/lib/db/mirror').then((m) => m.mirrorImagingEquipment(rigs))
 }
 
 export async function listImagingRigs(): Promise<Array<ImagingEquipment | null>> {

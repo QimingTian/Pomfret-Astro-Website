@@ -29,6 +29,7 @@ async function readArchive(userId: string): Promise<MemberSessionHistoryRow[]> {
 async function writeArchive(userId: string, sessions: MemberSessionHistoryRow[]): Promise<void> {
   if (kvEnabled()) {
     await kvSetJson(keyForUser(userId), { sessions })
+    void import('@/lib/db/mirror').then((m) => m.mirrorMemberSessionHistory(userId, sessions))
     return
   }
   const g = globalThis as GlobalArchive

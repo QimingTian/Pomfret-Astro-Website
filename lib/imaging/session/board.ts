@@ -202,6 +202,7 @@ async function writeEntries(entries: SessionBoardEntry[]): Promise<void> {
     const ok = await kvSetJson(KEY, { entries: trimmed })
     if (ok) {
       emitSiteSessionsChanged('board')
+      void import('@/lib/db/mirror').then((m) => m.mirrorSessionBoard(trimmed))
       return
     }
   }

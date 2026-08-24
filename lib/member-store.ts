@@ -215,6 +215,7 @@ async function writeUsers(users: MemberUser[]): Promise<void> {
   const trimmed = users.length > MAX_USERS ? users.slice(-MAX_USERS) : users
   if (kvEnabled()) {
     await kvSetJson(USERS_KEY, { users: trimmed })
+    void import('@/lib/db/mirror').then((m) => m.mirrorMembers(trimmed))
     return
   }
   const g = globalThis as GlobalMemberStore

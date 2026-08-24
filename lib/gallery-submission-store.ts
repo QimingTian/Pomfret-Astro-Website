@@ -68,6 +68,7 @@ async function writeSubmissions(submissions: GallerySubmission[]): Promise<void>
     .slice(0, MAX_SUBMISSIONS)
   if (kvEnabled()) {
     await kvSetJson(SUBMISSIONS_KEY, { submissions: trimmed })
+    void import('@/lib/db/mirror').then((m) => m.mirrorGallerySubmissions(trimmed))
     return
   }
   const g = globalThis as GlobalStore

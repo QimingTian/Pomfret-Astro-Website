@@ -53,7 +53,10 @@ async function writeAll(windows: AdminClosedWindow[]): Promise<void> {
   const sorted = [...windows].sort((a, b) => a.startIso.localeCompare(b.startIso))
   if (kvEnabled()) {
     const ok = await kvSetJson(KEY, { windows: sorted })
-    if (ok) return
+    if (ok) {
+      void import('@/lib/db/mirror').then((m) => m.mirrorAdminClosedWindows(sorted))
+      return
+    }
   }
   const g = globalThis as GlobalState
   g.__pomfret_admin_closed_windows__ = sorted

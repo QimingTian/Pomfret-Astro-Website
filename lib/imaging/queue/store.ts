@@ -180,6 +180,7 @@ async function persist(): Promise<void> {
   const statusChanged = nextSig !== lastQueueStatusSignature
   if (kvEnabled()) {
     await kvSetJson(KV_QUEUE_KEY, { requests: snapshot })
+    void import('@/lib/db/mirror').then((m) => m.mirrorImagingQueue(snapshot))
     if (statusChanged) {
       lastQueueStatusSignature = nextSig
       emitSiteSessionsChanged('queue')

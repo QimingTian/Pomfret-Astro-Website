@@ -40,6 +40,7 @@ async function writeSessions(userId: string, sessions: MemberSavedSessionEntry[]
   const trimmed = sessions.slice(0, MAX_PER_USER)
   if (kvEnabled()) {
     await kvSetJson(keyForUser(userId), { sessions: trimmed })
+    void import('@/lib/db/mirror').then((m) => m.mirrorMemberSavedSessions(userId, trimmed))
     return
   }
   const g = globalThis as GlobalSaved

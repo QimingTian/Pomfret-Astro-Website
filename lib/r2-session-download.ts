@@ -103,6 +103,7 @@ export async function upsertR2ObjectKey(queueId: string, objectKey: string): Pro
   const current = ((await kvGetJson<MappingPayload>(KEY)) ?? { byQueueId: {} }) as MappingPayload
   current.byQueueId[queueId] = objectKey
   await kvSetJson(KEY, current)
+  void import('@/lib/db/mirror').then((m) => m.mirrorR2ObjectKey('object', queueId, objectKey))
 }
 
 export async function upsertR2PreviewObjectKey(queueId: string, objectKey: string): Promise<void> {
@@ -112,18 +113,21 @@ export async function upsertR2PreviewObjectKey(queueId: string, objectKey: strin
   const current = ((await kvGetJson<MappingPayload>(PREVIEW_KEY)) ?? { byQueueId: {} }) as MappingPayload
   current.byQueueId[queueId] = objectKey
   await kvSetJson(PREVIEW_KEY, current)
+  void import('@/lib/db/mirror').then((m) => m.mirrorR2ObjectKey('preview', queueId, objectKey))
 }
 
 async function removeR2ObjectKeyMapping(queueId: string): Promise<void> {
   const current = ((await kvGetJson<MappingPayload>(KEY)) ?? { byQueueId: {} }) as MappingPayload
   delete current.byQueueId[queueId]
   await kvSetJson(KEY, current)
+  void import('@/lib/db/mirror').then((m) => m.mirrorR2ObjectKey('object', queueId, null))
 }
 
 async function removeR2PreviewObjectKeyMapping(queueId: string): Promise<void> {
   const current = ((await kvGetJson<MappingPayload>(PREVIEW_KEY)) ?? { byQueueId: {} }) as MappingPayload
   delete current.byQueueId[queueId]
   await kvSetJson(PREVIEW_KEY, current)
+  void import('@/lib/db/mirror').then((m) => m.mirrorR2ObjectKey('preview', queueId, null))
 }
 
 export async function getR2ObjectKey(queueId: string): Promise<string> {

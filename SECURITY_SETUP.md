@@ -19,6 +19,7 @@ In Vercel → Project → Settings → Environment Variables → **Production**,
 | `RESEND_API_KEY`, `IMAGING_MAIL_FROM` | Yes (email verification) |
 | `BOOTSTRAP_ADMIN_EMAILS` | Yes (comma-separated `@pomfret.org` admins only; may demote/remove other admins in All Members) |
 | `SITE_URL` or `NEXT_PUBLIC_SITE_URL` | **Yes** (`https://www.pomfretastro.org`) — verification email links and post-verify redirects |
+| `DATABASE_URL` | Optional until Neon is connected. Live imaging still uses KV. After Marketplace Neon is installed, this is auto-injected. |
 
 **Rotate** all shared secrets if they were ever committed, logged, or shared. Generate new values with a password manager.
 

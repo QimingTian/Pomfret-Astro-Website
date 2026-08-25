@@ -2,11 +2,11 @@ import { createHmac } from 'crypto'
 import { NextResponse } from 'next/server'
 import { imagingCorsHeadersResolved } from '@/lib/imaging-queue-auth'
 import {
-  computeVariableStarWindowHms,
+  observatoryHmsFromUtcMs,
+  scheduledSessionEndMs,
   type NinaSequenceParams,
   type ObservatoryHms,
 } from '@/lib/imaging/nina/sequence-json'
-import { VARIABLE_STAR_SESSION_OVERHEAD_SEC } from '@/lib/imaging/session/overhead'
 import {
   estopDiscordMessageForState,
   isWeatherSafetyEmergencyStopActor,
@@ -29,7 +29,7 @@ export const NINA_AGENT_JOB_VERSION = 7
 export type NinaAgentJobCommand = 'run' | 'estop' | 'end_night'
 
 export type NinaAgentRunParams = NinaSequenceParams & {
-  variableStarWindow?: { start: ObservatoryHms; end: ObservatoryHms }
+  variableStarWindow?: { start?: ObservatoryHms; end: ObservatoryHms }
 }
 
 export type NinaAgentJob = {
@@ -116,19 +116,17 @@ export function ninaAgentJobResponse(job: NinaAgentJobInput): NextResponse {
   })
 }
 
+export function queueSessionScheduledEndMs(r: ImagingRequest, nowMs = Date.now()): number | null {
+  return scheduledSessionEndMs(r, nowMs)
+}
+
 export function sequenceParamsFromQueueRequest(r: ImagingRequest): NinaAgentRunParams | null {
   if (r.raHours == null || r.decDeg == null || !r.filter) return null
   const templateKind = r.sequenceTemplate === 'variable_star' ? 'variable_star' : 'dso'
-  const variableStarObservingSeconds =
-    templateKind === 'variable_star' &&
-    typeof r.estimatedDurationSeconds === 'number' &&
-    Number.isFinite(r.estimatedDurationSeconds)
-      ? Math.max(0, r.estimatedDurationSeconds - VARIABLE_STAR_SESSION_OVERHEAD_SEC)
-      : undefined
   const params: NinaAgentRunParams = {
     raHoursDecimal: r.raHours,
     decDegDecimal: r.decDeg,
-    filterName: r.filter,
+    filterName: templateKind === 'variable_star' ? 'G' : r.filter,
     exposureSeconds: r.exposureSeconds,
     exposureCount: r.count,
     pomfretQueueId: r.id,
@@ -136,27 +134,32 @@ export function sequenceParamsFromQueueRequest(r: ImagingRequest): NinaAgentRunP
     outputMode: r.outputMode as NinaSequenceParams['outputMode'],
     cameraCoolingTempC: r.cameraCoolingTempC,
     targetName: r.target ?? undefined,
-    ...(r.filterPlans && r.filterPlans.length > 0
+    ...(templateKind === 'variable_star'
       ? {
-          filterPlans: r.filterPlans.map((p) => ({
-            filterName: p.filterName,
-            exposureSeconds: p.exposureSeconds,
-            exposureCount: p.count,
-          })),
+          filterPlans: [
+            {
+              filterName: 'G',
+              exposureSeconds: r.exposureSeconds,
+              exposureCount: r.count,
+            },
+          ],
         }
-      : {}),
-    ...(variableStarObservingSeconds != null ? { variableStarObservingSeconds } : {}),
+      : r.filterPlans && r.filterPlans.length > 0
+        ? {
+            filterPlans: r.filterPlans.map((p) => ({
+              filterName: p.filterName,
+              exposureSeconds: p.exposureSeconds,
+              exposureCount: p.count,
+            })),
+          }
+        : {}),
   }
   if (templateKind === 'variable_star') {
-    const observingMs =
-      typeof variableStarObservingSeconds === 'number'
-        ? Math.round(variableStarObservingSeconds * 1000)
-        : undefined
-    params.variableStarWindow = computeVariableStarWindowHms(
-      params.raHoursDecimal,
-      params.decDegDecimal,
-      observingMs,
-    )
+    const endMs = queueSessionScheduledEndMs(r)
+    if (endMs != null) {
+      params.variableStarSessionEndMs = endMs
+      params.variableStarWindow = { end: observatoryHmsFromUtcMs(endMs) }
+    }
   }
   return params
 }

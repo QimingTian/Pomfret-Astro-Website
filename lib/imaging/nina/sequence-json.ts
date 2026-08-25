@@ -26,6 +26,8 @@ export interface NinaSequenceParams {
   templateKind?: 'dso' | 'variable_star'
   targetName?: string
   variableStarObservingSeconds?: number
+  /** UTC ms: Loop-until Time clock (scheduled session end). */
+  variableStarSessionEndMs?: number
   cameraCoolingTempC?: number
 }
 
@@ -328,6 +330,33 @@ function lastAltitudeAllowedTimeMs(
 
 export type ObservatoryHms = { hours: number; minutes: number; seconds: number }
 
+export function observatoryHmsFromUtcMs(ms: number): ObservatoryHms {
+  return dateToObservatoryHms(new Date(ms))
+}
+
+/** Scheduled bar / force-run cutoff: plannedStart + estimatedDuration, else adminForceRunUntil. */
+export function scheduledSessionEndMs(
+  r: {
+    plannedStartIso?: string | null
+    estimatedDurationSeconds?: number | null
+    adminForceRunUntilIso?: string | null
+  },
+  nowMs = Date.now(),
+): number | null {
+  const startMs = r.plannedStartIso ? Date.parse(r.plannedStartIso) : Number.NaN
+  const forceUntilMs = r.adminForceRunUntilIso ? Date.parse(r.adminForceRunUntilIso) : Number.NaN
+  if (Number.isFinite(forceUntilMs) && forceUntilMs > nowMs) return forceUntilMs
+  if (
+    Number.isFinite(startMs) &&
+    typeof r.estimatedDurationSeconds === 'number' &&
+    Number.isFinite(r.estimatedDurationSeconds) &&
+    r.estimatedDurationSeconds > 0
+  ) {
+    return startMs + r.estimatedDurationSeconds * 1000
+  }
+  return null
+}
+
 /** Altitude-clamped start/end clocks for the variable-star template (server computes, agent applies). */
 export function computeVariableStarWindowHms(
   raHoursDecimal: number,
@@ -357,27 +386,16 @@ export function computeVariableStarWindowHms(
   }
 }
 
-function applyVariableStarStartEndTimes(
-  dso: Record<string, unknown>,
-  raHoursDecimal: number,
-  decDegDecimal: number,
-  observingDurationMs?: number
-) {
-  const window = computeVariableStarWindowHms(raHoursDecimal, decDegDecimal, observingDurationMs)
-  const waitForTransit = findFirstByType(dso, 'NINA.Plugin.ExoPlanets.Sequencer.Utility.WaitForTransit')
-  if (waitForTransit) {
-    waitForTransit['Hours'] = window.start.hours
-    waitForTransit['Minutes'] = window.start.minutes
-    waitForTransit['Seconds'] = window.start.seconds
-    waitForTransit['MinutesOffset'] = 0
-  }
-
-  const transitCondition = findLastByType(dso, 'NINA.Plugin.ExoPlanets.Sequencer.Conditions.TransitCondition')
-  if (transitCondition) {
-    transitCondition['Hours'] = window.end.hours
-    transitCondition['Minutes'] = window.end.minutes
-    transitCondition['Seconds'] = window.end.seconds
-    transitCondition['MinutesOffset'] = 0
+function applyVariableStarLoopUntil(dso: Record<string, unknown>, sessionEndMs: number) {
+  const hms = observatoryHmsFromUtcMs(sessionEndMs)
+  const timeCondition =
+    findLastByType(dso, 'NINA.Sequencer.Conditions.TimeCondition') ??
+    findLastByType(dso, 'NINA.Plugin.ExoPlanets.Sequencer.Conditions.TransitCondition')
+  if (timeCondition) {
+    timeCondition['Hours'] = hms.hours
+    timeCondition['Minutes'] = hms.minutes
+    timeCondition['Seconds'] = hms.seconds
+    timeCondition['MinutesOffset'] = 0
   }
 }
 
@@ -448,7 +466,12 @@ export function buildNinaSequenceJson(params: NinaSequenceParams): string {
   if (exoPlanetDso && typeof exoPlanetDso === 'object' && !Array.isArray(exoPlanetDso)) {
     const exoDsoRec = exoPlanetDso as Record<string, unknown>
     const exoCoords = exoDsoRec['Coordinates']
-    if (exoCoords && typeof exoCoords === 'object' && !Array.isArray(exoCoords)) {
+    if (
+      exoCoords &&
+      typeof exoCoords === 'object' &&
+      !Array.isArray(exoCoords) &&
+      !('$ref' in (exoCoords as object))
+    ) {
       applyExoPlanetCoordinates(
         exoCoords as Record<string, unknown>,
         params.raHoursDecimal,
@@ -458,13 +481,15 @@ export function buildNinaSequenceJson(params: NinaSequenceParams): string {
   }
 
   if (templateKind === 'variable_star') {
-    const obsSec = params.variableStarObservingSeconds
-    const observingMs =
-      typeof obsSec === 'number' && Number.isFinite(obsSec) && obsSec > 0 ? Math.round(obsSec * 1000) : undefined
-    applyVariableStarStartEndTimes(dso, params.raHoursDecimal, params.decDegDecimal, observingMs)
+    if (typeof params.variableStarSessionEndMs === 'number' && Number.isFinite(params.variableStarSessionEndMs)) {
+      applyVariableStarLoopUntil(dso, params.variableStarSessionEndMs)
+    }
     const switchFilter = findFirstByType(dsoItemValues, 'NINA.Sequencer.SequenceItem.FilterWheel.SwitchFilter')
     if (!switchFilter) throw new Error('Template: SwitchFilter not found')
-    switchFilter['Filter'] = buildFilterInfoObject(root, usedIds, normalizedPlans[0].filterName)
+    const filterInfo = switchFilter['Filter']
+    if (!filterInfo || typeof filterInfo !== 'object' || (filterInfo as { _name?: unknown })._name !== 'G') {
+      throw new Error('Template: variable star SwitchFilter must stay G')
+    }
   } else if (normalizedPlans.length === 1) {
     const switchIndex = findIndexByTypePrefix(dsoItemValues, 'NINA.Sequencer.SequenceItem.FilterWheel.SwitchFilter')
     if (switchIndex < 0) throw new Error('Template: SwitchFilter not found')
@@ -555,7 +580,7 @@ export function buildNinaSequenceJson(params: NinaSequenceParams): string {
     root['PomfretAstro'] = {
       QueueId: pomfretQueueId,
       OutputMode: params.outputMode ?? 'raw_zip',
-      FilterName: normalizedPlans[0]?.filterName ?? params.filterName,
+      FilterName: templateKind === 'variable_star' ? 'G' : (normalizedPlans[0]?.filterName ?? params.filterName),
       FilterPlans: normalizedPlans,
       SessionProgressHint:
         'POST JSON to /api/imaging/session-progress with { "queueId": "<QueueId>", ... }',

@@ -8,6 +8,7 @@ import {
   imagingUnauthorized,
 } from '@/lib/imaging-queue-auth'
 import { buildNinaSequenceJson } from '@/lib/build-nina-sequence-json'
+import { scheduledSessionEndMs } from '@/lib/imaging/nina/sequence-json'
 import {
   endNightJob,
   ninaAgentJobResponse,
@@ -40,7 +41,6 @@ import { boardMarkDownloaded, boardUpsertInProgress, listBoardEntries } from '@/
 import {
   consumeRequestById,
   listPending,
-  VARIABLE_STAR_SESSION_OVERHEAD_SEC,
   type ImagingRequest,
 } from '@/lib/imaging-queue-store'
 import type { ObservatoryStatus } from '@/lib/observatory-status-store'
@@ -83,7 +83,7 @@ export function OPTIONS() {
 }
 
 function sequenceJsonFor(r: ImagingRequest): string | null {
-  if (r.ninaSequenceJson) return r.ninaSequenceJson
+  if (r.ninaSequenceJson && r.sequenceTemplate !== 'variable_star') return r.ninaSequenceJson
   if (r.raHours != null && r.decDeg != null && r.filter) {
     return buildNinaSequenceJson({
       raHoursDecimal: r.raHours,
@@ -96,12 +96,7 @@ function sequenceJsonFor(r: ImagingRequest): string | null {
       outputMode: r.outputMode,
       cameraCoolingTempC: r.cameraCoolingTempC,
       targetName: r.target ?? undefined,
-      variableStarObservingSeconds:
-        r.sequenceTemplate === 'variable_star' &&
-        typeof r.estimatedDurationSeconds === 'number' &&
-        Number.isFinite(r.estimatedDurationSeconds)
-          ? Math.max(0, r.estimatedDurationSeconds - VARIABLE_STAR_SESSION_OVERHEAD_SEC)
-          : undefined,
+      variableStarSessionEndMs: scheduledSessionEndMs(r) ?? undefined,
     })
   }
   return null

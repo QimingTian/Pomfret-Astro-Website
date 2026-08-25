@@ -684,10 +684,6 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
         exposureSeconds: p.exposureSeconds,
         exposureCount: p.count,
       })),
-      variableStarObservingSeconds:
-        sequenceTemplate === 'variable_star'
-          ? Math.max(0, estimatedDurationSeconds - VARIABLE_STAR_SESSION_OVERHEAD_SEC)
-          : undefined,
     })
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Failed to build NINA sequence'
@@ -891,10 +887,6 @@ export async function updatePendingRequestById(
         exposureSeconds: p.exposureSeconds,
         exposureCount: p.count,
       })),
-      variableStarObservingSeconds:
-        sequenceTemplate === 'variable_star'
-          ? Math.max(0, estimatedDurationSeconds - VARIABLE_STAR_SESSION_OVERHEAD_SEC)
-          : undefined,
     })
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Failed to build NINA sequence'

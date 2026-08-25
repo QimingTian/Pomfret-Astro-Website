@@ -5,8 +5,9 @@ import {
   imagingQueueOrMemberAuthorized,
   imagingUnauthorized,
 } from '@/lib/imaging-queue-auth'
-import { getRequestById, VARIABLE_STAR_SESSION_OVERHEAD_SEC } from '@/lib/imaging-queue-store'
+import { getRequestById } from '@/lib/imaging-queue-store'
 import { buildNinaSequenceJson } from '@/lib/build-nina-sequence-json'
+import { scheduledSessionEndMs } from '@/lib/imaging/nina/sequence-json'
 
 export const runtime = 'nodejs'
 
@@ -33,7 +34,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     )
   }
 
-  let sequenceJson = row.ninaSequenceJson
+  let sequenceJson =
+    row.sequenceTemplate === 'variable_star' ? undefined : row.ninaSequenceJson
   if (!sequenceJson && row.raHours != null && row.decDeg != null && row.filter) {
     try {
       sequenceJson = buildNinaSequenceJson({
@@ -47,12 +49,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
         outputMode: row.outputMode,
         cameraCoolingTempC: row.cameraCoolingTempC,
         targetName: row.target ?? undefined,
-        variableStarObservingSeconds:
-          row.sequenceTemplate === 'variable_star' &&
-          typeof row.estimatedDurationSeconds === 'number' &&
-          Number.isFinite(row.estimatedDurationSeconds)
-            ? Math.max(0, row.estimatedDurationSeconds - VARIABLE_STAR_SESSION_OVERHEAD_SEC)
-            : undefined,
+        variableStarSessionEndMs: scheduledSessionEndMs(row) ?? undefined,
       })
     } catch {
       sequenceJson = undefined

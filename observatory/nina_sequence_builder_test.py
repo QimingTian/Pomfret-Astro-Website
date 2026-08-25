@@ -89,6 +89,78 @@ class NinaSequenceBuilderTests(unittest.TestCase):
         job = parse_job_envelope({"PomfretAstroJob": {"kind": JOB_KIND, "command": "estop"}})
         self.assertEqual(job["command"], "estop")
 
+    def test_variable_star_keeps_g_and_autofocus_before_exposure(self):
+        root = build_run_sequence(
+            {
+                "raHoursDecimal": 14.2,
+                "decDegDecimal": 20.1,
+                "filterName": "Ha",
+                "exposureSeconds": 30,
+                "exposureCount": 1,
+                "pomfretQueueId": "var-1",
+                "templateKind": "variable_star",
+                "targetName": "CR Boo",
+                "variableStarWindow": {"end": {"hours": 4, "minutes": 30, "seconds": 0}},
+            }
+        )
+        target = None
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            if isinstance(node, dict):
+                t = str(node.get("$type") or "")
+                if "VariableStarObjectContainer" in t:
+                    target = node
+                    break
+                stack.extend(node.values())
+            elif isinstance(node, list):
+                stack.extend(node)
+        self.assertIsNotNone(target)
+        values = target["Items"]["$values"]
+        types = [str(v.get("$type") or "").split(",")[0].rsplit(".", 1)[-1] for v in values if isinstance(v, dict)]
+        switch_i = types.index("SwitchFilter")
+        af_i = types.index("RunAutofocus")
+        calc_i = next(i for i, t in enumerate(types) if t == "CalculateExposureTime")
+        self.assertLess(switch_i, af_i)
+        self.assertLess(af_i, calc_i)
+        self.assertEqual(values[switch_i]["Filter"]["_name"], "G")
+        self.assertEqual(values[switch_i]["Filter"]["_position"], 5)
+        posts = []
+        for v in values:
+            if not isinstance(v, dict) or "HTTP.HttpClient" not in str(v.get("$type") or ""):
+                continue
+            body = v.get("HttpPostBody")
+            if isinstance(body, str) and body.startswith("{"):
+                body = json.loads(body).get("text")
+            posts.append(body)
+        self.assertEqual(
+            posts,
+            ["Target Centered", "Filter Switched", "Autofocus Finished", "Guiding Started | Imaging Started"],
+        )
+        centered = next(
+            v
+            for v in values
+            if isinstance(v, dict) and "HTTP.HttpClient" in str(v.get("$type") or "") and "Target Centered" in str(v.get("HttpPostBody"))
+        )
+        self.assertEqual(centered["HttpAuthUsername"], "pomfretastro")
+        self.assertEqual(centered["HttpUri"], "https://www.pomfretastro.org/api/imaging/session-progress")
+        self.assertEqual(root["PomfretAstro"]["FilterName"], "G")
+        self.assertFalse(any("WaitForTransit" in str(v.get("$type") or "") for v in values))
+        loop = values[-1]
+        cond = loop["Conditions"]["$values"][0]
+        self.assertEqual(cond["Hours"], 4)
+        self.assertEqual(cond["Minutes"], 30)
+        self.assertEqual(cond["Seconds"], 0)
+        self.assertIn("TimeCondition", str(cond.get("$type") or ""))
+        self.assertNotIn("TransitCondition", str(cond.get("$type") or ""))
+        self.assertIn("TimeProvider", str(cond.get("SelectedProvider", {}).get("$type") or ""))
+        self.assertNotIn("ObservationEndProvider", str(cond.get("SelectedProvider", {}).get("$type") or ""))
+        exo = target["ExoPlanetDSO"]
+        self.assertIn("$ref", exo["Coordinates"])
+        moon_coords = exo["Moon"]["Coordinates"]
+        self.assertEqual(moon_coords.get("$id"), "45")
+        self.assertEqual(moon_coords.get("RA"), 0.0)
+
     def test_templates_exist(self):
         folder = ROOT / "nina_templates"
         for name in (

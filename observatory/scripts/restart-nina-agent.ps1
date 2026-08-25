@@ -1,32 +1,26 @@
-$agent = 'C:\Users\Observatory\Downloads\nina_agent.py'
-$log = 'C:\Users\Observatory\Downloads\nina_agent_boot.log'
+$agentTask = 'PomfretNinaAgent'
 
 Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='py.exe'" |
   Where-Object { $_.CommandLine -like '*nina_agent*' } |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
-Start-Sleep -Seconds 2
-
-$py = (Get-Command py -ErrorAction SilentlyContinue).Source
-if (-not $py) {
-  $py = 'C:\Users\Observatory\AppData\Local\Programs\Python\Python313\python.exe'
+$task = Get-ScheduledTask -TaskName $agentTask -ErrorAction SilentlyContinue
+if (-not $task) {
+  throw "Scheduled task $agentTask was not found. Recreate it or start nina_agent.py another way."
 }
 
-Start-Process -FilePath $py -ArgumentList '-3', $agent `
-  -WorkingDirectory 'C:\Users\Observatory\Downloads' `
-  -WindowStyle Hidden `
-  -RedirectStandardOutput $log `
-  -RedirectStandardError ($log + '.err')
-
+Enable-ScheduledTask -TaskName $agentTask | Out-Null
+Stop-ScheduledTask -TaskName $agentTask -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 1
+Start-ScheduledTask -TaskName $agentTask
 Start-Sleep -Seconds 4
+
+Write-Output '--- task ---'
+Get-ScheduledTask -TaskName $agentTask | Select-Object TaskName, State | Format-List
+Get-ScheduledTaskInfo -TaskName $agentTask | Select-Object LastRunTime, LastTaskResult | Format-List
 
 Write-Output '--- running nina_agent processes ---'
 Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='py.exe'" |
   Where-Object { $_.CommandLine -like '*nina_agent*' } |
   Select-Object ProcessId, CommandLine |
   Format-List
-
-if (Test-Path $log) {
-  Write-Output '--- boot log tail ---'
-  Get-Content $log -Tail 12
-}

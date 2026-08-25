@@ -238,12 +238,29 @@ def dec_decimal_to_nina(dec_deg: float) -> dict[str, Any]:
     }
 
 
+def _assert_json_refs_clean(node: Any, path: str = "$") -> None:
+    if isinstance(node, list):
+        for i, item in enumerate(node):
+            _assert_json_refs_clean(item, f"{path}[{i}]")
+        return
+    if not isinstance(node, dict):
+        return
+    if REF_KEY in node and any(k != REF_KEY for k in node):
+        raise ValueError(f"NINA $ref object has extra keys at {path}: {sorted(node)}")
+    for key, child in node.items():
+        _assert_json_refs_clean(child, f"{path}.{key}")
+
+
 def _apply_nina_coords(coords: dict[str, Any], ra_hours: float, dec_deg: float) -> None:
+    if REF_KEY in coords:
+        raise ValueError("Refusing to write coordinates onto a $ref object")
     coords.update(ra_decimal_to_nina(ra_hours))
     coords.update(dec_decimal_to_nina(dec_deg))
 
 
 def _apply_exo_coords(coords: dict[str, Any], ra_hours: float, dec_deg: float) -> None:
+    if REF_KEY in coords:
+        raise ValueError("Refusing to write ExoPlanet coordinates onto a $ref object")
     ra = ra_decimal_to_nina(ra_hours)
     dec = dec_decimal_to_nina(dec_deg)
     ra_h = ra["RAHours"] + ra["RAMinutes"] / 60 + ra["RASeconds"] / 3600
@@ -261,15 +278,10 @@ def _apply_exo_coords(coords: dict[str, Any], ra_hours: float, dec_deg: float) -
 
 
 def _apply_variable_star_window(dso: dict[str, Any], window: dict[str, Any]) -> None:
-    start = window.get("start") or {}
     end = window.get("end") or {}
-    wait = _find_first_by_type(dso, "NINA.Plugin.ExoPlanets.Sequencer.Utility.WaitForTransit")
-    if wait is not None:
-        wait["Hours"] = start.get("hours", 0)
-        wait["Minutes"] = start.get("minutes", 0)
-        wait["Seconds"] = start.get("seconds", 0)
-        wait["MinutesOffset"] = 0
-    cond = _find_last_by_type(dso, "NINA.Plugin.ExoPlanets.Sequencer.Conditions.TransitCondition")
+    cond = _find_last_by_type(dso, "NINA.Sequencer.Conditions.TimeCondition")
+    if cond is None:
+        cond = _find_last_by_type(dso, "NINA.Plugin.ExoPlanets.Sequencer.Conditions.TransitCondition")
     if cond is not None:
         cond["Hours"] = end.get("hours", 0)
         cond["Minutes"] = end.get("minutes", 0)
@@ -398,7 +410,7 @@ def build_run_sequence(params: dict[str, Any]) -> dict[str, Any]:
     exo = dso.get("ExoPlanetDSO")
     if isinstance(exo, dict):
         exo_coords = exo.get("Coordinates")
-        if isinstance(exo_coords, dict):
+        if isinstance(exo_coords, dict) and REF_KEY not in exo_coords:
             _apply_exo_coords(exo_coords, ra, dec)
 
     dso_items = _as_record(dso.get("Items"))
@@ -411,7 +423,9 @@ def build_run_sequence(params: dict[str, Any]) -> dict[str, Any]:
         switch = _find_first_by_type(values, "NINA.Sequencer.SequenceItem.FilterWheel.SwitchFilter")
         if switch is None:
             raise ValueError("Template: SwitchFilter not found")
-        switch["Filter"] = _build_filter_info(root, used, plans[0]["filterName"])
+        filter_info = switch.get("Filter")
+        if not isinstance(filter_info, dict) or str(filter_info.get("_name") or "") != "G":
+            raise ValueError("Template: variable star SwitchFilter must stay G")
     elif len(plans) == 1:
         switch_i = _index_by_type(values, "NINA.Sequencer.SequenceItem.FilterWheel.SwitchFilter")
         take_i = _index_by_type(values, "NINA.Sequencer.SequenceItem.Imaging.TakeManyExposures")
@@ -472,13 +486,14 @@ def build_run_sequence(params: dict[str, Any]) -> dict[str, Any]:
         root["PomfretAstro"] = {
             "QueueId": queue_id,
             "OutputMode": params.get("outputMode") or "raw_zip",
-            "FilterName": plans[0]["filterName"],
+            "FilterName": "G" if kind == "variable_star" else plans[0]["filterName"],
             "FilterPlans": plans,
             "SessionProgressHint": 'POST JSON to /api/imaging/session-progress with { "queueId": "<QueueId>", ... }',
         }
         _apply_session_progress_queue_id(root, queue_id)
     if params.get("cameraCoolingTempC") is not None:
         _apply_cooling(root, float(params["cameraCoolingTempC"]))
+    _assert_json_refs_clean(root)
     return root
 
 

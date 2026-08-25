@@ -4,7 +4,7 @@
   "Strategy": {
     "$type": "NINA.Sequencer.Container.ExecutionStrategy.SequentialStrategy, NINA.Sequencer"
   },
-  "Name": "Variable Star Sequence",
+  "Name": "test var",
   "Conditions": {
     "$id": "2",
     "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Conditions.ISequenceCondition, NINA.Sequencer]], System.ObjectModel",
@@ -48,7 +48,7 @@
               "HttpMethod": 1,
               "HttpUri": "https://www.pomfretastro.org/api/imaging/session-progress",
               "HttpPostContentType": "text/plain",
-              "HttpPostBody": "Camera Connected\r\n",
+              "HttpPostBody": "Camera Connected",
               "HttpClientDescription": "",
               "HttpAuthUsername": "pomfretastro",
               "HttpAuthPassword": "1894",
@@ -61,7 +61,7 @@
             {
               "$id": "9",
               "$type": "NINA.Sequencer.SequenceItem.Connect.ConnectEquipment, NINA.Sequencer",
-              "SelectedDevice": "Mount",
+              "SelectedDevice": "Filter Wheel",
               "Parent": {
                 "$ref": "4"
               },
@@ -74,7 +74,7 @@
               "HttpMethod": 1,
               "HttpUri": "https://www.pomfretastro.org/api/imaging/session-progress",
               "HttpPostContentType": "text/plain",
-              "HttpPostBody": "Mount Connected\r\n\r\n",
+              "HttpPostBody": "Filter Wheel Connected",
               "HttpClientDescription": "",
               "HttpAuthUsername": "pomfretastro",
               "HttpAuthPassword": "1894",
@@ -87,7 +87,7 @@
             {
               "$id": "11",
               "$type": "NINA.Sequencer.SequenceItem.Connect.ConnectEquipment, NINA.Sequencer",
-              "SelectedDevice": "Dome",
+              "SelectedDevice": "Focuser",
               "Parent": {
                 "$ref": "4"
               },
@@ -100,7 +100,7 @@
               "HttpMethod": 1,
               "HttpUri": "https://www.pomfretastro.org/api/imaging/session-progress",
               "HttpPostContentType": "text/plain",
-              "HttpPostBody": "Dome Connected\r\n\r\n",
+              "HttpPostBody": "Focuser Connected",
               "HttpClientDescription": "",
               "HttpAuthUsername": "pomfretastro",
               "HttpAuthPassword": "1894",
@@ -112,18 +112,12 @@
             },
             {
               "$id": "13",
-              "$type": "DaleGhent.NINA.GroundStation.HTTP.HttpClient, DaleGhent.NINA.GroundStation",
-              "HttpMethod": 1,
-              "HttpUri": "https://www.pomfretastro.org/api/imaging/session-progress",
-              "HttpPostContentType": "text/plain",
-              "HttpPostBody": "Cooling Camera\r\n",
-              "HttpClientDescription": "",
-              "HttpAuthUsername": "pomfretastro",
-              "HttpAuthPassword": "1894",
+              "$type": "NINA.Sequencer.SequenceItem.Connect.ConnectEquipment, NINA.Sequencer",
+              "SelectedDevice": "Mount",
               "Parent": {
                 "$ref": "4"
               },
-              "ErrorBehavior": 0,
+              "ErrorBehavior": 2,
               "Attempts": 1
             },
             {
@@ -132,7 +126,7 @@
               "HttpMethod": 1,
               "HttpUri": "https://www.pomfretastro.org/api/imaging/session-progress",
               "HttpPostContentType": "text/plain",
-              "HttpPostBody": "Opening Dome\r\n",
+              "HttpPostBody": "Mount Connected",
               "HttpClientDescription": "",
               "HttpAuthUsername": "pomfretastro",
               "HttpAuthPassword": "1894",
@@ -144,77 +138,160 @@
             },
             {
               "$id": "15",
+              "$type": "NINA.Sequencer.SequenceItem.Connect.ConnectEquipment, NINA.Sequencer",
+              "SelectedDevice": "Guider",
+              "Parent": {
+                "$ref": "4"
+              },
+              "ErrorBehavior": 2,
+              "Attempts": 1
+            },
+            {
+              "$id": "16",
+              "$type": "DaleGhent.NINA.GroundStation.HTTP.HttpClient, DaleGhent.NINA.GroundStation",
+              "HttpMethod": 1,
+              "HttpUri": "https://www.pomfretastro.org/api/imaging/session-progress",
+              "HttpPostContentType": "text/plain",
+              "HttpPostBody": "Guider Connected",
+              "HttpClientDescription": "",
+              "HttpAuthUsername": "pomfretastro",
+              "HttpAuthPassword": "1894",
+              "Parent": {
+                "$ref": "4"
+              },
+              "ErrorBehavior": 0,
+              "Attempts": 1
+            },
+            {
+              "$id": "17",
+              "$type": "NINA.Sequencer.SequenceItem.Connect.ConnectEquipment, NINA.Sequencer",
+              "SelectedDevice": "Weather",
+              "Parent": {
+                "$ref": "4"
+              },
+              "ErrorBehavior": 0,
+              "Attempts": 1
+            },
+            {
+              "$id": "18",
+              "$type": "NINA.Sequencer.SequenceItem.Connect.ConnectEquipment, NINA.Sequencer",
+              "SelectedDevice": "Dome",
+              "Parent": {
+                "$ref": "4"
+              },
+              "ErrorBehavior": 2,
+              "Attempts": 1
+            },
+            {
+              "$id": "19",
+              "$type": "DaleGhent.NINA.GroundStation.HTTP.HttpClient, DaleGhent.NINA.GroundStation",
+              "HttpMethod": 1,
+              "HttpUri": "https://www.pomfretastro.org/api/imaging/session-progress",
+              "HttpPostContentType": "text/plain",
+              "HttpPostBody": "Dome Connected",
+              "HttpClientDescription": "",
+              "HttpAuthUsername": "pomfretastro",
+              "HttpAuthPassword": "1894",
+              "Parent": {
+                "$ref": "4"
+              },
+              "ErrorBehavior": 0,
+              "Attempts": 1
+            },
+            {
+              "$id": "20",
+              "$type": "NINA.DiscordAlert.DiscordAlertSequenceItems.DiscordMessageInstruction, Discord Alert",
+              "Text": "All Equipment Successfully Connected",
+              "Parent": {
+                "$ref": "4"
+              },
+              "ErrorBehavior": 0,
+              "Attempts": 1
+            },
+            {
+              "$id": "21",
+              "$type": "DaleGhent.NINA.GroundStation.HTTP.HttpClient, DaleGhent.NINA.GroundStation",
+              "HttpMethod": 1,
+              "HttpUri": "https://www.pomfretastro.org/api/imaging/session-progress",
+              "HttpPostContentType": "text/plain",
+              "HttpPostBody": "Cooling Camera",
+              "HttpClientDescription": "",
+              "HttpAuthUsername": "pomfretastro",
+              "HttpAuthPassword": "1894",
+              "Parent": {
+                "$ref": "4"
+              },
+              "ErrorBehavior": 0,
+              "Attempts": 1
+            },
+            {
+              "$id": "22",
+              "$type": "DaleGhent.NINA.GroundStation.HTTP.HttpClient, DaleGhent.NINA.GroundStation",
+              "HttpMethod": 1,
+              "HttpUri": "https://www.pomfretastro.org/api/imaging/session-progress",
+              "HttpPostContentType": "text/plain",
+              "HttpPostBody": "Opening Dome",
+              "HttpClientDescription": "",
+              "HttpAuthUsername": "pomfretastro",
+              "HttpAuthPassword": "1894",
+              "Parent": {
+                "$ref": "4"
+              },
+              "ErrorBehavior": 0,
+              "Attempts": 1
+            },
+            {
+              "$id": "23",
               "$type": "NINA.Sequencer.Container.ParallelContainer, NINA.Sequencer",
               "Strategy": {
                 "$type": "NINA.Sequencer.Container.ExecutionStrategy.ParallelStrategy, NINA.Sequencer"
               },
               "Name": "Parallel Instruction Set",
               "Conditions": {
-                "$id": "16",
+                "$id": "24",
                 "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Conditions.ISequenceCondition, NINA.Sequencer]], System.ObjectModel",
                 "$values": []
               },
               "IsExpanded": true,
               "Items": {
-                "$id": "17",
+                "$id": "25",
                 "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.SequenceItem.ISequenceItem, NINA.Sequencer]], System.ObjectModel",
                 "$values": [
                   {
-                    "$id": "18",
-                    "$type": "NINA.Sequencer.SequenceItem.Connect.ConnectEquipment, NINA.Sequencer",
-                    "SelectedDevice": "Weather",
+                    "$id": "26",
+                    "$type": "NINA.Sequencer.SequenceItem.Camera.CoolCamera, NINA.Sequencer",
+                    "Temperature": -10.0,
+                    "Duration": 10.0,
                     "Parent": {
-                      "$ref": "15"
+                      "$ref": "23"
+                    },
+                    "ErrorBehavior": 2,
+                    "Attempts": 1
+                  },
+                  {
+                    "$id": "27",
+                    "$type": "NINA.Sequencer.SequenceItem.Camera.DewHeater, NINA.Sequencer",
+                    "OnOff": true,
+                    "Parent": {
+                      "$ref": "23"
                     },
                     "ErrorBehavior": 0,
                     "Attempts": 1
                   },
                   {
-                    "$id": "19",
-                    "$type": "NINA.Sequencer.SequenceItem.Connect.ConnectEquipment, NINA.Sequencer",
-                    "SelectedDevice": "Focuser",
+                    "$id": "28",
+                    "$type": "NINA.Sequencer.SequenceItem.Telescope.FindHome, NINA.Sequencer",
                     "Parent": {
-                      "$ref": "15"
+                      "$ref": "23"
                     },
-                    "ErrorBehavior": 2,
+                    "ErrorBehavior": 0,
                     "Attempts": 1
                   },
                   {
-                    "$id": "20",
-                    "$type": "NINA.Sequencer.SequenceItem.Connect.ConnectEquipment, NINA.Sequencer",
-                    "SelectedDevice": "Guider",
-                    "Parent": {
-                      "$ref": "15"
-                    },
-                    "ErrorBehavior": 2,
-                    "Attempts": 1
-                  },
-                  {
-                    "$id": "21",
-                    "$type": "NINA.Sequencer.SequenceItem.Camera.CoolCamera, NINA.Sequencer",
-                    "Temperature": -10.0,
-                    "Duration": 10.0,
-                    "Parent": {
-                      "$ref": "15"
-                    },
-                    "ErrorBehavior": 2,
-                    "Attempts": 1
-                  },
-                  {
-                    "$id": "22",
-                    "$type": "NINA.Sequencer.SequenceItem.Connect.ConnectEquipment, NINA.Sequencer",
-                    "SelectedDevice": "Filter Wheel",
-                    "Parent": {
-                      "$ref": "15"
-                    },
-                    "ErrorBehavior": 2,
-                    "Attempts": 1
-                  },
-                  {
-                    "$id": "23",
+                    "$id": "29",
                     "$type": "NINA.Sequencer.SequenceItem.Dome.OpenDomeShutter, NINA.Sequencer",
                     "Parent": {
-                      "$ref": "15"
+                      "$ref": "23"
                     },
                     "ErrorBehavior": 2,
                     "Attempts": 1
@@ -222,7 +299,7 @@
                 ]
               },
               "Triggers": {
-                "$id": "24",
+                "$id": "30",
                 "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Trigger.ISequenceTrigger, NINA.Sequencer]], System.ObjectModel",
                 "$values": []
               },
@@ -233,64 +310,7 @@
               "Attempts": 1
             },
             {
-              "$id": "25",
-              "$type": "NINA.Sequencer.SequenceItem.Dome.EnableDomeSynchronization, NINA.Sequencer",
-              "Parent": {
-                "$ref": "4"
-              },
-              "ErrorBehavior": 0,
-              "Attempts": 1
-            },
-            {
-              "$id": "26",
-              "$type": "DaleGhent.NINA.GroundStation.HTTP.HttpClient, DaleGhent.NINA.GroundStation",
-              "HttpMethod": 1,
-              "HttpUri": "https://www.pomfretastro.org/api/imaging/session-progress",
-              "HttpPostContentType": "text/plain",
-              "HttpPostBody": "Guider Connected\r\n\r\n\r\n\r\n",
-              "HttpClientDescription": "",
-              "HttpAuthUsername": "pomfretastro",
-              "HttpAuthPassword": "1894",
-              "Parent": {
-                "$ref": "4"
-              },
-              "ErrorBehavior": 0,
-              "Attempts": 1
-            },
-            {
-              "$id": "27",
-              "$type": "DaleGhent.NINA.GroundStation.HTTP.HttpClient, DaleGhent.NINA.GroundStation",
-              "HttpMethod": 1,
-              "HttpUri": "https://www.pomfretastro.org/api/imaging/session-progress",
-              "HttpPostContentType": "text/plain",
-              "HttpPostBody": "Focuser Connected\r\n\r\n\r\n\r\n",
-              "HttpClientDescription": "",
-              "HttpAuthUsername": "pomfretastro",
-              "HttpAuthPassword": "1894",
-              "Parent": {
-                "$ref": "4"
-              },
-              "ErrorBehavior": 0,
-              "Attempts": 1
-            },
-            {
-              "$id": "28",
-              "$type": "DaleGhent.NINA.GroundStation.HTTP.HttpClient, DaleGhent.NINA.GroundStation",
-              "HttpMethod": 1,
-              "HttpUri": "https://www.pomfretastro.org/api/imaging/session-progress",
-              "HttpPostContentType": "text/plain",
-              "HttpPostBody": "Weather Connected\r\n\r\n\r\n",
-              "HttpClientDescription": "",
-              "HttpAuthUsername": "pomfretastro",
-              "HttpAuthPassword": "1894",
-              "Parent": {
-                "$ref": "4"
-              },
-              "ErrorBehavior": 0,
-              "Attempts": 1
-            },
-            {
-              "$id": "29",
+              "$id": "31",
               "$type": "DaleGhent.NINA.GroundStation.HTTP.HttpClient, DaleGhent.NINA.GroundStation",
               "HttpMethod": 1,
               "HttpUri": "https://www.pomfretastro.org/api/imaging/session-progress",
@@ -306,7 +326,23 @@
               "Attempts": 1
             },
             {
-              "$id": "30",
+              "$id": "32",
+              "$type": "DaleGhent.NINA.GroundStation.HTTP.HttpClient, DaleGhent.NINA.GroundStation",
+              "HttpMethod": 1,
+              "HttpUri": "https://www.pomfretastro.org/api/imaging/session-progress",
+              "HttpPostContentType": "text/plain",
+              "HttpPostBody": "Mount Homed",
+              "HttpClientDescription": "",
+              "HttpAuthUsername": "pomfretastro",
+              "HttpAuthPassword": "1894",
+              "Parent": {
+                "$ref": "4"
+              },
+              "ErrorBehavior": 0,
+              "Attempts": 1
+            },
+            {
+              "$id": "33",
               "$type": "DaleGhent.NINA.GroundStation.HTTP.HttpClient, DaleGhent.NINA.GroundStation",
               "HttpMethod": 1,
               "HttpUri": "https://www.pomfretastro.org/api/imaging/session-progress",
@@ -322,9 +358,44 @@
               "Attempts": 1
             },
             {
-              "$id": "31",
+              "$id": "34",
+              "$type": "NINA.Sequencer.SequenceItem.Telescope.SetTracking, NINA.Sequencer",
+              "TrackingMode": 0,
+              "Parent": {
+                "$ref": "4"
+              },
+              "ErrorBehavior": 0,
+              "Attempts": 1
+            },
+            {
+              "$id": "35",
+              "$type": "NINA.Sequencer.SequenceItem.Dome.EnableDomeSynchronization, NINA.Sequencer",
+              "Parent": {
+                "$ref": "4"
+              },
+              "ErrorBehavior": 2,
+              "Attempts": 1
+            },
+            {
+              "$id": "36",
               "$type": "NINA.DiscordAlert.DiscordAlertSequenceItems.DiscordMessageInstruction, Discord Alert",
-              "Text": "All Equipments Successfully Connected And Ready",
+              "Text": "All Equipment Ready",
+              "Parent": {
+                "$ref": "4"
+              },
+              "ErrorBehavior": 0,
+              "Attempts": 1
+            },
+            {
+              "$id": "37",
+              "$type": "DaleGhent.NINA.GroundStation.HTTP.HttpClient, DaleGhent.NINA.GroundStation",
+              "HttpMethod": 1,
+              "HttpUri": "https://www.pomfretastro.org/api/imaging/session-progress",
+              "HttpPostContentType": "text/plain",
+              "HttpPostBody": "Slew To Target",
+              "HttpClientDescription": "",
+              "HttpAuthUsername": "pomfretastro",
+              "HttpAuthPassword": "1894",
               "Parent": {
                 "$ref": "4"
               },
@@ -334,7 +405,7 @@
           ]
         },
         "Triggers": {
-          "$id": "32",
+          "$id": "38",
           "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Trigger.ISequenceTrigger, NINA.Sequencer]], System.ObjectModel",
           "$values": []
         },
@@ -345,41 +416,41 @@
         "Attempts": 1
       },
       {
-        "$id": "33",
+        "$id": "39",
         "$type": "NINA.Sequencer.Container.TargetAreaContainer, NINA.Sequencer",
         "Strategy": {
           "$type": "NINA.Sequencer.Container.ExecutionStrategy.SequentialStrategy, NINA.Sequencer"
         },
         "Name": "Targets",
         "Conditions": {
-          "$id": "34",
+          "$id": "40",
           "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Conditions.ISequenceCondition, NINA.Sequencer]], System.ObjectModel",
           "$values": []
         },
         "IsExpanded": true,
         "Items": {
-          "$id": "35",
+          "$id": "41",
           "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.SequenceItem.ISequenceItem, NINA.Sequencer]], System.ObjectModel",
           "$values": [
             {
-              "$id": "36",
-              "$type": "NINA.Plugin.ExoPlanets.Sequencer.Container.ExoPlanetObjectContainer, ExoPlanets",
-              "SelectedExoPlanet": null,
+              "$id": "42",
+              "$type": "NINA.Plugin.ExoPlanets.Sequencer.Container.VariableStarObjectContainer, ExoPlanets",
+              "SelectedVariableStar": null,
               "ExoPlanetDSO": {
-                "$id": "37",
+                "$id": "43",
                 "$type": "NINA.Plugin.ExoPlanets.Model.ExoPlanetDeepSkyObject, ExoPlanets",
                 "ObservationStart": "0001-01-01T00:00:00",
                 "ObservationEnd": "0001-01-01T00:00:00",
                 "LightCurve": {
-                  "$id": "38",
+                  "$id": "44",
                   "$type": "System.Collections.Generic.List`1[[OxyPlot.DataPoint, OxyPlot]], System.Private.CoreLib",
                   "$values": []
                 },
-                "ReferenceDate": "2026-05-02T12:00:00-04:00",
+                "ReferenceDate": "2026-08-25T12:00:00-04:00",
                 "Moon": {
                   "$type": "NINA.Astrometry.MoonInfo, NINA.Astrometry",
                   "Coordinates": {
-                    "$id": "39",
+                    "$id": "45",
                     "$type": "NINA.Astrometry.Coordinates, NINA.Astrometry",
                     "RA": 0.0,
                     "RAString": "00:00:00",
@@ -389,27 +460,27 @@
                     "Epoch": 2,
                     "DateTime": {
                       "$type": "NINA.Core.Utility.SystemDateTime, NINA.Core",
-                      "Now": "2026-05-02T12:19:36.3939288-04:00",
-                      "UtcNow": "2026-05-02T16:19:36.3940506Z",
+                      "Now": "2026-08-25T14:28:45.2125792-04:00",
+                      "UtcNow": "2026-08-25T18:28:45.212697Z",
                       "MinValue": "0001-01-01T00:00:00",
                       "MaxValue": "9999-12-31T23:59:59.9999999"
                     }
                   },
                   "MaxAltitude": {
-                    "$id": "40",
+                    "$id": "46",
                     "$type": "OxyPlot.DataPoint, OxyPlot",
                     "X": 0.0,
                     "Y": 0.0
                   },
                   "DataPoints": null,
-                  "Separation": 0.0,
-                  "SeparationText": null,
+                  "Separation": 87.4431911321291,
+                  "SeparationText": "087°",
                   "DisplayMoon": false,
-                  "Phase": 1,
-                  "Color": "#0FF0F0F0"
+                  "Phase": 8,
+                  "Color": "#25DADADA"
                 },
                 "Coordinates": {
-                  "$ref": "39"
+                  "$ref": "45"
                 },
                 "ShiftTrackingRate": {
                   "$type": "NINA.Astrometry.SiderealShiftTrackingRate, NINA.Astrometry",
@@ -436,19 +507,1460 @@
                 "RotationPositionAngle": 0.0,
                 "MaxAltitude": {
                   "$type": "OxyPlot.DataPoint, OxyPlot",
-                  "X": 0.0,
-                  "Y": 0.0
+                  "X": 46259.90416666667,
+                  "Y": 67.04641214189174
                 },
                 "Altitudes": {
                   "$type": "System.Collections.Generic.List`1[[OxyPlot.DataPoint, OxyPlot]], System.Private.CoreLib",
-                  "$values": []
+                  "$values": [
+                    {
+                      "$id": "47",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.5,
+                      "Y": 20.132335964353807
+                    },
+                    {
+                      "$id": "48",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.504166666666,
+                      "Y": 20.42448313305187
+                    },
+                    {
+                      "$id": "49",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.50833333333,
+                      "Y": 20.72791946737694
+                    },
+                    {
+                      "$id": "50",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.5125,
+                      "Y": 21.042512458010265
+                    },
+                    {
+                      "$id": "51",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.51666666667,
+                      "Y": 21.368125678297943
+                    },
+                    {
+                      "$id": "52",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.520833333336,
+                      "Y": 21.7046189191769
+                    },
+                    {
+                      "$id": "53",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.525,
+                      "Y": 22.051848322077383
+                    },
+                    {
+                      "$id": "54",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.52916666667,
+                      "Y": 22.409666509209874
+                    },
+                    {
+                      "$id": "55",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.53333333333,
+                      "Y": 22.77792271065507
+                    },
+                    {
+                      "$id": "56",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.5375,
+                      "Y": 23.156462887686644
+                    },
+                    {
+                      "$id": "57",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.541666666664,
+                      "Y": 23.545129851769026
+                    },
+                    {
+                      "$id": "58",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.54583333333,
+                      "Y": 23.943763378684036
+                    },
+                    {
+                      "$id": "59",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.55,
+                      "Y": 24.352200317252333
+                    },
+                    {
+                      "$id": "60",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.55416666667,
+                      "Y": 24.77027469212718
+                    },
+                    {
+                      "$id": "61",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.558333333334,
+                      "Y": 25.197817800148886
+                    },
+                    {
+                      "$id": "62",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.5625,
+                      "Y": 25.634658299757856
+                    },
+                    {
+                      "$id": "63",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.566666666666,
+                      "Y": 26.08062229297284
+                    },
+                    {
+                      "$id": "64",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.57083333333,
+                      "Y": 26.53553339944778
+                    },
+                    {
+                      "$id": "65",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.575,
+                      "Y": 26.999212822125482
+                    },
+                    {
+                      "$id": "66",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.57916666667,
+                      "Y": 27.471479404009486
+                    },
+                    {
+                      "$id": "67",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.583333333336,
+                      "Y": 27.95214967557579
+                    },
+                    {
+                      "$id": "68",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.5875,
+                      "Y": 28.44103789234364
+                    },
+                    {
+                      "$id": "69",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.59166666667,
+                      "Y": 28.937956062119806
+                    },
+                    {
+                      "$id": "70",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.59583333333,
+                      "Y": 29.442713961422008
+                    },
+                    {
+                      "$id": "71",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.6,
+                      "Y": 29.95511914057578
+                    },
+                    {
+                      "$id": "72",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.604166666664,
+                      "Y": 30.474976916962923
+                    },
+                    {
+                      "$id": "73",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.60833333333,
+                      "Y": 31.002090355880966
+                    },
+                    {
+                      "$id": "74",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.6125,
+                      "Y": 31.536260238448634
+                    },
+                    {
+                      "$id": "75",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.61666666667,
+                      "Y": 32.07728501596508
+                    },
+                    {
+                      "$id": "76",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.620833333334,
+                      "Y": 32.62496075009697
+                    },
+                    {
+                      "$id": "77",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.625,
+                      "Y": 33.17908103823021
+                    },
+                    {
+                      "$id": "78",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.629166666666,
+                      "Y": 33.73943692328063
+                    },
+                    {
+                      "$id": "79",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.63333333333,
+                      "Y": 34.30581678720842
+                    },
+                    {
+                      "$id": "80",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.6375,
+                      "Y": 34.87800622742826
+                    },
+                    {
+                      "$id": "81",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.64166666667,
+                      "Y": 35.45578791524672
+                    },
+                    {
+                      "$id": "82",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.645833333336,
+                      "Y": 36.03894143539233
+                    },
+                    {
+                      "$id": "83",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.65,
+                      "Y": 36.62724310563191
+                    },
+                    {
+                      "$id": "84",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.65416666667,
+                      "Y": 37.22046577538824
+                    },
+                    {
+                      "$id": "85",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.65833333333,
+                      "Y": 37.81837860218821
+                    },
+                    {
+                      "$id": "86",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.6625,
+                      "Y": 38.42074680468055
+                    },
+                    {
+                      "$id": "87",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.666666666664,
+                      "Y": 39.02733139086286
+                    },
+                    {
+                      "$id": "88",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.67083333333,
+                      "Y": 39.637888860054574
+                    },
+                    {
+                      "$id": "89",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.675,
+                      "Y": 40.252170877042666
+                    },
+                    {
+                      "$id": "90",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.67916666667,
+                      "Y": 40.86992391671107
+                    },
+                    {
+                      "$id": "91",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.683333333334,
+                      "Y": 41.4908888773468
+                    },
+                    {
+                      "$id": "92",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.6875,
+                      "Y": 42.114800660692474
+                    },
+                    {
+                      "$id": "93",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.691666666666,
+                      "Y": 42.741387716691385
+                    },
+                    {
+                      "$id": "94",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.69583333333,
+                      "Y": 43.37037155074863
+                    },
+                    {
+                      "$id": "95",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.7,
+                      "Y": 44.001466191211506
+                    },
+                    {
+                      "$id": "96",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.70416666667,
+                      "Y": 44.63437761466095
+                    },
+                    {
+                      "$id": "97",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.708333333336,
+                      "Y": 45.2688031265051
+                    },
+                    {
+                      "$id": "98",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.7125,
+                      "Y": 45.904430694283
+                    },
+                    {
+                      "$id": "99",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.71666666667,
+                      "Y": 46.54093823102968
+                    },
+                    {
+                      "$id": "100",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.72083333333,
+                      "Y": 47.17799282603067
+                    },
+                    {
+                      "$id": "101",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.725,
+                      "Y": 47.81524992031557
+                    },
+                    {
+                      "$id": "102",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.729166666664,
+                      "Y": 48.452352424324026
+                    },
+                    {
+                      "$id": "103",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.73333333333,
+                      "Y": 49.088929775334655
+                    },
+                    {
+                      "$id": "104",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.7375,
+                      "Y": 49.72459693250446
+                    },
+                    {
+                      "$id": "105",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.74166666667,
+                      "Y": 50.35895330774412
+                    },
+                    {
+                      "$id": "106",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.745833333334,
+                      "Y": 50.99158163118427
+                    },
+                    {
+                      "$id": "107",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.75,
+                      "Y": 51.62204675070461
+                    },
+                    {
+                      "$id": "108",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.754166666666,
+                      "Y": 52.249894365944535
+                    },
+                    {
+                      "$id": "109",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.75833333333,
+                      "Y": 52.874649698434965
+                    },
+                    {
+                      "$id": "110",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.7625,
+                      "Y": 53.495816101048575
+                    },
+                    {
+                      "$id": "111",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.76666666667,
+                      "Y": 54.11287361191685
+                    },
+                    {
+                      "$id": "112",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.770833333336,
+                      "Y": 54.72527746038358
+                    },
+                    {
+                      "$id": "113",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.775,
+                      "Y": 55.332456535531136
+                    },
+                    {
+                      "$id": "114",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.77916666667,
+                      "Y": 55.93381183141222
+                    },
+                    {
+                      "$id": "115",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.78333333333,
+                      "Y": 56.528714887434056
+                    },
+                    {
+                      "$id": "116",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.7875,
+                      "Y": 57.11650624745829
+                    },
+                    {
+                      "$id": "117",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.791666666664,
+                      "Y": 57.69649396717441
+                    },
+                    {
+                      "$id": "118",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.79583333333,
+                      "Y": 58.267952206241056
+                    },
+                    {
+                      "$id": "119",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.8,
+                      "Y": 58.8301199495958
+                    },
+                    {
+                      "$id": "120",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.80416666667,
+                      "Y": 59.38219991119701
+                    },
+                    {
+                      "$id": "121",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.808333333334,
+                      "Y": 59.92335768319881
+                    },
+                    {
+                      "$id": "122",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.8125,
+                      "Y": 60.45272120399732
+                    },
+                    {
+                      "$id": "123",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.816666666666,
+                      "Y": 60.96938062942785
+                    },
+                    {
+                      "$id": "124",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.82083333333,
+                      "Y": 61.47238870218716
+                    },
+                    {
+                      "$id": "125",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.825,
+                      "Y": 61.96076172465799
+                    },
+                    {
+                      "$id": "126",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.82916666667,
+                      "Y": 62.43348124887237
+                    },
+                    {
+                      "$id": "127",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.833333333336,
+                      "Y": 62.88949660325909
+                    },
+                    {
+                      "$id": "128",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.8375,
+                      "Y": 63.327728377745615
+                    },
+                    {
+                      "$id": "129",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.84166666667,
+                      "Y": 63.74707298517173
+                    },
+                    {
+                      "$id": "130",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.84583333333,
+                      "Y": 64.14640840612516
+                    },
+                    {
+                      "$id": "131",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.85,
+                      "Y": 64.52460120451784
+                    },
+                    {
+                      "$id": "132",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.854166666664,
+                      "Y": 64.88051487094093
+                    },
+                    {
+                      "$id": "133",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.85833333333,
+                      "Y": 65.21301950894538
+                    },
+                    {
+                      "$id": "134",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.8625,
+                      "Y": 65.52100282550674
+                    },
+                    {
+                      "$id": "135",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.86666666667,
+                      "Y": 65.80338232172384
+                    },
+                    {
+                      "$id": "136",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.870833333334,
+                      "Y": 66.0591185053339
+                    },
+                    {
+                      "$id": "137",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.875,
+                      "Y": 66.28722886657094
+                    },
+                    {
+                      "$id": "138",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.879166666666,
+                      "Y": 66.48680227857983
+                    },
+                    {
+                      "$id": "139",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.88333333333,
+                      "Y": 66.65701340982457
+                    },
+                    {
+                      "$id": "140",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.8875,
+                      "Y": 66.79713667645801
+                    },
+                    {
+                      "$id": "141",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.89166666667,
+                      "Y": 66.90655922535176
+                    },
+                    {
+                      "$id": "142",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.895833333336,
+                      "Y": 66.9847924304141
+                    },
+                    {
+                      "$id": "143",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.9,
+                      "Y": 67.0314814108488
+                    },
+                    {
+                      "$id": "144",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.90416666667,
+                      "Y": 67.04641214189174
+                    },
+                    {
+                      "$id": "145",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.90833333333,
+                      "Y": 67.02951582421247
+                    },
+                    {
+                      "$id": "146",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.9125,
+                      "Y": 66.98087030147514
+                    },
+                    {
+                      "$id": "147",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.916666666664,
+                      "Y": 66.90069845689634
+                    },
+                    {
+                      "$id": "148",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.92083333333,
+                      "Y": 66.78936366699999
+                    },
+                    {
+                      "$id": "149",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.925,
+                      "Y": 66.64736253132938
+                    },
+                    {
+                      "$id": "150",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.92916666667,
+                      "Y": 66.47531521872179
+                    },
+                    {
+                      "$id": "151",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.933333333334,
+                      "Y": 66.27395386445278
+                    },
+                    {
+                      "$id": "152",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.9375,
+                      "Y": 66.04410951224425
+                    },
+                    {
+                      "$id": "153",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.941666666666,
+                      "Y": 65.78669811896206
+                    },
+                    {
+                      "$id": "154",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.94583333333,
+                      "Y": 65.50270612978301
+                    },
+                    {
+                      "$id": "155",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.95,
+                      "Y": 65.19317609275612
+                    },
+                    {
+                      "$id": "156",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.95416666667,
+                      "Y": 64.85919272109273
+                    },
+                    {
+                      "$id": "157",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.958333333336,
+                      "Y": 64.501869737125
+                    },
+                    {
+                      "$id": "158",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.9625,
+                      "Y": 64.12233775139003
+                    },
+                    {
+                      "$id": "159",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.96666666667,
+                      "Y": 63.72173335044821
+                    },
+                    {
+                      "$id": "160",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.97083333333,
+                      "Y": 63.3011894930602
+                    },
+                    {
+                      "$id": "161",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.975,
+                      "Y": 62.86182724979328
+                    },
+                    {
+                      "$id": "162",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.979166666664,
+                      "Y": 62.40474886797371
+                    },
+                    {
+                      "$id": "163",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.98333333333,
+                      "Y": 61.931032102748375
+                    },
+                    {
+                      "$id": "164",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.9875,
+                      "Y": 61.44172572542456
+                    },
+                    {
+                      "$id": "165",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.99166666667,
+                      "Y": 60.93784610106518
+                    },
+                    {
+                      "$id": "166",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46259.995833333334,
+                      "Y": 60.42037471696744
+                    },
+                    {
+                      "$id": "167",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.0,
+                      "Y": 59.89025654042968
+                    },
+                    {
+                      "$id": "168",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.004166666666,
+                      "Y": 59.348399086425445
+                    },
+                    {
+                      "$id": "169",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.00833333333,
+                      "Y": 58.79567208191307
+                    },
+                    {
+                      "$id": "170",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.0125,
+                      "Y": 58.23290762219252
+                    },
+                    {
+                      "$id": "171",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.01666666667,
+                      "Y": 57.66090072489027
+                    },
+                    {
+                      "$id": "172",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.020833333336,
+                      "Y": 57.08041019796633
+                    },
+                    {
+                      "$id": "173",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.025,
+                      "Y": 56.49215974896555
+                    },
+                    {
+                      "$id": "174",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.02916666667,
+                      "Y": 55.89683927313626
+                    },
+                    {
+                      "$id": "175",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.03333333333,
+                      "Y": 55.29510626772697
+                    },
+                    {
+                      "$id": "176",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.0375,
+                      "Y": 54.687587328577244
+                    },
+                    {
+                      "$id": "177",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.041666666664,
+                      "Y": 54.07487969296466
+                    },
+                    {
+                      "$id": "178",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.04583333333,
+                      "Y": 53.45755279954728
+                    },
+                    {
+                      "$id": "179",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.05,
+                      "Y": 52.83614984217927
+                    },
+                    {
+                      "$id": "180",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.05416666667,
+                      "Y": 52.21118929944172
+                    },
+                    {
+                      "$id": "181",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.058333333334,
+                      "Y": 51.58316642599785
+                    },
+                    {
+                      "$id": "182",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.0625,
+                      "Y": 50.95255469543686
+                    },
+                    {
+                      "$id": "183",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.066666666666,
+                      "Y": 50.319807187201796
+                    },
+                    {
+                      "$id": "184",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.07083333333,
+                      "Y": 49.685357912586
+                    },
+                    {
+                      "$id": "185",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.075,
+                      "Y": 49.04962307670816
+                    },
+                    {
+                      "$id": "186",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.07916666667,
+                      "Y": 48.41300227491038
+                    },
+                    {
+                      "$id": "187",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.083333333336,
+                      "Y": 47.77587962322739
+                    },
+                    {
+                      "$id": "188",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.0875,
+                      "Y": 47.13862482350442
+                    },
+                    {
+                      "$id": "189",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.09166666667,
+                      "Y": 46.50159416444752
+                    },
+                    {
+                      "$id": "190",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.09583333333,
+                      "Y": 45.865131460407184
+                    },
+                    {
+                      "$id": "191",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.1,
+                      "Y": 45.22956893006808
+                    },
+                    {
+                      "$id": "192",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.104166666664,
+                      "Y": 44.595228017465544
+                    },
+                    {
+                      "$id": "193",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.10833333333,
+                      "Y": 43.962420157903495
+                    },
+                    {
+                      "$id": "194",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.1125,
+                      "Y": 43.33144749142661
+                    },
+                    {
+                      "$id": "195",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.11666666667,
+                      "Y": 42.702603526518615
+                    },
+                    {
+                      "$id": "196",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.120833333334,
+                      "Y": 42.076173756672716
+                    },
+                    {
+                      "$id": "197",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.125,
+                      "Y": 41.452436232422166
+                    },
+                    {
+                      "$id": "198",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.129166666666,
+                      "Y": 40.831662091333094
+                    },
+                    {
+                      "$id": "199",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.13333333333,
+                      "Y": 40.21411604836236
+                    },
+                    {
+                      "$id": "200",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.1375,
+                      "Y": 39.60005684886934
+                    },
+                    {
+                      "$id": "201",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.14166666667,
+                      "Y": 38.98973768645049
+                    },
+                    {
+                      "$id": "202",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.145833333336,
+                      "Y": 38.38340658764352
+                    },
+                    {
+                      "$id": "203",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.15,
+                      "Y": 37.78130676542314
+                    },
+                    {
+                      "$id": "204",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.15416666667,
+                      "Y": 37.18367694328836
+                    },
+                    {
+                      "$id": "205",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.15833333333,
+                      "Y": 36.59075165162325
+                    },
+                    {
+                      "$id": "206",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.1625,
+                      "Y": 36.002761497896685
+                    },
+                    {
+                      "$id": "207",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.166666666664,
+                      "Y": 35.4199334121589
+                    },
+                    {
+                      "$id": "208",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.17083333333,
+                      "Y": 34.842490869187934
+                    },
+                    {
+                      "$id": "209",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.175,
+                      "Y": 34.27065408854166
+                    },
+                    {
+                      "$id": "210",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.17916666667,
+                      "Y": 33.70464021368055
+                    },
+                    {
+                      "$id": "211",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.183333333334,
+                      "Y": 33.144663471241
+                    },
+                    {
+                      "$id": "212",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.1875,
+                      "Y": 32.59093531146123
+                    },
+                    {
+                      "$id": "213",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.191666666666,
+                      "Y": 32.04366453068987
+                    },
+                    {
+                      "$id": "214",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.19583333333,
+                      "Y": 31.503057376841788
+                    },
+                    {
+                      "$id": "215",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.2,
+                      "Y": 30.96931763860607
+                    },
+                    {
+                      "$id": "216",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.20416666667,
+                      "Y": 30.442646719157587
+                    },
+                    {
+                      "$id": "217",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.208333333336,
+                      "Y": 29.923243695075552
+                    },
+                    {
+                      "$id": "218",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.2125,
+                      "Y": 29.41130536112962
+                    },
+                    {
+                      "$id": "219",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.21666666667,
+                      "Y": 28.907026261557302
+                    },
+                    {
+                      "$id": "220",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.22083333333,
+                      "Y": 28.41059870842284
+                    },
+                    {
+                      "$id": "221",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.225,
+                      "Y": 27.922212787621326
+                    },
+                    {
+                      "$id": "222",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.229166666664,
+                      "Y": 27.4420563530672
+                    },
+                    {
+                      "$id": "223",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.23333333333,
+                      "Y": 26.970315009587676
+                    },
+                    {
+                      "$id": "224",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.2375,
+                      "Y": 26.50717208502639
+                    },
+                    {
+                      "$id": "225",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.24166666667,
+                      "Y": 26.052808592050315
+                    },
+                    {
+                      "$id": "226",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.245833333334,
+                      "Y": 25.607403180146186
+                    },
+                    {
+                      "$id": "227",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.25,
+                      "Y": 25.171132078285883
+                    },
+                    {
+                      "$id": "228",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.254166666666,
+                      "Y": 24.74416902873966
+                    },
+                    {
+                      "$id": "229",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.25833333333,
+                      "Y": 24.32668521251604
+                    },
+                    {
+                      "$id": "230",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.2625,
+                      "Y": 23.918849166909926
+                    },
+                    {
+                      "$id": "231",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.26666666667,
+                      "Y": 23.520826695646274
+                    },
+                    {
+                      "$id": "232",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.270833333336,
+                      "Y": 23.132780772113446
+                    },
+                    {
+                      "$id": "233",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.275,
+                      "Y": 22.754871436187997
+                    },
+                    {
+                      "$id": "234",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.27916666667,
+                      "Y": 22.38725568516414
+                    },
+                    {
+                      "$id": "235",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.28333333333,
+                      "Y": 22.03008735931053
+                    },
+                    {
+                      "$id": "236",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.2875,
+                      "Y": 21.683517022589413
+                    },
+                    {
+                      "$id": "237",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.291666666664,
+                      "Y": 21.347691839084746
+                    },
+                    {
+                      "$id": "238",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.29583333333,
+                      "Y": 21.02275544569807
+                    },
+                    {
+                      "$id": "239",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.3,
+                      "Y": 20.708847821682973
+                    },
+                    {
+                      "$id": "240",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.30416666667,
+                      "Y": 20.406105155600514
+                    },
+                    {
+                      "$id": "241",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.308333333334,
+                      "Y": 20.114659710287643
+                    },
+                    {
+                      "$id": "242",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.3125,
+                      "Y": 19.83463968644178
+                    },
+                    {
+                      "$id": "243",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.316666666666,
+                      "Y": 19.56616908543145
+                    },
+                    {
+                      "$id": "244",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.32083333333,
+                      "Y": 19.30936757195019
+                    },
+                    {
+                      "$id": "245",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.325,
+                      "Y": 19.064350337135387
+                    },
+                    {
+                      "$id": "246",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.32916666667,
+                      "Y": 18.83122796277586
+                    },
+                    {
+                      "$id": "247",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.333333333336,
+                      "Y": 18.610106287232593
+                    },
+                    {
+                      "$id": "248",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.3375,
+                      "Y": 18.40108627369401
+                    },
+                    {
+                      "$id": "249",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.34166666667,
+                      "Y": 18.20426388138191
+                    },
+                    {
+                      "$id": "250",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.34583333333,
+                      "Y": 18.019729940316193
+                    },
+                    {
+                      "$id": "251",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.35,
+                      "Y": 17.847570030234614
+                    },
+                    {
+                      "$id": "252",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.354166666664,
+                      "Y": 17.687864364249748
+                    },
+                    {
+                      "$id": "253",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.35833333333,
+                      "Y": 17.540687677807
+                    },
+                    {
+                      "$id": "254",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.3625,
+                      "Y": 17.40610912348694
+                    },
+                    {
+                      "$id": "255",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.36666666667,
+                      "Y": 17.284192172170403
+                    },
+                    {
+                      "$id": "256",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.370833333334,
+                      "Y": 17.17499452105751
+                    },
+                    {
+                      "$id": "257",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.375,
+                      "Y": 17.078568009000875
+                    },
+                    {
+                      "$id": "258",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.379166666666,
+                      "Y": 16.99495853957953
+                    },
+                    {
+                      "$id": "259",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.38333333333,
+                      "Y": 16.924206012303554
+                    },
+                    {
+                      "$id": "260",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.3875,
+                      "Y": 16.866344262300046
+                    },
+                    {
+                      "$id": "261",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.39166666667,
+                      "Y": 16.821401008789355
+                    },
+                    {
+                      "$id": "262",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.395833333336,
+                      "Y": 16.78939781261661
+                    },
+                    {
+                      "$id": "263",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.4,
+                      "Y": 16.77035004305772
+                    },
+                    {
+                      "$id": "264",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.40416666667,
+                      "Y": 16.764266854071767
+                    },
+                    {
+                      "$id": "265",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.40833333333,
+                      "Y": 16.771151170122888
+                    },
+                    {
+                      "$id": "266",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.4125,
+                      "Y": 16.790999681645413
+                    },
+                    {
+                      "$id": "267",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.416666666664,
+                      "Y": 16.823802850175696
+                    },
+                    {
+                      "$id": "268",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.42083333333,
+                      "Y": 16.869544923124103
+                    },
+                    {
+                      "$id": "269",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.425,
+                      "Y": 16.928203958110338
+                    },
+                    {
+                      "$id": "270",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.42916666667,
+                      "Y": 16.999751856735884
+                    },
+                    {
+                      "$id": "271",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.433333333334,
+                      "Y": 17.084154407618747
+                    },
+                    {
+                      "$id": "272",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.4375,
+                      "Y": 17.18137133846851
+                    },
+                    {
+                      "$id": "273",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.441666666666,
+                      "Y": 17.29135637693366
+                    },
+                    {
+                      "$id": "274",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.44583333333,
+                      "Y": 17.414057319909947
+                    },
+                    {
+                      "$id": "275",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.45,
+                      "Y": 17.549416110956347
+                    },
+                    {
+                      "$id": "276",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.45416666667,
+                      "Y": 17.697368925426453
+                    },
+                    {
+                      "$id": "277",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.458333333336,
+                      "Y": 17.857846262886625
+                    },
+                    {
+                      "$id": "278",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.4625,
+                      "Y": 18.030773046358473
+                    },
+                    {
+                      "$id": "279",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.46666666667,
+                      "Y": 18.216068727892917
+                    },
+                    {
+                      "$id": "280",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.47083333333,
+                      "Y": 18.41364739995566
+                    },
+                    {
+                      "$id": "281",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.475,
+                      "Y": 18.623417912079447
+                    },
+                    {
+                      "$id": "282",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.479166666664,
+                      "Y": 18.84528399221801
+                    },
+                    {
+                      "$id": "283",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.48333333333,
+                      "Y": 19.079144372218725
+                    },
+                    {
+                      "$id": "284",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.4875,
+                      "Y": 19.324892916816555
+                    },
+                    {
+                      "$id": "285",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.49166666667,
+                      "Y": 19.582418755541052
+                    },
+                    {
+                      "$id": "286",
+                      "$type": "OxyPlot.DataPoint, OxyPlot",
+                      "X": 46260.495833333334,
+                      "Y": 19.851606416919516
+                    }
+                  ]
                 },
                 "Horizon": {
                   "$type": "System.Collections.Generic.List`1[[OxyPlot.DataPoint, OxyPlot]], System.Private.CoreLib",
                   "$values": []
                 },
                 "AlsoKnownAs": {
-                  "$id": "41",
+                  "$id": "287",
                   "$type": "System.Collections.Generic.List`1[[System.String, System.Private.CoreLib]], System.Private.CoreLib",
                   "$values": []
                 },
@@ -456,13 +1968,13 @@
                 "Image": null
               },
               "ExoPlanetInputTarget": {
-                "$id": "42",
+                "$id": "288",
                 "$type": "NINA.Plugin.ExoPlanets.Model.ExoPlanetInputTarget, ExoPlanets",
                 "Expanded": true,
-                "TargetName": null,
+                "TargetName": "Variable Star",
                 "PositionAngle": 0.0,
                 "InputCoordinates": {
-                  "$id": "43",
+                  "$id": "289",
                   "$type": "NINA.Astrometry.InputCoordinates, NINA.Astrometry",
                   "RAHours": 0,
                   "RAMinutes": 0,
@@ -474,44 +1986,28 @@
                 }
               },
               "Target": {
-                "$ref": "42"
+                "$ref": "288"
               },
               "Strategy": {
                 "$type": "NINA.Sequencer.Container.ExecutionStrategy.SequentialStrategy, NINA.Sequencer"
               },
-              "Name": "Deep Sky Object Instruction Set",
+              "Name": "Variable Star object container",
               "Conditions": {
-                "$id": "44",
+                "$id": "290",
                 "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Conditions.ISequenceCondition, NINA.Sequencer]], System.ObjectModel",
                 "$values": []
               },
               "IsExpanded": true,
               "Items": {
-                "$id": "45",
+                "$id": "291",
                 "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.SequenceItem.ISequenceItem, NINA.Sequencer]], System.ObjectModel",
                 "$values": [
                   {
-                    "$id": "46",
-                    "$type": "DaleGhent.NINA.GroundStation.HTTP.HttpClient, DaleGhent.NINA.GroundStation",
-                    "HttpMethod": 1,
-                    "HttpUri": "https://www.pomfretastro.org/api/imaging/session-progress",
-                    "HttpPostContentType": "text/plain",
-                    "HttpPostBody": "Slewing To Target",
-                    "HttpClientDescription": "",
-                    "HttpAuthUsername": "pomfretastro",
-                    "HttpAuthPassword": "1894",
-                    "Parent": {
-                      "$ref": "36"
-                    },
-                    "ErrorBehavior": 0,
-                    "Attempts": 1
-                  },
-                  {
-                    "$id": "47",
+                    "$id": "292",
                     "$type": "NINA.Sequencer.SequenceItem.Platesolving.Center, NINA.Sequencer",
                     "Inherited": true,
                     "Coordinates": {
-                      "$id": "48",
+                      "$id": "293",
                       "$type": "NINA.Astrometry.InputCoordinates, NINA.Astrometry",
                       "RAHours": 0,
                       "RAMinutes": 0,
@@ -522,13 +2018,13 @@
                       "DecSeconds": 0.0
                     },
                     "Parent": {
-                      "$ref": "36"
+                      "$ref": "42"
                     },
-                    "ErrorBehavior": 2,
+                    "ErrorBehavior": 0,
                     "Attempts": 1
                   },
                   {
-                    "$id": "49",
+                    "$id": "356",
                     "$type": "DaleGhent.NINA.GroundStation.HTTP.HttpClient, DaleGhent.NINA.GroundStation",
                     "HttpMethod": 1,
                     "HttpUri": "https://www.pomfretastro.org/api/imaging/session-progress",
@@ -538,32 +2034,16 @@
                     "HttpAuthUsername": "pomfretastro",
                     "HttpAuthPassword": "1894",
                     "Parent": {
-                      "$ref": "36"
+                      "$ref": "42"
                     },
                     "ErrorBehavior": 0,
                     "Attempts": 1
                   },
                   {
-                    "$id": "50",
-                    "$type": "DaleGhent.NINA.GroundStation.HTTP.HttpClient, DaleGhent.NINA.GroundStation",
-                    "HttpMethod": 1,
-                    "HttpUri": "https://www.pomfretastro.org/api/imaging/session-progress",
-                    "HttpPostContentType": "text/plain",
-                    "HttpPostBody": "Switching Filter",
-                    "HttpClientDescription": "",
-                    "HttpAuthUsername": "pomfretastro",
-                    "HttpAuthPassword": "1894",
-                    "Parent": {
-                      "$ref": "36"
-                    },
-                    "ErrorBehavior": 0,
-                    "Attempts": 1
-                  },
-                  {
-                    "$id": "51",
+                    "$id": "294",
                     "$type": "NINA.Sequencer.SequenceItem.FilterWheel.SwitchFilter, NINA.Sequencer",
                     "Filter": {
-                      "$id": "52",
+                      "$id": "295",
                       "$type": "NINA.Core.Model.Equipment.FilterInfo, NINA.Core",
                       "_name": "G",
                       "_focusOffset": 0,
@@ -571,7 +2051,7 @@
                       "_autoFocusExposureTime": -1.0,
                       "_autoFocusFilter": false,
                       "FlatWizardFilterSettings": {
-                        "$id": "53",
+                        "$id": "296",
                         "$type": "NINA.Core.Model.Equipment.FlatWizardFilterSettings, NINA.Core",
                         "FlatWizardMode": 0,
                         "HistogramMeanTarget": 0.5,
@@ -583,14 +2063,14 @@
                         "Gain": -1,
                         "Offset": -1,
                         "Binning": {
-                          "$id": "54",
+                          "$id": "297",
                           "$type": "NINA.Core.Model.Equipment.BinningMode, NINA.Core",
                           "X": 1,
                           "Y": 1
                         }
                       },
                       "_autoFocusBinning": {
-                        "$id": "55",
+                        "$id": "298",
                         "$type": "NINA.Core.Model.Equipment.BinningMode, NINA.Core",
                         "X": 1,
                         "Y": 1
@@ -599,197 +2079,284 @@
                       "_autoFocusOffset": -1
                     },
                     "Parent": {
-                      "$ref": "36"
-                    },
-                    "ErrorBehavior": 2,
-                    "Attempts": 1
-                  },
-                  {
-                    "$id": "56",
-                    "$type": "DaleGhent.NINA.GroundStation.HTTP.HttpClient, DaleGhent.NINA.GroundStation",
-                    "HttpMethod": 1,
-                    "HttpUri": "https://www.pomfretastro.org/api/imaging/session-progress",
-                    "HttpPostContentType": "text/plain",
-                    "HttpPostBody": "Filter Switched To G",
-                    "HttpClientDescription": "",
-                    "HttpAuthUsername": "pomfretastro",
-                    "HttpAuthPassword": "1894",
-                    "Parent": {
-                      "$ref": "36"
+                      "$ref": "42"
                     },
                     "ErrorBehavior": 0,
                     "Attempts": 1
                   },
                   {
-                    "$id": "57",
+                    "$id": "357",
                     "$type": "DaleGhent.NINA.GroundStation.HTTP.HttpClient, DaleGhent.NINA.GroundStation",
                     "HttpMethod": 1,
                     "HttpUri": "https://www.pomfretastro.org/api/imaging/session-progress",
                     "HttpPostContentType": "text/plain",
-                    "HttpPostBody": "Calculating Proper Exposure Time",
+                    "HttpPostBody": "Filter Switched",
                     "HttpClientDescription": "",
                     "HttpAuthUsername": "pomfretastro",
                     "HttpAuthPassword": "1894",
                     "Parent": {
-                      "$ref": "36"
+                      "$ref": "42"
                     },
                     "ErrorBehavior": 0,
                     "Attempts": 1
                   },
                   {
-                    "$id": "58",
+                    "$id": "299",
+                    "$type": "NINA.Sequencer.SequenceItem.Autofocus.RunAutofocus, NINA.Sequencer",
+                    "Parent": {
+                      "$ref": "42"
+                    },
+                    "ErrorBehavior": 0,
+                    "Attempts": 1
+                  },
+                  {
+                    "$id": "358",
+                    "$type": "DaleGhent.NINA.GroundStation.HTTP.HttpClient, DaleGhent.NINA.GroundStation",
+                    "HttpMethod": 1,
+                    "HttpUri": "https://www.pomfretastro.org/api/imaging/session-progress",
+                    "HttpPostContentType": "text/plain",
+                    "HttpPostBody": "Autofocus Finished",
+                    "HttpClientDescription": "",
+                    "HttpAuthUsername": "pomfretastro",
+                    "HttpAuthPassword": "1894",
+                    "Parent": {
+                      "$ref": "42"
+                    },
+                    "ErrorBehavior": 0,
+                    "Attempts": 1
+                  },
+                  {
+                    "$id": "300",
+                    "$type": "NINA.Sequencer.SequenceItem.Guider.StartGuiding, NINA.Sequencer",
+                    "ForceCalibration": false,
+                    "Parent": {
+                      "$ref": "42"
+                    },
+                    "ErrorBehavior": 0,
+                    "Attempts": 1
+                  },
+                  {
+                    "$id": "359",
+                    "$type": "DaleGhent.NINA.GroundStation.HTTP.HttpClient, DaleGhent.NINA.GroundStation",
+                    "HttpMethod": 1,
+                    "HttpUri": "https://www.pomfretastro.org/api/imaging/session-progress",
+                    "HttpPostContentType": "text/plain",
+                    "HttpPostBody": "Guiding Started | Imaging Started",
+                    "HttpClientDescription": "",
+                    "HttpAuthUsername": "pomfretastro",
+                    "HttpAuthPassword": "1894",
+                    "Parent": {
+                      "$ref": "42"
+                    },
+                    "ErrorBehavior": 0,
+                    "Attempts": 1
+                  },
+                  {
+                    "$id": "301",
                     "$type": "NINA.Plugin.ExoPlanets.Sequencer.Utility.CalculateExposureTime, ExoPlanets",
                     "ExposureTime": 30.0,
                     "ExposureTimeFirst": 30.0,
                     "ExposureTimeSecond": 60.0,
-                    "ExposureTimeMax": 180.0,
+                    "ExposureTimeMax": 300.0,
                     "Gain": -1,
-                    "Offset": 30,
+                    "Offset": -1,
                     "Binning": {
-                      "$id": "59",
+                      "$id": "302",
                       "$type": "NINA.Core.Model.Equipment.BinningMode, NINA.Core",
                       "X": 1,
                       "Y": 1
                     },
                     "ExposureCount": 0,
                     "TargetADU": 0.66,
-                    "SaveImages": false,
+                    "SaveImages": true,
                     "UpdateExposureTime": true,
                     "Parent": {
-                      "$ref": "36"
-                    },
-                    "ErrorBehavior": 2,
-                    "Attempts": 1
-                  },
-                  {
-                    "$id": "60",
-                    "$type": "DaleGhent.NINA.GroundStation.HTTP.HttpClient, DaleGhent.NINA.GroundStation",
-                    "HttpMethod": 1,
-                    "HttpUri": "https://www.pomfretastro.org/api/imaging/session-progress",
-                    "HttpPostContentType": "text/plain",
-                    "HttpPostBody": "Exposure Time Calculated | Start Imaging",
-                    "HttpClientDescription": "",
-                    "HttpAuthUsername": "pomfretastro",
-                    "HttpAuthPassword": "1894",
-                    "Parent": {
-                      "$ref": "36"
+                      "$ref": "42"
                     },
                     "ErrorBehavior": 0,
                     "Attempts": 1
                   },
                   {
-                    "$id": "61",
-                    "$type": "NINA.Plugin.ExoPlanets.Sequencer.Utility.WaitForTransit, ExoPlanets",
-                    "Hours": 11,
-                    "Minutes": 6,
-                    "MinutesOffset": 0,
-                    "Seconds": 9,
-                    "SelectedProvider": {
-                      "$id": "62",
-                      "$type": "NINA.Sequencer.Utility.DateTimeProvider.TimeProvider, NINA.Sequencer"
-                    },
-                    "Parent": {
-                      "$ref": "36"
-                    },
-                    "ErrorBehavior": 0,
-                    "Attempts": 1
-                  },
-                  {
-                    "$id": "63",
+                    "$id": "303",
                     "$type": "NINA.Sequencer.Container.SequentialContainer, NINA.Sequencer",
                     "Strategy": {
                       "$type": "NINA.Sequencer.Container.ExecutionStrategy.SequentialStrategy, NINA.Sequencer"
                     },
-                    "Name": "Sequential Instruction Set",
+                    "Name": "Loop Setup",
                     "Conditions": {
-                      "$id": "64",
+                      "$id": "304",
                       "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Conditions.ISequenceCondition, NINA.Sequencer]], System.ObjectModel",
                       "$values": [
                         {
-                          "$id": "65",
-                          "$type": "NINA.Plugin.ExoPlanets.Sequencer.Conditions.TransitCondition, ExoPlanets",
-                          "Hours": 11,
-                          "Minutes": 6,
+                          "$id": "305",
+                          "$type": "NINA.Sequencer.Conditions.TimeCondition, NINA.Sequencer",
+                          "Hours": 0,
+                          "Minutes": 0,
                           "MinutesOffset": 0,
-                          "Seconds": 17,
+                          "Seconds": 0,
                           "SelectedProvider": {
-                            "$ref": "62"
+                            "$id": "306",
+                            "$type": "NINA.Sequencer.Utility.DateTimeProvider.TimeProvider, NINA.Sequencer"
                           },
                           "Parent": {
-                            "$ref": "63"
+                            "$ref": "303"
                           }
                         }
                       ]
                     },
                     "IsExpanded": true,
                     "Items": {
-                      "$id": "66",
+                      "$id": "307",
                       "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.SequenceItem.ISequenceItem, NINA.Sequencer]], System.ObjectModel",
                       "$values": [
                         {
-                          "$id": "67",
-                          "$type": "NINA.Sequencer.SequenceItem.Imaging.TakeExposure, NINA.Sequencer",
-                          "ExposureTime": 30.0,
-                          "Gain": -1,
-                          "Offset": 30,
-                          "Binning": {
-                            "$id": "68",
-                            "$type": "NINA.Core.Model.Equipment.BinningMode, NINA.Core",
-                            "X": 1,
-                            "Y": 1
+                          "$id": "308",
+                          "$type": "NINA.Sequencer.SequenceItem.Imaging.SmartExposure, NINA.Sequencer",
+                          "ErrorBehavior": 0,
+                          "Attempts": 1,
+                          "Strategy": {
+                            "$type": "NINA.Sequencer.Container.ExecutionStrategy.SequentialStrategy, NINA.Sequencer"
                           },
-                          "ImageType": "LIGHT",
-                          "ExposureCount": 0,
+                          "Name": "Smart Exposure",
+                          "Conditions": {
+                            "$id": "309",
+                            "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Conditions.ISequenceCondition, NINA.Sequencer]], System.ObjectModel",
+                            "$values": [
+                              {
+                                "$id": "310",
+                                "$type": "NINA.Sequencer.Conditions.LoopCondition, NINA.Sequencer",
+                                "CompletedIterations": 0,
+                                "Iterations": 1,
+                                "Parent": {
+                                  "$ref": "308"
+                                }
+                              }
+                            ]
+                          },
+                          "IsExpanded": false,
+                          "Items": {
+                            "$id": "311",
+                            "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.SequenceItem.ISequenceItem, NINA.Sequencer]], System.ObjectModel",
+                            "$values": [
+                              {
+                                "$id": "312",
+                                "$type": "NINA.Sequencer.SequenceItem.FilterWheel.SwitchFilter, NINA.Sequencer",
+                                "Filter": null,
+                                "Parent": {
+                                  "$ref": "308"
+                                },
+                                "ErrorBehavior": 0,
+                                "Attempts": 1
+                              },
+                              {
+                                "$id": "313",
+                                "$type": "NINA.Sequencer.SequenceItem.Imaging.TakeExposure, NINA.Sequencer",
+                                "ExposureTime": 0.0,
+                                "Gain": -1,
+                                "Offset": -1,
+                                "Binning": {
+                                  "$id": "314",
+                                  "$type": "NINA.Core.Model.Equipment.BinningMode, NINA.Core",
+                                  "X": 1,
+                                  "Y": 1
+                                },
+                                "ImageType": "LIGHT",
+                                "ExposureCount": 0,
+                                "Parent": {
+                                  "$ref": "308"
+                                },
+                                "ErrorBehavior": 0,
+                                "Attempts": 1
+                              }
+                            ]
+                          },
+                          "Triggers": {
+                            "$id": "315",
+                            "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Trigger.ISequenceTrigger, NINA.Sequencer]], System.ObjectModel",
+                            "$values": [
+                              {
+                                "$id": "316",
+                                "$type": "NINA.Sequencer.Trigger.Guider.DitherAfterExposures, NINA.Sequencer",
+                                "AfterExposures": 0,
+                                "Parent": {
+                                  "$ref": "308"
+                                },
+                                "TriggerRunner": {
+                                  "$id": "317",
+                                  "$type": "NINA.Sequencer.Container.SequentialContainer, NINA.Sequencer",
+                                  "Strategy": {
+                                    "$type": "NINA.Sequencer.Container.ExecutionStrategy.SequentialStrategy, NINA.Sequencer"
+                                  },
+                                  "Name": null,
+                                  "Conditions": {
+                                    "$id": "318",
+                                    "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Conditions.ISequenceCondition, NINA.Sequencer]], System.ObjectModel",
+                                    "$values": []
+                                  },
+                                  "IsExpanded": true,
+                                  "Items": {
+                                    "$id": "319",
+                                    "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.SequenceItem.ISequenceItem, NINA.Sequencer]], System.ObjectModel",
+                                    "$values": [
+                                      {
+                                        "$id": "320",
+                                        "$type": "NINA.Sequencer.SequenceItem.Guider.Dither, NINA.Sequencer",
+                                        "Parent": {
+                                          "$ref": "317"
+                                        },
+                                        "ErrorBehavior": 0,
+                                        "Attempts": 1
+                                      }
+                                    ]
+                                  },
+                                  "Triggers": {
+                                    "$id": "321",
+                                    "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Trigger.ISequenceTrigger, NINA.Sequencer]], System.ObjectModel",
+                                    "$values": []
+                                  },
+                                  "Parent": null,
+                                  "ErrorBehavior": 0,
+                                  "Attempts": 1
+                                }
+                              }
+                            ]
+                          },
                           "Parent": {
-                            "$ref": "63"
-                          },
-                          "ErrorBehavior": 2,
-                          "Attempts": 1
+                            "$ref": "303"
+                          }
                         }
                       ]
                     },
                     "Triggers": {
-                      "$id": "69",
+                      "$id": "322",
                       "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Trigger.ISequenceTrigger, NINA.Sequencer]], System.ObjectModel",
                       "$values": [
                         {
-                          "$id": "70",
-                          "$type": "NINA.Sequencer.Trigger.Autofocus.AutofocusAfterHFRIncreaseTrigger, NINA.Sequencer",
-                          "Amount": 5.0,
-                          "SampleSize": 10,
+                          "$id": "323",
+                          "$type": "NINA.Sequencer.Trigger.MeridianFlip.MeridianFlipTrigger, NINA.Sequencer",
                           "Parent": {
-                            "$ref": "63"
+                            "$ref": "303"
                           },
                           "TriggerRunner": {
-                            "$id": "71",
+                            "$id": "324",
                             "$type": "NINA.Sequencer.Container.SequentialContainer, NINA.Sequencer",
                             "Strategy": {
                               "$type": "NINA.Sequencer.Container.ExecutionStrategy.SequentialStrategy, NINA.Sequencer"
                             },
                             "Name": null,
                             "Conditions": {
-                              "$id": "72",
+                              "$id": "325",
                               "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Conditions.ISequenceCondition, NINA.Sequencer]], System.ObjectModel",
                               "$values": []
                             },
                             "IsExpanded": true,
                             "Items": {
-                              "$id": "73",
+                              "$id": "326",
                               "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.SequenceItem.ISequenceItem, NINA.Sequencer]], System.ObjectModel",
-                              "$values": [
-                                {
-                                  "$id": "74",
-                                  "$type": "NINA.Sequencer.SequenceItem.Autofocus.RunAutofocus, NINA.Sequencer",
-                                  "Parent": {
-                                    "$ref": "71"
-                                  },
-                                  "ErrorBehavior": 0,
-                                  "Attempts": 1
-                                }
-                              ]
+                              "$values": []
                             },
                             "Triggers": {
-                              "$id": "75",
+                              "$id": "327",
                               "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Trigger.ISequenceTrigger, NINA.Sequencer]], System.ObjectModel",
                               "$values": []
                             },
@@ -799,34 +2366,34 @@
                           }
                         },
                         {
-                          "$id": "76",
+                          "$id": "328",
                           "$type": "NINA.Sequencer.Trigger.Guider.RestoreGuiding, NINA.Sequencer",
                           "Parent": {
-                            "$ref": "63"
+                            "$ref": "303"
                           },
                           "TriggerRunner": {
-                            "$id": "77",
+                            "$id": "329",
                             "$type": "NINA.Sequencer.Container.SequentialContainer, NINA.Sequencer",
                             "Strategy": {
                               "$type": "NINA.Sequencer.Container.ExecutionStrategy.SequentialStrategy, NINA.Sequencer"
                             },
                             "Name": null,
                             "Conditions": {
-                              "$id": "78",
+                              "$id": "330",
                               "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Conditions.ISequenceCondition, NINA.Sequencer]], System.ObjectModel",
                               "$values": []
                             },
                             "IsExpanded": true,
                             "Items": {
-                              "$id": "79",
+                              "$id": "331",
                               "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.SequenceItem.ISequenceItem, NINA.Sequencer]], System.ObjectModel",
                               "$values": [
                                 {
-                                  "$id": "80",
+                                  "$id": "332",
                                   "$type": "NINA.Sequencer.SequenceItem.Guider.StartGuiding, NINA.Sequencer",
                                   "ForceCalibration": false,
                                   "Parent": {
-                                    "$ref": "77"
+                                    "$ref": "329"
                                   },
                                   "ErrorBehavior": 0,
                                   "Attempts": 1
@@ -834,7 +2401,7 @@
                               ]
                             },
                             "Triggers": {
-                              "$id": "81",
+                              "$id": "333",
                               "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Trigger.ISequenceTrigger, NINA.Sequencer]], System.ObjectModel",
                               "$values": []
                             },
@@ -844,66 +2411,43 @@
                           }
                         },
                         {
-                          "$id": "82",
-                          "$type": "NINA.Sequencer.Trigger.MeridianFlip.MeridianFlipTrigger, NINA.Sequencer",
+                          "$id": "334",
+                          "$type": "NINA.Sequencer.Trigger.Autofocus.AutofocusAfterHFRIncreaseTrigger, NINA.Sequencer",
+                          "Amount": 10.0,
+                          "SampleSize": 10,
                           "Parent": {
-                            "$ref": "63"
+                            "$ref": "303"
                           },
                           "TriggerRunner": {
-                            "$id": "83",
+                            "$id": "335",
                             "$type": "NINA.Sequencer.Container.SequentialContainer, NINA.Sequencer",
                             "Strategy": {
                               "$type": "NINA.Sequencer.Container.ExecutionStrategy.SequentialStrategy, NINA.Sequencer"
                             },
                             "Name": null,
                             "Conditions": {
-                              "$id": "84",
+                              "$id": "336",
                               "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Conditions.ISequenceCondition, NINA.Sequencer]], System.ObjectModel",
                               "$values": []
                             },
                             "IsExpanded": true,
                             "Items": {
-                              "$id": "85",
+                              "$id": "337",
                               "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.SequenceItem.ISequenceItem, NINA.Sequencer]], System.ObjectModel",
-                              "$values": []
+                              "$values": [
+                                {
+                                  "$id": "338",
+                                  "$type": "NINA.Sequencer.SequenceItem.Autofocus.RunAutofocus, NINA.Sequencer",
+                                  "Parent": {
+                                    "$ref": "335"
+                                  },
+                                  "ErrorBehavior": 0,
+                                  "Attempts": 1
+                                }
+                              ]
                             },
                             "Triggers": {
-                              "$id": "86",
-                              "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Trigger.ISequenceTrigger, NINA.Sequencer]], System.ObjectModel",
-                              "$values": []
-                            },
-                            "Parent": null,
-                            "ErrorBehavior": 0,
-                            "Attempts": 1
-                          }
-                        },
-                        {
-                          "$id": "87",
-                          "$type": "NINA.DiscordAlert.DiscordAlertSequenceItems.DiscordAlertOnErrorTrigger, Discord Alert",
-                          "Text": "@everyone",
-                          "Parent": {
-                            "$ref": "63"
-                          },
-                          "TriggerRunner": {
-                            "$id": "88",
-                            "$type": "NINA.Sequencer.Container.SequentialContainer, NINA.Sequencer",
-                            "Strategy": {
-                              "$type": "NINA.Sequencer.Container.ExecutionStrategy.SequentialStrategy, NINA.Sequencer"
-                            },
-                            "Name": null,
-                            "Conditions": {
-                              "$id": "89",
-                              "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Conditions.ISequenceCondition, NINA.Sequencer]], System.ObjectModel",
-                              "$values": []
-                            },
-                            "IsExpanded": true,
-                            "Items": {
-                              "$id": "90",
-                              "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.SequenceItem.ISequenceItem, NINA.Sequencer]], System.ObjectModel",
-                              "$values": []
-                            },
-                            "Triggers": {
-                              "$id": "91",
+                              "$id": "339",
                               "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Trigger.ISequenceTrigger, NINA.Sequencer]], System.ObjectModel",
                               "$values": []
                             },
@@ -915,7 +2459,7 @@
                       ]
                     },
                     "Parent": {
-                      "$ref": "36"
+                      "$ref": "42"
                     },
                     "ErrorBehavior": 0,
                     "Attempts": 1
@@ -923,48 +2467,12 @@
                 ]
               },
               "Triggers": {
-                "$id": "92",
+                "$id": "340",
                 "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Trigger.ISequenceTrigger, NINA.Sequencer]], System.ObjectModel",
-                "$values": [
-                  {
-                    "$id": "93",
-                    "$type": "NINA.DiscordAlert.DiscordAlertSequenceItems.DiscordAlertOnErrorTrigger, Discord Alert",
-                    "Text": "@everyone",
-                    "Parent": {
-                      "$ref": "36"
-                    },
-                    "TriggerRunner": {
-                      "$id": "94",
-                      "$type": "NINA.Sequencer.Container.SequentialContainer, NINA.Sequencer",
-                      "Strategy": {
-                        "$type": "NINA.Sequencer.Container.ExecutionStrategy.SequentialStrategy, NINA.Sequencer"
-                      },
-                      "Name": null,
-                      "Conditions": {
-                        "$id": "95",
-                        "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Conditions.ISequenceCondition, NINA.Sequencer]], System.ObjectModel",
-                        "$values": []
-                      },
-                      "IsExpanded": true,
-                      "Items": {
-                        "$id": "96",
-                        "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.SequenceItem.ISequenceItem, NINA.Sequencer]], System.ObjectModel",
-                        "$values": []
-                      },
-                      "Triggers": {
-                        "$id": "97",
-                        "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Trigger.ISequenceTrigger, NINA.Sequencer]], System.ObjectModel",
-                        "$values": []
-                      },
-                      "Parent": null,
-                      "ErrorBehavior": 0,
-                      "Attempts": 1
-                    }
-                  }
-                ]
+                "$values": []
               },
               "Parent": {
-                "$ref": "33"
+                "$ref": "39"
               },
               "ErrorBehavior": 0,
               "Attempts": 1
@@ -972,7 +2480,7 @@
           ]
         },
         "Triggers": {
-          "$id": "98",
+          "$id": "341",
           "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Trigger.ISequenceTrigger, NINA.Sequencer]], System.ObjectModel",
           "$values": []
         },
@@ -983,53 +2491,53 @@
         "Attempts": 1
       },
       {
-        "$id": "99",
+        "$id": "342",
         "$type": "NINA.Sequencer.Container.EndAreaContainer, NINA.Sequencer",
         "Strategy": {
           "$type": "NINA.Sequencer.Container.ExecutionStrategy.SequentialStrategy, NINA.Sequencer"
         },
         "Name": "End",
         "Conditions": {
-          "$id": "100",
+          "$id": "343",
           "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Conditions.ISequenceCondition, NINA.Sequencer]], System.ObjectModel",
           "$values": []
         },
         "IsExpanded": true,
         "Items": {
-          "$id": "101",
+          "$id": "344",
           "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.SequenceItem.ISequenceItem, NINA.Sequencer]], System.ObjectModel",
           "$values": [
             {
-              "$id": "102",
+              "$id": "345",
               "$type": "NINA.Sequencer.Container.ParallelContainer, NINA.Sequencer",
               "Strategy": {
                 "$type": "NINA.Sequencer.Container.ExecutionStrategy.ParallelStrategy, NINA.Sequencer"
               },
               "Name": "Parallel Instruction Set",
               "Conditions": {
-                "$id": "103",
+                "$id": "346",
                 "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Conditions.ISequenceCondition, NINA.Sequencer]], System.ObjectModel",
                 "$values": []
               },
               "IsExpanded": true,
               "Items": {
-                "$id": "104",
+                "$id": "347",
                 "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.SequenceItem.ISequenceItem, NINA.Sequencer]], System.ObjectModel",
                 "$values": [
                   {
-                    "$id": "105",
-                    "$type": "NINA.Sequencer.SequenceItem.Telescope.FindHome, NINA.Sequencer",
+                    "$id": "348",
+                    "$type": "NINA.Sequencer.SequenceItem.Dome.FindHomeDome, NINA.Sequencer",
                     "Parent": {
-                      "$ref": "102"
+                      "$ref": "345"
                     },
                     "ErrorBehavior": 0,
                     "Attempts": 1
                   },
                   {
-                    "$id": "106",
-                    "$type": "NINA.Sequencer.SequenceItem.Dome.FindHomeDome, NINA.Sequencer",
+                    "$id": "349",
+                    "$type": "NINA.Sequencer.SequenceItem.Telescope.FindHome, NINA.Sequencer",
                     "Parent": {
-                      "$ref": "102"
+                      "$ref": "345"
                     },
                     "ErrorBehavior": 0,
                     "Attempts": 1
@@ -1037,37 +2545,37 @@
                 ]
               },
               "Triggers": {
-                "$id": "107",
+                "$id": "350",
                 "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Trigger.ISequenceTrigger, NINA.Sequencer]], System.ObjectModel",
                 "$values": []
               },
               "Parent": {
-                "$ref": "99"
+                "$ref": "342"
               },
               "ErrorBehavior": 0,
               "Attempts": 1
             },
             {
-              "$id": "108",
+              "$id": "351",
               "$type": "NINA.Sequencer.SequenceItem.Connect.DisconnectAllEquipment, NINA.Sequencer",
               "Parent": {
-                "$ref": "99"
+                "$ref": "342"
               },
               "ErrorBehavior": 0,
               "Attempts": 1
             },
             {
-              "$id": "109",
+              "$id": "352",
               "$type": "NINA.DiscordAlert.DiscordAlertSequenceItems.DiscordMessageInstruction, Discord Alert",
-              "Text": "Sequence Finished",
+              "Text": "Sequence Finish",
               "Parent": {
-                "$ref": "99"
+                "$ref": "342"
               },
               "ErrorBehavior": 0,
               "Attempts": 1
             },
             {
-              "$id": "110",
+              "$id": "353",
               "$type": "DaleGhent.NINA.GroundStation.HTTP.HttpClient, DaleGhent.NINA.GroundStation",
               "HttpMethod": 1,
               "HttpUri": "https://www.pomfretastro.org/api/imaging/session-progress",
@@ -1077,7 +2585,7 @@
               "HttpAuthUsername": "pomfretastro",
               "HttpAuthPassword": "1894",
               "Parent": {
-                "$ref": "99"
+                "$ref": "342"
               },
               "ErrorBehavior": 0,
               "Attempts": 1
@@ -1085,7 +2593,7 @@
           ]
         },
         "Triggers": {
-          "$id": "111",
+          "$id": "354",
           "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Trigger.ISequenceTrigger, NINA.Sequencer]], System.ObjectModel",
           "$values": []
         },
@@ -1098,7 +2606,7 @@
     ]
   },
   "Triggers": {
-    "$id": "112",
+    "$id": "355",
     "$type": "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Trigger.ISequenceTrigger, NINA.Sequencer]], System.ObjectModel",
     "$values": []
   },

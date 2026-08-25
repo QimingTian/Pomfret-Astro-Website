@@ -4,7 +4,8 @@ import {
 } from '@/lib/imaging-schedule-bar'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { postgresReadsEnabled } from '@/lib/db'
-import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
+import { REDIS_LIVE_KEYS } from '@/lib/db/data-plane'
+import { kvEnabled, kvGetString, kvSetJson } from '@/lib/kv-rest'
 import { emitSiteSessionsChanged } from '@/lib/imaging/site-events'
 
 /** Sessions removed from the API queue after NINA download, still shown on Remote. */
@@ -40,7 +41,7 @@ export type SessionBoardEntry = {
   projectMode?: boolean
 }
 
-const KEY = 'imaging-session-board'
+const KEY = REDIS_LIVE_KEYS.board
 const MAX_ENTRIES = 50
 
 type Payload = { entries: SessionBoardEntry[] }
@@ -191,14 +192,23 @@ async function freezeScheduleBarOnTerminal(
 
 async function readEntries(): Promise<SessionBoardEntry[]> {
   if (kvEnabled()) {
-    const remote = await kvGetJson<Payload>(KEY)
-    return normalizeEntries(remote)
+    const raw = await kvGetString(KEY)
+    if (raw !== undefined) {
+      try {
+        return normalizeEntries(JSON.parse(raw) as Payload)
+      } catch {
+        return []
+      }
+    }
   }
   if (postgresReadsEnabled()) {
     try {
       const { loadJsonDocumentsFromPostgres } = await import('@/lib/db/read')
       const pg = await loadJsonDocumentsFromPostgres<SessionBoardEntry>('board')
-      if (pg) return pg
+      if (pg) {
+        if (kvEnabled() && pg.length > 0) await kvSetJson(KEY, { entries: pg })
+        return pg
+      }
     } catch (error) {
       console.error('[pg-read] board failed; using memory', error)
     }
@@ -211,6 +221,8 @@ async function writeEntries(entries: SessionBoardEntry[]): Promise<void> {
   if (kvEnabled()) {
     const ok = await kvSetJson(KEY, { entries: trimmed })
     if (ok) {
+      const { mirrorSessionBoard } = await import('@/lib/db/mirror')
+      await mirrorSessionBoard(trimmed)
       emitSiteSessionsChanged('board')
       return
     }

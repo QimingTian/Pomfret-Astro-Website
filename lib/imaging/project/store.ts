@@ -6,7 +6,8 @@ import { boardRemove, getBoardEntry, listBoardEntries } from '@/lib/imaging-sess
 import { getRequestById } from '@/lib/imaging-queue-store'
 import { emitSiteSessionsChanged } from '@/lib/imaging/site-events'
 import { postgresReadsEnabled } from '@/lib/db'
-import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
+import { REDIS_LIVE_KEYS } from '@/lib/db/data-plane'
+import { kvEnabled, kvGetString, kvSetJson } from '@/lib/kv-rest'
 import type { ScheduleBarPlacement } from '@/lib/imaging-schedule-bar'
 
 export type ProjectStatus = 'pending' | 'scheduled' | 'in_progress' | 'completed' | 'failed'
@@ -185,7 +186,7 @@ export function sumRemainingByFilterAcrossPanels(
   return Array.from(byFilter.values())
 }
 
-const KEY = 'imaging-projects'
+const KEY = REDIS_LIVE_KEYS.projects
 const MAX_PROJECTS = 50
 
 type Payload = { projects?: ImagingProject[] }
@@ -233,14 +234,26 @@ function hydrateProjectSequences(project: ImagingProject): ImagingProject {
 
 async function readProjects(): Promise<ImagingProject[]> {
   if (kvEnabled()) {
-    const remote = await kvGetJson<Payload>(KEY)
-    return normalizeProjects(remote).map(hydrateProjectSequences)
+    const raw = await kvGetString(KEY)
+    if (raw !== undefined) {
+      try {
+        return normalizeProjects(JSON.parse(raw) as Payload).map(hydrateProjectSequences)
+      } catch {
+        return []
+      }
+    }
   }
   if (postgresReadsEnabled()) {
     try {
       const { loadJsonDocumentsFromPostgres } = await import('@/lib/db/read')
       const pg = await loadJsonDocumentsFromPostgres<ImagingProject>('projects')
-      if (pg) return pg.map(hydrateProjectSequences)
+      if (pg) {
+        const hydrated = pg.map(hydrateProjectSequences)
+        if (kvEnabled() && hydrated.length > 0) {
+          await kvSetJson(KEY, { projects: hydrated })
+        }
+        return hydrated
+      }
     } catch (error) {
       console.error('[pg-read] projects failed; using memory', error)
     }
@@ -264,6 +277,8 @@ async function writeProjects(projects: ImagingProject[]): Promise<void> {
   if (kvEnabled()) {
     const ok = await kvSetJson(KEY, { projects: trimmed })
     if (ok) {
+      const { mirrorImagingProjects } = await import('@/lib/db/mirror')
+      await mirrorImagingProjects(trimmed)
       const g = globalThis as GlobalWithProjects
       g.__pomfret_imaging_projects__ = trimmed
       if (prevSig !== nextSig) emitSiteSessionsChanged('projects')

@@ -8,7 +8,8 @@ import {
 } from '@/lib/imaging-session-overhead'
 import { hashSessionPassword } from '@/lib/session-password'
 import { postgresReadsEnabled } from '@/lib/db'
-import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
+import { REDIS_LIVE_KEYS } from '@/lib/db/data-plane'
+import { kvEnabled, kvGetString, kvSetJson } from '@/lib/kv-rest'
 import {
   emitAgentWakePollSequenceDebounced,
   emitSiteSessionsChanged,
@@ -136,7 +137,7 @@ function getMemory(): ImagingRequest[] {
 const queueFile = process.env.IMAGING_QUEUE_FILE
 
 /** Shared across Vercel instances when Upstash KV is configured (same pattern as imaging-session-board). */
-const KV_QUEUE_KEY = 'imaging-queue-requests'
+const KV_QUEUE_KEY = REDIS_LIVE_KEYS.queue
 
 let diskLoaded = false
 let lastQueueStatusSignature = ''
@@ -149,10 +150,17 @@ async function applyQueueList(list: ImagingRequest[]): Promise<void> {
   diskLoaded = true
 }
 
-async function loadQueueFromKvIntoMemory(): Promise<void> {
-  const remote = await kvGetJson<QueueFilePayload>(KV_QUEUE_KEY)
-  const kvList = Array.isArray(remote?.requests) ? remote.requests : []
-  await applyQueueList(kvList)
+async function loadQueueFromKvIntoMemory(): Promise<'hit' | 'miss'> {
+  const raw = await kvGetString(KV_QUEUE_KEY)
+  if (raw === undefined) return 'miss'
+  try {
+    const remote = JSON.parse(raw) as QueueFilePayload
+    const kvList = Array.isArray(remote?.requests) ? remote.requests : []
+    await applyQueueList(kvList)
+  } catch {
+    await applyQueueList([])
+  }
+  return 'hit'
 }
 
 async function loadQueueFromPostgresIntoMemory(): Promise<void> {
@@ -171,7 +179,11 @@ async function loadQueueFromPostgresIntoMemory(): Promise<void> {
 
 async function ensureLoadedFromDisk(): Promise<void> {
   if (kvEnabled()) {
-    await loadQueueFromKvIntoMemory()
+    const hit = await loadQueueFromKvIntoMemory()
+    if (hit === 'miss' && postgresReadsEnabled()) {
+      await loadQueueFromPostgresIntoMemory()
+      if (getMemory().length > 0) await persist()
+    }
   } else if (postgresReadsEnabled()) {
     await loadQueueFromPostgresIntoMemory()
   } else if (!queueFile || diskLoaded) {
@@ -201,6 +213,8 @@ async function persist(): Promise<void> {
   const statusChanged = nextSig !== lastQueueStatusSignature
   if (kvEnabled()) {
     await kvSetJson(KV_QUEUE_KEY, { requests: snapshot })
+    const { mirrorImagingQueue } = await import('@/lib/db/mirror')
+    await mirrorImagingQueue(snapshot)
     if (statusChanged) {
       lastQueueStatusSignature = nextSig
       emitSiteSessionsChanged('queue')

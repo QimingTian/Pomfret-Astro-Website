@@ -1,5 +1,6 @@
 import { postgresReadsEnabled } from '@/lib/db'
-import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
+import { REDIS_LIVE_KEYS } from '@/lib/db/data-plane'
+import { kvEnabled, kvGetString, kvSetJson } from '@/lib/kv-rest'
 
 export type AdminClosedWindow = {
   id: string
@@ -12,7 +13,7 @@ export type AdminClosedWindow = {
 
 type Payload = { windows?: AdminClosedWindow[] }
 type GlobalState = typeof globalThis & { __pomfret_admin_closed_windows__?: AdminClosedWindow[] }
-const KEY = 'imaging-admin-closed-windows'
+const KEY = REDIS_LIVE_KEYS.closedWindows
 
 function memoryWindows(): AdminClosedWindow[] {
   const g = globalThis as GlobalState
@@ -43,15 +44,25 @@ function normalize(w: AdminClosedWindow): AdminClosedWindow | null {
 
 async function readAll(): Promise<AdminClosedWindow[]> {
   if (kvEnabled()) {
-    const remote = await kvGetJson<Payload>(KEY)
-    const windows = Array.isArray(remote?.windows) ? remote.windows : []
-    return windows.map(normalize).filter((x): x is AdminClosedWindow => x != null)
+    const raw = await kvGetString(KEY)
+    if (raw !== undefined) {
+      try {
+        const remote = JSON.parse(raw) as Payload
+        const windows = Array.isArray(remote?.windows) ? remote.windows : []
+        return windows.map(normalize).filter((x): x is AdminClosedWindow => x != null)
+      } catch {
+        return []
+      }
+    }
   }
   if (postgresReadsEnabled()) {
     try {
       const { loadJsonDocumentsFromPostgres } = await import('@/lib/db/read')
       const pg = await loadJsonDocumentsFromPostgres<AdminClosedWindow>('windows')
-      if (pg) return pg
+      if (pg) {
+        if (kvEnabled() && pg.length > 0) await kvSetJson(KEY, { windows: pg })
+        return pg
+      }
     } catch (error) {
       console.error('[pg-read] closed windows failed; using memory', error)
     }
@@ -64,6 +75,8 @@ async function writeAll(windows: AdminClosedWindow[]): Promise<void> {
   if (kvEnabled()) {
     const ok = await kvSetJson(KEY, { windows: sorted })
     if (ok) {
+      const { mirrorAdminClosedWindows } = await import('@/lib/db/mirror')
+      await mirrorAdminClosedWindows(sorted)
       return
     }
   }

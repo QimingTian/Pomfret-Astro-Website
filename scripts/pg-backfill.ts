@@ -6,7 +6,7 @@ async function main() {
     console.error(result.error)
     process.exit(1)
   }
-  console.log('Postgres backfill from KV finished. KV remains source of truth.')
+  console.log('Postgres backfill finished. Missing Redis keys were skipped (will not wipe Postgres).')
 }
 
 void main()

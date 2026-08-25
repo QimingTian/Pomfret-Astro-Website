@@ -17,9 +17,10 @@ export function isDatabaseConfigured(): boolean {
 }
 
 /**
- * Durable cold docs (members, gallery, history, R2 maps, equipment) use Postgres.
- * Hot imaging docs (queue, projects, board, audit, closed windows) stay on Redis when KV is configured.
- * Set POSTGRES_READ=0 to force those cold docs onto KV copies too.
+ * See lib/db/data-plane.ts.
+ * Postgres-live: members, gallery, equipment, R2 maps, saved sessions, history.
+ * Redis-live (Postgres backup only): queue, projects, board, audit, closed windows.
+ * Set POSTGRES_READ=0 to force Postgres-live docs onto leftover KV copies.
  */
 export function postgresReadsEnabled(): boolean {
   if (process.env.POSTGRES_READ === '0') return false

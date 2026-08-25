@@ -1,8 +1,9 @@
 import { postgresReadsEnabled } from '@/lib/db'
+import { REDIS_LIVE_KEYS } from '@/lib/db/data-plane'
 import { kvCompareAndSet, kvEnabled, kvGetJson, kvGetString, kvSetJson } from '@/lib/kv-rest'
 import { auditRoutedQueueId, progressLineText, stringish } from '@/lib/session-progress-signal'
 
-const KEY = 'imaging-audit-log'
+const KEY = REDIS_LIVE_KEYS.audit
 const MAX_ENTRIES = 400
 const CAS_ATTEMPTS = 6
 
@@ -78,6 +79,8 @@ async function writeEntries(entries: AuditLogEntry[]): Promise<void> {
   if (kvEnabled()) {
     const ok = await kvSetJson(KEY, { entries: trimmed })
     if (ok) {
+      const { mirrorAuditLog } = await import('@/lib/db/mirror')
+      await mirrorAuditLog(trimmed)
       const g = globalThis as GlobalWithLog
       g.__pomfret_imaging_audit_log__ = trimmed
       return
@@ -111,6 +114,8 @@ async function compareAndWriteEntries(
     const nextRaw = JSON.stringify({ entries: trimmed })
     const ok = await kvCompareAndSet(KEY, raw ?? '', nextRaw)
     if (ok) {
+      const { mirrorAuditLog } = await import('@/lib/db/mirror')
+      await mirrorAuditLog(trimmed)
       const g = globalThis as GlobalWithLog
       g.__pomfret_imaging_audit_log__ = trimmed
       return

@@ -96,12 +96,46 @@ export function projectFrameCounts(project: {
   return { total, captured }
 }
 
+/**
+ * Variable-star sequences loop until a clock time (no fixed frame count).
+ * Legacy board rows may lack `sequenceTemplate`; G×1 is the var-star placeholder plan.
+ */
+export function isOpenEndedVariableStarSession(opts: {
+  sequenceTemplate?: 'dso' | 'variable_star' | null
+  filterPlans?: FilterPlanLike[] | null
+}): boolean {
+  if (opts.sequenceTemplate === 'variable_star') return true
+  if (opts.sequenceTemplate === 'dso') return false
+  const plans = opts.filterPlans
+  if (!plans || plans.length !== 1) return false
+  const p = plans[0]!
+  return p.filterName === 'G' && Math.round(Number(p.count)) === 1
+}
+
 /** After queue consume, plans live on the session board; before that, on the queue row. */
 export async function totalExposureFramesForQueueId(queueId: string): Promise<number | null> {
   const req = await getRequestById(queueId)
+  if (
+    req &&
+    isOpenEndedVariableStarSession({
+      sequenceTemplate: req.sequenceTemplate,
+      filterPlans: req.filterPlans,
+    })
+  ) {
+    return null
+  }
   const fromReq = totalFramesFromFilterPlans(req?.filterPlans)
   if (fromReq != null) return fromReq
   const board = await getBoardEntry(queueId)
+  if (
+    board &&
+    isOpenEndedVariableStarSession({
+      sequenceTemplate: board.sequenceTemplate,
+      filterPlans: board.filterPlans,
+    })
+  ) {
+    return null
+  }
   const fromBoard = totalFramesFromFilterPlans(board?.filterPlans)
   if (fromBoard != null) return fromBoard
   const match = await getProjectByNightSubId(queueId)

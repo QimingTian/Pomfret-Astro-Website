@@ -12,6 +12,7 @@ import {
   type ProjectNight,
 } from '@/lib/imaging-project-store'
 import { projectFilterFrameProgress, projectFrameCounts } from '@/lib/imaging-total-frames'
+import { isOpenEndedVariableStarSession } from '@/lib/imaging/core/total-frames'
 import { listBoardEntries } from '@/lib/imaging-session-board'
 import { listAll, toPublicImagingRequest } from '@/lib/imaging-queue-store'
 import { hasR2ObjectForQueueId } from '@/lib/r2-session-download'
@@ -70,6 +71,7 @@ export async function GET(request: NextRequest) {
     hasPreview?: boolean
     previewPath?: string
     sessionType?: 'dso' | 'variable_star'
+    variableStarAmplitudeMag?: number | null
     projectMode?: boolean
     mosaicMode?: boolean
     mosaicPanels?: ImagingProject['mosaicPanels']
@@ -229,6 +231,11 @@ export async function GET(request: NextRequest) {
       plannedStartIso: p.plannedStartIso ?? null,
       scheduleReasons: Array.isArray(p.scheduleReasons) ? p.scheduleReasons : undefined,
       sessionType: p.sequenceTemplate === 'variable_star' ? 'variable_star' : 'dso',
+      ...(p.sequenceTemplate === 'variable_star' &&
+      typeof p.variableStarAmplitudeMag === 'number' &&
+      Number.isFinite(p.variableStarAmplitudeMag)
+        ? { variableStarAmplitudeMag: p.variableStarAmplitudeMag }
+        : {}),
       scheduleStripNightKey: null,
       scheduleBarStartMs: null,
       scheduleBarEndMs: null,
@@ -290,6 +297,15 @@ export async function GET(request: NextRequest) {
           typeof b.scheduleBarEndMs === 'number' && Number.isFinite(b.scheduleBarEndMs)
             ? b.scheduleBarEndMs
             : null,
+        sessionType: isOpenEndedVariableStarSession({
+          sequenceTemplate: b.sequenceTemplate,
+          filterPlans: b.filterPlans,
+        })
+          ? 'variable_star'
+          : 'dso',
+        ...(typeof b.variableStarAmplitudeMag === 'number' && Number.isFinite(b.variableStarAmplitudeMag)
+          ? { variableStarAmplitudeMag: b.variableStarAmplitudeMag }
+          : {}),
         userId: b.userId ?? null,
         ...(b.projectMode === true
           ? { projectMode: true as const, nights: [] as Row['nights'] }

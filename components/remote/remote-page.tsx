@@ -400,6 +400,7 @@ export default function RemotePage() {
       hasPreview?: boolean
       previewPath?: string
       sessionType?: 'dso' | 'variable_star'
+      variableStarAmplitudeMag?: number | null
       failedAt?: string | null
       scheduleStripNightKey?: string | null
       scheduleBarStartMs?: number | null
@@ -1213,6 +1214,11 @@ export default function RemotePage() {
                 ? ((x as Record<string, unknown>).cameraCoolingTempC as -10 | 0)
                 : undefined,
             sessionType,
+            variableStarAmplitudeMag:
+              typeof (x as Record<string, unknown>).variableStarAmplitudeMag === 'number' &&
+              Number.isFinite((x as Record<string, unknown>).variableStarAmplitudeMag as number)
+                ? ((x as Record<string, unknown>).variableStarAmplitudeMag as number)
+                : null,
             estimatedDurationSeconds:
               typeof x.estimatedDurationSeconds === 'number' && Number.isFinite(x.estimatedDurationSeconds)
                 ? x.estimatedDurationSeconds

@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { projectFilterFrameProgress, projectFrameCounts } from './total-frames'
+import {
+  isOpenEndedVariableStarSession,
+  projectFilterFrameProgress,
+  projectFrameCounts,
+} from './total-frames'
+import {
+  formatVariableStarImagingPlan,
+  variableStarMonitorUntilMs,
+} from '../nina/variable-star-plan-label'
 
 test('projectFilterFrameProgress reports captured per filter', () => {
   const rows = projectFilterFrameProgress({
@@ -59,4 +67,41 @@ test('projectFilterFrameProgress labels mosaic filters as Panel N -- filter', ()
     { filterName: 'Panel 1 -- S', total: 10, captured: 6 },
     { filterName: 'Panel 2 -- H', total: 8, captured: 0 },
   ])
+})
+
+test('isOpenEndedVariableStarSession detects template and legacy G×1 plan', () => {
+  assert.equal(isOpenEndedVariableStarSession({ sequenceTemplate: 'variable_star' }), true)
+  assert.equal(isOpenEndedVariableStarSession({ sequenceTemplate: 'dso', filterPlans: [{ filterName: 'G', exposureSeconds: 30, count: 1 }] }), false)
+  assert.equal(
+    isOpenEndedVariableStarSession({
+      filterPlans: [{ filterName: 'G', exposureSeconds: 30, count: 1 }],
+    }),
+    true
+  )
+  assert.equal(
+    isOpenEndedVariableStarSession({
+      filterPlans: [{ filterName: 'G', exposureSeconds: 30, count: 10 }],
+    }),
+    false
+  )
+})
+
+test('formatVariableStarImagingPlan uses monitor-until and ADU percent', () => {
+  const untilMs = Date.parse('2026-08-26T05:30:00.000Z')
+  const label = formatVariableStarImagingPlan({
+    untilMs,
+    amplitudeMag: 1.1,
+    filterName: 'G',
+  })
+  assert.match(label, /^G · Monitor until /)
+  assert.match(label, /Dynamic exposure/)
+  assert.match(label, /Target ADU 40%$/)
+  assert.equal(variableStarMonitorUntilMs({ scheduleBarEndMs: untilMs }), untilMs)
+  assert.equal(
+    variableStarMonitorUntilMs({
+      plannedStartIso: '2026-08-26T02:00:00.000Z',
+      estimatedDurationSeconds: 3600,
+    }),
+    Date.parse('2026-08-26T03:00:00.000Z')
+  )
 })

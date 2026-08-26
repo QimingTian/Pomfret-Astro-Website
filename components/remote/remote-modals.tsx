@@ -8,6 +8,10 @@ import { queueStatusLabel, isSessionFailedTerminalLine } from '@/lib/remote/queu
 import { nightDisplayLabel } from '@/lib/remote/night-label'
 import { queueStatusBadgeClass } from '@/lib/remote/ui-status'
 import {
+  formatVariableStarImagingPlan,
+  variableStarMonitorUntilMs,
+} from '@/lib/imaging/nina/variable-star-plan-label'
+import {
   loadMemberSavedSessionByName,
   saveMemberSavedSession,
   type MemberSavedSessionApiEntry,
@@ -49,6 +53,7 @@ export type RemoteModalQueueItem = {
   hasPreview?: boolean
   previewPath?: string
   sessionType?: 'dso' | 'variable_star'
+  variableStarAmplitudeMag?: number | null
   failedAt?: string | null
   scheduleStripNightKey?: string | null
   scheduleBarStartMs?: number | null
@@ -320,11 +325,23 @@ export function RemoteModals({
                   <p><span className="text-gray-500">Estimated Duration: </span>{formatDurationShort(terminalSessionDetail?.estimatedDurationSeconds)}</p>
                   <p className="md:col-span-3">
                     <span className="text-gray-500">Imaging Plan: </span>
-                    {Array.isArray(terminalSessionDetail?.filterPlans) && terminalSessionDetail.filterPlans.length > 0
-                      ? terminalSessionDetail.filterPlans
-                          .map((p) => `${p.filterName} (${p.count} × ${p.exposureSeconds}s)`)
-                          .join(' | ')
-                      : '--'}
+                    {terminalSessionDetail?.sessionType === 'variable_star'
+                      ? formatVariableStarImagingPlan({
+                          untilMs: variableStarMonitorUntilMs({
+                            scheduleBarEndMs: terminalSessionDetail.scheduleBarEndMs,
+                            scheduleBarStartMs: terminalSessionDetail.scheduleBarStartMs,
+                            plannedStartIso: terminalSessionDetail.plannedStartIso,
+                            estimatedDurationSeconds: terminalSessionDetail.estimatedDurationSeconds,
+                          }),
+                          amplitudeMag: terminalSessionDetail.variableStarAmplitudeMag,
+                          filterName: terminalSessionDetail.filter ?? terminalSessionDetail.filterPlans?.[0]?.filterName,
+                        })
+                      : Array.isArray(terminalSessionDetail?.filterPlans) &&
+                          terminalSessionDetail.filterPlans.length > 0
+                        ? terminalSessionDetail.filterPlans
+                            .map((p) => `${p.filterName} (${p.count} × ${p.exposureSeconds}s)`)
+                            .join(' | ')
+                        : '--'}
                   </p>
                 </div>
               </div>

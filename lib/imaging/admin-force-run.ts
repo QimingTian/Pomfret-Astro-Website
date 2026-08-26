@@ -420,6 +420,12 @@ async function deliverForceRunQueueRow(row: ImagingRequest): Promise<NextRespons
     sessionPasswordHash: consumed.sessionPasswordHash,
     userId: consumed.userId,
     projectMode: consumed.projectMode,
+    sequenceTemplate: consumed.sequenceTemplate === 'variable_star' ? 'variable_star' : 'dso',
+    ...(consumed.sequenceTemplate === 'variable_star' &&
+    typeof consumed.variableStarAmplitudeMag === 'number' &&
+    Number.isFinite(consumed.variableStarAmplitudeMag)
+      ? { variableStarAmplitudeMag: consumed.variableStarAmplitudeMag }
+      : {}),
   })
   await boardMarkDownloaded(consumed.id)
   void sendSessionStartedEmail({

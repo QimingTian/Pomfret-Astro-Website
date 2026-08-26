@@ -39,6 +39,8 @@ export type SessionBoardEntry = {
   scheduleBarEndMs?: number | null
   /** Multi-night DSO project (board id = project id). */
   projectMode?: boolean
+  sequenceTemplate?: 'dso' | 'variable_star'
+  variableStarAmplitudeMag?: number | null
 }
 
 const KEY = REDIS_LIVE_KEYS.board
@@ -96,7 +98,12 @@ function normalizeEntries(raw: unknown): SessionBoardEntry[] {
       ((e as SessionBoardEntry).scheduleBarStartMs == null ||
         typeof (e as SessionBoardEntry).scheduleBarStartMs === 'number') &&
       ((e as SessionBoardEntry).scheduleBarEndMs == null ||
-        typeof (e as SessionBoardEntry).scheduleBarEndMs === 'number')
+        typeof (e as SessionBoardEntry).scheduleBarEndMs === 'number') &&
+      ((e as SessionBoardEntry).sequenceTemplate == null ||
+        (e as SessionBoardEntry).sequenceTemplate === 'dso' ||
+        (e as SessionBoardEntry).sequenceTemplate === 'variable_star') &&
+      ((e as SessionBoardEntry).variableStarAmplitudeMag == null ||
+        typeof (e as SessionBoardEntry).variableStarAmplitudeMag === 'number')
   )
 }
 
@@ -275,6 +282,8 @@ export async function boardUpsertInProgress(input: {
   sessionPasswordHash?: string
   userId?: string
   projectMode?: boolean
+  sequenceTemplate?: 'dso' | 'variable_star'
+  variableStarAmplitudeMag?: number | null
 }): Promise<void> {
   const ts = new Date().toISOString()
   const prev = await readEntries()
@@ -301,6 +310,14 @@ export async function boardUpsertInProgress(input: {
     sessionPasswordHash: input.sessionPasswordHash,
     ...(input.userId ? { userId: input.userId } : {}),
     ...(input.projectMode ? { projectMode: true as const } : {}),
+    ...(input.sequenceTemplate === 'variable_star' || input.sequenceTemplate === 'dso'
+      ? { sequenceTemplate: input.sequenceTemplate }
+      : {}),
+    ...(input.sequenceTemplate === 'variable_star' &&
+    typeof input.variableStarAmplitudeMag === 'number' &&
+    Number.isFinite(input.variableStarAmplitudeMag)
+      ? { variableStarAmplitudeMag: input.variableStarAmplitudeMag }
+      : {}),
   }
   await writeEntries([...without, entry])
 }

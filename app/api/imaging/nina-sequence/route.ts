@@ -684,6 +684,12 @@ export async function GET(request: NextRequest) {
     estimatedDurationSeconds: consumed.estimatedDurationSeconds,
     sessionPasswordHash: consumed.sessionPasswordHash,
     userId: consumed.userId,
+    sequenceTemplate: consumed.sequenceTemplate === 'variable_star' ? 'variable_star' : 'dso',
+    ...(consumed.sequenceTemplate === 'variable_star' &&
+    typeof consumed.variableStarAmplitudeMag === 'number' &&
+    Number.isFinite(consumed.variableStarAmplitudeMag)
+      ? { variableStarAmplitudeMag: consumed.variableStarAmplitudeMag }
+      : {}),
   })
 
   const startedAtIso = new Date().toISOString()

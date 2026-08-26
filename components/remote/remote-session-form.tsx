@@ -324,7 +324,8 @@ export function RemoteSessionForm({
                 className={
                   tonightWeatherPrediction === 'permitted'
                     ? 'text-green-600 dark:text-green-400'
-                    : tonightWeatherPrediction === 'loading'
+                    : tonightWeatherPrediction === 'loading' ||
+                        tonightWeatherPrediction === 'unavailable'
                       ? 'text-gray-500 dark:text-gray-500'
                       : 'text-red-600 dark:text-red-400'
                 }
@@ -333,7 +334,9 @@ export function RemoteSessionForm({
                   ? 'Permitted'
                   : tonightWeatherPrediction === 'loading'
                     ? 'Loading...'
-                    : 'Not permitted'}
+                    : tonightWeatherPrediction === 'unavailable'
+                      ? 'Unavailable'
+                      : 'Not permitted'}
               </span>
             </>
           ) : null}

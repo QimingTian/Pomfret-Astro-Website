@@ -22,8 +22,6 @@ type OpenMeteoHourly = {
   cloud_cover?: number[]
   precipitation_probability?: number[]
   wind_speed_10m?: number[]
-  /** 0 = night, 1 = day (Open-Meteo); used so “after midnight before sunrise” counts as night. */
-  is_day?: number[]
 }
 
 type OpenMeteoResponse = {
@@ -60,7 +58,7 @@ export async function GET(request: Request) {
   const url =
     'https://api.open-meteo.com/v1/forecast' +
     `?latitude=${site.weatherLat}&longitude=${site.weatherLon}` +
-    '&hourly=cloud_cover,precipitation_probability,wind_speed_10m,is_day' +
+    '&hourly=cloud_cover,precipitation_probability,wind_speed_10m' +
     '&daily=sunrise,sunset' +
     `&past_days=1&forecast_days=2&timezone=${site.timezone}&timeformat=unixtime`
 
@@ -75,7 +73,6 @@ export async function GET(request: Request) {
     const clouds = hourly?.cloud_cover ?? []
     const precipProb = hourly?.precipitation_probability ?? []
     const windSpeed = hourly?.wind_speed_10m ?? []
-    const isDay = hourly?.is_day ?? []
     const dailySunrise = data.daily?.sunrise ?? []
     const dailySunset = data.daily?.sunset ?? []
 
@@ -83,8 +80,7 @@ export async function GET(request: Request) {
       times.length === 0 ||
       clouds.length !== times.length ||
       precipProb.length !== times.length ||
-      windSpeed.length !== times.length ||
-      (isDay.length > 0 && isDay.length !== times.length)
+      windSpeed.length !== times.length
     ) {
       return NextResponse.json({ ok: false as const, error: 'Forecast data is incomplete' }, { status: 502 })
     }
@@ -178,29 +174,11 @@ export async function GET(request: Request) {
       })
       .filter((x): x is { hourStartSec: number; precipitationProbability: number; cloudCover: number | null } => x != null)
     const hasAnyPrecipitationTonight = precipitationHits.length > 0
-
-    // Old check used only [today sunset → tomorrow sunrise]. After local midnight but before
-    // "today's" sunset, that window has not started yet, so 1am looked like "day" and returned
-    // not_permitted. Prefer Open-Meteo hourly is_day when present; else fall back to sunset window.
-    let isNighttimeNow = nowSec >= windowStartSec && nowSec < windowEndSec
-    if (isDay.length === times.length) {
-      let idx = -1
-      for (let i = 0; i < times.length; i += 1) {
-        if (times[i] <= nowSec) idx = i
-        else break
-      }
-      if (idx >= 0) {
-        isNighttimeNow = Number(isDay[idx]) === 0
-      }
-    } else {
-      // No is_day: same bug as before for 1am — at least treat “before today’s sunrise” as night.
-      const todaySunrise = dailySunrise[0]
-      isNighttimeNow =
-        nowSec < todaySunrise ||
-        (nowSec >= windowStartSec && nowSec < windowEndSec)
-    }
     const precipitationHitHourStartsSec = precipitationHits.map((hit) => hit.hourStartSec)
 
+    // Headline / global prediction is only meaningful before nautical dusk — same cutoff as
+    // `isBeforeTonightWeatherHeadline`. Do not use Open-Meteo is_day (civil night): that flips
+    // ~30–40 min earlier and made the UI show "Not permitted" while the dusk headline still showed.
     const strip = getTonightScheduleStrip(new Date())
     const nauticalDuskSec = Math.floor(strip.nauticalDuskMs / 1000)
     const imagingNightUnderway =
@@ -209,7 +187,7 @@ export async function GET(request: Request) {
       nowSec >= nauticalDuskSec &&
       nowSec < globalGateEndSec
 
-    if (isNighttimeNow || imagingNightUnderway) {
+    if (imagingNightUnderway) {
       await reconcileIfScheduleWeatherColumnChanged(windowStartSec, windowEndSec, {
         prediction: 'unavailable',
         hasAnyPrecipitationTonight,
@@ -221,7 +199,7 @@ export async function GET(request: Request) {
       return NextResponse.json({
         ok: true as const,
         prediction: 'unavailable',
-        message: 'nighttime now, prediction not available',
+        message: 'after nautical dusk, prediction not available',
         readyHourStartsSec,
         nightHourStartsSec,
         notPermittedHourReasons,

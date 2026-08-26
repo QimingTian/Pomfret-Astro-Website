@@ -182,6 +182,14 @@ export function completedSessionOverlapsTonightStripWindow(
   locked: Record<string, { startMs: number; endMs: number }>,
 ): boolean {
   if (item.nightKey && item.nightKey !== tonightNightKey) return false
+  // Frozen on a prior strip night — never treat as tonight's schedule after the calendar flips.
+  if (
+    typeof item.scheduleStripNightKey === 'string' &&
+    item.scheduleStripNightKey.trim() &&
+    item.scheduleStripNightKey !== tonightNightKey
+  ) {
+    return false
+  }
   const durationMs = sessionDurationMsFromItem(item)
   const lock = locked[item.id]
   if (

@@ -1,5 +1,6 @@
 import {
   fallbackScheduleBarPlacement,
+  hasAnyFrozenScheduleBar,
   type ScheduleBarPlacement,
 } from '@/lib/imaging-schedule-bar'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
@@ -117,7 +118,8 @@ function applyScheduleBar(entry: SessionBoardEntry, bar: ScheduleBarPlacement): 
 }
 
 /**
- * Save schedule bar placement. Terminal sessions (completed/failed) are immutable once set for that night.
+ * Save schedule bar placement. Terminal sessions (completed/failed) are immutable
+ * once any night's bar is frozen — never move them onto a later strip night.
  */
 export async function boardSetScheduleBar(
   id: string,
@@ -130,11 +132,8 @@ export async function boardSetScheduleBar(
   if (current.status !== 'in_progress' && current.status !== 'completed' && current.status !== 'failed') {
     return { ok: false, error: 'Session is not on the board' }
   }
-  if (
-    (current.status === 'completed' || current.status === 'failed') &&
-    hasFrozenScheduleBar(current, bar.nightKey)
-  ) {
-    return { ok: true }
+  if (current.status === 'completed' || current.status === 'failed') {
+    if (hasAnyFrozenScheduleBar(current)) return { ok: true }
   }
   if (bar.endMs <= bar.startMs) return { ok: false, error: 'Invalid bar interval' }
   const next = [...prev]
@@ -143,40 +142,35 @@ export async function boardSetScheduleBar(
   return { ok: true }
 }
 
-function hasFrozenScheduleBar(entry: SessionBoardEntry, nightKey: string): boolean {
-  if (entry.scheduleStripNightKey !== nightKey) return false
-  const s = entry.scheduleBarStartMs
-  const e = entry.scheduleBarEndMs
-  return typeof s === 'number' && typeof e === 'number' && Number.isFinite(s) && Number.isFinite(e) && e > s
-}
-
 /** Backfill frozen bar for legacy completed/failed rows missing schedule fields. */
 export async function boardEnsureScheduleBarForTerminal(id: string): Promise<void> {
   const entry = await getBoardEntry(id)
   if (!entry) return
+  if (hasAnyFrozenScheduleBar(entry)) return
   if (entry.status === 'completed' && entry.completedAt) {
     const endMs = Date.parse(entry.completedAt)
-    if (Number.isFinite(endMs)) await freezeScheduleBarOnTerminal(id, endMs)
+    if (Number.isFinite(endMs)) await freezeScheduleBarOnTerminal(id, endMs, new Date(endMs))
     return
   }
   if (entry.status === 'failed' && entry.failedAt) {
     const endMs = Date.parse(entry.failedAt)
-    if (Number.isFinite(endMs)) await freezeScheduleBarOnTerminal(id, endMs)
+    if (Number.isFinite(endMs)) await freezeScheduleBarOnTerminal(id, endMs, new Date(endMs))
   }
 }
 
 async function freezeScheduleBarOnTerminal(
   id: string,
   terminalEndMs: number,
-  now = new Date()
+  now = new Date(terminalEndMs)
 ): Promise<void> {
   const prev = await readEntries()
   const idx = prev.findIndex((e) => e.id === id)
   if (idx === -1) return
   const entry = prev[idx]!
-  const strip = getTonightScheduleStrip(now)
-  if (hasFrozenScheduleBar(entry, strip.nightKey)) return
+  // Already frozen on any strip night — do not rewrite onto "tonight" after the calendar flips.
+  if (hasAnyFrozenScheduleBar(entry)) return
 
+  const strip = getTonightScheduleStrip(now)
   let bar: ScheduleBarPlacement
   if (
     typeof entry.scheduleBarStartMs === 'number' &&

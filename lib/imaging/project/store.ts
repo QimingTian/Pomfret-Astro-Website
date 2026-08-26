@@ -1217,11 +1217,14 @@ export async function setNightScheduleBar(
   const next = all.map((project) => {
     const nights = project.nights.map((n) => {
       if (n.id !== nightSubId) return n
+      // Terminal nights keep their frozen bar on the original strip night.
       if (
         (n.status === 'completed' || n.status === 'failed') &&
-        n.scheduleStripNightKey === bar.nightKey &&
+        typeof n.scheduleStripNightKey === 'string' &&
+        n.scheduleStripNightKey.trim() &&
         typeof n.scheduleBarStartMs === 'number' &&
-        typeof n.scheduleBarEndMs === 'number'
+        typeof n.scheduleBarEndMs === 'number' &&
+        n.scheduleBarEndMs > n.scheduleBarStartMs
       ) {
         return n
       }

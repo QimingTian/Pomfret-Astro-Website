@@ -2299,6 +2299,15 @@ export default function RemotePage() {
         const item = scheduleStripItems.find((x) => x.id === id)
         if (!item) continue
         if (item.status !== 'in_progress' && item.status !== 'completed') continue
+        // Never re-stamp a completed session onto a later strip night.
+        if (
+          item.status === 'completed' &&
+          typeof item.scheduleStripNightKey === 'string' &&
+          item.scheduleStripNightKey.trim() &&
+          item.scheduleStripNightKey !== tonightNightKey
+        ) {
+          continue
+        }
         const frozen = serverScheduleBarForNight(item, tonightNightKey)
         if (frozen && item.status !== 'in_progress') continue
         if (

@@ -15,7 +15,7 @@ export function OPTIONS() {
 
 /**
  * Persist Tonight's Schedule bar position for a board session (KV-backed).
- * Terminal rows (completed/failed) ignore updates once frozen for the current strip night.
+ * Terminal rows (completed/failed) ignore updates once any night's bar is frozen.
  */
 export async function POST(request: NextRequest) {
   const auth = await requireUser(request)

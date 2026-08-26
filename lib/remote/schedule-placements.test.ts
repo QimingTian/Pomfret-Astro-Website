@@ -121,3 +121,21 @@ test('completedSessionOverlapsTonightStripWindow rejects other nightKey', () => 
     false
   )
 })
+
+test('completedSessionOverlapsTonightStripWindow rejects frozen scheduleStripNightKey from prior night', () => {
+  const windowStart = Date.parse('2026-08-26T20:00:00.000Z')
+  const windowEnd = Date.parse('2026-08-27T12:00:00.000Z')
+  const item = {
+    id: 'xz1',
+    status: 'completed',
+    createdAt: '2026-08-26T00:30:20.000Z',
+    scheduleStripNightKey: '2026-08-25',
+    scheduleBarStartMs: Date.parse('2026-08-26T00:39:46.000Z'),
+    scheduleBarEndMs: Date.parse('2026-08-26T07:01:30.000Z'),
+    estimatedDurationSeconds: 22800,
+  }
+  assert.equal(
+    completedSessionOverlapsTonightStripWindow(item, '2026-08-26', windowStart, windowEnd, {}),
+    false
+  )
+})

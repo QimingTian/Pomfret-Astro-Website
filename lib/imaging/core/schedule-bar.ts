@@ -87,3 +87,10 @@ export function readScheduleBarFromEntry(
 export function hasFrozenScheduleBar(entry: SessionBoardEntry, nightKey: string): boolean {
   return readScheduleBarFromEntry(entry, nightKey) != null
 }
+
+/** Terminal sessions keep one frozen bar forever — never move it onto a later strip night. */
+export function hasAnyFrozenScheduleBar(entry: SessionBoardEntry): boolean {
+  const nightKey = entry.scheduleStripNightKey
+  if (typeof nightKey !== 'string' || !nightKey.trim()) return false
+  return readScheduleBarFromEntry(entry, nightKey) != null
+}

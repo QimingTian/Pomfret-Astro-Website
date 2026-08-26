@@ -101,6 +101,7 @@ class NinaSequenceBuilderTests(unittest.TestCase):
                 "templateKind": "variable_star",
                 "targetName": "CR Boo",
                 "variableStarWindow": {"end": {"hours": 4, "minutes": 30, "seconds": 0}},
+                "variableStarTargetAdu": 0.4,
             }
         )
         target = None
@@ -125,6 +126,10 @@ class NinaSequenceBuilderTests(unittest.TestCase):
         self.assertLess(af_i, calc_i)
         self.assertEqual(values[switch_i]["Filter"]["_name"], "G")
         self.assertEqual(values[switch_i]["Filter"]["_position"], 5)
+        calc = next(v for v in values if isinstance(v, dict) and "CalculateExposureTime" in str(v.get("$type") or ""))
+        self.assertEqual(calc["ExposureTimeFirst"], 10.0)
+        self.assertEqual(calc["ExposureTimeMax"], 180.0)
+        self.assertEqual(calc["TargetADU"], 0.4)
         posts = []
         for v in values:
             if not isinstance(v, dict) or "HTTP.HttpClient" not in str(v.get("$type") or ""):

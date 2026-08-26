@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, writeFile } from 'fs/promises'
 import path from 'path'
 
 import { buildNinaSequenceJson } from '@/lib/build-nina-sequence-json'
+import { variableStarTargetAduFromAmplitude } from '@/lib/imaging/nina/variable-star-target-adu'
 import {
   VARIABLE_STAR_SESSION_OVERHEAD_SEC,
   dsoSessionDurationSeconds,
@@ -57,6 +58,8 @@ export interface ImagingRequest {
   plannedStartIso?: string | null
   scheduleReasons?: string[]
   sequenceTemplate?: 'dso' | 'variable_star'
+  /** Peak-to-peak amplitude (mag) from catalog; used to size CalculateExposureTime TargetADU. */
+  variableStarAmplitudeMag?: number | null
   /** Multi-night DSO project; queue row is consumed on first NINA delivery only. */
   projectMode?: boolean
   mosaicMode?: boolean
@@ -124,6 +127,14 @@ function variableStarDurationFromClientEstimate(inputEst: unknown): { ok: true; 
   if (Math.abs(halves - Math.round(halves)) > 0.02) return { ok: false }
   if (blockH < 0.5 - 1e-6) return { ok: false }
   return { ok: true, seconds: Math.max(60, est) }
+}
+
+function normalizeVariableStarAmplitudeMag(input: unknown): number | null | undefined {
+  if (input === undefined) return undefined
+  if (input === null) return null
+  const n = typeof input === 'number' ? input : Number(input)
+  if (!Number.isFinite(n) || n <= 0 || n > 20) return null
+  return Math.round(n * 1000) / 1000
 }
 
 type GlobalWithQueue = typeof globalThis & { __pomfret_imaging_queue__?: ImagingRequest[] }
@@ -488,6 +499,8 @@ export interface CreateImagingInput {
   sequenceTemplate?: 'dso' | 'variable_star'
   /** Variable star: total seconds = (N×0.5 h block) + variable-star session overhead; validated when `sequenceTemplate` is `variable_star`. */
   estimatedDurationSeconds?: number
+  /** Peak-to-peak amplitude (mag); sizes CalculateExposureTime TargetADU. */
+  variableStarAmplitudeMag?: number | null
   /** Multi-night DSO project: skip single-night duration / ideal-night feasibility checks. */
   projectMode?: boolean
   mosaicMode?: boolean
@@ -657,6 +670,10 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
   if (!userId) {
     return { error: 'Authentication required to submit imaging requests.' }
   }
+  const variableStarAmplitudeMag =
+    sequenceTemplate === 'variable_star'
+      ? (normalizeVariableStarAmplitudeMag(input.variableStarAmplitudeMag) ?? null)
+      : undefined
   const sessionPassword = typeof input.sessionPassword === 'string' ? input.sessionPassword.trim() : ''
   let sessionPasswordHash: string | undefined
   if (sessionPassword.length > 128) {
@@ -684,6 +701,9 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
         exposureSeconds: p.exposureSeconds,
         exposureCount: p.count,
       })),
+      ...(sequenceTemplate === 'variable_star'
+        ? { variableStarTargetAdu: variableStarTargetAduFromAmplitude(variableStarAmplitudeMag) }
+        : {}),
     })
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Failed to build NINA sequence'
@@ -713,6 +733,7 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
     ninaSequenceJson,
     ...(sessionPasswordHash ? { sessionPasswordHash } : {}),
     sequenceTemplate,
+    ...(variableStarAmplitudeMag != null ? { variableStarAmplitudeMag } : {}),
     ...(projectMode ? { projectMode: true as const } : {}),
     ...(mosaicMode && Array.isArray(input.mosaicPanels) && input.mosaicPanels.length > 0
       ? {
@@ -868,6 +889,14 @@ export async function updatePendingRequestById(
   }
 
   const cameraCoolingTempC = input.cameraCoolingTempC ?? current.cameraCoolingTempC
+  const variableStarAmplitudeMag =
+    sequenceTemplate === 'variable_star'
+      ? (normalizeVariableStarAmplitudeMag(
+          input.variableStarAmplitudeMag !== undefined
+            ? input.variableStarAmplitudeMag
+            : current.variableStarAmplitudeMag
+        ) ?? null)
+      : undefined
 
   let ninaSequenceJson: string
   try {
@@ -887,6 +916,9 @@ export async function updatePendingRequestById(
         exposureSeconds: p.exposureSeconds,
         exposureCount: p.count,
       })),
+      ...(sequenceTemplate === 'variable_star'
+        ? { variableStarTargetAdu: variableStarTargetAduFromAmplitude(variableStarAmplitudeMag) }
+        : {}),
     })
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Failed to build NINA sequence'
@@ -915,6 +947,7 @@ export async function updatePendingRequestById(
     ninaSequenceJson,
     sessionPasswordHash,
     sequenceTemplate,
+    variableStarAmplitudeMag: sequenceTemplate === 'variable_star' ? variableStarAmplitudeMag ?? null : undefined,
     ...(projectMode ? { projectMode: true as const } : {}),
     ...(input.mosaicMode === true &&
     Array.isArray(input.mosaicPanels) &&

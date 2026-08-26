@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { buildNinaSequenceJson } from '@/lib/build-nina-sequence-json'
 import { scheduledSessionEndMs } from '@/lib/imaging/nina/sequence-json'
+import { variableStarTargetAduFromAmplitude } from '@/lib/imaging/nina/variable-star-target-adu'
 import {
   ninaAgentJobResponse,
   runJobFromProjectNight,
@@ -240,6 +241,10 @@ function sequenceJsonFor(r: ImagingRequest): string | null {
       cameraCoolingTempC: r.cameraCoolingTempC,
       targetName: r.target ?? undefined,
       variableStarSessionEndMs: scheduledSessionEndMs(r) ?? undefined,
+      variableStarTargetAdu:
+        r.sequenceTemplate === 'variable_star'
+          ? variableStarTargetAduFromAmplitude(r.variableStarAmplitudeMag)
+          : undefined,
     })
   }
   return null

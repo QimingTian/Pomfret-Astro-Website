@@ -1,6 +1,6 @@
 # Pomfret Astro — Technical Documentation
 
-**Version:** v7.0.2  
+**Version:** v7.0.3  
 **Production:** https://www.pomfretastro.org  
 **Repository:** https://github.com/QimingTian/Pomfret-Astro-Website
 

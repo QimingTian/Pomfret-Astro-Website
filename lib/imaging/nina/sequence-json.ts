@@ -28,6 +28,8 @@ export interface NinaSequenceParams {
   variableStarObservingSeconds?: number
   /** UTC ms: Loop-until Time clock (scheduled session end). */
   variableStarSessionEndMs?: number
+  /** ExoPlanets CalculateExposureTime TargetADU (0–1 full well); set from amplitude on the server. */
+  variableStarTargetAdu?: number
   cameraCoolingTempC?: number
 }
 
@@ -399,6 +401,12 @@ function applyVariableStarLoopUntil(dso: Record<string, unknown>, sessionEndMs: 
   }
 }
 
+function applyVariableStarTargetAdu(dso: Record<string, unknown>, targetAdu: number) {
+  if (!Number.isFinite(targetAdu) || targetAdu <= 0) return
+  const calc = findFirstByType(dso, 'NINA.Plugin.ExoPlanets.Sequencer.Utility.CalculateExposureTime')
+  if (calc) calc['TargetADU'] = targetAdu
+}
+
 /**
  * Loads the repo template JSON, clones it, and overwrites only:
  * - Target.InputCoordinates + Center.Coordinates (RA/Dec in NINA HMS / DMS)
@@ -483,6 +491,9 @@ export function buildNinaSequenceJson(params: NinaSequenceParams): string {
   if (templateKind === 'variable_star') {
     if (typeof params.variableStarSessionEndMs === 'number' && Number.isFinite(params.variableStarSessionEndMs)) {
       applyVariableStarLoopUntil(dso, params.variableStarSessionEndMs)
+    }
+    if (typeof params.variableStarTargetAdu === 'number' && Number.isFinite(params.variableStarTargetAdu)) {
+      applyVariableStarTargetAdu(dso, params.variableStarTargetAdu)
     }
     const switchFilter = findFirstByType(dsoItemValues, 'NINA.Sequencer.SequenceItem.FilterWheel.SwitchFilter')
     if (!switchFilter) throw new Error('Template: SwitchFilter not found')

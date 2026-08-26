@@ -180,6 +180,12 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     mosaicFilterPlansByPanel: Array.isArray(b.mosaicFilterPlansByPanel)
       ? (b.mosaicFilterPlansByPanel as CreateImagingInput['mosaicFilterPlansByPanel'])
       : undefined,
+    variableStarAmplitudeMag:
+      typeof b.variableStarAmplitudeMag === 'number' && Number.isFinite(b.variableStarAmplitudeMag)
+        ? b.variableStarAmplitudeMag
+        : b.variableStarAmplitudeMag === null
+          ? null
+          : undefined,
   }
 
   const updated = await updatePendingRequestById(id, payload)

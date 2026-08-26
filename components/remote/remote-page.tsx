@@ -2690,6 +2690,15 @@ export default function RemotePage() {
           ? mosaicFilterPlansByPanel.reduce((sum, plans) => sum + estimateDurationSecondsFromPlans(plans), 0)
           : estimateDurationSecondsFromPlans(normalizedPlans)
 
+    const variableStarAmplitudeMag =
+      sessionType === 'variable_star' &&
+      variableStarPreviewStar?.minMag != null &&
+      variableStarPreviewStar?.maxMag != null &&
+      Number.isFinite(variableStarPreviewStar.minMag) &&
+      Number.isFinite(variableStarPreviewStar.maxMag)
+        ? Math.abs(variableStarPreviewStar.minMag - variableStarPreviewStar.maxMag)
+        : undefined
+
     const endpoint = editingSessionId ? `/api/imaging/queue/${encodeURIComponent(editingSessionId)}` : '/api/imaging/queue'
     const editCredential = editingSessionId ? sessionPasswords[editingSessionId] ?? '' : ''
     const res = await fetch(endpoint, {
@@ -2716,6 +2725,9 @@ export default function RemotePage() {
         cameraCoolingTempC,
         estimatedDurationSeconds,
         sessionType,
+        ...(variableStarAmplitudeMag != null && variableStarAmplitudeMag > 0
+          ? { variableStarAmplitudeMag }
+          : {}),
         ...(sessionType === 'dso' && projectMode ? { projectMode: true } : {}),
         ...(sessionType === 'dso' && mosaicMode && mosaicDraft?.panels?.length
           ? {

@@ -217,6 +217,12 @@ export async function POST(request: NextRequest) {
       ? (b.mosaicFilterPlansByPanel as CreateImagingInput['mosaicFilterPlansByPanel'])
       : undefined,
     userId: auth.user.id,
+    variableStarAmplitudeMag:
+      typeof b.variableStarAmplitudeMag === 'number' && Number.isFinite(b.variableStarAmplitudeMag)
+        ? b.variableStarAmplitudeMag
+        : b.variableStarAmplitudeMag === null
+          ? null
+          : undefined,
   }
 
   const whenClosedBehavior =

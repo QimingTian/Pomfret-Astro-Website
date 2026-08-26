@@ -289,6 +289,18 @@ def _apply_variable_star_window(dso: dict[str, Any], window: dict[str, Any]) -> 
         cond["MinutesOffset"] = 0
 
 
+def _apply_variable_star_target_adu(dso: dict[str, Any], target_adu: Any) -> None:
+    try:
+        adu = float(target_adu)
+    except (TypeError, ValueError):
+        return
+    if not (adu > 0):
+        return
+    calc = _find_first_by_type(dso, "NINA.Plugin.ExoPlanets.Sequencer.Utility.CalculateExposureTime")
+    if calc is not None:
+        calc["TargetADU"] = adu
+
+
 def _apply_cooling(node: Any, temp_c: float) -> None:
     if isinstance(node, list):
         for item in node:
@@ -420,6 +432,8 @@ def build_run_sequence(params: dict[str, Any]) -> dict[str, Any]:
         window = params.get("variableStarWindow")
         if isinstance(window, dict):
             _apply_variable_star_window(dso, window)
+        if "variableStarTargetAdu" in params:
+            _apply_variable_star_target_adu(dso, params.get("variableStarTargetAdu"))
         switch = _find_first_by_type(values, "NINA.Sequencer.SequenceItem.FilterWheel.SwitchFilter")
         if switch is None:
             raise ValueError("Template: SwitchFilter not found")

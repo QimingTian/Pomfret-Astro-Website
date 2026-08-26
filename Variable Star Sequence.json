@@ -2154,10 +2154,10 @@
                   {
                     "$id": "301",
                     "$type": "NINA.Plugin.ExoPlanets.Sequencer.Utility.CalculateExposureTime, ExoPlanets",
-                    "ExposureTime": 30.0,
-                    "ExposureTimeFirst": 30.0,
+                    "ExposureTime": 10.0,
+                    "ExposureTimeFirst": 10.0,
                     "ExposureTimeSecond": 60.0,
-                    "ExposureTimeMax": 300.0,
+                    "ExposureTimeMax": 180.0,
                     "Gain": -1,
                     "Offset": -1,
                     "Binning": {

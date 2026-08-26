@@ -7,6 +7,7 @@ import {
   type NinaSequenceParams,
   type ObservatoryHms,
 } from '@/lib/imaging/nina/sequence-json'
+import { variableStarTargetAduFromAmplitude } from '@/lib/imaging/nina/variable-star-target-adu'
 import {
   estopDiscordMessageForState,
   isWeatherSafetyEmergencyStopActor,
@@ -160,6 +161,7 @@ export function sequenceParamsFromQueueRequest(r: ImagingRequest): NinaAgentRunP
       params.variableStarSessionEndMs = endMs
       params.variableStarWindow = { end: observatoryHmsFromUtcMs(endMs) }
     }
+    params.variableStarTargetAdu = variableStarTargetAduFromAmplitude(r.variableStarAmplitudeMag)
   }
   return params
 }

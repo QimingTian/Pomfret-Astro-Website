@@ -8,6 +8,7 @@ import {
 import { getRequestById } from '@/lib/imaging-queue-store'
 import { buildNinaSequenceJson } from '@/lib/build-nina-sequence-json'
 import { scheduledSessionEndMs } from '@/lib/imaging/nina/sequence-json'
+import { variableStarTargetAduFromAmplitude } from '@/lib/imaging/nina/variable-star-target-adu'
 
 export const runtime = 'nodejs'
 
@@ -50,6 +51,10 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
         cameraCoolingTempC: row.cameraCoolingTempC,
         targetName: row.target ?? undefined,
         variableStarSessionEndMs: scheduledSessionEndMs(row) ?? undefined,
+        variableStarTargetAdu:
+          row.sequenceTemplate === 'variable_star'
+            ? variableStarTargetAduFromAmplitude(row.variableStarAmplitudeMag)
+            : undefined,
       })
     } catch {
       sequenceJson = undefined

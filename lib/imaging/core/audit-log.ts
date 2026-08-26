@@ -5,6 +5,8 @@ import { auditRoutedQueueId, progressLineText, stringish } from '@/lib/session-p
 
 const KEY = REDIS_LIVE_KEYS.audit
 const MAX_ENTRIES = 400
+/** Keep recent Image/terminal spam from wiping the admin activity log. */
+const PROGRESS_RESERVE = 80
 const CAS_ATTEMPTS = 6
 
 export type AuditLogEntry = {
@@ -42,6 +44,27 @@ function normalizeEntries(raw: unknown): AuditLogEntry[] {
   )
 }
 
+/** Prefer retaining non-progress events; only keep a short recent progress tail. */
+export function trimAuditEntries(entries: AuditLogEntry[], max = MAX_ENTRIES): AuditLogEntry[] {
+  if (entries.length <= max) return entries
+  const progress: AuditLogEntry[] = []
+  const other: AuditLogEntry[] = []
+  for (const e of entries) {
+    if (e.kind === 'session.progress') progress.push(e)
+    else other.push(e)
+  }
+  const reserved =
+    progress.length > 0 ? Math.min(PROGRESS_RESERVE, progress.length, max) : 0
+  if (other.length >= max - reserved) {
+    const keptOther = other.slice(-(max - reserved))
+    const keptProgress = progress.slice(-reserved)
+    return [...keptOther, ...keptProgress].sort((a, b) => a.at.localeCompare(b.at))
+  }
+  const keptOther = other
+  const keptProgress = progress.slice(-(max - keptOther.length))
+  return [...keptOther, ...keptProgress].sort((a, b) => a.at.localeCompare(b.at))
+}
+
 async function readEntries(): Promise<AuditLogEntry[]> {
   if (kvEnabled()) {
     const remote = await kvGetJson<Payload>(KEY)
@@ -52,7 +75,7 @@ async function readEntries(): Promise<AuditLogEntry[]> {
         const { loadJsonDocumentsFromPostgres } = await import('@/lib/db/read')
         const pg = await loadJsonDocumentsFromPostgres<AuditLogEntry>('audit')
         if (pg && pg.length > 0) {
-          const trimmed = pg.length > MAX_ENTRIES ? pg.slice(-MAX_ENTRIES) : pg
+          const trimmed = trimAuditEntries(pg)
           await kvSetJson(KEY, { entries: trimmed })
           return trimmed
         }
@@ -75,7 +98,7 @@ async function readEntries(): Promise<AuditLogEntry[]> {
 }
 
 async function writeEntries(entries: AuditLogEntry[]): Promise<void> {
-  const trimmed = entries.length > MAX_ENTRIES ? entries.slice(-MAX_ENTRIES) : entries
+  const trimmed = trimAuditEntries(entries)
   if (kvEnabled()) {
     const ok = await kvSetJson(KEY, { entries: trimmed })
     if (ok) {
@@ -110,7 +133,7 @@ async function compareAndWriteEntries(
     const raw = await kvGetString(KEY)
     const prev = normalizeEntries(raw ? (JSON.parse(raw) as Payload) : null)
     const next = mutate(prev)
-    const trimmed = next.length > MAX_ENTRIES ? next.slice(-MAX_ENTRIES) : next
+    const trimmed = trimAuditEntries(next)
     const nextRaw = JSON.stringify({ entries: trimmed })
     const ok = await kvCompareAndSet(KEY, raw ?? '', nextRaw)
     if (ok) {

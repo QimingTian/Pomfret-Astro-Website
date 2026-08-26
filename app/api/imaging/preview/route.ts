@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { publishPreview } from '@/lib/imaging-preview-live'
 import { publishProgress } from '@/lib/imaging-progress-live'
-import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { authorizeImagingSession } from '@/lib/imaging-session-access'
 import { imagingCorsOptions, imagingQueueAuthorized, withImagingCors } from '@/lib/imaging-queue-auth'
 import { getPreviewImage, upsertPreviewImage } from '@/lib/imaging-preview-store'
@@ -97,11 +96,8 @@ export async function POST(request: NextRequest) {
   const total = await totalExposureFramesForQueueId(queueId)
   const lineText = total != null ? `Image ${frameNumber}/${total}` : `Image ${frameNumber}`
   const at = new Date().toISOString()
-  await appendAuditLog({
-    kind: 'session.progress',
-    message: `Preview frame ${frameNumber} for ${queueId}.`,
-    detail: { queueId, message: lineText },
-  })
+  // Per-session progress list only — do not append to the capped admin audit ring
+  // (Image spam would evict emergency_stop / queue events; Admin UI filters session.progress).
   publishProgress(queueId, { type: 'line', at, text: lineText })
   publishPreview(queueId, new Date().toISOString())
   return withImagingCors({ ok: true as const, queueId })

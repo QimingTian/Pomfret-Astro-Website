@@ -189,7 +189,7 @@ export function AboutHome() {
                   }}
                 >
                   <p className="text-[clamp(2.25rem,5vw,3.75rem)] font-medium leading-[1.12] text-white sm:whitespace-nowrap">
-                    Welcome To Pomfret Astro
+                    Pomfret Astro Network
                   </p>
                 </div>
               </div>

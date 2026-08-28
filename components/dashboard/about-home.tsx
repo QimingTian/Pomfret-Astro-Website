@@ -188,7 +188,7 @@ export function AboutHome() {
                   }}
                 >
                   <p className="text-[clamp(2.25rem,5vw,3.75rem)] font-medium leading-[1.12] text-white sm:whitespace-nowrap">
-                    Welcome To Pomfret Olmsted Observatory
+                    Welcome To Pomfret Astro
                   </p>
                 </div>
               </div>

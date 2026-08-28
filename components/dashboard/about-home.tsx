@@ -170,7 +170,7 @@ export function AboutHome() {
             aria-live="polite"
           >
             {/* Slide 0 — Welcome */}
-            <div className="absolute inset-0 flex items-center">
+            <div className="absolute inset-0 flex items-center justify-center">
               <div
                 className="w-full will-change-transform"
                 style={{
@@ -180,6 +180,7 @@ export function AboutHome() {
                 aria-hidden={progress >= 0.5}
               >
                 <div
+                  className="w-full text-center"
                   style={{
                     letterSpacing: '-0.025em',
                     fontFamily: SF_PRO,

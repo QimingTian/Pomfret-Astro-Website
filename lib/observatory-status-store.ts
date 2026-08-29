@@ -11,6 +11,7 @@ import {
 } from '@/lib/kv-rest'
 import { OBS_LAT_DEG, OBS_LON_DEG } from '@/lib/target-altitude'
 import { getDaytimeClosedWindowDetail, isWithinDaytimeClosedWindow } from '@/lib/sunrise-window'
+import { observatoryAgentDisconnectedStaleMs } from '@/lib/observatory-poll-schedule'
 import { isWithinAdminClosedWindow } from '@/lib/admin-closed-window-store'
 import {
   maybeFailSessionsAfterNinaStopped,
@@ -50,7 +51,6 @@ type GlobalState = typeof globalThis & {
 const statusFile = process.env.OBSERVATORY_STATUS_FILE
 let loaded = false
 const NINA_RUNNING_STALE_MS = 90_000
-const AGENT_DISCONNECTED_MS = 90_000
 const WEATHER_CACHE_MS = 0
 const AUTO_BASE_CURSOR_KV_KEY = 'observatory-auto-audit-last-base'
 const LAST_PUSHED_STATUS_KV_KEY = 'observatory-last-pushed-final-status'
@@ -719,7 +719,8 @@ export async function reportObservatoryAgentPulse(input: { ninaRunning: boolean 
 
 export function isObservatoryAgentDisconnected(nowMs: number, lastAgentSeenTs: number): boolean {
   if (!Number.isFinite(lastAgentSeenTs) || lastAgentSeenTs <= 0) return true
-  return nowMs - lastAgentSeenTs > AGENT_DISCONNECTED_MS
+  const staleMs = observatoryAgentDisconnectedStaleMs(new Date(nowMs))
+  return nowMs - lastAgentSeenTs > staleMs
 }
 
 /** True when the NINA agent heartbeat (pulse or nina-sequence poll) was seen within the stale window. */

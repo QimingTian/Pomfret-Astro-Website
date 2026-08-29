@@ -1,3 +1,4 @@
+import type { ObservatorySite } from '@/lib/observatory-sites'
 import { getDaytimeClosedWindowDetail } from '@/lib/sunrise-window'
 
 export type ObservatoryPollKind =
@@ -45,6 +46,24 @@ export function msUntilObservatoryPhaseChange(now = new Date()): number {
 }
 
 const DAY_MS = 20 * 60_000
+/** Agent idle poll at night + slack for nina-sequence / agent-pulse heartbeat. */
+export const AGENT_DISCONNECTED_NIGHT_MS = 90_000
+/** Daytime idle agent poll (DAY_MS) + slack — must exceed agent_poll_schedule.DAY_POLL_SECONDS. */
+export const AGENT_DISCONNECTED_DAY_MS = DAY_MS + 5 * 60_000
+
+/**
+ * How long without agent heartbeat before UI shows Disconnected.
+ * Matches adaptive agent poll: strict at night (45s poll), lenient by day (20min poll).
+ */
+export function observatoryAgentDisconnectedStaleMs(
+  now = new Date(),
+  site?: ObservatorySite
+): number {
+  return getDaytimeClosedWindowDetail(now, site).within
+    ? AGENT_DISCONNECTED_DAY_MS
+    : AGENT_DISCONNECTED_NIGHT_MS
+}
+
 const NIGHT_SITE_MS = 45_000
 const NIGHT_SITE_IMAGING_MS = 10_000
 const NIGHT_QUEUE_MS = 45_000

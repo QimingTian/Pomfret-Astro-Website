@@ -24,3 +24,8 @@ test('isObservatoryAgentDisconnected is false with recent agent heartbeat', () =
   const now = 1_000_000
   assert.equal(isObservatoryAgentDisconnected(now, now - 30_000), false)
 })
+
+test('isObservatoryAgentDisconnected allows longer gap during daytime closed window', () => {
+  const noon = new Date('2026-06-15T18:00:00.000Z').getTime()
+  assert.equal(isObservatoryAgentDisconnected(noon, noon - 15 * 60_000), false)
+})

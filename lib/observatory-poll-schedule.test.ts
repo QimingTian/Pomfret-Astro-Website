@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { isObservatoryNight, observatoryPollIntervalMs } from './observatory-poll-schedule'
+import {
+  AGENT_DISCONNECTED_DAY_MS,
+  AGENT_DISCONNECTED_NIGHT_MS,
+  isObservatoryNight,
+  observatoryAgentDisconnectedStaleMs,
+  observatoryPollIntervalMs,
+} from './observatory-poll-schedule'
 
 test('observatoryPollIntervalMs is much slower by day than at night', () => {
   const day = new Date('2026-06-15T18:00:00.000Z')
@@ -21,4 +27,12 @@ test('hidden tabs poll less often', () => {
   const visible = observatoryPollIntervalMs('mount', {}, night)
   const hidden = observatoryPollIntervalMs('mount', { pageHidden: true }, night)
   assert.ok(hidden > visible)
+})
+
+test('agent disconnect stale window matches adaptive agent poll', () => {
+  const day = new Date('2026-06-15T18:00:00.000Z')
+  const night = new Date('2026-06-16T02:00:00.000Z')
+  assert.ok(observatoryAgentDisconnectedStaleMs(day) > observatoryAgentDisconnectedStaleMs(night))
+  assert.equal(observatoryAgentDisconnectedStaleMs(night), AGENT_DISCONNECTED_NIGHT_MS)
+  assert.equal(observatoryAgentDisconnectedStaleMs(day), AGENT_DISCONNECTED_DAY_MS)
 })

@@ -1,4 +1,3 @@
-import type { ObservatorySite } from '@/lib/observatory-sites'
 import { getDaytimeClosedWindowDetail } from '@/lib/sunrise-window'
 
 export type ObservatoryPollKind =
@@ -55,11 +54,8 @@ export const AGENT_DISCONNECTED_DAY_MS = DAY_MS + 5 * 60_000
  * How long without agent heartbeat before UI shows Disconnected.
  * Matches adaptive agent poll: strict at night (45s poll), lenient by day (20min poll).
  */
-export function observatoryAgentDisconnectedStaleMs(
-  now = new Date(),
-  site?: ObservatorySite
-): number {
-  return getDaytimeClosedWindowDetail(now, site).within
+export function observatoryAgentDisconnectedStaleMs(now = new Date()): number {
+  return getDaytimeClosedWindowDetail(now).within
     ? AGENT_DISCONNECTED_DAY_MS
     : AGENT_DISCONNECTED_NIGHT_MS
 }

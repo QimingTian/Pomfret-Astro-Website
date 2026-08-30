@@ -85,6 +85,7 @@ export function formatMemberRoleLabels(input: {
   const labels: string[] = []
   if (isPomfretAstroAdmin(input.systemRole)) {
     labels.push('Pomfret Astro Admin')
+    return labels
   }
   const memberships = input.memberships ?? []
   for (const m of memberships) {

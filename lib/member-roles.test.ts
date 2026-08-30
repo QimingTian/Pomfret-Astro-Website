@@ -83,6 +83,6 @@ test('formatMemberRoleLabels can include system and site roles', () => {
         },
       ],
     }),
-    ['Pomfret Astro Admin', 'Observatory Admin · Pomfret School']
+    ['Pomfret Astro Admin']
   )
 })

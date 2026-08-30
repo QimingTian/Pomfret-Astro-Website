@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { requireImagingAdmin } from '@/lib/imaging-admin-auth'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import { listAuditLog } from '@/lib/imaging-audit-log'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 
 export const runtime = 'nodejs'
 
@@ -10,6 +11,7 @@ export function OPTIONS() {
 }
 
 export async function GET(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   const admin = await requireImagingAdmin(request)
   if (!admin.ok) {
     return withImagingCors({ ok: false as const, error: admin.error }, admin.status)
@@ -21,4 +23,5 @@ export async function GET(request: NextRequest) {
 
   const entries = await listAuditLog(safe)
   return withImagingCors({ ok: true as const, entries })
+  })
 }

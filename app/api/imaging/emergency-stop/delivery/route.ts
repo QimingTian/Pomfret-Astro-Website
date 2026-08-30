@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 
 import {
   imagingCorsHeadersResolved,
@@ -20,6 +21,7 @@ export function OPTIONS() {
  * Does not run scheduling logic — only checks and delivers an armed Emergency STOP sequence.
  */
 export async function GET(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   if (!imagingQueueAuthorized(request)) {
     return imagingUnauthorized()
   }
@@ -35,4 +37,5 @@ export async function GET(request: NextRequest) {
   }
 
   return new NextResponse(null, { status: 204, headers: imagingCorsHeadersResolved() })
+  })
 }

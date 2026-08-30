@@ -1,4 +1,4 @@
-import { OBS_LAT_DEG, OBS_LON_DEG } from '@/lib/target-altitude'
+import { currentObservatorySite } from '@/lib/observatory-site-scope'
 
 export type OpenMeteoCurrentWeather = {
   temperatureC: number | null
@@ -10,8 +10,9 @@ export type OpenMeteoCurrentWeather = {
 }
 
 export function openMeteoCurrentWeatherUrl(): string {
+  const site = currentObservatorySite()
   return (
-    `https://api.open-meteo.com/v1/forecast?latitude=${OBS_LAT_DEG}&longitude=${OBS_LON_DEG}` +
+    `https://api.open-meteo.com/v1/forecast?latitude=${site.weatherLat}&longitude=${site.weatherLon}` +
     '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_gusts_10m,precipitation_probability,cloud_cover&timezone=auto'
   )
 }

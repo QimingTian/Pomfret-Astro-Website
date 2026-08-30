@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 import {
   imagingCorsHeadersResolved,
   imagingCorsOptions,
@@ -18,6 +19,7 @@ export function OPTIONS() {
 
 /** Returns NINA sequence JSON for this queue item (member or observatory Bearer). */
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+  return runWithRequestSite(request, async () => {
   if (!(await imagingQueueOrMemberAuthorized(request))) {
     return imagingUnauthorized()
   }
@@ -75,5 +77,6 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'no-store',
     },
+  })
   })
 }

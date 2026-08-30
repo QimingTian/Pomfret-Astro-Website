@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 
 export const runtime = 'nodejs'
 
@@ -78,6 +79,7 @@ const SESAME_MIRRORS: Array<{ url: (q: string) => string; label: string }> = [
 ]
 
 export async function GET(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   const query = request.nextUrl.searchParams.get('query')?.trim() ?? ''
   if (!query) {
     return withImagingCors({ ok: false as const, error: 'query is required' }, 400)
@@ -135,4 +137,5 @@ export async function GET(request: NextRequest) {
 
   const status = sawHttpOk ? 404 : 502
   return withImagingCors({ ok: false as const, error: lastError }, status)
+  })
 }

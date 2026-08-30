@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 import {
   armEmergencyStop,
   emergencyStopAuditDetail,
@@ -26,6 +27,7 @@ export function OPTIONS() {
 }
 
 export async function GET(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   const admin = await requireImagingAdmin(request)
   if (!admin.ok) {
     return withImagingCors({ ok: false as const, error: admin.error }, admin.status)
@@ -38,9 +40,11 @@ export async function GET(request: NextRequest) {
     agentConnected,
     ...publicState,
   })
+  })
 }
 
 export async function POST(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   const admin = await requireImagingAdmin(request)
   if (!admin.ok) {
     return withImagingCors({ ok: false as const, error: admin.error }, admin.status)
@@ -108,5 +112,6 @@ export async function POST(request: NextRequest) {
     ok: true as const,
     ...publicState,
     failedSessionIds: [...failedSubs, ...failedBoard],
+  })
   })
 }

@@ -1,9 +1,12 @@
 import { postgresReadsEnabled } from '@/lib/db'
 import { REDIS_LIVE_KEYS } from '@/lib/db/data-plane'
 import { kvCompareAndSet, kvEnabled, kvGetJson, kvGetString, kvSetJson } from '@/lib/kv-rest'
+import { currentObservatorySiteId, scopedKvKey } from '@/lib/observatory-site-scope'
 import { auditRoutedQueueId, progressLineText, stringish } from '@/lib/session-progress-signal'
 
-const KEY = REDIS_LIVE_KEYS.audit
+function auditKvKey(): string {
+  return scopedKvKey(REDIS_LIVE_KEYS.audit)
+}
 const MAX_ENTRIES = 400
 /** Keep recent Image/terminal spam from wiping the admin activity log. */
 const PROGRESS_RESERVE = 80
@@ -20,13 +23,15 @@ export type AuditLogEntry = {
 type Payload = { entries: AuditLogEntry[] }
 
 type GlobalWithLog = typeof globalThis & {
-  __pomfret_imaging_audit_log__?: AuditLogEntry[]
+  __pomfret_imaging_audit_log_by_site__?: Record<string, AuditLogEntry[]>
 }
 
 function memoryEntries(): AuditLogEntry[] {
   const g = globalThis as GlobalWithLog
-  if (!g.__pomfret_imaging_audit_log__) g.__pomfret_imaging_audit_log__ = []
-  return g.__pomfret_imaging_audit_log__
+  if (!g.__pomfret_imaging_audit_log_by_site__) g.__pomfret_imaging_audit_log_by_site__ = {}
+  const sid = currentObservatorySiteId()
+  if (!g.__pomfret_imaging_audit_log_by_site__[sid]) g.__pomfret_imaging_audit_log_by_site__[sid] = []
+  return g.__pomfret_imaging_audit_log_by_site__[sid]!
 }
 
 function normalizeEntries(raw: unknown): AuditLogEntry[] {
@@ -67,7 +72,7 @@ export function trimAuditEntries(entries: AuditLogEntry[], max = MAX_ENTRIES): A
 
 async function readEntries(): Promise<AuditLogEntry[]> {
   if (kvEnabled()) {
-    const remote = await kvGetJson<Payload>(KEY)
+    const remote = await kvGetJson<Payload>(auditKvKey())
     const fromKv = normalizeEntries(remote)
     if (fromKv.length > 0) return fromKv
     if (postgresReadsEnabled()) {
@@ -76,7 +81,7 @@ async function readEntries(): Promise<AuditLogEntry[]> {
         const pg = await loadJsonDocumentsFromPostgres<AuditLogEntry>('audit')
         if (pg && pg.length > 0) {
           const trimmed = trimAuditEntries(pg)
-          await kvSetJson(KEY, { entries: trimmed })
+          await kvSetJson(auditKvKey(), { entries: trimmed })
           return trimmed
         }
       } catch (error) {
@@ -100,24 +105,24 @@ async function readEntries(): Promise<AuditLogEntry[]> {
 async function writeEntries(entries: AuditLogEntry[]): Promise<void> {
   const trimmed = trimAuditEntries(entries)
   if (kvEnabled()) {
-    const ok = await kvSetJson(KEY, { entries: trimmed })
+    const ok = await kvSetJson(auditKvKey(), { entries: trimmed })
     if (ok) {
       const { mirrorAuditLog } = await import('@/lib/db/mirror')
       await mirrorAuditLog(trimmed)
-      const g = globalThis as GlobalWithLog
-      g.__pomfret_imaging_audit_log__ = trimmed
+      const mem = memoryEntries()
+      mem.splice(0, mem.length, ...trimmed)
       return
     }
   }
   if (postgresReadsEnabled()) {
     const { mirrorAuditLog } = await import('@/lib/db/mirror')
     await mirrorAuditLog(trimmed)
-    const g = globalThis as GlobalWithLog
-    g.__pomfret_imaging_audit_log__ = trimmed
+    const mem = memoryEntries()
+    mem.splice(0, mem.length, ...trimmed)
     return
   }
-  const g = globalThis as GlobalWithLog
-  g.__pomfret_imaging_audit_log__ = trimmed
+  const mem = memoryEntries()
+  mem.splice(0, mem.length, ...trimmed)
 }
 
 async function compareAndWriteEntries(
@@ -130,17 +135,17 @@ async function compareAndWriteEntries(
   }
 
   for (let attempt = 0; attempt < CAS_ATTEMPTS; attempt++) {
-    const raw = await kvGetString(KEY)
+    const raw = await kvGetString(auditKvKey())
     const prev = normalizeEntries(raw ? (JSON.parse(raw) as Payload) : null)
     const next = mutate(prev)
     const trimmed = trimAuditEntries(next)
     const nextRaw = JSON.stringify({ entries: trimmed })
-    const ok = await kvCompareAndSet(KEY, raw ?? '', nextRaw)
+    const ok = await kvCompareAndSet(auditKvKey(), raw ?? '', nextRaw)
     if (ok) {
       const { mirrorAuditLog } = await import('@/lib/db/mirror')
       await mirrorAuditLog(trimmed)
-      const g = globalThis as GlobalWithLog
-      g.__pomfret_imaging_audit_log__ = trimmed
+      const mem = memoryEntries()
+      mem.splice(0, mem.length, ...trimmed)
       return
     }
   }

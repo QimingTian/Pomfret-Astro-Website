@@ -3,6 +3,7 @@ import { liveProgressChannel, subscribeLiveEvents } from '@/lib/imaging/live-bus
 import { subscribeProgress, type LiveProgressEvent } from '@/lib/imaging-progress-live'
 import { authorizeImagingSession, resolveImagingSessionContext } from '@/lib/imaging-session-access'
 import type { NextRequest } from 'next/server'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 
 export const runtime = 'nodejs'
 
@@ -11,6 +12,7 @@ function sseData(payload: unknown): string {
 }
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+  return runWithRequestSite(request, async () => {
   const id = params.id
   if (!id) {
     return new Response(JSON.stringify({ ok: false, error: 'Missing id' }), { status: 400 })
@@ -75,5 +77,6 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive',
     },
+  })
   })
 }

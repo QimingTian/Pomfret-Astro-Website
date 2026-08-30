@@ -5,6 +5,7 @@ import { getAdminFromRequest } from '@/lib/imaging-admin-auth'
 import { authorizeImagingSession } from '@/lib/imaging-session-access'
 import { getCurrentUser } from '@/lib/member-auth'
 import { canSubmitImaging } from '@/lib/member-access'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 import {
   imagingCorsOptions,
   imagingQueueAuthorized,
@@ -37,6 +38,7 @@ export function OPTIONS() {
 const allowed: ImagingRequestStatus[] = ['in_progress', 'completed', 'failed']
 
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+  return runWithRequestSite(request, async () => {
   if (!imagingQueueAuthorized(request)) {
     return imagingUnauthorized()
   }
@@ -78,9 +80,11 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   })
 
   return withImagingCors({ ok: true as const, request: toPublicImagingRequest(result) })
+  })
 }
 
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+  return runWithRequestSite(request, async () => {
   const id = params.id
   if (!id) return withImagingCors({ ok: false as const, error: 'Missing id' }, 400)
   const credential = request.headers.get('x-edit-credential')?.trim() || null
@@ -245,9 +249,11 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     detail: { id: updated.id, target: updated.target, status: updated.status },
   })
   return withImagingCors({ ok: true as const, request: toPublicImagingRequest(updated) })
+  })
 }
 
 export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+  return runWithRequestSite(request, async () => {
   const id = params.id
   if (!id) {
     return withImagingCors({ ok: false as const, error: 'Missing id' }, 400)
@@ -291,4 +297,5 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
   })
 
   return withImagingCors({ ok: true as const })
+  })
 }

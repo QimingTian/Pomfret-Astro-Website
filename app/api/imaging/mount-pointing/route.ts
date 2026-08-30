@@ -3,6 +3,7 @@ import { mountTelemetryPostAuthorized } from '@/lib/mount-telemetry-auth'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import { getMountPointingSample, setMountPointingSample, type MountPointingPayload } from '@/lib/mount-pointing-store'
 import { isWithinDaytimeClosedWindow } from '@/lib/sunrise-window'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 
 export const runtime = 'nodejs'
 /** Avoid CDN / disk caching live mount JSON (Chrome often kept a stale GET; Safari did not). */
@@ -80,6 +81,7 @@ export function OPTIONS() {
  * Auth: POST requires `NINA_MOUNT_TELEMETRY_SECRET` (or basic password). GET is open for the dashboard.
  */
 export async function POST(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   if (!mountTelemetryPostAuthorized(request)) {
     return withImagingCors({ ok: false as const, error: 'Unauthorized' }, 401, NO_STORE_HEADERS)
   }
@@ -116,12 +118,14 @@ export async function POST(request: NextRequest) {
 
   const stored = await setMountPointingSample(payload.stationId, payload)
   return withImagingCors({ ok: true as const, receivedAtUtc: stored.receivedAtUtc }, 200, NO_STORE_HEADERS)
+  })
 }
 
 /**
  * Latest stored sample for optional `?stationId=`. No plugin secret required (Remote dashboard poll).
  */
 export async function GET(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   const stationId = request.nextUrl.searchParams.get('stationId') ?? undefined
   const sample = await getMountPointingSample(stationId)
   const serverNowUtc = new Date().toISOString()
@@ -129,4 +133,5 @@ export async function GET(request: NextRequest) {
     return withImagingCors({ ok: true as const, sample: null, serverNowUtc }, 200, NO_STORE_HEADERS)
   }
   return withImagingCors({ ok: true as const, sample, serverNowUtc }, 200, NO_STORE_HEADERS)
+  })
 }

@@ -1,7 +1,12 @@
-import { getTonightScheduleEveningAstronomyUtc, getTonightScheduleMorningAstronomyUtc } from '@/lib/sunrise-window'
-import { OBS_LAT_DEG, OBS_LON_DEG } from '@/lib/target-altitude'
+import {
+  getTonightScheduleEveningAstronomyUtc,
+  getTonightScheduleMorningAstronomyUtc,
+  observatoryLocalCalendarAnchorUtc,
+} from '@/lib/sunrise-window'
+import { currentObservatorySite } from '@/lib/observatory-site-scope'
+import type { ObservatorySite } from '@/lib/observatory-sites'
 
-/** Matches Remote “tonight” strip: local 4pm → next day 8am, keyed by strip start calendar day. */
+/** Matches Remote “tonight” strip: observatory-local startHour → next day endHour. */
 export type TonightScheduleStrip = {
   nightKey: string
   windowStartMs: number
@@ -24,9 +29,35 @@ function dayOfYearUTC(date: Date): number {
   return Math.floor((current - start) / 86400000) + 1
 }
 
-function sunriseUtcForLocalCalendarDay(now: Date): Date {
-  const anchor = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
-  const n = dayOfYearUTC(anchor)
+/** Approximate UTC instant for `y-m-d hour:minute` in an IANA timezone. */
+export function zonedWallTimeToUtcMs(
+  timeZone: string,
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute = 0,
+  second = 0
+): number {
+  const utcGuess = Date.UTC(year, month - 1, day, hour, minute, second)
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  })
+  const parts = formatter.formatToParts(new Date(utcGuess))
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value)
+  const asUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second'))
+  return utcGuess - (asUtc - utcGuess)
+}
+
+function sunriseUtcForSiteCalendarDay(anchorUtcMidnight: Date, site: ObservatorySite): Date {
+  const n = dayOfYearUTC(anchorUtcMidnight)
   const gamma = (2 * Math.PI / 365) * (n - 1)
   const eqTime =
     229.18 *
@@ -43,52 +74,87 @@ function sunriseUtcForLocalCalendarDay(now: Date): Date {
     0.000907 * Math.sin(2 * gamma) -
     0.002697 * Math.cos(3 * gamma) +
     0.00148 * Math.sin(3 * gamma)
-  const latRad = degToRad(OBS_LAT_DEG)
+  const latRad = degToRad(site.observerLatDeg)
   const zenithRad = degToRad(90.833)
   const cosH =
     (Math.cos(zenithRad) - Math.sin(latRad) * Math.sin(decl)) / (Math.cos(latRad) * Math.cos(decl))
   const clamped = Math.max(-1, Math.min(1, cosH))
   const hourAngleDeg = radToDeg(Math.acos(clamped))
-  const solarNoonMin = 720 - 4 * OBS_LON_DEG - eqTime
+  const solarNoonMin = 720 - 4 * site.observerLonDeg - eqTime
   const eventMin = solarNoonMin - 4 * hourAngleDeg
-  const midnightUtc = Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth(), anchor.getUTCDate())
+  const midnightUtc = Date.UTC(
+    anchorUtcMidnight.getUTCFullYear(),
+    anchorUtcMidnight.getUTCMonth(),
+    anchorUtcMidnight.getUTCDate()
+  )
   return new Date(midnightUtc + eventMin * 60000)
 }
 
-export function getTonightScheduleStrip(now = new Date()): TonightScheduleStrip {
-  const todaySunrise = sunriseUtcForLocalCalendarDay(now)
-  const start = new Date(now)
-  start.setHours(16, 0, 0, 0)
+export function getTonightScheduleStrip(
+  now = new Date(),
+  site: ObservatorySite = currentObservatorySite()
+): TonightScheduleStrip {
+  const startHour = site.scheduleStripStartHour
+  const endHour = site.scheduleStripEndHour
+  const todayAnchor = observatoryLocalCalendarAnchorUtc(now, site)
+  const todaySunrise = sunriseUtcForSiteCalendarDay(todayAnchor, site)
+  const y0 = todayAnchor.getUTCFullYear()
+  const m0 = todayAnchor.getUTCMonth() + 1
+  const d0 = todayAnchor.getUTCDate()
+
+  let startMs = zonedWallTimeToUtcMs(site.timezone, y0, m0, d0, startHour, 0, 0)
   if (now.getTime() < todaySunrise.getTime()) {
-    start.setDate(start.getDate() - 1)
+    const prev = new Date(Date.UTC(y0, m0 - 1, d0 - 1))
+    startMs = zonedWallTimeToUtcMs(
+      site.timezone,
+      prev.getUTCFullYear(),
+      prev.getUTCMonth() + 1,
+      prev.getUTCDate(),
+      startHour,
+      0,
+      0
+    )
   }
-  const end = new Date(start)
-  end.setDate(end.getDate() + 1)
-  end.setHours(8, 0, 0, 0)
 
-  const y = start.getFullYear()
-  const m = String(start.getMonth() + 1).padStart(2, '0')
-  const d = String(start.getDate()).padStart(2, '0')
-  const nightKey = `${y}-${m}-${d}`
+  const startLocal = new Date(startMs)
+  const startParts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: site.timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(startLocal)
+  const [sy, sm, sd] = startParts.split('-').map(Number)
+  const nextDay = new Date(Date.UTC(sy!, sm! - 1, sd! + 1))
+  const endMs = zonedWallTimeToUtcMs(
+    site.timezone,
+    nextDay.getUTCFullYear(),
+    nextDay.getUTCMonth() + 1,
+    nextDay.getUTCDate(),
+    endHour,
+    0,
+    0
+  )
+  const nightKey = `${sy}-${String(sm).padStart(2, '0')}-${String(sd).padStart(2, '0')}`
 
-  const { nauticalDuskUtc } = getTonightScheduleEveningAstronomyUtc(now)
-  const { astronomicalDawnUtc } = getTonightScheduleMorningAstronomyUtc(now)
-  const windowStartMs = start.getTime()
-  const windowEndMs = end.getTime()
-  const schedulingDeadlineMs = Math.min(windowEndMs, astronomicalDawnUtc.getTime())
+  const { nauticalDuskUtc } = getTonightScheduleEveningAstronomyUtc(now, site)
+  const { astronomicalDawnUtc } = getTonightScheduleMorningAstronomyUtc(now, site)
+  const schedulingDeadlineMs = Math.min(endMs, astronomicalDawnUtc.getTime())
 
   return {
     nightKey,
-    windowStartMs,
-    windowEndMs,
+    windowStartMs: startMs,
+    windowEndMs: endMs,
     schedulingDeadlineMs,
     nauticalDuskMs: nauticalDuskUtc.getTime(),
   }
 }
 
-/** Same 4pm→8am window as Remote / Atlas weather ribbon (unix seconds). */
-export function getTonightScheduleWindowSec(now = new Date()): { startSec: number; endSec: number } {
-  const strip = getTonightScheduleStrip(now)
+/** Same window as Remote / Atlas weather ribbon (unix seconds). */
+export function getTonightScheduleWindowSec(
+  now = new Date(),
+  site?: ObservatorySite
+): { startSec: number; endSec: number } {
+  const strip = getTonightScheduleStrip(now, site ?? currentObservatorySite())
   return {
     startSec: Math.floor(strip.windowStartMs / 1000),
     endSec: Math.floor(strip.windowEndMs / 1000),
@@ -96,7 +162,7 @@ export function getTonightScheduleWindowSec(now = new Date()): { startSec: numbe
 }
 
 /** Global “Tonight’s weather prediction” headline — only meaningful before nautical dusk. */
-export function isBeforeTonightWeatherHeadline(now = new Date()): boolean {
-  const strip = getTonightScheduleStrip(now)
+export function isBeforeTonightWeatherHeadline(now = new Date(), site?: ObservatorySite): boolean {
+  const strip = getTonightScheduleStrip(now, site ?? currentObservatorySite())
   return now.getTime() < strip.nauticalDuskMs
 }

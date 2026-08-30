@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { requireImagingAdmin, formatImagingAdminActor } from '@/lib/imaging-admin-auth'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 import {
   clearEmergencyStopAfterManualUnlock,
   isEmergencyStopBlocking,
@@ -38,13 +39,16 @@ export function OPTIONS() {
   return imagingCorsOptions()
 }
 
-export async function GET() {
-  const mode = await getObservatoryMode()
-  const status = await getObservatoryStatus()
-  return withImagingCors({ ok: true as const, mode, status })
+export async function GET(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
+    const mode = await getObservatoryMode()
+    const status = await getObservatoryStatus()
+    return withImagingCors({ ok: true as const, mode, status })
+  })
 }
 
 export async function PATCH(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   const admin = await requireImagingAdmin(request)
   if (!admin.ok) {
     return withImagingCors({ ok: false as const, error: admin.error }, admin.status)
@@ -142,4 +146,5 @@ export async function PATCH(request: NextRequest) {
   }
 
   return withImagingCors({ ok: true as const, mode: nextMode, status: nextStatus })
+  })
 }

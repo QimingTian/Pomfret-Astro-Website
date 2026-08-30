@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import { requireImagingAdmin } from '@/lib/imaging-admin-auth'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 import {
   adminDeleteSession,
   adminMarkSessionComplete,
@@ -20,6 +21,7 @@ export function OPTIONS() {
 }
 
 export async function GET(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   const admin = await requireImagingAdmin(request)
   if (!admin.ok) {
     return withImagingCors({ ok: false as const, error: admin.error }, admin.status)
@@ -27,9 +29,11 @@ export async function GET(request: NextRequest) {
   await runImagingScheduleMaintenance()
   const sessions = await listSessionControlEntries()
   return withImagingCors({ ok: true as const, sessions })
+  })
 }
 
 export async function POST(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   const admin = await requireImagingAdmin(request)
   if (!admin.ok) {
     return withImagingCors({ ok: false as const, error: admin.error }, admin.status)
@@ -87,4 +91,5 @@ export async function POST(request: NextRequest) {
   }
   const sessions = await listSessionControlEntries()
   return withImagingCors({ ok: true as const, sessions })
+  })
 }

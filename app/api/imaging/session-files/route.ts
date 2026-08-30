@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 
 import { imagingCorsOptions, imagingQueueAuthorized, withImagingCors } from '@/lib/imaging-queue-auth'
 import { upsertR2ObjectKey, upsertR2PreviewObjectKey } from '@/lib/r2-session-download'
@@ -53,6 +54,7 @@ function pickBestObjectKey(queueId: string, files: UploadedFileRow[]): string | 
 }
 
 export async function POST(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   // Reuse existing bearer auth policy.
   if (!imagingQueueAuthorized(request)) {
     return withImagingCors({ ok: false as const, error: 'Unauthorized' }, 401)
@@ -102,6 +104,7 @@ export async function POST(request: NextRequest) {
     queueId,
     objectKey: chosen,
     ...(previewObjectKey ? { previewObjectKey } : {}),
+  })
   })
 }
 

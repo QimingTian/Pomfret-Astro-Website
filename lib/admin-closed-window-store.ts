@@ -1,6 +1,7 @@
 import { postgresReadsEnabled } from '@/lib/db'
 import { REDIS_LIVE_KEYS } from '@/lib/db/data-plane'
 import { kvEnabled, kvGetString, kvSetJson } from '@/lib/kv-rest'
+import { currentObservatorySiteId, scopedKvKey } from '@/lib/observatory-site-scope'
 
 export type AdminClosedWindow = {
   id: string
@@ -12,13 +13,19 @@ export type AdminClosedWindow = {
 }
 
 type Payload = { windows?: AdminClosedWindow[] }
-type GlobalState = typeof globalThis & { __pomfret_admin_closed_windows__?: AdminClosedWindow[] }
-const KEY = REDIS_LIVE_KEYS.closedWindows
+type GlobalState = typeof globalThis & {
+  __pomfret_admin_closed_windows_by_site__?: Record<string, AdminClosedWindow[]>
+}
+function closedWindowsKvKey(): string {
+  return scopedKvKey(REDIS_LIVE_KEYS.closedWindows)
+}
 
 function memoryWindows(): AdminClosedWindow[] {
   const g = globalThis as GlobalState
-  if (!g.__pomfret_admin_closed_windows__) g.__pomfret_admin_closed_windows__ = []
-  return g.__pomfret_admin_closed_windows__
+  if (!g.__pomfret_admin_closed_windows_by_site__) g.__pomfret_admin_closed_windows_by_site__ = {}
+  const sid = currentObservatorySiteId()
+  if (!g.__pomfret_admin_closed_windows_by_site__[sid]) g.__pomfret_admin_closed_windows_by_site__[sid] = []
+  return g.__pomfret_admin_closed_windows_by_site__[sid]!
 }
 
 function normalize(w: AdminClosedWindow): AdminClosedWindow | null {
@@ -44,7 +51,7 @@ function normalize(w: AdminClosedWindow): AdminClosedWindow | null {
 
 async function readAll(): Promise<AdminClosedWindow[]> {
   if (kvEnabled()) {
-    const raw = await kvGetString(KEY)
+    const raw = await kvGetString(closedWindowsKvKey())
     if (raw !== undefined) {
       try {
         const remote = JSON.parse(raw) as Payload
@@ -60,7 +67,7 @@ async function readAll(): Promise<AdminClosedWindow[]> {
       const { loadJsonDocumentsFromPostgres } = await import('@/lib/db/read')
       const pg = await loadJsonDocumentsFromPostgres<AdminClosedWindow>('windows')
       if (pg) {
-        if (kvEnabled() && pg.length > 0) await kvSetJson(KEY, { windows: pg })
+        if (kvEnabled() && pg.length > 0) await kvSetJson(closedWindowsKvKey(), { windows: pg })
         return pg
       }
     } catch (error) {
@@ -73,7 +80,7 @@ async function readAll(): Promise<AdminClosedWindow[]> {
 async function writeAll(windows: AdminClosedWindow[]): Promise<void> {
   const sorted = [...windows].sort((a, b) => a.startIso.localeCompare(b.startIso))
   if (kvEnabled()) {
-    const ok = await kvSetJson(KEY, { windows: sorted })
+    const ok = await kvSetJson(closedWindowsKvKey(), { windows: sorted })
     if (ok) {
       const { mirrorAdminClosedWindows } = await import('@/lib/db/mirror')
       await mirrorAdminClosedWindows(sorted)
@@ -85,8 +92,8 @@ async function writeAll(windows: AdminClosedWindow[]): Promise<void> {
     await mirrorAdminClosedWindows(sorted)
     return
   }
-  const g = globalThis as GlobalState
-  g.__pomfret_admin_closed_windows__ = sorted
+  const mem = memoryWindows()
+  mem.splice(0, mem.length, ...sorted)
 }
 
 export async function listAdminClosedWindows(): Promise<AdminClosedWindow[]> {

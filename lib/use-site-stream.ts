@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react'
 
 import { useAdaptivePoll } from '@/hooks/use-adaptive-poll'
+import { observatorySiteFetch, useObservatorySite } from '@/components/observatory-site-provider'
 
 export type SiteStreamObservatoryEvent = {
   type: 'observatory_status'
@@ -50,6 +51,7 @@ export type SiteStreamState = {
  * Site-wide observatory / ESTOP via adaptive HTTP polls (slow by day, faster at night when imaging).
  */
 export function useSiteStream(handlers: SiteStreamHandlers, enabled = true): SiteStreamState {
+  const { siteId } = useObservatorySite()
   const handlersRef = useRef(handlers)
   handlersRef.current = handlers
   const sessionsTickRef = useRef<string | null>(null)
@@ -57,7 +59,10 @@ export function useSiteStream(handlers: SiteStreamHandlers, enabled = true): Sit
 
   const poll = async () => {
     try {
-      const res = await fetch('/api/imaging/site-poll', { cache: 'no-store', credentials: 'include' })
+      const res = await observatorySiteFetch('/api/imaging/site-poll', siteId, {
+        cache: 'no-store',
+        credentials: 'include',
+      })
       if (!res.ok) return
       const body = (await res.json()) as PollBody
       if (body.ok !== true) return

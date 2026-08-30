@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { sendSessionStartedEmail } from '@/lib/imaging-completion-email'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 import {
   imagingCorsHeadersResolved,
   imagingCorsOptions,
@@ -369,6 +370,7 @@ function endNightSequenceJson(
  * While agent pulse reports NINA running, polls deliver Emergency STOP only (409 for all other work).
  */
 export async function GET(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   if (!imagingQueueAuthorized(request)) {
     return imagingUnauthorized()
   }
@@ -727,4 +729,5 @@ export async function GET(request: NextRequest) {
   })
 
   return ninaAgentJobResponse(job)
+  })
 }

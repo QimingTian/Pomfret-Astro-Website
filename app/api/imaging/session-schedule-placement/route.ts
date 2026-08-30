@@ -6,6 +6,7 @@ import { boardSetScheduleBar, getBoardEntry } from '@/lib/imaging-session-board'
 import { getRequestById } from '@/lib/imaging-queue-store'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 
 export const runtime = 'nodejs'
 
@@ -18,6 +19,7 @@ export function OPTIONS() {
  * Terminal rows (completed/failed) ignore updates once any night's bar is frozen.
  */
 export async function POST(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   const auth = await requireUser(request)
   if (!auth.ok) {
     return withImagingCors(auth.body, auth.status)
@@ -74,4 +76,5 @@ export async function POST(request: NextRequest) {
   }
 
   return withImagingCors({ ok: true as const })
+  })
 }

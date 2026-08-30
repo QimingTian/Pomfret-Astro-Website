@@ -1,10 +1,7 @@
 import { getAdminClosedWindowsInRange } from '@/lib/admin-closed-window-store'
 import { subtractOccupiedFromFree } from '@/lib/imaging-queue-free-intervals'
-import { POMFRET_SITE } from '@/lib/observatory-sites'
+import { currentObservatorySite } from '@/lib/observatory-site-scope'
 
-const LAT = POMFRET_SITE.weatherLat
-const LON = POMFRET_SITE.weatherLon
-const WEATHER_TZ = POMFRET_SITE.timezone
 const KMH_TO_MS = 1 / 3.6
 
 /** Global hard gate: require this many consecutive fully weather-permitted night hours. */
@@ -221,14 +218,15 @@ export function pickOpenMeteoImagingNightBounds(
 }
 
 export async function getTonightWeatherPermittedIntervals(): Promise<TonightWeatherIntervalsResult> {
+  const site = currentObservatorySite()
   // past_days=1 keeps yesterday's sunset after local midnight so the current imaging night
   // (previous evening → this morning) is still present in daily[].
   const url =
     'https://api.open-meteo.com/v1/forecast' +
-    `?latitude=${LAT}&longitude=${LON}` +
+    `?latitude=${site.weatherLat}&longitude=${site.weatherLon}` +
     '&hourly=cloud_cover,precipitation_probability,wind_speed_10m' +
     '&daily=sunrise,sunset' +
-    `&past_days=1&forecast_days=2&timezone=${WEATHER_TZ}&timeformat=unixtime`
+    `&past_days=1&forecast_days=2&timezone=${site.timezone}&timeformat=unixtime`
 
   try {
     const [res] = await Promise.all([
@@ -350,11 +348,12 @@ export async function sessionWindowHourlyPrecipOk(
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
     return { ok: false, reason: 'Invalid session window.' }
   }
+  const site = currentObservatorySite()
   const url =
     'https://api.open-meteo.com/v1/forecast' +
-    `?latitude=${LAT}&longitude=${LON}` +
+    `?latitude=${site.weatherLat}&longitude=${site.weatherLon}` +
     '&hourly=precipitation_probability' +
-    `&forecast_days=2&timezone=${WEATHER_TZ}&timeformat=unixtime`
+    `&forecast_days=2&timezone=${site.timezone}&timeformat=unixtime`
   try {
     const res = await fetch(url, { cache: 'no-store' })
     if (!res.ok) {

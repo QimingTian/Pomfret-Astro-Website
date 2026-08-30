@@ -2,8 +2,11 @@ import type { ImagingAdminActor } from '@/lib/imaging/core/admin-auth'
 import { emergencyStopActorLabel } from '@/lib/imaging/session/emergency-stop-display'
 import { emitAgentWake } from '@/lib/imaging/site-events'
 import { kvCompareAndSet, kvEnabled, kvGetJson, kvGetString, kvSetJson } from '@/lib/kv-rest'
+import { currentObservatorySiteId, scopedKvKey } from '@/lib/observatory-site-scope'
 
-const KV_KEY = 'imaging-emergency-stop'
+function estopKvKey(): string {
+  return scopedKvKey('imaging-emergency-stop')
+}
 const CAS_ATTEMPTS = 6
 /** Un-delivered stopping state older than this is cleared instead of delivered (orphan KV). */
 const STALE_UNDELIVERED_STOPPING_MS = 6 * 60 * 60 * 1000
@@ -39,15 +42,19 @@ export type EmergencyStopPublicState = {
 }
 
 type GlobalWithEstop = typeof globalThis & {
-  __pomfret_emergency_stop__?: EmergencyStopState | null
+  __pomfret_emergency_stop_by_site__?: Record<string, EmergencyStopState | null>
 }
 
 function memoryState(): EmergencyStopState | null {
-  return (globalThis as GlobalWithEstop).__pomfret_emergency_stop__ ?? null
+  const g = globalThis as GlobalWithEstop
+  const sid = currentObservatorySiteId()
+  return g.__pomfret_emergency_stop_by_site__?.[sid] ?? null
 }
 
 function setMemoryState(state: EmergencyStopState | null): void {
-  ;(globalThis as GlobalWithEstop).__pomfret_emergency_stop__ = state
+  const g = globalThis as GlobalWithEstop
+  if (!g.__pomfret_emergency_stop_by_site__) g.__pomfret_emergency_stop_by_site__ = {}
+  g.__pomfret_emergency_stop_by_site__[currentObservatorySiteId()] = state
 }
 
 function normalizeState(raw: unknown): EmergencyStopState | null {
@@ -91,7 +98,7 @@ async function notifyEstopChanged(armAgent = false): Promise<void> {
 
 async function readState(): Promise<EmergencyStopState | null> {
   if (kvEnabled()) {
-    const remote = await kvGetJson<unknown>(KV_KEY)
+    const remote = await kvGetJson<unknown>(estopKvKey())
     const normalized = normalizeState(remote)
     setMemoryState(normalized)
     return normalized
@@ -108,7 +115,7 @@ function serializeStateForKv(state: EmergencyStopState | null): string {
 
 async function readStateRaw(): Promise<{ state: EmergencyStopState | null; raw: string }> {
   if (kvEnabled()) {
-    const raw = await kvGetString(KV_KEY)
+    const raw = await kvGetString(estopKvKey())
     if (raw === undefined) return { state: null, raw: '' }
     try {
       const normalized = normalizeState(JSON.parse(raw) as unknown)
@@ -138,7 +145,7 @@ async function compareAndWriteState(
     const { state: current, raw } = await readStateRaw()
     const next = mutate(current)
     if (next === 'abort') return 'abort'
-    const ok = await kvCompareAndSet(KV_KEY, raw, serializeStateForKv(next))
+    const ok = await kvCompareAndSet(estopKvKey(), raw, serializeStateForKv(next))
     if (ok) {
       setMemoryState(next)
       return 'ok'
@@ -397,7 +404,7 @@ export async function clearEmergencyStopAfterManualUnlock(): Promise<EmergencySt
 export async function resetEmergencyStopForTests(): Promise<void> {
   setMemoryState(null)
   if (kvEnabled()) {
-    await kvSetJson(KV_KEY, { phase: null, clearedAt: new Date().toISOString() })
+    await kvSetJson(estopKvKey(), { phase: null, clearedAt: new Date().toISOString() })
   }
 }
 

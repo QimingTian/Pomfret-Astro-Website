@@ -2,6 +2,7 @@ import { isAdminUser } from '@/lib/member-store'
 import { getCurrentUser } from '@/lib/member-auth'
 import { getEmergencyStopPublicState } from '@/lib/imaging-emergency-stop'
 import { getSitePollSnapshot } from '@/lib/imaging/site-poll-snapshot'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 import {
   getObservatoryMode,
   getObservatoryStatus,
@@ -14,6 +15,7 @@ export const dynamic = 'force-dynamic'
 
 /** Lightweight poll replacement for long-lived site-stream SSE (saves Vercel Fluid hours + KV bandwidth). */
 export async function GET(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   const user = await getCurrentUser(request)
   if (!user) {
     return new Response(JSON.stringify({ ok: false, error: 'Unauthorized' }), { status: 401 })
@@ -44,5 +46,6 @@ export async function GET(request: NextRequest) {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'private, no-store',
     },
+  })
   })
 }

@@ -1,11 +1,12 @@
 import { POMFRET_SITE } from '@/lib/observatory-sites'
 
-/** Pomfret, CT — US Eastern (EST/EDT). */
+/** @deprecated Pomfret alias — prefer `formatObservatoryDateTime(d, site.timezone)`. */
 export const EST_TIME_ZONE = POMFRET_SITE.timezone
 
-export function formatEstDateTime(d: Date): string {
+/** Wall clock for map overlays / UI timestamps in an observatory IANA timezone. */
+export function formatObservatoryDateTime(d: Date, timeZone: string): string {
   return d.toLocaleString('en-US', {
-    timeZone: EST_TIME_ZONE,
+    timeZone,
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -15,4 +16,9 @@ export function formatEstDateTime(d: Date): string {
     hour12: true,
     timeZoneName: 'short',
   })
+}
+
+/** @deprecated Prefer `formatObservatoryDateTime` with the active site timezone. */
+export function formatEstDateTime(d: Date): string {
+  return formatObservatoryDateTime(d, EST_TIME_ZONE)
 }

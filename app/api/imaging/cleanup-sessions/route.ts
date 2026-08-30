@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import { cronAuthorized } from '@/lib/cron-auth'
@@ -15,6 +16,7 @@ export function OPTIONS() {
 
 /** Vercel Cron: maintenance + purge completed sessions older than 48 hours. */
 export async function GET(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   if (!cronAuthorized(request)) {
     return withImagingCors({ ok: false as const, error: 'Unauthorized' }, 401)
   }
@@ -26,5 +28,6 @@ export async function GET(request: NextRequest) {
     ok: true as const,
     purged: purgedIds.length,
     ids: purgedIds,
+  })
   })
 }

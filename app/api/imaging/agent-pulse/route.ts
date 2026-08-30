@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 
 import {
   imagingCorsOptions,
@@ -17,6 +18,7 @@ export function OPTIONS() {
 
 /** Observatory PC agent: report NINA.exe running state (replaces inferring busy from poll gaps). */
 export async function POST(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   if (!imagingQueueAuthorized(request)) {
     return imagingUnauthorized()
   }
@@ -40,4 +42,5 @@ export async function POST(request: NextRequest) {
   // Night weather-safety (arm + auto-clear when Open-Meteo/ASC clear); daytime arm is no-op.
   triggerWeatherSafetyEmergencyStopCheck()
   return withImagingCors({ ok: true as const, ninaRunning })
+  })
 }

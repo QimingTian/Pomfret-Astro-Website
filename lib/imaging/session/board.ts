@@ -8,12 +8,15 @@ import { postgresReadsEnabled } from '@/lib/db'
 import { REDIS_LIVE_KEYS } from '@/lib/db/data-plane'
 import { kvEnabled, kvGetString, kvSetJson } from '@/lib/kv-rest'
 import { emitSiteSessionsChanged } from '@/lib/imaging/site-events'
+import { currentObservatorySiteId, scopedKvKey } from '@/lib/observatory-site-scope'
+import type { ObservatorySiteId } from '@/lib/observatory-sites'
 
 /** Sessions removed from the API queue after NINA download, still shown on Remote. */
 export type SessionBoardStatus = 'in_progress' | 'completed' | 'failed'
 
 export type SessionBoardEntry = {
   id: string
+  siteId?: ObservatorySiteId
   target: string
   createdAt: string
   updatedAt: string
@@ -44,19 +47,23 @@ export type SessionBoardEntry = {
   variableStarAmplitudeMag?: number | null
 }
 
-const KEY = REDIS_LIVE_KEYS.board
+function boardKvKey(): string {
+  return scopedKvKey(REDIS_LIVE_KEYS.board)
+}
 const MAX_ENTRIES = 50
 
 type Payload = { entries: SessionBoardEntry[] }
 
 type GlobalWithBoard = typeof globalThis & {
-  __pomfret_imaging_session_board__?: SessionBoardEntry[]
+  __pomfret_imaging_session_board_by_site__?: Record<string, SessionBoardEntry[]>
 }
 
 function memoryEntries(): SessionBoardEntry[] {
   const g = globalThis as GlobalWithBoard
-  if (!g.__pomfret_imaging_session_board__) g.__pomfret_imaging_session_board__ = []
-  return g.__pomfret_imaging_session_board__
+  if (!g.__pomfret_imaging_session_board_by_site__) g.__pomfret_imaging_session_board_by_site__ = {}
+  const sid = currentObservatorySiteId()
+  if (!g.__pomfret_imaging_session_board_by_site__[sid]) g.__pomfret_imaging_session_board_by_site__[sid] = []
+  return g.__pomfret_imaging_session_board_by_site__[sid]!
 }
 
 function normalizeEntries(raw: unknown): SessionBoardEntry[] {
@@ -193,7 +200,7 @@ async function freezeScheduleBarOnTerminal(
 
 async function readEntries(): Promise<SessionBoardEntry[]> {
   if (kvEnabled()) {
-    const raw = await kvGetString(KEY)
+    const raw = await kvGetString(boardKvKey())
     if (raw !== undefined) {
       try {
         return normalizeEntries(JSON.parse(raw) as Payload)
@@ -207,7 +214,7 @@ async function readEntries(): Promise<SessionBoardEntry[]> {
       const { loadJsonDocumentsFromPostgres } = await import('@/lib/db/read')
       const pg = await loadJsonDocumentsFromPostgres<SessionBoardEntry>('board')
       if (pg) {
-        if (kvEnabled() && pg.length > 0) await kvSetJson(KEY, { entries: pg })
+        if (kvEnabled() && pg.length > 0) await kvSetJson(boardKvKey(), { entries: pg })
         return pg
       }
     } catch (error) {
@@ -220,7 +227,7 @@ async function readEntries(): Promise<SessionBoardEntry[]> {
 async function writeEntries(entries: SessionBoardEntry[]): Promise<void> {
   const trimmed = entries.length > MAX_ENTRIES ? entries.slice(-MAX_ENTRIES) : entries
   if (kvEnabled()) {
-    const ok = await kvSetJson(KEY, { entries: trimmed })
+    const ok = await kvSetJson(boardKvKey(), { entries: trimmed })
     if (ok) {
       const { mirrorSessionBoard } = await import('@/lib/db/mirror')
       await mirrorSessionBoard(trimmed)
@@ -234,8 +241,8 @@ async function writeEntries(entries: SessionBoardEntry[]): Promise<void> {
     emitSiteSessionsChanged('board')
     return
   }
-  const g = globalThis as GlobalWithBoard
-  g.__pomfret_imaging_session_board__ = trimmed
+  const mem = memoryEntries()
+  mem.splice(0, mem.length, ...trimmed)
   emitSiteSessionsChanged('board')
 }
 
@@ -284,6 +291,7 @@ export async function boardUpsertInProgress(input: {
   const without = prev.filter((e) => e.id !== input.id)
   const entry: SessionBoardEntry = {
     id: input.id,
+    siteId: currentObservatorySiteId(),
     target: input.target,
     createdAt: input.createdAt,
     updatedAt: ts,

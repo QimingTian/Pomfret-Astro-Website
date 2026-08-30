@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 
 import { authorizeImagingSession } from '@/lib/imaging-session-access'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
@@ -12,6 +13,7 @@ export function OPTIONS() {
 }
 
 export async function GET(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   const queueId = request.nextUrl.searchParams.get('queueId')?.trim() ?? ''
   const file = request.nextUrl.searchParams.get('file')?.trim() ?? ''
   const responseMode = request.nextUrl.searchParams.get('mode')?.trim() ?? ''
@@ -47,5 +49,6 @@ export async function GET(request: NextRequest) {
         'Authorization, Content-Type, x-nina-session-progress-secret, x-imaging-r2-secret',
       'Cache-Control': 'no-store',
     },
+  })
   })
 }

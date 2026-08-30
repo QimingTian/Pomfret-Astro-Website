@@ -7,6 +7,7 @@ import {
 } from '@/lib/observatory-overlay-status'
 import { useAdaptivePoll } from '@/hooks/use-adaptive-poll'
 import { useSiteStream } from '@/lib/use-site-stream'
+import { observatorySiteFetch, useObservatorySite } from '@/components/observatory-site-provider'
 
 type ObservatoryMode = 'manual' | 'auto'
 
@@ -28,6 +29,7 @@ export function useObservatoryEnvelope(options?: {
   observatoryStatusUrl?: string
   siteStreamEnabled?: boolean
 }) {
+  const { siteId } = useObservatorySite()
   const url = options?.observatoryStatusUrl ?? '/api/imaging/observatory-status'
   const siteStreamEnabled = options?.siteStreamEnabled ?? true
   const [mode, setMode] = useState<ObservatoryMode | null>(null)
@@ -40,14 +42,14 @@ export function useObservatoryEnvelope(options?: {
 
   const loadEnvelope = useCallback(async () => {
     try {
-      const res = await fetch(url, { cache: 'no-store' })
+      const res = await observatorySiteFetch(url, siteId, { cache: 'no-store' })
       const data = (await res.json()) as unknown
       if (!res.ok) return
       applyEnvelope(parseEnvelope(data))
     } catch {
       // keep previous
     }
-  }, [applyEnvelope, url])
+  }, [applyEnvelope, url, siteId])
 
   useEffect(() => {
     void loadEnvelope()

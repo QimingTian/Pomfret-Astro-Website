@@ -44,5 +44,7 @@ export const POSTGRES_HOT_BACKUP = [
 const LIVE_KEY_SET = new Set<string>(Object.values(REDIS_LIVE_KEYS))
 
 export function isRedisLiveKey(key: string): boolean {
-  return LIVE_KEY_SET.has(key)
+  if (LIVE_KEY_SET.has(key)) return true
+  const m = /^site:[^:]+:(.+)$/.exec(key)
+  return m != null && LIVE_KEY_SET.has(m[1]!)
 }

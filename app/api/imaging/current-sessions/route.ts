@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import { getCurrentUser } from '@/lib/member-auth'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 import {
   effectiveProjectStatus,
   listProjects,
@@ -37,6 +38,7 @@ function redactContactFields<T extends { email?: string | null; firstName?: stri
 }
 
 export async function GET(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   const viewer = await getCurrentUser(request)
   const includeContact = viewer != null
 
@@ -346,4 +348,5 @@ export async function GET(request: NextRequest) {
   const sessionsOut = enriched.map((s) => redactContactFields(s, includeContact))
 
   return withImagingCors({ ok: true as const, sessions: sessionsOut })
+  })
 }

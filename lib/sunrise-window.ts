@@ -1,8 +1,12 @@
-import { POMFRET_SITE } from '@/lib/observatory-sites'
-import { OBS_LAT_DEG, OBS_LON_DEG } from '@/lib/target-altitude'
+import { POMFRET_SITE, type ObservatorySite } from '@/lib/observatory-sites'
+import { currentObservatorySite } from '@/lib/observatory-site-scope'
 
-/** Civil calendar + solar gates for Pomfret; must match Remote “tonight schedule” expectations. */
+/** @deprecated Pomfret alias — prefer `currentObservatorySite().timezone`. */
 export const OBSERVATORY_TIME_ZONE = POMFRET_SITE.timezone
+
+function siteOrCurrent(site?: ObservatorySite): ObservatorySite {
+  return site ?? currentObservatorySite()
+}
 
 /**
  * UTC `Date` at 00:00:00 for the observatory's **local** civil calendar day containing `now`
@@ -10,15 +14,16 @@ export const OBSERVATORY_TIME_ZONE = POMFRET_SITE.timezone
  * dawn/dusk match local evening; avoids treating UTC-midnight as “new day” while US evening
  * is still before local nautical dusk (which incorrectly cleared daytime-closed → Ready).
  */
-export function observatoryLocalCalendarAnchorUtc(now: Date): Date {
+export function observatoryLocalCalendarAnchorUtc(now: Date, site?: ObservatorySite): Date {
+  const observatory = siteOrCurrent(site)
   const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone: OBSERVATORY_TIME_ZONE,
+    timeZone: observatory.timezone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
   })
-  const s = formatter.format(now)
-  const [y, m, d] = s.split('-').map((part) => Number(part))
+  const formatted = formatter.format(now)
+  const [y, m, d] = formatted.split('-').map((part) => Number(part))
   if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) {
     return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
   }
@@ -39,7 +44,15 @@ function dayOfYearUTC(date: Date): number {
   return Math.floor((current - start) / 86400000) + 1
 }
 
-function solarEventUtcForDate(date: Date, zenithDeg: number, isSunrise: boolean): Date {
+function solarEventUtcForDate(
+  date: Date,
+  zenithDeg: number,
+  isSunrise: boolean,
+  site?: ObservatorySite
+): Date {
+  const s = siteOrCurrent(site)
+  const OBS_LAT_DEG = s.observerLatDeg
+  const OBS_LON_DEG = s.observerLonDeg
   const n = dayOfYearUTC(date)
   const gamma = (2 * Math.PI / 365) * (n - 1)
 
@@ -76,24 +89,24 @@ function solarEventUtcForDate(date: Date, zenithDeg: number, isSunrise: boolean)
   return new Date(midnightUtc + eventMin * 60000)
 }
 
-function sunriseUtcForDate(date: Date): Date {
-  return solarEventUtcForDate(date, 90.833, true)
+function sunriseUtcForDate(date: Date, site?: ObservatorySite): Date {
+  return solarEventUtcForDate(date, 90.833, true, site)
 }
 
-function sunsetUtcForDate(date: Date): Date {
-  return solarEventUtcForDate(date, 90.833, false)
+function sunsetUtcForDate(date: Date, site?: ObservatorySite): Date {
+  return solarEventUtcForDate(date, 90.833, false, site)
 }
 
-function nauticalDawnUtcForDate(date: Date): Date {
-  return solarEventUtcForDate(date, 102, true)
+function nauticalDawnUtcForDate(date: Date, site?: ObservatorySite): Date {
+  return solarEventUtcForDate(date, 102, true, site)
 }
 
-function nauticalDuskUtcForDate(date: Date): Date {
-  return solarEventUtcForDate(date, 102, false)
+function nauticalDuskUtcForDate(date: Date, site?: ObservatorySite): Date {
+  return solarEventUtcForDate(date, 102, false, site)
 }
 
 /** Nautical dawn/dusk (UTC) and daytime-closed band (nautical dawn … nautical dusk) for observatory local day of `now`. */
-export function getDaytimeClosedWindowDetail(now = new Date()): {
+export function getDaytimeClosedWindowDetail(now = new Date(), site?: ObservatorySite): {
   within: boolean
   nauticalDawnUtc: string
   nauticalDuskUtc: string
@@ -102,11 +115,11 @@ export function getDaytimeClosedWindowDetail(now = new Date()): {
   closedStartUtc: string
   closedEndUtc: string
 } {
-  const today = observatoryLocalCalendarAnchorUtc(now)
-  const nauticalDawn = nauticalDawnUtcForDate(today)
-  const nauticalDusk = nauticalDuskUtcForDate(today)
-  const sunrise = sunriseUtcForDate(today)
-  const sunset = sunsetUtcForDate(today)
+  const today = observatoryLocalCalendarAnchorUtc(now, site)
+  const nauticalDawn = nauticalDawnUtcForDate(today, site)
+  const nauticalDusk = nauticalDuskUtcForDate(today, site)
+  const sunrise = sunriseUtcForDate(today, site)
+  const sunset = sunsetUtcForDate(today, site)
   const closedStart = nauticalDawn
   const closedEnd = nauticalDusk
   return {
@@ -179,25 +192,27 @@ export function getTonightAstronomicalNightWindow(now = new Date()): {
   return { astronomicalDuskUtc, astronomicalDawnUtc, durationSeconds }
 }
 
-/** Imaging queue / placement window: **nautical dusk → nautical dawn** (same calendar anchor as elsewhere). */
-export function getTonightSchedulingWindow(now = new Date()): {
+/** Imaging queue / placement window: **nautical dusk → nautical dawn** (observatory-local calendar anchor). */
+export function getTonightSchedulingWindow(now = new Date(), site?: ObservatorySite): {
   nauticalDuskUtc: Date
   nauticalDawnUtc: Date
   /** Still computed for callers that need astronomical morning; queue deadline uses `nauticalDawnUtc`. */
   astronomicalDawnUtc: Date
 } {
-  const nowUtcMidnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
-  const todaySunrise = solarEventUtcForDate(nowUtcMidnight, 90.833, true)
-  const baseUtcDate = new Date(nowUtcMidnight)
+  const s = siteOrCurrent(site)
+  const today = observatoryLocalCalendarAnchorUtc(now, s)
+  const y = today.getUTCFullYear()
+  const m = today.getUTCMonth() + 1
+  const d = today.getUTCDate()
+  const todaySunrise = solarEventUtcForDate(today, 90.833, true, s)
+  let base = today
   if (now.getTime() < todaySunrise.getTime()) {
-    baseUtcDate.setUTCDate(baseUtcDate.getUTCDate() - 1)
+    base = new Date(Date.UTC(y, m - 1, d - 1))
   }
-  const nextUtcDate = new Date(baseUtcDate)
-  nextUtcDate.setUTCDate(nextUtcDate.getUTCDate() + 1)
-
-  const nauticalDuskUtc = solarEventUtcForDate(baseUtcDate, 102, false)
-  const nauticalDawnUtc = solarEventUtcForDate(nextUtcDate, 102, true)
-  const astronomicalDawnUtc = solarEventUtcForDate(nextUtcDate, 108, true)
+  const nextUtc = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate() + 1))
+  const nauticalDuskUtc = solarEventUtcForDate(base, 102, false, s)
+  const nauticalDawnUtc = solarEventUtcForDate(nextUtc, 102, true, s)
+  const astronomicalDawnUtc = solarEventUtcForDate(nextUtc, 108, true, s)
   return { nauticalDuskUtc, nauticalDawnUtc, astronomicalDawnUtc }
 }
 
@@ -221,59 +236,67 @@ export function getCivilTwilightNightWindowUtc(now = new Date()): { civilDuskUtc
 }
 
 /**
- * Evening solar / twilight instants on the same anchor as Remote `tonightSchedule`:
- * local 16:00 window start, `todaySunrise` gate using `Date.UTC(now.getFullYear(), …)` (browser local calendar),
- * then `baseUtc` from that window’s start date. Zeniths: official sunset 90.833°, civil 96°, nautical 102°, astronomical 108°.
+ * Evening solar / twilight instants on the same anchor as Remote `tonightSchedule`
+ * (site-local strip start calendar day). Zeniths: sunset 90.833°, civil 96°, nautical 102°, astronomical 108°.
  */
-export function getTonightScheduleEveningAstronomyUtc(now = new Date()): {
+export function getTonightScheduleEveningAstronomyUtc(
+  now = new Date(),
+  site?: ObservatorySite
+): {
   sunsetUtc: Date
   civilDuskUtc: Date
   nauticalDuskUtc: Date
   astronomicalDarkUtc: Date
 } {
-  const start = new Date(now)
-  start.setHours(16, 0, 0, 0)
-  const nowUtcMidnight = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
-  const todaySunrise = solarEventUtcForDate(nowUtcMidnight, 90.833, true)
+  const s = siteOrCurrent(site)
+  const startHour = s.scheduleStripStartHour
+  const today = observatoryLocalCalendarAnchorUtc(now, s)
+  const y = today.getUTCFullYear()
+  const m = today.getUTCMonth() + 1
+  const d = today.getUTCDate()
+  // Sunrise gate: before local sunrise, "tonight" is still yesterday's strip.
+  const todaySunrise = solarEventUtcForDate(today, 90.833, true, s)
+  let base = today
   if (now.getTime() < todaySunrise.getTime()) {
-    start.setDate(start.getDate() - 1)
+    base = new Date(Date.UTC(y, m - 1, d - 1))
   }
-  const baseUtc = new Date(Date.UTC(start.getFullYear(), start.getMonth(), start.getDate()))
+  // Strip start hour is only used to stay consistent with nightKey; solar events use base civil day.
+  void startHour
   return {
-    sunsetUtc: solarEventUtcForDate(baseUtc, 90.833, false),
-    civilDuskUtc: solarEventUtcForDate(baseUtc, 96, false),
-    nauticalDuskUtc: solarEventUtcForDate(baseUtc, 102, false),
-    astronomicalDarkUtc: solarEventUtcForDate(baseUtc, 108, false),
+    sunsetUtc: solarEventUtcForDate(base, 90.833, false, s),
+    civilDuskUtc: solarEventUtcForDate(base, 96, false, s),
+    nauticalDuskUtc: solarEventUtcForDate(base, 102, false, s),
+    astronomicalDarkUtc: solarEventUtcForDate(base, 108, false, s),
   }
 }
 
 /**
- * Next-morning solar / twilight instants on the same anchor as `getTonightScheduleEveningAstronomyUtc`
- * (Remote `tonightSchedule` window: local 16:00 start → +24h → 08:00 end). `nextUtc` is the UTC midnight
- * of the schedule end's local calendar day. Zeniths: official sunrise 90.833°, civil 96°, nautical 102°,
- * astronomical 108°.
+ * Next-morning solar / twilight on the day after the evening strip anchor.
  */
-export function getTonightScheduleMorningAstronomyUtc(now = new Date()): {
+export function getTonightScheduleMorningAstronomyUtc(
+  now = new Date(),
+  site?: ObservatorySite
+): {
   sunriseUtc: Date
   civilDawnUtc: Date
   nauticalDawnUtc: Date
   astronomicalDawnUtc: Date
 } {
-  const start = new Date(now)
-  start.setHours(16, 0, 0, 0)
-  const nowUtcMidnight = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
-  const todaySunrise = solarEventUtcForDate(nowUtcMidnight, 90.833, true)
+  const s = siteOrCurrent(site)
+  const today = observatoryLocalCalendarAnchorUtc(now, s)
+  const y = today.getUTCFullYear()
+  const m = today.getUTCMonth() + 1
+  const d = today.getUTCDate()
+  const todaySunrise = solarEventUtcForDate(today, 90.833, true, s)
+  let base = today
   if (now.getTime() < todaySunrise.getTime()) {
-    start.setDate(start.getDate() - 1)
+    base = new Date(Date.UTC(y, m - 1, d - 1))
   }
-  const end = new Date(start)
-  end.setDate(end.getDate() + 1)
-  end.setHours(8, 0, 0, 0)
-  const nextUtc = new Date(Date.UTC(end.getFullYear(), end.getMonth(), end.getDate()))
+  const nextUtc = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate() + 1))
   return {
-    sunriseUtc: solarEventUtcForDate(nextUtc, 90.833, true),
-    civilDawnUtc: solarEventUtcForDate(nextUtc, 96, true),
-    nauticalDawnUtc: solarEventUtcForDate(nextUtc, 102, true),
-    astronomicalDawnUtc: solarEventUtcForDate(nextUtc, 108, true),
+    sunriseUtc: solarEventUtcForDate(nextUtc, 90.833, true, s),
+    civilDawnUtc: solarEventUtcForDate(nextUtc, 96, true, s),
+    nauticalDawnUtc: solarEventUtcForDate(nextUtc, 102, true, s),
+    astronomicalDawnUtc: solarEventUtcForDate(nextUtc, 108, true, s),
   }
 }

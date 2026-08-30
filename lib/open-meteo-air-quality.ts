@@ -1,4 +1,4 @@
-import { OBS_LAT_DEG, OBS_LON_DEG } from '@/lib/target-altitude'
+import { currentObservatorySite } from '@/lib/observatory-site-scope'
 
 export type OpenMeteoAirQuality = {
   usAqi: number | null
@@ -14,7 +14,7 @@ export type UsAqiCategory =
 
 export function openMeteoAirQualityUrl(): string {
   return (
-    `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${OBS_LAT_DEG}&longitude=${OBS_LON_DEG}` +
+    `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${currentObservatorySite().weatherLat}&longitude=${currentObservatorySite().weatherLon}` +
     '&current=us_aqi&timezone=auto'
   )
 }

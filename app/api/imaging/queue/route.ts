@@ -4,6 +4,7 @@ import { memberSessionHistoryRowFromQueue } from '@/lib/member-session-history'
 import { recordMemberSessionHistory } from '@/lib/member-session-history-archive'
 import { canSubmitImaging } from '@/lib/member-access'
 import { requireUser } from '@/lib/member-auth'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 import {
   imagingCorsOptions,
   imagingQueueReadable,
@@ -36,7 +37,7 @@ import { planAndScheduleProjectTonight } from '@/lib/imaging-project-planner'
 import { getScheduleReservedIntervalsForActiveProject } from '@/lib/imaging-project-altitude-hold'
 import { computeScheduleInsight } from '@/lib/imaging-queue-schedule-insight'
 import { getObservatoryStatus, isObservatoryReady } from '@/lib/observatory-status-store'
-import { liveImagingObservatorySite } from '@/lib/observatory-sites'
+import { currentObservatorySite } from '@/lib/observatory-site-scope'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import {
   getTonightWeatherPermittedIntervals,
@@ -67,7 +68,7 @@ function queueCreatedAuditDetail(result: ImagingRequest): Record<string, unknown
 }
 
 async function detectSunsetSunrisePrecipGate(): Promise<{ active: boolean | null; hitHours: number[] }> {
-  const site = liveImagingObservatorySite()
+  const site = currentObservatorySite()
   const url =
     'https://api.open-meteo.com/v1/forecast' +
     `?latitude=${site.weatherLat}&longitude=${site.weatherLon}` +
@@ -107,6 +108,7 @@ export function OPTIONS() {
  * ?scope=all — full queue (member or IMAGING_QUEUE_SECRET only).
  */
 export async function GET(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   if (!(await imagingQueueReadable(request))) {
     return imagingUnauthorized()
   }
@@ -121,9 +123,11 @@ export async function GET(request: NextRequest) {
 
   const requests = (await listPending()).map((r) => toPublicImagingRequest(r, { redactContact: true }))
   return withImagingCors({ ok: true as const, scope: 'pending' as const, requests })
+  })
 }
 
 export async function POST(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   const auth = await requireUser(request)
   if (!auth.ok) {
     return withImagingCors(auth.body, auth.status)
@@ -458,4 +462,5 @@ export async function POST(request: NextRequest) {
     void recordMemberSessionHistory(finalRow.userId, memberSessionHistoryRowFromQueue(finalRow))
   }
   return withImagingCors({ ok: true as const, request: toPublicImagingRequest(finalRow) }, 201)
+  })
 }

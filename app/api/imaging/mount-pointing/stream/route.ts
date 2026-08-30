@@ -1,6 +1,7 @@
 import { liveMountChannel, subscribeLiveEvents } from '@/lib/imaging/live-bus'
 import { getMountPointingSample, type StoredMountSample } from '@/lib/mount-pointing-store'
 import type { NextRequest } from 'next/server'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -10,6 +11,7 @@ function sseData(payload: unknown): string {
 }
 
 export async function GET(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   const stationId = request.nextUrl.searchParams.get('stationId') ?? undefined
   const channel = liveMountChannel(stationId)
 
@@ -57,5 +59,6 @@ export async function GET(request: NextRequest) {
       'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive',
     },
+  })
   })
 }

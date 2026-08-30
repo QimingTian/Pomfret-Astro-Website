@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { promises as fs } from 'fs'
 import path from 'path'
 import { withImagingCors, imagingCorsOptions } from '@/lib/imaging-queue-auth'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 
 export const runtime = 'nodejs'
 
@@ -20,6 +21,7 @@ export function OPTIONS() {
 }
 
 export async function GET(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   const model = request.nextUrl.searchParams.get('model') ?? 'Reflector.obj'
   if (!ALLOWED_MODELS.has(model)) {
     return withImagingCors({ ok: false as const, error: 'Unknown model' }, 400)
@@ -39,5 +41,6 @@ export async function GET(request: NextRequest) {
   } catch {
     return withImagingCors({ ok: false as const, error: 'Model file not found' }, 404)
   }
+  })
 }
 

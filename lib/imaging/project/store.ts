@@ -8,6 +8,8 @@ import { emitSiteSessionsChanged } from '@/lib/imaging/site-events'
 import { postgresReadsEnabled } from '@/lib/db'
 import { REDIS_LIVE_KEYS } from '@/lib/db/data-plane'
 import { kvEnabled, kvGetString, kvSetJson } from '@/lib/kv-rest'
+import { currentObservatorySiteId, scopedKvKey } from '@/lib/observatory-site-scope'
+import type { ObservatorySiteId } from '@/lib/observatory-sites'
 import type { ScheduleBarPlacement } from '@/lib/imaging-schedule-bar'
 
 export type ProjectStatus = 'pending' | 'scheduled' | 'in_progress' | 'completed' | 'failed'
@@ -52,6 +54,7 @@ export type ProjectNight = {
 
 export type ImagingProject = {
   id: string
+  siteId?: ObservatorySiteId
   projectMode: true
   createdAt: string
   updatedAt: string
@@ -186,19 +189,23 @@ export function sumRemainingByFilterAcrossPanels(
   return Array.from(byFilter.values())
 }
 
-const KEY = REDIS_LIVE_KEYS.projects
+function projectsKvKey(): string {
+  return scopedKvKey(REDIS_LIVE_KEYS.projects)
+}
 const MAX_PROJECTS = 50
 
 type Payload = { projects?: ImagingProject[] }
 
 type GlobalWithProjects = typeof globalThis & {
-  __pomfret_imaging_projects__?: ImagingProject[]
+  __pomfret_imaging_projects_by_site__?: Record<string, ImagingProject[]>
 }
 
 function memoryProjects(): ImagingProject[] {
   const g = globalThis as GlobalWithProjects
-  if (!g.__pomfret_imaging_projects__) g.__pomfret_imaging_projects__ = []
-  return g.__pomfret_imaging_projects__
+  if (!g.__pomfret_imaging_projects_by_site__) g.__pomfret_imaging_projects_by_site__ = {}
+  const sid = currentObservatorySiteId()
+  if (!g.__pomfret_imaging_projects_by_site__[sid]) g.__pomfret_imaging_projects_by_site__[sid] = []
+  return g.__pomfret_imaging_projects_by_site__[sid]!
 }
 
 function normalizeProjects(raw: unknown): ImagingProject[] {
@@ -234,7 +241,7 @@ function hydrateProjectSequences(project: ImagingProject): ImagingProject {
 
 async function readProjects(): Promise<ImagingProject[]> {
   if (kvEnabled()) {
-    const raw = await kvGetString(KEY)
+    const raw = await kvGetString(projectsKvKey())
     if (raw !== undefined) {
       try {
         return normalizeProjects(JSON.parse(raw) as Payload).map(hydrateProjectSequences)
@@ -250,7 +257,7 @@ async function readProjects(): Promise<ImagingProject[]> {
       if (pg) {
         const hydrated = pg.map(hydrateProjectSequences)
         if (kvEnabled() && hydrated.length > 0) {
-          await kvSetJson(KEY, { projects: hydrated })
+          await kvSetJson(projectsKvKey(), { projects: hydrated })
         }
         return hydrated
       }
@@ -275,12 +282,12 @@ async function writeProjects(projects: ImagingProject[]): Promise<void> {
   const prevSig = projectSessionsSignature(memoryProjects())
   const nextSig = projectSessionsSignature(trimmed)
   if (kvEnabled()) {
-    const ok = await kvSetJson(KEY, { projects: trimmed })
+    const ok = await kvSetJson(projectsKvKey(), { projects: trimmed })
     if (ok) {
       const { mirrorImagingProjects } = await import('@/lib/db/mirror')
       await mirrorImagingProjects(trimmed)
-      const g = globalThis as GlobalWithProjects
-      g.__pomfret_imaging_projects__ = trimmed
+      const mem = memoryProjects()
+      mem.splice(0, mem.length, ...trimmed)
       if (prevSig !== nextSig) emitSiteSessionsChanged('projects')
       return
     }
@@ -288,13 +295,13 @@ async function writeProjects(projects: ImagingProject[]): Promise<void> {
   if (postgresReadsEnabled()) {
     const { mirrorImagingProjects } = await import('@/lib/db/mirror')
     await mirrorImagingProjects(trimmed)
-    const g = globalThis as GlobalWithProjects
-    g.__pomfret_imaging_projects__ = trimmed
+    const mem = memoryProjects()
+    mem.splice(0, mem.length, ...trimmed)
     if (prevSig !== nextSig) emitSiteSessionsChanged('projects')
     return
   }
-  const g = globalThis as GlobalWithProjects
-  g.__pomfret_imaging_projects__ = trimmed
+  const mem = memoryProjects()
+  mem.splice(0, mem.length, ...trimmed)
   if (prevSig !== nextSig) emitSiteSessionsChanged('projects')
 }
 
@@ -720,6 +727,7 @@ export async function createImagingProject(input: CreateImagingProjectInput): Pr
       : undefined
   const project: ImagingProject = {
     id: input.id,
+    siteId: currentObservatorySiteId(),
     projectMode: true,
     createdAt: ts,
     updatedAt: ts,

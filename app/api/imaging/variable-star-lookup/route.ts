@@ -1,5 +1,6 @@
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import type { VariableStarRow } from '@/lib/variable-star-catalog'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 
 export const runtime = 'nodejs'
 
@@ -133,6 +134,7 @@ export function OPTIONS() {
 }
 
 export async function GET(request: Request) {
+  return runWithRequestSite(request, async () => {
   const requestUrl = new URL(request.url)
   const query = (requestUrl.searchParams.get('query') ?? '').trim()
   if (!query) return withImagingCors({ ok: false as const, error: 'query is required' }, 400)
@@ -146,4 +148,5 @@ export async function GET(request: Request) {
     const msg = e instanceof Error ? e.message : 'SIMBAD lookup failed'
     return withImagingCors({ ok: false as const, error: msg }, 502)
   }
+  })
 }

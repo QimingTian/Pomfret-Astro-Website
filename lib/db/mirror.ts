@@ -18,10 +18,17 @@ import {
   users,
 } from '@/lib/db/schema'
 import { DEFAULT_OBSERVATORY_SITE_ID } from '@/lib/observatory-sites'
+import { currentObservatorySiteId } from '@/lib/observatory-site-scope'
 import type { MemberUser } from '@/lib/member-store'
 
-function siteId(): string {
+/** Membership / gallery / equipment stay on Pomfret until ACL split. */
+function membershipSiteId(): string {
   return DEFAULT_OBSERVATORY_SITE_ID
+}
+
+/** Imaging queue / projects / board / audit / windows / R2 follow request site. */
+function imagingSiteId(): string {
+  return currentObservatorySiteId() || DEFAULT_OBSERVATORY_SITE_ID
 }
 
 function ts(value: string | null | undefined): string | null {
@@ -67,7 +74,7 @@ export async function mirrorMembers(list: MemberUser[]): Promise<void> {
         .insert(memberships)
         .values({
           userId: user.id,
-          siteId: siteId(),
+          siteId: membershipSiteId(),
           imagingApprovedAt: ts(user.imagingApprovedAt),
           imagingRejectedAt: ts(user.imagingRejectedAt),
           updatedAt: user.updatedAt || now,
@@ -97,7 +104,7 @@ type QueueRow = {
 export async function mirrorImagingQueue(rows: QueueRow[]): Promise<void> {
   await withDatabaseBackup('imaging-queue', async () => {
     const db = getDb()
-    const sid = siteId()
+    const sid = imagingSiteId()
     const ids = rows.map((r) => r.id)
     const existingDocs = await db
       .select({
@@ -201,7 +208,7 @@ type ProjectRow = {
 export async function mirrorImagingProjects(rows: ProjectRow[]): Promise<void> {
   await withDatabaseBackup('imaging-projects', async () => {
     const db = getDb()
-    const sid = siteId()
+    const sid = imagingSiteId()
     const ids = rows.map((r) => r.id)
     const existing = await db
       .select({
@@ -272,7 +279,7 @@ type BoardRow = {
 export async function mirrorSessionBoard(rows: BoardRow[]): Promise<void> {
   await withDatabaseBackup('session-board', async () => {
     const db = getDb()
-    const sid = siteId()
+    const sid = imagingSiteId()
     const ids = rows.map((r) => r.id)
     for (const row of rows) {
       await db
@@ -313,7 +320,7 @@ type AuditRow = { id: string; at: string; kind: string; message: string; detail?
 export async function mirrorAuditLog(rows: AuditRow[]): Promise<void> {
   await withDatabaseBackup('audit-log', async () => {
     const db = getDb()
-    const sid = siteId()
+    const sid = imagingSiteId()
     const existing = await db.select({ id: auditLog.id }).from(auditLog).where(eq(auditLog.siteId, sid))
     const have = new Set(existing.map((r) => r.id))
     for (const row of rows) {
@@ -346,7 +353,7 @@ type GalleryRow = { id: string; userId: string; status: string; createdAt: strin
 export async function mirrorGallerySubmissions(rows: GalleryRow[]): Promise<void> {
   await withDatabaseMirror('gallery', async () => {
     const db = getDb()
-    const sid = siteId()
+    const sid = membershipSiteId()
     const ids = rows.map((r) => r.id)
     for (const row of rows) {
       await db
@@ -376,7 +383,7 @@ export async function mirrorGallerySubmissions(rows: GalleryRow[]): Promise<void
 export async function mirrorImagingEquipment(rigs: unknown): Promise<void> {
   await withDatabaseMirror('equipment', async () => {
     const db = getDb()
-    const sid = siteId()
+    const sid = membershipSiteId()
     await db
       .insert(imagingEquipment)
       .values({
@@ -396,7 +403,7 @@ type WindowRow = { id: string; startIso: string; endIso: string }
 export async function mirrorAdminClosedWindows(rows: WindowRow[]): Promise<void> {
   await withDatabaseBackup('admin-closed-windows', async () => {
     const db = getDb()
-    const sid = siteId()
+    const sid = imagingSiteId()
     const ids = rows.map((r) => r.id)
     for (const row of rows) {
       await db
@@ -442,7 +449,7 @@ export async function mirrorR2ObjectKey(kind: 'object' | 'preview', queueId: str
       .values({
         queueId,
         kind,
-        siteId: siteId(),
+        siteId: imagingSiteId(),
         objectKey,
       })
       .onConflictDoUpdate({
@@ -457,7 +464,7 @@ type SavedRow = { id: string; userId: string; name: string; updatedAt: string }
 export async function mirrorMemberSavedSessions(userId: string, rows: SavedRow[]): Promise<void> {
   await withDatabaseMirror('saved-sessions', async () => {
     const db = getDb()
-    const sid = siteId()
+    const sid = membershipSiteId()
     const ids = rows.map((r) => r.id)
     for (const row of rows) {
       await db
@@ -497,7 +504,7 @@ type HistoryRow = { id: string; updatedAt: string }
 export async function mirrorMemberSessionHistory(userId: string, rows: HistoryRow[]): Promise<void> {
   await withDatabaseMirror('session-history', async () => {
     const db = getDb()
-    const sid = siteId()
+    const sid = membershipSiteId()
     const ids = rows.map((r) => r.id)
     for (const row of rows) {
       await db

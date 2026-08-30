@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import { upsertR2ObjectKey } from '@/lib/r2-session-download'
@@ -16,6 +17,7 @@ function authorized(request: NextRequest): boolean {
 }
 
 export async function POST(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   if (!authorized(request)) {
     return withImagingCors({ ok: false as const, error: 'Unauthorized' }, 401)
   }
@@ -40,4 +42,5 @@ export async function POST(request: NextRequest) {
 
   await upsertR2ObjectKey(queueId, objectKey)
   return withImagingCors({ ok: true as const })
+  })
 }

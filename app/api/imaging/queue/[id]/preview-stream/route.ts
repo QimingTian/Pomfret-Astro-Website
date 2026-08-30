@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server'
 import { getPreviewImage } from '@/lib/imaging-preview-store'
 import { subscribePreview } from '@/lib/imaging-preview-live'
 import { livePreviewChannel, subscribeLiveEvents } from '@/lib/imaging/live-bus'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 
 export const runtime = 'nodejs'
 
@@ -11,6 +12,7 @@ function sseData(payload: unknown): string {
 }
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+  return runWithRequestSite(request, async () => {
   const id = params.id
   if (!id) {
     return new Response(JSON.stringify({ ok: false, error: 'Missing id' }), { status: 400 })
@@ -65,5 +67,6 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive',
     },
+  })
   })
 }

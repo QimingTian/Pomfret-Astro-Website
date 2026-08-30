@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import { requireImagingAdmin } from '@/lib/imaging-admin-auth'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 import {
   addAdminClosedWindow,
   listAdminClosedWindows,
@@ -17,12 +18,15 @@ export function OPTIONS() {
   return imagingCorsOptions()
 }
 
-export async function GET() {
-  const windows = await listAdminClosedWindows()
-  return withImagingCors({ ok: true as const, windows })
+export async function GET(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
+    const windows = await listAdminClosedWindows()
+    return withImagingCors({ ok: true as const, windows })
+  })
 }
 
 export async function POST(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   const admin = await requireImagingAdmin(request)
   if (!admin.ok) {
     return withImagingCors({ ok: false as const, error: admin.error }, admin.status)
@@ -123,9 +127,11 @@ export async function POST(request: NextRequest) {
     },
   })
   return withImagingCors({ ok: true as const, window: created })
+  })
 }
 
 export async function DELETE(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   const admin = await requireImagingAdmin(request)
   if (!admin.ok) {
     return withImagingCors({ ok: false as const, error: admin.error }, admin.status)
@@ -142,5 +148,6 @@ export async function DELETE(request: NextRequest) {
     detail: { id },
   })
   return withImagingCors({ ok: true as const })
+  })
 }
 

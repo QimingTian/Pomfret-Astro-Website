@@ -1,4 +1,5 @@
 import { POMFRET_SITE } from '@/lib/observatory-sites'
+import { currentObservatorySite } from '@/lib/observatory-site-scope'
 
 export const OBS_LAT_DEG = POMFRET_SITE.observerLatDeg
 export const OBS_LON_DEG = POMFRET_SITE.observerLonDeg
@@ -38,11 +39,14 @@ function gmstDegrees(date: Date): number {
 }
 
 export function currentAltitudeDeg(raHours: number, decDeg: number, now = new Date()): number {
+  const site = currentObservatorySite()
+  const latDeg = site.observerLatDeg
+  const lonDeg = site.observerLonDeg
   const raDeg = raHours * 15
-  const lstDeg = normalizeDegrees(gmstDegrees(now) + OBS_LON_DEG)
+  const lstDeg = normalizeDegrees(gmstDegrees(now) + lonDeg)
   const hourAngleDeg = normalizeDegrees(lstDeg - raDeg)
 
-  const latRad = degToRad(OBS_LAT_DEG)
+  const latRad = degToRad(latDeg)
   const decRad = degToRad(decDeg)
   const haRad = degToRad(hourAngleDeg > 180 ? hourAngleDeg - 360 : hourAngleDeg)
 
@@ -68,39 +72,46 @@ export function isAltitudeAllowed(raHours: number, decDeg: number): {
 }
 
 /** Upper culmination altitude for a fixed declination at the observatory latitude. */
-export function maximumAltitudeDegAtMeridian(decDeg: number, latDeg = OBS_LAT_DEG): number {
+export function maximumAltitudeDegAtMeridian(
+  decDeg: number,
+  latDeg = currentObservatorySite().observerLatDeg
+): number {
   return 90 - Math.abs(latDeg - decDeg)
 }
 
 /** Minimum declination (deg) for meridian altitude >= minAltitudeDeg at the site. */
 export function minDecDegForMinAltitudeAtMeridian(
   minAltitudeDeg = MIN_ALTITUDE_DEG,
-  latDeg = OBS_LAT_DEG
+  latDeg = currentObservatorySite().observerLatDeg
 ): number {
   return latDeg - (90 - minAltitudeDeg)
 }
 
-export function targetNeverRisesAtSite(decDeg: number, latDeg = OBS_LAT_DEG): boolean {
+export function targetNeverRisesAtSite(
+  decDeg: number,
+  latDeg = currentObservatorySite().observerLatDeg
+): boolean {
   return maximumAltitudeDegAtMeridian(decDeg, latDeg) <= 0
 }
 
 export function targetObservableFromSite(
   decDeg: number,
   minAltitudeDeg = MIN_ALTITUDE_DEG,
-  latDeg = OBS_LAT_DEG
+  latDeg = currentObservatorySite().observerLatDeg
 ): boolean {
   return maximumAltitudeDegAtMeridian(decDeg, latDeg) >= minAltitudeDeg - 1e-6
 }
 
-/** Hard reject for targets that cannot meet Pomfret's minimum altitude rule. */
+/** Hard reject for targets that cannot meet the selected site's minimum altitude rule. */
 export function pomfretTargetObservabilityError(decDeg: number): string | null {
   if (!Number.isFinite(decDeg)) return 'Invalid declination.'
-  if (targetNeverRisesAtSite(decDeg)) {
-    return 'This target never rises at Pomfret Observatory.'
+  const site = currentObservatorySite()
+  if (targetNeverRisesAtSite(decDeg, site.observerLatDeg)) {
+    return `This target never rises at ${site.name}.`
   }
-  if (!targetObservableFromSite(decDeg)) {
-    const maxAlt = maximumAltitudeDegAtMeridian(decDeg)
-    return `This target only reaches ${maxAlt.toFixed(1)}° altitude at Pomfret (minimum ${MIN_ALTITUDE_DEG}° required).`
+  if (!targetObservableFromSite(decDeg, MIN_ALTITUDE_DEG, site.observerLatDeg)) {
+    const maxAlt = maximumAltitudeDegAtMeridian(decDeg, site.observerLatDeg)
+    return `This target only reaches ${maxAlt.toFixed(1)}° altitude at ${site.name} (minimum ${MIN_ALTITUDE_DEG}° required).`
   }
   return null
 }

@@ -16,16 +16,24 @@ import {
   users,
 } from '@/lib/db/schema'
 import { DEFAULT_OBSERVATORY_SITE_ID } from '@/lib/observatory-sites'
+import { currentObservatorySiteId } from '@/lib/observatory-site-scope'
 import type { MemberUser } from '@/lib/member-store'
 
-const SITE = DEFAULT_OBSERVATORY_SITE_ID
+/** Imaging hot docs follow the request-scoped site. */
+function imagingSiteId(): string {
+  return currentObservatorySiteId() || DEFAULT_OBSERVATORY_SITE_ID
+}
 
 export async function loadMembersFromPostgres(): Promise<MemberUser[] | null> {
   if (!postgresReadsEnabled()) return null
   try {
     const db = getDb()
     const userRows = await db.select().from(users)
-    const membershipRows = await db.select().from(memberships).where(eq(memberships.siteId, SITE))
+    // Membership ACL stays Pomfret for this pass (multi-site roles out of scope).
+    const membershipRows = await db
+      .select()
+      .from(memberships)
+      .where(eq(memberships.siteId, DEFAULT_OBSERVATORY_SITE_ID))
     const membershipByUser = new Map(membershipRows.map((m) => [m.userId, m]))
     return userRows.map((u) => {
       const m = membershipByUser.get(u.id)
@@ -61,12 +69,13 @@ export async function loadJsonDocumentsFromPostgres<T extends { id: string }>(
     | 'audit'
 ): Promise<T[] | null> {
   if (!postgresReadsEnabled()) return null
+  const site = imagingSiteId()
   try {
     const db = getDb()
     if (kind === 'queue') {
       const rows = await db.select().from(imagingRequests)
       return rows
-        .filter((r) => r.siteId === SITE)
+        .filter((r) => r.siteId === site)
         .map((r) => {
           const doc = (r.document ?? {}) as T
           return { ...doc, id: r.id }
@@ -74,23 +83,26 @@ export async function loadJsonDocumentsFromPostgres<T extends { id: string }>(
     }
     if (kind === 'projects') {
       const rows = await db.select().from(imagingProjects)
-      return rows.filter((r) => r.siteId === SITE).map((r) => r.document as T)
+      return rows.filter((r) => r.siteId === site).map((r) => r.document as T)
     }
     if (kind === 'board') {
       const rows = await db.select().from(sessionBoard)
-      return rows.filter((r) => r.siteId === SITE).map((r) => r.document as T)
+      return rows.filter((r) => r.siteId === site).map((r) => r.document as T)
     }
     if (kind === 'gallery') {
+      // Gallery stays Pomfret until share rules are site-scoped.
       const rows = await db.select().from(gallerySubmissions)
-      return rows.filter((r) => r.siteId === SITE).map((r) => r.document as T)
+      return rows
+        .filter((r) => r.siteId === DEFAULT_OBSERVATORY_SITE_ID)
+        .map((r) => r.document as T)
     }
     if (kind === 'windows') {
       const rows = await db.select().from(adminClosedWindows)
-      return rows.filter((r) => r.siteId === SITE).map((r) => r.document as T)
+      return rows.filter((r) => r.siteId === site).map((r) => r.document as T)
     }
     const rows = await db.select().from(auditLog).orderBy(asc(auditLog.at))
     return rows
-      .filter((r) => r.siteId === SITE)
+      .filter((r) => r.siteId === site)
       .map((r) => ({ id: r.id, at: r.at, kind: r.kind, message: r.message, detail: r.detail ?? undefined }) as unknown as T)
   } catch (error) {
     console.error(`[pg-read] ${kind} failed; using KV`, error)
@@ -102,7 +114,10 @@ export async function loadEquipmentRigsFromPostgres(): Promise<unknown[] | null>
   if (!postgresReadsEnabled()) return null
   try {
     const db = getDb()
-    const rows = await db.select().from(imagingEquipment).where(eq(imagingEquipment.siteId, SITE))
+    const rows = await db
+      .select()
+      .from(imagingEquipment)
+      .where(eq(imagingEquipment.siteId, DEFAULT_OBSERVATORY_SITE_ID))
     const rigs = rows[0]?.rigs
     return Array.isArray(rigs) ? rigs : null
   } catch (error) {
@@ -117,8 +132,9 @@ export async function loadR2MapFromPostgres(kind: 'object' | 'preview'): Promise
     const db = getDb()
     const rows = await db.select().from(r2ObjectMap).where(eq(r2ObjectMap.kind, kind))
     const out: Record<string, string> = {}
+    const site = imagingSiteId()
     for (const row of rows) {
-      if (row.siteId === SITE) out[row.queueId] = row.objectKey
+      if (row.siteId === site) out[row.queueId] = row.objectKey
     }
     return out
   } catch (error) {

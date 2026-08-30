@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import { isAltitudeAllowed } from '@/lib/target-altitude'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 
 export const runtime = 'nodejs'
 
@@ -9,6 +10,7 @@ export function OPTIONS() {
 }
 
 export async function POST(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   let body: unknown
   try {
     body = await request.json()
@@ -28,5 +30,6 @@ export async function POST(request: NextRequest) {
     altitudeDeg: Number(check.altitudeDeg.toFixed(3)),
     minAltitudeDeg: check.minAltitudeDeg,
     visible: check.ok,
+  })
   })
 }

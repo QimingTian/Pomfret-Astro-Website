@@ -26,6 +26,7 @@ import {
 } from '@/lib/asc-cloud'
 import { fetchOpenMeteoCurrentWeather } from '@/lib/open-meteo-current'
 import { isEmergencyStopBlocking } from '@/lib/imaging-emergency-stop'
+import { currentObservatorySiteId, scopedKvKey } from '@/lib/observatory-site-scope'
 
 export type ObservatoryStatus =
   | 'ready'
@@ -52,8 +53,15 @@ const statusFile = process.env.OBSERVATORY_STATUS_FILE
 let loaded = false
 const NINA_RUNNING_STALE_MS = 90_000
 const WEATHER_CACHE_MS = 0
-const AUTO_BASE_CURSOR_KV_KEY = 'observatory-auto-audit-last-base'
-const LAST_PUSHED_STATUS_KV_KEY = 'observatory-last-pushed-final-status'
+function autoBaseCursorKvKey(): string {
+  return scopedKvKey('observatory-auto-audit-last-base')
+}
+function lastPushedStatusKvKey(): string {
+  return scopedKvKey('observatory-last-pushed-final-status')
+}
+function observatoryStatusKvKey(): string {
+  return scopedKvKey('observatory-status')
+}
 const OBSERVATORY_PERSIST_DEBOUNCE_MS = 30_000
 
 let lastObservatoryPersistAt = 0
@@ -69,7 +77,7 @@ export type GetObservatoryStatusOptions = {
 
 async function readLastPushedObservatoryStatus(): Promise<ObservatoryStatus | undefined> {
   if (kvEnabled()) {
-    const raw = await kvGetString(LAST_PUSHED_STATUS_KV_KEY)
+    const raw = await kvGetString(lastPushedStatusKvKey())
     if (raw && isObservatoryStatus(raw)) return raw
     return undefined
   }
@@ -78,7 +86,7 @@ async function readLastPushedObservatoryStatus(): Promise<ObservatoryStatus | un
 
 async function markLastPushedObservatoryStatus(status: ObservatoryStatus): Promise<void> {
   if (kvEnabled()) {
-    await kvSetJson(LAST_PUSHED_STATUS_KV_KEY, { status, at: new Date().toISOString() })
+    await kvSetJson(lastPushedStatusKvKey(), { status, at: new Date().toISOString() })
   }
   ;(globalThis as GlobalWithPushed).__pomfret_last_pushed_obs_status__ = status
 }
@@ -265,7 +273,7 @@ function isObservatoryStatus(value: string): value is ObservatoryStatus {
 
 async function readAutoBaseCursor(): Promise<ObservatoryStatus | 'unset'> {
   if (kvEnabled()) {
-    const raw = await kvGetString(AUTO_BASE_CURSOR_KV_KEY)
+    const raw = await kvGetString(autoBaseCursorKvKey())
     if (raw && isObservatoryStatus(raw)) {
       memory().__pomfret_auto_audit_last_base__ = raw
       return raw
@@ -283,7 +291,7 @@ async function tryClaimAutoBaseCursor(
 ): Promise<boolean> {
   const expectedStr = expected === 'unset' ? '' : expected
   if (kvEnabled()) {
-    const claimed = await kvCompareAndSet(AUTO_BASE_CURSOR_KV_KEY, expectedStr, next)
+    const claimed = await kvCompareAndSet(autoBaseCursorKvKey(), expectedStr, next)
     if (claimed) {
       memory().__pomfret_auto_audit_last_base__ = next
       return true
@@ -300,7 +308,7 @@ async function tryClaimAutoBaseCursor(
 async function resetAutoBaseAuditCursor(): Promise<void> {
   memory().__pomfret_auto_audit_last_base__ = undefined
   if (kvEnabled()) {
-    await kvDel(AUTO_BASE_CURSOR_KV_KEY)
+    await kvDel(autoBaseCursorKvKey())
   }
 }
 
@@ -485,7 +493,7 @@ async function ensureLoaded() {
 
   if (kvEnabled()) {
     const remote = await kvGetJson<{ status?: unknown; mode?: unknown; lastPollTs?: unknown }>(
-      'observatory-status'
+      observatoryStatusKvKey()
     )
     if (remote && (remote.mode === 'manual' || remote.mode === 'auto')) {
       applyObservatoryPayload(remote)
@@ -520,7 +528,7 @@ async function syncObservatoryFromKv(): Promise<void> {
     lastAgentSeenTs?: unknown
     ninaRunning?: unknown
     ninaRunningReportedAt?: unknown
-  }>('observatory-status')
+  }> (observatoryStatusKvKey())
   if (!remote) return
 
   const estopBlocking = await isEmergencyStopBlocking()
@@ -561,7 +569,7 @@ async function persist(options?: { force?: boolean }) {
     ninaRunningReportedAt: memory().__pomfret_nina_running_reported_at__ ?? null,
   }
   if (kvEnabled()) {
-    const ok = await kvSetJson('observatory-status', payload)
+    const ok = await kvSetJson(observatoryStatusKvKey(), payload)
     if (ok) {
       void forcePushObservatoryStatusLive()
       return

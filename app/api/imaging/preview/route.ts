@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 
 import { publishPreview } from '@/lib/imaging-preview-live'
 import { publishProgress } from '@/lib/imaging-progress-live'
@@ -14,6 +15,7 @@ export function OPTIONS() {
 }
 
 export async function GET(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   const queueId = request.nextUrl.searchParams.get('queueId')?.trim() ?? ''
   const responseMode = request.nextUrl.searchParams.get('mode')?.trim() ?? ''
 
@@ -54,9 +56,11 @@ export async function GET(request: NextRequest) {
       ETag: `"${latest.updatedAt}"`,
     },
   })
+  })
 }
 
 export async function POST(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   if (!imagingQueueAuthorized(request)) {
     return withImagingCors({ ok: false as const, error: 'Unauthorized' }, 401)
   }
@@ -101,4 +105,5 @@ export async function POST(request: NextRequest) {
   publishProgress(queueId, { type: 'line', at, text: lineText })
   publishPreview(queueId, new Date().toISOString())
   return withImagingCors({ ok: true as const, queueId })
+  })
 }

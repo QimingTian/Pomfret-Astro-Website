@@ -1,4 +1,4 @@
-import { OBS_LAT_DEG, OBS_LON_DEG } from '@/lib/target-altitude'
+import { currentObservatorySite } from '@/lib/observatory-site-scope'
 
 /** 7Timer ASTRO scale 1–8 (lower = better). */
 export type AstroConditionScale = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
@@ -22,8 +22,9 @@ const SCALE_LABELS: Record<AstroConditionScale, string> = {
 }
 
 export function sevenTimerAstroUrl(): string {
+  const site = currentObservatorySite()
   return (
-    `https://www.7timer.info/bin/astro.php?lon=${OBS_LON_DEG}&lat=${OBS_LAT_DEG}` +
+    `https://www.7timer.info/bin/astro.php?lon=${site.observerLonDeg}&lat=${site.observerLatDeg}` +
     '&ac=0&unit=metric&output=json&tzshift=0'
   )
 }

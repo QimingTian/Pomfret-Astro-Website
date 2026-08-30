@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 import {
   maybeReconcileQueueWhenScheduleWeatherColumnChanged,
   type ScheduleWeatherColumnPayload,
@@ -51,6 +52,7 @@ async function reconcileIfScheduleWeatherColumnChanged(
 }
 
 export async function GET(request: Request) {
+  return runWithRequestSite(request, async () => {
   const requestUrl = new URL(request.url)
   const site = observatorySiteFromSearchParams(requestUrl.searchParams)
   const startSecParam = requestUrl.searchParams.get('startSec')
@@ -138,7 +140,7 @@ export async function GET(request: Request) {
         notPermittedHourReasons.push({ hourStartSec: times[i], reasons })
       }
     }
-    const { nauticalDuskUtc, nauticalDawnUtc } = getTonightSchedulingWindow(new Date())
+    const { nauticalDuskUtc, nauticalDawnUtc } = getTonightSchedulingWindow(new Date(), site)
     const globalGateStartSec = Math.floor(nauticalDuskUtc.getTime() / 1000)
     const globalGateEndSec = Math.floor(nauticalDawnUtc.getTime() / 1000)
 
@@ -179,7 +181,7 @@ export async function GET(request: Request) {
     // Headline / global prediction is only meaningful before nautical dusk — same cutoff as
     // `isBeforeTonightWeatherHeadline`. Do not use Open-Meteo is_day (civil night): that flips
     // ~30–40 min earlier and made the UI show "Not permitted" while the dusk headline still showed.
-    const strip = getTonightScheduleStrip(new Date())
+    const strip = getTonightScheduleStrip(new Date(), site)
     const nauticalDuskSec = Math.floor(strip.nauticalDuskMs / 1000)
     const imagingNightUnderway =
       Number.isFinite(nauticalDuskSec) &&
@@ -252,4 +254,5 @@ export async function GET(request: Request) {
     console.error('[tonight-weather-prediction] failed', error)
     return NextResponse.json({ ok: false as const, error: 'Unable to evaluate weather prediction' }, { status: 500 })
   }
+  })
 }

@@ -1,3 +1,4 @@
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 import {
   imagingCorsHeadersResolved,
   imagingCorsOptions,
@@ -16,6 +17,7 @@ export function OPTIONS() {
  * Agent should use nina-sequence polling instead; see observatory/nina_agent.py.
  */
 export async function GET(request: NextRequest) {
+  return runWithRequestSite(request, async () => {
   void request
   return new Response(
     JSON.stringify({
@@ -32,4 +34,5 @@ export async function GET(request: NextRequest) {
       },
     }
   )
+  })
 }

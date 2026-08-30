@@ -23,7 +23,8 @@ import {
 import { resolveSessionProgressQueueId } from './progress-queue'
 
 type GlobalWithEstop = typeof globalThis & {
-  __pomfret_emergency_stop__?: EmergencyStopState | null
+  __pomfret_emergency_stop_by_site__?: Record<string, unknown>
+  __pomfret_emergency_stop__?: unknown
 }
 
 test('isEmergencyStopQueueId recognizes estop queue ids', () => {
@@ -148,9 +149,11 @@ test('emergency stop async state machine', async (t) => {
 
     await resetEmergencyStopForTests()
     const { state: armed } = await armEmergencyStop('James Tian', [])
-    ;(globalThis as GlobalWithEstop).__pomfret_emergency_stop__ = {
+    ;(globalThis as GlobalWithEstop).__pomfret_emergency_stop_by_site__ = {
+      pomfret: {
       ...armed,
       deliveredAt: undefined,
+      },
     }
     await markEmergencyStopDelivered(armed.queueId)
     const state = await getEmergencyStopState()

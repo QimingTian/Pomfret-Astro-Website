@@ -23,10 +23,10 @@ import {
   failInProgressProjectSubSessions,
 } from '@/lib/imaging-session-failure'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
+import { scopedKvKey } from '@/lib/observatory-site-scope'
 import { isObservatoryNight } from '@/lib/observatory-poll-schedule'
 import { setObservatoryMode } from '@/lib/observatory-status-store'
-import { POMFRET_SITE } from '@/lib/observatory-sites'
-import { OBS_LAT_DEG, OBS_LON_DEG } from '@/lib/target-altitude'
+import { currentObservatorySite } from '@/lib/observatory-site-scope'
 
 /** Lead-time ring for thunderstorm approach (≈30–60 min at typical summer storm speeds). */
 export const STORM_APPROACH_RADIUS_KM = 20
@@ -38,8 +38,12 @@ export const WEATHER_SAFETY_DEBOUNCE_MS = 45_000
 /** Weather-safety ESTOP must stay continuously clear this long before auto-unlock. */
 export const WEATHER_SAFETY_CLEAR_HOLD_MS = 20 * 60 * 1000
 
-const DEBOUNCE_KV_KEY = 'imaging-weather-safety-estop-last-arm'
-const CLEAR_SINCE_KV_KEY = 'imaging-weather-safety-estop-clear-since'
+function weatherSafetyDebounceKey(): string {
+  return scopedKvKey('imaging-weather-safety-estop-last-arm')
+}
+function weatherSafetyClearSinceKey(): string {
+  return scopedKvKey('imaging-weather-safety-estop-clear-since')
+}
 const EARTH_RADIUS_KM = 6371
 const THUNDERSTORM_CODES = new Set([95, 96, 99])
 
@@ -324,14 +328,20 @@ function parseOpenMeteoMulti(
 }
 
 async function fetchRingForecasts(): Promise<LocationForecast[] | null> {
-  const points = ringSampleCoordinates(OBS_LAT_DEG, OBS_LON_DEG, STORM_APPROACH_RADIUS_KM, 8)
+  const site = currentObservatorySite()
+  const points = ringSampleCoordinates(
+    site.observerLatDeg,
+    site.observerLonDeg,
+    STORM_APPROACH_RADIUS_KM,
+    8
+  )
   const lats = points.map((p) => p.lat.toFixed(4)).join(',')
   const lons = points.map((p) => p.lon.toFixed(4)).join(',')
   const url =
     'https://api.open-meteo.com/v1/forecast' +
     `?latitude=${lats}&longitude=${lons}` +
     '&hourly=precipitation_probability,weather_code' +
-    `&forecast_days=1&timezone=${POMFRET_SITE.timezone}&timeformat=unixtime`
+    `&forecast_days=1&timezone=${site.timezone}&timeformat=unixtime`
 
   try {
     const res = await fetch(url, { cache: 'no-store' })
@@ -420,7 +430,7 @@ async function readDebounceMs(): Promise<number> {
   const mem = (globalThis as GlobalWithWeatherSafety).__pomfret_weather_safety_last_arm_ms__
   if (typeof mem === 'number' && Number.isFinite(mem)) return mem
   if (kvEnabled()) {
-    const remote = await kvGetJson<{ atMs?: number }>(DEBOUNCE_KV_KEY)
+    const remote = await kvGetJson<{ atMs?: number }>(weatherSafetyDebounceKey())
     if (typeof remote?.atMs === 'number' && Number.isFinite(remote.atMs)) {
       ;(globalThis as GlobalWithWeatherSafety).__pomfret_weather_safety_last_arm_ms__ = remote.atMs
       return remote.atMs
@@ -432,7 +442,7 @@ async function readDebounceMs(): Promise<number> {
 async function writeDebounceMs(atMs: number): Promise<void> {
   ;(globalThis as GlobalWithWeatherSafety).__pomfret_weather_safety_last_arm_ms__ = atMs
   if (kvEnabled()) {
-    await kvSetJson(DEBOUNCE_KV_KEY, { atMs })
+    await kvSetJson(weatherSafetyDebounceKey(), { atMs })
   }
 }
 
@@ -441,7 +451,7 @@ async function readClearSinceMs(): Promise<number | null> {
   if (mem === null) return null
   if (typeof mem === 'number' && Number.isFinite(mem)) return mem
   if (kvEnabled()) {
-    const remote = await kvGetJson<{ clearSinceMs?: number | null }>(CLEAR_SINCE_KV_KEY)
+    const remote = await kvGetJson<{ clearSinceMs?: number | null }>(weatherSafetyClearSinceKey())
     const value = remote?.clearSinceMs
     if (typeof value === 'number' && Number.isFinite(value)) {
       ;(globalThis as GlobalWithWeatherSafety).__pomfret_weather_safety_clear_since_ms__ = value
@@ -455,7 +465,7 @@ async function readClearSinceMs(): Promise<number | null> {
 async function writeClearSinceMs(clearSinceMs: number | null): Promise<void> {
   ;(globalThis as GlobalWithWeatherSafety).__pomfret_weather_safety_clear_since_ms__ = clearSinceMs
   if (kvEnabled()) {
-    await kvSetJson(CLEAR_SINCE_KV_KEY, { clearSinceMs })
+    await kvSetJson(weatherSafetyClearSinceKey(), { clearSinceMs })
   }
 }
 

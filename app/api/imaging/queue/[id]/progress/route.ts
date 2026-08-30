@@ -2,6 +2,7 @@ import { listSessionProgressLines } from '@/lib/imaging/core/session-progress-st
 import { authorizeImagingSession, resolveImagingSessionContext } from '@/lib/imaging-session-access'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import type { NextRequest } from 'next/server'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 
 export const runtime = 'nodejs'
 
@@ -11,6 +12,7 @@ export function OPTIONS() {
 
 /** Live lines for Remote "terminal" (no auth for now). */
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+  return runWithRequestSite(request, async () => {
   const id = params.id
   if (!id) {
     return withImagingCors({ ok: false as const, error: 'Missing id' }, 400)
@@ -34,5 +36,6 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     ok: true as const,
     queueStatus,
     lines,
+  })
   })
 }

@@ -149,6 +149,17 @@ export function AccountInfoSection({
     }
   }
 
+  const accountActions = (
+    <div className="flex shrink-0 flex-wrap items-center gap-2 sm:gap-3">
+      <button type="button" onClick={openInfoModal} className={actionButtonClass}>
+        Update Info
+      </button>
+      <button type="button" onClick={() => void handleLogout()} className={actionButtonClass}>
+        Log out
+      </button>
+    </div>
+  )
+
   const roleValue = memberRolesDisplay(user)
 
   const body = (
@@ -184,14 +195,7 @@ export function AccountInfoSection({
           <InfoRow label="Last name" value={user.lastName} />
           <InfoRow label="Role" value={roleValue} />
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2 sm:gap-3">
-          <button type="button" onClick={openInfoModal} className={actionButtonClass}>
-            Update Info
-          </button>
-          <button type="button" onClick={() => void handleLogout()} className={actionButtonClass}>
-            Log out
-          </button>
-        </div>
+        {accountActions}
       </div>
 
       {infoModalOpen ? (
@@ -319,5 +323,10 @@ export function AccountInfoSection({
     )
   }
 
-  return <section className="boxed-fields space-y-3">{body}</section>
+  return (
+    <section className={`boxed-fields space-y-3 ${className}`}>
+      <div className="flex flex-wrap items-center justify-end gap-3">{accountActions}</div>
+      {body}
+    </section>
+  )
 }

@@ -4,10 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSiteStream } from '@/lib/use-site-stream'
 import { AdminDashboardGrid } from '@/app/dashboard/admin/admin-dashboard-grid'
 import { AccountFullBleedRule } from '@/app/dashboard/account/account-full-bleed-rule'
-import { accountTwoColGridAccountEmergency } from '@/app/dashboard/account/account-two-col-layout'
-import { AccountTwoColRow } from '@/app/dashboard/account/account-two-col-row'
 import { AccountPageHeader } from '@/app/dashboard/account/account-page-header'
 import { AccountInfoSection } from '@/app/dashboard/account/account-info-section'
+import { DashboardPanel } from '@/app/dashboard/account/dashboard-panel'
 import { observatorySiteFetch } from '@/components/observatory-site-provider'
 import { isPomfretAstroAdmin } from '@/lib/member-roles'
 import type { PublicMemberUser } from '@/lib/member-store'
@@ -303,11 +302,13 @@ export function AdminAccountDashboard({ user }: { user: PublicMemberUser }) {
     <div className="pb-4 sm:pb-8">
       <AccountPageHeader username={user.username} />
 
-      <AccountTwoColRow
-        desktopGrid={accountTwoColGridAccountEmergency}
-        left={<AccountInfoSection user={user} variant="panel" className="min-h-0" />}
-        right={<EmergencyStopButton user={user} />}
-      />
+      <AccountInfoSection user={user} variant="panel" className="min-h-0" />
+
+      <AccountFullBleedRule />
+
+      <DashboardPanel title="Emergency STOP" compact className="min-h-0">
+        <EmergencyStopButton user={user} />
+      </DashboardPanel>
 
       <AccountFullBleedRule />
 

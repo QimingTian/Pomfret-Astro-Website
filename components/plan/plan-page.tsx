@@ -2,13 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
-import { POMFRET_SITE } from '@/lib/observatory-sites'
+import { observatorySiteFetch, useObservatorySite } from '@/components/observatory-site-provider'
 import {
   getTonightScheduleEveningAstronomyUtc,
   getTonightScheduleMorningAstronomyUtc,
-  OBSERVATORY_TIME_ZONE,
 } from '@/lib/sunrise-window'
-import { getTonightScheduleWindowSec } from '@/lib/schedule-strip'
+import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { useCameraFrameOverlay } from '@/lib/imaging/equipment/use-camera-frame-overlay'
 import { overlayRotationDeg } from '@/lib/imaging/equipment/equipment'
 import { useImagingRigs } from '@/lib/imaging/equipment/useEquipment'
@@ -28,10 +27,6 @@ import { PlanSkyLayers, LAYER_ORDER, type LayerKey } from './plan-sky-layers'
 import { PlanFramingToolbar, PlanFrameOverlays } from './plan-framing-toolbar'
 import { PlanSelectionOverlay, type LiveSkyInfo } from './plan-selection-overlay'
 import { formatDecDegDms, formatRaHoursHms } from '@/lib/format-radec'
-
-const POMFRET_LATITUDE = POMFRET_SITE.weatherLat
-const POMFRET_LONGITUDE = POMFRET_SITE.weatherLon
-const POMFRET_ALTITUDE_METERS = POMFRET_SITE.elevationMeters
 
 type WeatherPrediction = {
   ok: boolean
@@ -117,42 +112,23 @@ function buildHourStartsSec(windowStartSec: number, windowEndSec: number): numbe
     return []
   }
   const hours: number[] = []
-  for (let sec = windowStartSec; sec < windowEndSec; sec += 3600) {
+  let sec = Math.floor(windowStartSec / 3600) * 3600
+  if (sec < windowStartSec) sec += 3600
+  for (; sec < windowEndSec; sec += 3600) {
     hours.push(sec)
   }
   return hours
 }
 
-/** Local date + time to the minute for the time-travel scrubber hover label. */
-function formatHoverTimeToMinute(sec: number): string {
-  const d = new Date(sec * 1000)
-  const datePart = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-  const timePart = d.toLocaleTimeString(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true,
-  })
-  return `${datePart} ${timePart}`
-}
-
-/** Same MJD convention as `public/stellarium/engine.html` `dateToMJD`. */
-function dateToMJD(d: Date): number {
-  return d.getTime() / 86400000 + 2440587.5 - 2400000.5
-}
-
-type AtlasRibbonAstronomyMarker = { id: string; label: string; sec: number; frac: number }
-
-/** Wall time for ribbon astronomy ticks (matches Remote schedule timezone). */
-function formatRibbonAstronomyTime(sec: number): string {
-  return new Date(sec * 1000).toLocaleTimeString(undefined, {
-    timeZone: OBSERVATORY_TIME_ZONE,
-    hour: 'numeric',
-    minute: '2-digit',
-  })
-}
-
-function usePolling<T>(fn: () => Promise<T | null>, intervalMs: number): T | null {
+function usePolling<T>(
+  fn: () => Promise<T | null>,
+  intervalMs: number,
+  resetKey: string
+): T | null {
   const [state, setState] = useState<T | null>(null)
+  useEffect(() => {
+    setState(null)
+  }, [resetKey])
   useEffect(() => {
     let cancelled = false
     const load = async () => {
@@ -169,10 +145,16 @@ function usePolling<T>(fn: () => Promise<T | null>, intervalMs: number): T | nul
       cancelled = true
       window.clearInterval(id)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [intervalMs])
+  }, [intervalMs, resetKey, fn])
   return state
 }
+
+/** Same MJD convention as `public/stellarium/engine.html` `dateToMJD`. */
+function dateToMJD(d: Date): number {
+  return d.getTime() / 86400000 + 2440587.5 - 2400000.5
+}
+
+type AtlasRibbonAstronomyMarker = { id: string; label: string; sec: number; frac: number }
 
 /** Resolve the engine object whose `visible` owns the given layer. */
 function layerObj(stel: StelLike | null, k: LayerKey): LayerToggleTarget | null {
@@ -239,6 +221,7 @@ function buildEngineResolveCandidates(resolved: ResolvedCatalogObject, rawQuery:
 }
 
 export default function PlanPage() {
+  const { site, siteId } = useObservatorySite()
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
   const tonightRibbonBarRef = useRef<HTMLDivElement | null>(null)
   const cameraFrameOverlayRef = useRef<HTMLDivElement | null>(null)
@@ -305,11 +288,11 @@ export default function PlanPage() {
   const viewerSrc = useMemo(
     () =>
       `/stellarium/engine.html?${new URLSearchParams({
-        lat: String(POMFRET_LATITUDE),
-        lng: String(POMFRET_LONGITUDE),
-        elev: String(POMFRET_ALTITUDE_METERS),
+        lat: String(site.weatherLat),
+        lng: String(site.weatherLon),
+        elev: String(site.elevationMeters),
       }).toString()}`,
-    [],
+    [site.weatherLat, site.weatherLon, site.elevationMeters],
   )
 
   const getStel = useCallback((): StelLike | null => {
@@ -1082,7 +1065,7 @@ export default function PlanPage() {
     /* Path 2: Simbad / local catalog backend used by Remote's Target Search. */
     let resolved: ResolvedCatalogObject | null = null
     try {
-      const res = await fetch(`/api/imaging/object-resolve?query=${encodeURIComponent(q)}`)
+      const res = await observatorySiteFetch(`/api/imaging/object-resolve?query=${encodeURIComponent(q)}`, siteId)
       const data = await res.json().catch(() => ({}))
       if (res.ok && data?.ok === true && data?.object) {
         resolved = data.object as ResolvedCatalogObject
@@ -1188,16 +1171,32 @@ export default function PlanPage() {
     stelReady &&
     (trackingTarget !== null || cameraFrameProfile !== null || framingPanels.length > 0)
 
-  const weather = usePolling<WeatherPrediction | null>(async () => {
-    const { startSec, endSec } = getTonightScheduleWindowSec()
-    const res = await fetch(
-      `/api/imaging/tonight-weather-prediction?startSec=${startSec}&endSec=${endSec}&_=${Date.now()}`,
+  const [scheduleMinute, setScheduleMinute] = useState(() => Math.floor(Date.now() / 60_000))
+  useEffect(() => {
+    const id = window.setInterval(
+      () => setScheduleMinute(Math.floor(Date.now() / 60_000)),
+      60_000
+    )
+    return () => window.clearInterval(id)
+  }, [])
+
+  const scheduleStrip = useMemo(
+    () => getTonightScheduleStrip(new Date(scheduleMinute * 60_000), site),
+    [site, scheduleMinute]
+  )
+  const ribbonStartSec = Math.floor(scheduleStrip.windowStartMs / 1000)
+  const ribbonEndSec = Math.floor(scheduleStrip.windowEndMs / 1000)
+
+  const fetchWeatherPrediction = useCallback(async () => {
+    const res = await observatorySiteFetch(
+      `/api/imaging/tonight-weather-prediction?startSec=${ribbonStartSec}&endSec=${ribbonEndSec}&_=${Date.now()}`,
+      siteId,
       { cache: 'no-store' }
     )
     return (await res.json().catch(() => null)) as WeatherPrediction | null
-  }, 60_000)
+  }, [ribbonStartSec, ribbonEndSec, siteId])
 
-  const { startSec: ribbonStartSec, endSec: ribbonEndSec } = getTonightScheduleWindowSec()
+  const weather = usePolling(fetchWeatherPrediction, 60_000, `${siteId}:${scheduleStrip.nightKey}`)
   const readySet = useMemo(() => new Set(weather?.readyHourStartsSec ?? []), [weather?.readyHourStartsSec])
 
   const apiHourStartsSec =
@@ -1211,8 +1210,8 @@ export default function PlanPage() {
     if (ribbonEndSec <= ribbonStartSec) return []
     const span = ribbonEndSec - ribbonStartSec
     const now = new Date()
-    const { civilDuskUtc, nauticalDuskUtc, astronomicalDarkUtc } = getTonightScheduleEveningAstronomyUtc(now)
-    const { civilDawnUtc, nauticalDawnUtc, astronomicalDawnUtc } = getTonightScheduleMorningAstronomyUtc(now)
+    const { civilDuskUtc, nauticalDuskUtc, astronomicalDarkUtc } = getTonightScheduleEveningAstronomyUtc(now, site)
+    const { civilDawnUtc, nauticalDawnUtc, astronomicalDawnUtc } = getTonightScheduleMorningAstronomyUtc(now, site)
     const raw: Array<Omit<AtlasRibbonAstronomyMarker, 'frac'>> = [
       { id: 'civil-dusk', label: 'Civil Dusk', sec: Math.floor(civilDuskUtc.getTime() / 1000) },
       { id: 'nautical-dusk', label: 'Nautical Dusk', sec: Math.floor(nauticalDuskUtc.getTime() / 1000) },
@@ -1225,7 +1224,7 @@ export default function PlanPage() {
       .map((m) => ({ ...m, frac: (m.sec - ribbonStartSec) / span }))
       .filter((m) => m.frac >= 0 && m.frac <= 1)
       .sort((a, b) => a.frac - b.frac)
-  }, [ribbonStartSec, ribbonEndSec])
+  }, [ribbonStartSec, ribbonEndSec, site])
 
   const handleRibbonClick = (ev: React.MouseEvent<HTMLDivElement> | React.KeyboardEvent<HTMLDivElement>) => {
     if (ribbonEndSec <= ribbonStartSec) return
@@ -1398,6 +1397,7 @@ export default function PlanPage() {
           ribbonStartSec={ribbonStartSec}
           ribbonEndSec={ribbonEndSec}
           ribbonHourStartsSec={ribbonHourStartsSec}
+          timezone={site.timezone}
           weatherColorsKnown={weatherColorsKnown}
           readySet={readySet}
           markers={atlasRibbonAstronomyMarkers}

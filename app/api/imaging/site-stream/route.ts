@@ -1,6 +1,6 @@
 import { subscribeLiveEvents } from '@/lib/imaging/live-bus'
-import { isAdminUser } from '@/lib/member-store'
 import { getCurrentUser } from '@/lib/member-auth'
+import { canAdministerImagingSite } from '@/lib/imaging/core/admin-auth'
 import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 import {
   getEmergencyStopPublicState,
@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
     return new Response(JSON.stringify({ ok: false, error: 'Unauthorized' }), { status: 401 })
   }
 
-  const isAdmin = isAdminUser(user)
+  const isAdmin = canAdministerImagingSite(user)
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {

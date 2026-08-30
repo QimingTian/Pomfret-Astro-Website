@@ -1,5 +1,9 @@
 import type { MemberUser, PublicMemberUser } from '@/lib/member-store'
 import { isPomfretOrgEmail } from '@/lib/member-store'
+import { canSubmitImagingAtSite, membershipForSite } from '@/lib/member-roles'
+import { DEFAULT_OBSERVATORY_SITE_ID } from '@/lib/observatory-sites'
+import { currentObservatorySiteId } from '@/lib/observatory-site-scope'
+import { getGuestSiteAccessStatus, getSiteGuestAccessMode } from '@/lib/site-policies'
 
 type ImagingSubmitFlags = {
   email: string
@@ -48,6 +52,7 @@ export function isImagingPending(user: Pick<MemberUser, 'email' | 'emailVerified
   return !isPomfretOrgEmail(user.email)
 }
 
+/** Default-site (Pomfret) convenience — prefer `canSubmitImagingForSite` for multi-site. */
 export function canSubmitImaging(user: MemberUser): { ok: true } | { ok: false; error: string } {
   return canSubmitImagingFromFlags({
     email: user.email,
@@ -64,6 +69,46 @@ export function canSubmitImagingPublic(user: PublicMemberUser): { ok: true } | {
     imagingApproved: user.imagingApproved,
     imagingRejected: user.imagingRejected,
   })
+}
+
+/**
+ * Site-aware imaging submit gate (affiliation + guest policy).
+ * Falls back to legacy Pomfret flags when memberships are empty.
+ */
+export async function canSubmitImagingForSite(
+  user: MemberUser,
+  siteId?: string | null
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!isEmailVerified(user)) {
+    return {
+      ok: false,
+      error: 'Verify your email before submitting imaging requests. Check your inbox or resend from Account.',
+    }
+  }
+
+  const site = siteId?.trim() || currentObservatorySiteId() || DEFAULT_OBSERVATORY_SITE_ID
+  const memberships = user.memberships ?? []
+
+  // Legacy path: no memberships array yet — keep Pomfret imaging flags.
+  if (memberships.length === 0) {
+    return canSubmitImaging(user)
+  }
+
+  const guestAccessMode = await getSiteGuestAccessMode(site)
+  const guestGrant = membershipForSite(memberships, site)
+    ? null
+    : await getGuestSiteAccessStatus(user.id, site)
+
+  const decision = canSubmitImagingAtSite({
+    systemRole: user.systemRole,
+    memberships,
+    siteId: site,
+    guestAccessMode,
+    guestGrant,
+  })
+
+  if (!decision.ok) return { ok: false, error: decision.error }
+  return { ok: true }
 }
 
 export type MemberAccessFlags = {

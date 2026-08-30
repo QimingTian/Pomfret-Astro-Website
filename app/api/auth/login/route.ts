@@ -21,7 +21,20 @@ export async function POST(request: NextRequest) {
         ? body.email
         : ''
   const password = typeof body.password === 'string' ? body.password : ''
-  const user = await verifyMemberCredentials(login, password)
+  let user
+  try {
+    user = await verifyMemberCredentials(login, password)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : ''
+    if (message === 'MEMBER_STORE_POSTGRES_UNAVAILABLE' || message.includes('MEMBER_STORE_POSTGRES')) {
+      console.error('[auth/login] member store unavailable', error)
+      return NextResponse.json(
+        { ok: false, error: 'Account database is temporarily unreachable. Try again in a moment.' },
+        { status: 503 }
+      )
+    }
+    throw error
+  }
   if (!user) {
     return NextResponse.json(
       { ok: false, error: 'Invalid email, username, or password.' },

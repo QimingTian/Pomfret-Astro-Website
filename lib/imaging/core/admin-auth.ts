@@ -1,6 +1,9 @@
 import type { NextRequest } from 'next/server'
 import { getCurrentUser } from '@/lib/member-auth'
-import { isAdminUser, type MemberUser } from '@/lib/member-store'
+import { canAdministerSite } from '@/lib/member-roles'
+import { type MemberUser } from '@/lib/member-store'
+import { DEFAULT_OBSERVATORY_SITE_ID } from '@/lib/observatory-sites'
+import { currentObservatorySiteId } from '@/lib/observatory-site-scope'
 
 export type ImagingAdminActor = {
   displayName: string
@@ -31,17 +34,41 @@ export function imagingAdminActorFromUser(user: MemberUser): ImagingAdminActor {
   }
 }
 
-export async function getAdminFromRequest(request: NextRequest): Promise<MemberUser | null> {
+function adminSiteId(explicit?: string | null): string {
+  return explicit?.trim() || currentObservatorySiteId() || DEFAULT_OBSERVATORY_SITE_ID
+}
+
+export function canAdministerImagingSite(
+  user: MemberUser | null | undefined,
+  siteId?: string | null
+): boolean {
+  if (!user) return false
+  return canAdministerSite({
+    systemRole: user.systemRole,
+    memberships: user.memberships,
+    siteId: adminSiteId(siteId),
+  })
+}
+
+export async function getAdminFromRequest(
+  request: NextRequest,
+  siteId?: string | null
+): Promise<MemberUser | null> {
   const user = await getCurrentUser(request)
-  if (user && isAdminUser(user)) return user
+  if (user && canAdministerImagingSite(user, siteId)) return user
   return null
 }
 
+/**
+ * Requires Pomfret Astro Admin or Observatory Admin for the request site
+ * (ALS / `?site=` / header). Pass `siteId` to override.
+ */
 export async function requireImagingAdmin(
-  request: NextRequest
+  request: NextRequest,
+  siteId?: string | null
 ): Promise<{ ok: true; user: MemberUser } | { ok: false; status: number; error: string }> {
   const user = await getCurrentUser(request)
-  if (user && isAdminUser(user)) {
+  if (user && canAdministerImagingSite(user, siteId)) {
     return { ok: true, user }
   }
   return { ok: false, status: 403, error: 'Admin access required.' }

@@ -21,14 +21,14 @@ import { DEFAULT_OBSERVATORY_SITE_ID } from '@/lib/observatory-sites'
 import { currentObservatorySiteId } from '@/lib/observatory-site-scope'
 import type { MemberUser } from '@/lib/member-store'
 
-/** Membership / gallery / equipment stay on Pomfret until ACL split. */
-function membershipSiteId(): string {
-  return DEFAULT_OBSERVATORY_SITE_ID
-}
-
 /** Imaging queue / projects / board / audit / windows / R2 follow request site. */
 function imagingSiteId(): string {
   return currentObservatorySiteId() || DEFAULT_OBSERVATORY_SITE_ID
+}
+
+/** Gallery / equipment / some member docs stay Pomfret until product scopes them. */
+function membershipSiteId(): string {
+  return DEFAULT_OBSERVATORY_SITE_ID
 }
 
 function ts(value: string | null | undefined): string | null {
@@ -41,6 +41,7 @@ export async function mirrorMembers(list: MemberUser[]): Promise<void> {
     const db = getDb()
     const now = new Date().toISOString()
     for (const user of list) {
+      const systemRole = user.systemRole ?? (user.role === 'admin' ? 'pomfret_astro_admin' : 'user')
       await db
         .insert(users)
         .values({
@@ -51,7 +52,7 @@ export async function mirrorMembers(list: MemberUser[]): Promise<void> {
           firstName: user.firstName,
           lastName: user.lastName,
           displayName: user.displayName ?? null,
-          role: user.role,
+          role: systemRole,
           emailVerifiedAt: ts(user.emailVerifiedAt),
           createdAt: user.createdAt,
           updatedAt: user.updatedAt,
@@ -65,28 +66,48 @@ export async function mirrorMembers(list: MemberUser[]): Promise<void> {
             firstName: user.firstName,
             lastName: user.lastName,
             displayName: user.displayName ?? null,
-            role: user.role,
+            role: systemRole,
             emailVerifiedAt: ts(user.emailVerifiedAt),
             updatedAt: user.updatedAt,
           },
         })
-      await db
-        .insert(memberships)
-        .values({
-          userId: user.id,
-          siteId: membershipSiteId(),
-          imagingApprovedAt: ts(user.imagingApprovedAt),
-          imagingRejectedAt: ts(user.imagingRejectedAt),
-          updatedAt: user.updatedAt || now,
-        })
-        .onConflictDoUpdate({
-          target: [memberships.userId, memberships.siteId],
-          set: {
-            imagingApprovedAt: ts(user.imagingApprovedAt),
-            imagingRejectedAt: ts(user.imagingRejectedAt),
+
+      const membershipList =
+        user.memberships?.length > 0
+          ? user.memberships
+          : [
+              {
+                siteId: DEFAULT_OBSERVATORY_SITE_ID,
+                siteRole:
+                  systemRole === 'pomfret_astro_admin' || user.role === 'admin'
+                    ? ('observatory_admin' as const)
+                    : ('observatory_member' as const),
+                imagingApprovedAt: user.imagingApprovedAt ?? null,
+                imagingRejectedAt: user.imagingRejectedAt ?? null,
+              },
+            ]
+
+      for (const m of membershipList) {
+        await db
+          .insert(memberships)
+          .values({
+            userId: user.id,
+            siteId: m.siteId,
+            siteRole: m.siteRole,
+            imagingApprovedAt: ts(m.imagingApprovedAt),
+            imagingRejectedAt: ts(m.imagingRejectedAt),
             updatedAt: user.updatedAt || now,
-          },
-        })
+          })
+          .onConflictDoUpdate({
+            target: [memberships.userId, memberships.siteId],
+            set: {
+              siteRole: m.siteRole,
+              imagingApprovedAt: ts(m.imagingApprovedAt),
+              imagingRejectedAt: ts(m.imagingRejectedAt),
+              updatedAt: user.updatedAt || now,
+            },
+          })
+      }
     }
   })
 }

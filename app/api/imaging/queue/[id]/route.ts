@@ -4,7 +4,7 @@ import { deleteProjectCascade } from '@/lib/imaging-project-delete'
 import { getAdminFromRequest } from '@/lib/imaging-admin-auth'
 import { authorizeImagingSession } from '@/lib/imaging-session-access'
 import { getCurrentUser } from '@/lib/member-auth'
-import { canSubmitImaging } from '@/lib/member-access'
+import { canSubmitImagingForSite } from '@/lib/member-access'
 import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 import {
   imagingCorsOptions,
@@ -105,7 +105,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
   const b = body as Record<string, unknown>
   const user = await getCurrentUser(request)
   if (user) {
-    const imagingAccess = canSubmitImaging(user)
+    const imagingAccess = await canSubmitImagingForSite(user)
     if (!imagingAccess.ok) {
       return withImagingCors({ ok: false as const, error: imagingAccess.error }, 403)
     }

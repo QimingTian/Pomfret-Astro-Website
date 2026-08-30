@@ -1,5 +1,5 @@
 import { appendAuditLog } from '@/lib/imaging-audit-log'
-import { POMFRET_SITE } from '@/lib/observatory-sites'
+import { currentObservatorySite } from '@/lib/observatory-site-scope'
 import {
   logSessionImagingPlanChanged,
   logSessionStatusChange,
@@ -77,11 +77,9 @@ export type ProjectTonightPlan = {
 
 const SESSION_OVERHEAD_BASE_MS = DSO_SESSION_OVERHEAD_SEC * 1000
 const PLACEMENT_STEP_MS = 5 * 60 * 1000
-const SCHEDULE_LOG_TZ = POMFRET_SITE.timezone
-
 function formatScheduleEt(ms: number): string {
   return new Date(ms).toLocaleString('en-US', {
-    timeZone: SCHEDULE_LOG_TZ,
+    timeZone: currentObservatorySite().timezone,
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
@@ -90,7 +88,7 @@ function formatScheduleEt(ms: number): string {
 }
 
 function formatScheduleEtRange(startMs: number, endMs: number): string {
-  return `${formatScheduleEt(startMs)} – ${formatScheduleEt(endMs)} ET`
+  return `${formatScheduleEt(startMs)} – ${formatScheduleEt(endMs)} local`
 }
 
 function formatWeatherPermittedSpansForRun(
@@ -1112,7 +1110,8 @@ export function explainWhyNoPlansTonight(
     const free = sortedFree[i]!
     const cursorMs = Math.max(free.startMs, globalCursorMs)
     const planningEndMs = Math.min(free.endMs, deadlineMs)
-    const label = `Free interval ${i + 1} (${new Date(cursorMs).toLocaleString('en-US', { timeZone: SCHEDULE_LOG_TZ, hour: 'numeric', minute: '2-digit' })}–${new Date(planningEndMs).toLocaleString('en-US', { timeZone: SCHEDULE_LOG_TZ, hour: 'numeric', minute: '2-digit' })} ET)`
+    const tz = currentObservatorySite().timezone
+    const label = `Free interval ${i + 1} (${new Date(cursorMs).toLocaleString('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' })}–${new Date(planningEndMs).toLocaleString('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' })} local)`
     const framesLeft = workingRemaining.reduce((s, r) => s + r.countRemaining, 0)
     if (framesLeft <= 0) break
     if (planningEndMs - cursorMs < minWindowMs) continue

@@ -15,6 +15,10 @@ export async function applyPostgresMigrations(): Promise<{ ok: true } | { ok: fa
     for (const statement of statements) {
       await sql.query(statement)
     }
+    // Additive upgrades for existing databases (CREATE TABLE IF NOT EXISTS won't alter columns).
+    await sql.query(
+      `ALTER TABLE memberships ADD COLUMN IF NOT EXISTS site_role text NOT NULL DEFAULT 'observatory_member'`
+    )
     return { ok: true }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'migration failed'

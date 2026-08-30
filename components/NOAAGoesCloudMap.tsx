@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import MapFrameTimeOverlay from '@/components/MapFrameTimeOverlay'
-import { formatEstDateTime } from '@/lib/est-datetime'
+import { formatObservatoryDateTime } from '@/lib/est-datetime'
 import { noaaGoesProxyUrl, parseGeocolorFrameUtc } from '@/lib/noaa-goes'
 import { useAppStore } from '@/lib/store'
+import { useObservatorySite } from '@/components/observatory-site-provider'
 
 const FRAME_MS = 900
 const MANIFEST_REFRESH_MS = 600_000
@@ -12,6 +13,7 @@ const MANIFEST_REFRESH_MS = 600_000
 type FrameEntry = { path: string }
 
 export default function NOAAGoesCloudMap() {
+  const { site } = useObservatorySite()
   const [frames, setFrames] = useState<FrameEntry[]>([])
   const [frameIndex, setFrameIndex] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -87,8 +89,8 @@ export default function NOAAGoesCloudMap() {
   const frameTimeLabel = useMemo(() => {
     if (!currentPath) return null
     const utc = parseGeocolorFrameUtc(currentPath)
-    return utc ? formatEstDateTime(utc) : null
-  }, [currentPath])
+    return utc ? formatObservatoryDateTime(utc, site.timezone) : null
+  }, [currentPath, site.timezone])
 
   return (
     <div

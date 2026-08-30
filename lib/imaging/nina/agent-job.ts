@@ -16,6 +16,8 @@ import {
   END_NIGHT_DISCORD_AFTER_SESSIONS,
   END_NIGHT_DISCORD_DAWN,
 } from '@/lib/imaging/nina-discord-message'
+import type { ObservatorySiteId } from '@/lib/observatory-sites'
+import { currentObservatorySiteId } from '@/lib/observatory-site-scope'
 import type { ImagingRequest } from '@/lib/imaging-queue-store'
 import {
   projectTargetCoords,
@@ -38,6 +40,8 @@ export type NinaAgentJob = {
   version: number
   command: NinaAgentJobCommand
   queueId: string
+  /** Observatory that owns this job (defaults to pomfret when omitted for older agents). */
+  siteId?: ObservatorySiteId
   issuedAt: string
   params?: NinaAgentRunParams
   estop?: { weatherSafety: boolean; discordText: string }
@@ -89,12 +93,14 @@ export function signNinaAgentJob(job: Omit<NinaAgentJob, 'signature'>): string {
 
 export function serializeNinaAgentJob(job: NinaAgentJobInput): string {
   const fromEnv = httpAuthFromEnv()
+  const siteId = job.siteId ?? currentObservatorySiteId()
   const unsigned: Omit<NinaAgentJob, 'signature'> = {
     kind: NINA_AGENT_JOB_KIND,
     version: NINA_AGENT_JOB_VERSION,
     issuedAt: job.issuedAt ?? new Date().toISOString(),
     command: job.command,
     queueId: job.queueId,
+    siteId,
     ...(job.params ? { params: job.params } : {}),
     ...(job.estop ? { estop: job.estop } : {}),
     ...(job.endNight ? { endNight: job.endNight } : {}),

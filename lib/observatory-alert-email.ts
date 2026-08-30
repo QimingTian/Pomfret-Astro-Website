@@ -1,5 +1,5 @@
 import { listMembersForAdminDirectory } from '@/lib/member-store'
-import { POMFRET_SITE } from '@/lib/observatory-sites'
+import { currentObservatorySite } from '@/lib/observatory-site-scope'
 
 function env(name: string): string {
   return (process.env[name] ?? '').trim()
@@ -48,17 +48,18 @@ export async function sendObservatoryDisconnectedAlertEmail(): Promise<{
     return { sent: false, reason: 'Mail env not configured' }
   }
 
-  const detectedLocal = new Date().toLocaleString('en-US', { timeZone: POMFRET_SITE.timezone })
-  const subject = 'Pomfret Observatory Alert: Observatory Disconnected'
+  const site = currentObservatorySite()
+  const detectedLocal = new Date().toLocaleString('en-US', { timeZone: site.timezone })
+  const subject = `${site.name} Alert: Observatory Disconnected`
   const greet = 'Hi Observatory Admin,'
   const text = [
     greet,
     '',
     'Observatory Disconnected',
     '',
-    `Detected: ${detectedLocal} (${POMFRET_SITE.timezone})`,
+    `Detected: ${detectedLocal} (${site.timezone})`,
     '',
-    'You are receiving this email because you are an administrator of the Pomfret Olmsted Observatory.',
+    `You are receiving this email because you are an administrator of ${site.name}.`,
     'The website has stopped receiving heartbeats from the observatory agent.',
     '',
     'Please check observatory condition, system power, and network/agent health to make sure everything is safe.',
@@ -71,9 +72,9 @@ export async function sendObservatoryDisconnectedAlertEmail(): Promise<{
     <div style="font-family: Arial, sans-serif; font-size: 14px; line-height: 1.6; color: #111111;">
       <p>${greet}</p>
       <p><strong>Observatory Disconnected</strong></p>
-      <p><strong>Detected:</strong> ${detectedLocal} (${POMFRET_SITE.timezone})</p>
+      <p><strong>Detected:</strong> ${detectedLocal} (${site.timezone})</p>
       <p>
-        You are receiving this email because you are an administrator of the Pomfret Olmsted Observatory.
+        You are receiving this email because you are an administrator of ${site.name}.
         The website has stopped receiving heartbeats from the observatory agent.
       </p>
       <p>

@@ -13,6 +13,7 @@ type Props = {
   ribbonStartSec: number
   ribbonEndSec: number
   ribbonHourStartsSec: number[]
+  timezone: string
   weatherColorsKnown: boolean
   readySet: Set<number>
   markers: RibbonAstronomyMarker[]
@@ -51,6 +52,7 @@ export function PlanTimelineSlot({
   ribbonStartSec,
   ribbonEndSec,
   ribbonHourStartsSec,
+  timezone,
   weatherColorsKnown,
   readySet,
   markers,
@@ -156,6 +158,7 @@ export function PlanTimelineSlot({
           ribbonStartSec={ribbonStartSec}
           ribbonEndSec={ribbonEndSec}
           ribbonHourStartsSec={ribbonHourStartsSec}
+          timezone={timezone}
           weatherColorsKnown={weatherColorsKnown}
           readySet={readySet}
           markers={markers}

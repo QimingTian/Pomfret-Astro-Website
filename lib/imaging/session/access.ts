@@ -1,11 +1,13 @@
 import type { NextRequest } from 'next/server'
 import { checkSessionPasswordRateLimit } from '@/lib/auth-rate-limit'
 import { getCurrentUser } from '@/lib/member-auth'
-import { isAdminUser, normalizeMemberEmail } from '@/lib/member-store'
+import { canAdministerImagingSite } from '@/lib/imaging/core/admin-auth'
+import { normalizeMemberEmail } from '@/lib/member-store'
 import { getProjectById, getProjectByNightSubId } from '@/lib/imaging-project-store'
 import { getBoardEntry } from '@/lib/imaging-session-board'
 import { getRequestById, type ImagingRequest } from '@/lib/imaging-queue-store'
 import { verifySessionPasswordHash } from '@/lib/session-password'
+import { DEFAULT_OBSERVATORY_SITE_ID } from '@/lib/observatory-sites'
 
 export type ImagingSessionRefs = {
   req: ImagingRequest | null
@@ -74,7 +76,12 @@ export async function authorizeImagingSession(
   }
 
   const user = await getCurrentUser(request)
-  if (user && isAdminUser(user)) {
+  const sessionSiteId =
+    refs.req?.siteId ??
+    (refs.board as { siteId?: string } | null)?.siteId ??
+    (refs.project as { siteId?: string } | null)?.siteId ??
+    DEFAULT_OBSERVATORY_SITE_ID
+  if (user && canAdministerImagingSite(user, sessionSiteId)) {
     return { ok: true }
   }
   if (user && refs.userId && refs.userId === user.id) {

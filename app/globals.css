@@ -437,4 +437,14 @@ h3 {
   .dark .glass-pill-ghost-active.glass-pill:hover:not(:disabled) {
     box-shadow: var(--lg-bezel), var(--lg-rim);
   }
+
+  /* Weather dashboard panels — same 1rem surface radius as ASC / Cloud / Radar */
+  .weather-glass-panel {
+    border-radius: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    overflow: hidden;
+  }
 }

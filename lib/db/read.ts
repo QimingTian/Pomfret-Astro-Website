@@ -15,13 +15,35 @@ import {
   sessionBoard,
   users,
 } from '@/lib/db/schema'
+import {
+  coerceSystemRole,
+  isSiteRole,
+  legacyMemberRoleLabel,
+  type SiteMembership,
+  type SiteRole,
+} from '@/lib/member-roles'
+import type { MemberUser } from '@/lib/member-store'
 import { DEFAULT_OBSERVATORY_SITE_ID } from '@/lib/observatory-sites'
 import { currentObservatorySiteId } from '@/lib/observatory-site-scope'
-import type { MemberUser } from '@/lib/member-store'
 
 /** Imaging hot docs follow the request-scoped site. */
 function imagingSiteId(): string {
   return currentObservatorySiteId() || DEFAULT_OBSERVATORY_SITE_ID
+}
+
+function membershipFromRow(row: {
+  siteId: string
+  siteRole: string
+  imagingApprovedAt: string | null
+  imagingRejectedAt: string | null
+}): SiteMembership {
+  const siteRole: SiteRole = isSiteRole(row.siteRole) ? row.siteRole : 'observatory_member'
+  return {
+    siteId: row.siteId,
+    siteRole,
+    imagingApprovedAt: row.imagingApprovedAt,
+    imagingRejectedAt: row.imagingRejectedAt,
+  }
 }
 
 export async function loadMembersFromPostgres(): Promise<MemberUser[] | null> {
@@ -29,14 +51,17 @@ export async function loadMembersFromPostgres(): Promise<MemberUser[] | null> {
   try {
     const db = getDb()
     const userRows = await db.select().from(users)
-    // Membership ACL stays Pomfret for this pass (multi-site roles out of scope).
-    const membershipRows = await db
-      .select()
-      .from(memberships)
-      .where(eq(memberships.siteId, DEFAULT_OBSERVATORY_SITE_ID))
-    const membershipByUser = new Map(membershipRows.map((m) => [m.userId, m]))
+    const membershipRows = await db.select().from(memberships)
+    const membershipsByUser = new Map<string, SiteMembership[]>()
+    for (const row of membershipRows) {
+      const list = membershipsByUser.get(row.userId) ?? []
+      list.push(membershipFromRow(row))
+      membershipsByUser.set(row.userId, list)
+    }
     return userRows.map((u) => {
-      const m = membershipByUser.get(u.id)
+      const userMemberships = membershipsByUser.get(u.id) ?? []
+      const systemRole = coerceSystemRole(u.role)
+      const pomfret = userMemberships.find((m) => m.siteId === DEFAULT_OBSERVATORY_SITE_ID)
       return {
         id: u.id,
         email: u.email,
@@ -45,16 +70,18 @@ export async function loadMembersFromPostgres(): Promise<MemberUser[] | null> {
         lastName: u.lastName,
         username: u.username,
         displayName: u.displayName ?? undefined,
-        role: u.role as MemberUser['role'],
+        systemRole,
+        memberships: userMemberships,
+        role: legacyMemberRoleLabel({ systemRole, memberships: userMemberships }),
         createdAt: u.createdAt,
         updatedAt: u.updatedAt,
         emailVerifiedAt: u.emailVerifiedAt,
-        imagingApprovedAt: m?.imagingApprovedAt ?? null,
-        imagingRejectedAt: m?.imagingRejectedAt ?? null,
-      }
+        imagingApprovedAt: pomfret?.imagingApprovedAt ?? null,
+        imagingRejectedAt: pomfret?.imagingRejectedAt ?? null,
+      } satisfies MemberUser
     })
   } catch (error) {
-    console.error('[pg-read] members failed; using KV', error)
+    console.error('[pg-read] members failed', error)
     return null
   }
 }
@@ -97,8 +124,11 @@ export async function loadJsonDocumentsFromPostgres<T extends { id: string }>(
         .map((r) => r.document as T)
     }
     if (kind === 'windows') {
-      const rows = await db.select().from(adminClosedWindows)
-      return rows.filter((r) => r.siteId === site).map((r) => r.document as T)
+      const rows = await db
+        .select()
+        .from(adminClosedWindows)
+        .where(eq(adminClosedWindows.siteId, site))
+      return rows.map((r) => r.document as T)
     }
     const rows = await db.select().from(auditLog).orderBy(asc(auditLog.at))
     return rows

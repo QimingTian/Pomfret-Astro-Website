@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { memberSessionHistoryRowFromQueue } from '@/lib/member-session-history'
 import { recordMemberSessionHistory } from '@/lib/member-session-history-archive'
-import { canSubmitImaging } from '@/lib/member-access'
+import { canSubmitImagingForSite } from '@/lib/member-access'
 import { requireUser } from '@/lib/member-auth'
 import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 import {
@@ -133,7 +133,7 @@ export async function POST(request: NextRequest) {
     return withImagingCors(auth.body, auth.status)
   }
 
-  const imagingAccess = canSubmitImaging(auth.user)
+  const imagingAccess = await canSubmitImagingForSite(auth.user)
   if (!imagingAccess.ok) {
     return withImagingCors({ ok: false as const, error: imagingAccess.error }, 403)
   }

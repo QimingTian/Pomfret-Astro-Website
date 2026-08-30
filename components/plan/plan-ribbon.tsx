@@ -1,6 +1,5 @@
 'use client'
 
-import { OBSERVATORY_TIME_ZONE } from '@/lib/sunrise-window'
 import { glassPillMd } from '@/lib/glass-ui'
 
 export type RibbonAstronomyMarker = { id: string; label: string; sec: number; frac: number }
@@ -10,6 +9,8 @@ type Props = {
   ribbonStartSec: number
   ribbonEndSec: number
   ribbonHourStartsSec: number[]
+  /** Observatory-local IANA timezone for ribbon labels and hover scrubber. */
+  timezone: string
   weatherColorsKnown: boolean
   readySet: Set<number>
   markers: RibbonAstronomyMarker[]
@@ -20,15 +21,15 @@ type Props = {
   stelReady: boolean
 }
 
-function formatHoverTimeToMinute(sec: number): string {
+function formatHoverTimeToMinute(sec: number, timeZone: string): string {
   const d = new Date(sec * 1000)
   const datePart = d.toLocaleDateString(undefined, {
-    timeZone: OBSERVATORY_TIME_ZONE,
+    timeZone,
     month: 'short',
     day: 'numeric',
   })
   const timePart = d.toLocaleTimeString(undefined, {
-    timeZone: OBSERVATORY_TIME_ZONE,
+    timeZone,
     hour: '2-digit',
     minute: '2-digit',
     hour12: true,
@@ -36,9 +37,9 @@ function formatHoverTimeToMinute(sec: number): string {
   return `${datePart} ${timePart}`
 }
 
-function formatRibbonAstronomyTime(sec: number): string {
+function formatRibbonAstronomyTime(sec: number, timeZone: string): string {
   return new Date(sec * 1000).toLocaleTimeString(undefined, {
-    timeZone: OBSERVATORY_TIME_ZONE,
+    timeZone,
     hour: 'numeric',
     minute: '2-digit',
   })
@@ -47,9 +48,11 @@ function formatRibbonAstronomyTime(sec: number): string {
 function MarkerLabels({
   markers,
   placement,
+  timezone,
 }: {
   markers: RibbonAstronomyMarker[]
   placement: 'above' | 'below'
+  timezone: string
 }) {
   return (
     <div
@@ -69,7 +72,7 @@ function MarkerLabels({
               style={{ left: `${m.frac * 100}%` }}
             >
               <span className="block text-white/65">{m.label}</span>
-              <span className="block font-medium tabular-nums">{formatRibbonAstronomyTime(m.sec)}</span>
+              <span className="block font-medium tabular-nums">{formatRibbonAstronomyTime(m.sec, timezone)}</span>
             </div>
           </div>
         )
@@ -83,6 +86,7 @@ export function PlanRibbon({
   ribbonStartSec,
   ribbonEndSec,
   ribbonHourStartsSec,
+  timezone,
   weatherColorsKnown,
   readySet,
   markers,
@@ -96,7 +100,7 @@ export function PlanRibbon({
     <div className="relative w-full">
       <div className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3">
         <div className="col-start-1 row-start-1 min-w-0">
-          <MarkerLabels markers={markers} placement="above" />
+          <MarkerLabels markers={markers} placement="above" timezone={timezone} />
         </div>
 
         <div
@@ -160,7 +164,7 @@ export function PlanRibbon({
                 style={{ left: `${hoverFrac * 100}%` }}
                 aria-hidden
               >
-                {formatHoverTimeToMinute(ribbonStartSec + hoverFrac * (ribbonEndSec - ribbonStartSec))}
+                {formatHoverTimeToMinute(ribbonStartSec + hoverFrac * (ribbonEndSec - ribbonStartSec), timezone)}
               </div>
             ) : null}
           </div>
@@ -176,7 +180,7 @@ export function PlanRibbon({
         </button>
 
         <div className="col-start-1 row-start-3 min-w-0">
-          <MarkerLabels markers={markers} placement="below" />
+          <MarkerLabels markers={markers} placement="below" timezone={timezone} />
         </div>
       </div>
     </div>

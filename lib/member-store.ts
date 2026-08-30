@@ -2,9 +2,19 @@ import crypto from 'crypto'
 
 import { postgresReadsEnabled } from '@/lib/db'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
+import {
+  coerceSystemRole,
+  isSiteRole,
+  legacyMemberRoleLabel,
+  type SiteMembership,
+  type SiteRole,
+  type SystemRole,
+} from '@/lib/member-roles'
+import { DEFAULT_OBSERVATORY_SITE_ID } from '@/lib/observatory-sites'
 import { hashSessionPassword, verifySessionPasswordHash } from '@/lib/session-password'
 import { isProductionRuntime, logMissingProductionSecret } from '@/lib/production-secrets'
 
+/** Legacy public/UI label. Prefer `systemRole` + `memberships` for authorization. */
 export type MemberRole = 'member' | 'admin'
 
 export type MemberUser = {
@@ -16,14 +26,21 @@ export type MemberUser = {
   username: string
   /** @deprecated Legacy field; use username + firstName/lastName */
   displayName?: string
+  /** Legacy UI label (`admin` if system or any observatory admin). */
   role: MemberRole
+  /** Global account class stored in `users.role`. */
+  systemRole: SystemRole
+  /** Per-site affiliations. Guests have none. */
+  memberships: SiteMembership[]
   createdAt: string
   updatedAt: string
   /** ISO timestamp when email was verified; null until verified. */
   emailVerifiedAt?: string | null
-  /** ISO timestamp when admin approved imaging (non-pomfret) or auto on verify (pomfret). */
+  /**
+   * Convenience imaging flags for the default (Pomfret) site —
+   * mirror of memberships[pomfret] for older call sites.
+   */
   imagingApprovedAt?: string | null
-  /** Set when admin rejects imaging access. */
   imagingRejectedAt?: string | null
 }
 
@@ -106,8 +123,56 @@ export function isBootstrapAdminEmail(email: string): boolean {
   return bootstrapAdminEmails().has(normalizeMemberEmail(email))
 }
 
-function roleForNewUser(email: string): MemberRole {
-  return bootstrapAdminEmails().has(normalizeMemberEmail(email)) ? 'admin' : 'member'
+function roleForNewUser(email: string): { systemRole: SystemRole; role: MemberRole } {
+  if (bootstrapAdminEmails().has(normalizeMemberEmail(email))) {
+    return { systemRole: 'pomfret_astro_admin', role: 'admin' }
+  }
+  return { systemRole: 'user', role: 'member' }
+}
+
+function membershipImagingForSite(
+  memberships: SiteMembership[],
+  siteId: string
+): { imagingApprovedAt: string | null; imagingRejectedAt: string | null } {
+  const m = memberships.find((row) => row.siteId === siteId)
+  return {
+    imagingApprovedAt: m?.imagingApprovedAt ?? null,
+    imagingRejectedAt: m?.imagingRejectedAt ?? null,
+  }
+}
+
+function withDerivedRoleFields(user: Omit<MemberUser, 'role'> & { role?: MemberRole }): MemberUser {
+  const memberships = user.memberships ?? []
+  const systemRole = coerceSystemRole(user.systemRole)
+  const pomfret = membershipImagingForSite(memberships, DEFAULT_OBSERVATORY_SITE_ID)
+  return {
+    ...user,
+    systemRole,
+    memberships,
+    role: legacyMemberRoleLabel({ systemRole, memberships }),
+    imagingApprovedAt: user.imagingApprovedAt ?? pomfret.imagingApprovedAt,
+    imagingRejectedAt: user.imagingRejectedAt ?? pomfret.imagingRejectedAt,
+  }
+}
+
+function parseMemberships(raw: Record<string, unknown>): SiteMembership[] {
+  if (!Array.isArray(raw.memberships)) return []
+  const out: SiteMembership[] = []
+  for (const row of raw.memberships) {
+    if (!row || typeof row !== 'object') continue
+    const m = row as Record<string, unknown>
+    if (typeof m.siteId !== 'string' || !m.siteId) continue
+    const siteRole: SiteRole = isSiteRole(String(m.siteRole ?? ''))
+      ? (m.siteRole as SiteRole)
+      : 'observatory_member'
+    out.push({
+      siteId: m.siteId,
+      siteRole,
+      imagingApprovedAt: typeof m.imagingApprovedAt === 'string' ? m.imagingApprovedAt : null,
+      imagingRejectedAt: typeof m.imagingRejectedAt === 'string' ? m.imagingRejectedAt : null,
+    })
+  }
+  return out
 }
 
 function hydrateLegacyUser(raw: Record<string, unknown>): MemberUser | null {
@@ -115,8 +180,17 @@ function hydrateLegacyUser(raw: Record<string, unknown>): MemberUser | null {
     raw == null ||
     typeof raw.id !== 'string' ||
     typeof raw.email !== 'string' ||
-    typeof raw.passwordHash !== 'string' ||
-    (raw.role !== 'member' && raw.role !== 'admin')
+    typeof raw.passwordHash !== 'string'
+  ) {
+    return null
+  }
+
+  const roleRaw = typeof raw.role === 'string' ? raw.role : typeof raw.systemRole === 'string' ? raw.systemRole : ''
+  if (
+    roleRaw !== 'member' &&
+    roleRaw !== 'admin' &&
+    roleRaw !== 'pomfret_astro_admin' &&
+    roleRaw !== 'user'
   ) {
     return null
   }
@@ -134,7 +208,54 @@ function hydrateLegacyUser(raw: Record<string, unknown>): MemberUser | null {
       ? raw.lastName.trim()
       : legacyDisplay.split(/\s+/).slice(1).join(' ') ?? ''
 
-  return {
+  let memberships = parseMemberships(raw)
+  const imagingApprovedAt =
+    typeof raw.imagingApprovedAt === 'string'
+      ? raw.imagingApprovedAt
+      : isPomfretOrgEmail(raw.email) || roleRaw === 'admin' || roleRaw === 'pomfret_astro_admin'
+        ? new Date().toISOString()
+        : null
+  const imagingRejectedAt = typeof raw.imagingRejectedAt === 'string' ? raw.imagingRejectedAt : null
+
+  // Legacy KV blobs: single imaging flags → Pomfret membership.
+  if (memberships.length === 0) {
+    const siteRole: SiteRole =
+      roleRaw === 'admin' || roleRaw === 'pomfret_astro_admin'
+        ? 'observatory_admin'
+        : 'observatory_member'
+    memberships = [
+      {
+        siteId: DEFAULT_OBSERVATORY_SITE_ID,
+        siteRole,
+        imagingApprovedAt,
+        imagingRejectedAt,
+      },
+    ]
+  }
+
+  const systemRole =
+    typeof raw.systemRole === 'string'
+      ? coerceSystemRole(raw.systemRole)
+      : coerceSystemRole(roleRaw === 'admin' ? 'pomfret_astro_admin' : roleRaw)
+
+  // Important: bare legacy `admin` without systemRole was often site admin, not global.
+  // Prefer explicit systemRole; if only legacy `admin` and memberships say otherwise, keep user.
+  let resolvedSystem: SystemRole = systemRole
+  if (raw.systemRole == null && roleRaw === 'admin') {
+    // Ambiguous legacy: treat as global only when bootstrap email, else site admin already in memberships.
+    resolvedSystem = bootstrapAdminEmails().has(normalizeMemberEmail(raw.email))
+      ? 'pomfret_astro_admin'
+      : 'user'
+    if (resolvedSystem === 'user') {
+      memberships = memberships.map((m) =>
+        m.siteId === DEFAULT_OBSERVATORY_SITE_ID
+          ? { ...m, siteRole: 'observatory_admin' as const }
+          : m
+      )
+    }
+  }
+
+  return withDerivedRoleFields({
     id: raw.id,
     email: normalizeMemberEmail(raw.email),
     passwordHash: raw.passwordHash,
@@ -142,37 +263,49 @@ function hydrateLegacyUser(raw: Record<string, unknown>): MemberUser | null {
     lastName,
     username: usernameRaw,
     displayName: legacyDisplay || undefined,
-    role: raw.role,
+    systemRole: resolvedSystem,
+    memberships,
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString(),
     updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : new Date().toISOString(),
     emailVerifiedAt:
       typeof raw.emailVerifiedAt === 'string'
         ? raw.emailVerifiedAt
-        : isPomfretOrgEmail(raw.email) || raw.role === 'admin'
+        : isPomfretOrgEmail(raw.email) || resolvedSystem === 'pomfret_astro_admin'
           ? new Date().toISOString()
           : null,
-    imagingApprovedAt:
-      typeof raw.imagingApprovedAt === 'string'
-        ? raw.imagingApprovedAt
-        : isPomfretOrgEmail(raw.email) || raw.role === 'admin'
-          ? new Date().toISOString()
-          : null,
-    imagingRejectedAt: typeof raw.imagingRejectedAt === 'string' ? raw.imagingRejectedAt : null,
-  }
+    imagingApprovedAt,
+    imagingRejectedAt,
+  })
 }
 
 /** Upgrade legacy accounts when their email is listed in BOOTSTRAP_ADMIN_EMAILS. */
 export async function syncBootstrapAdminRole(user: MemberUser): Promise<MemberUser> {
-  if (user.role === 'admin') return user
+  if (user.systemRole === 'pomfret_astro_admin') return user
   if (!bootstrapAdminEmails().has(user.email)) return user
   const users = await readUsers()
   const idx = users.findIndex((u) => u.id === user.id)
   if (idx === -1) return user
-  const updated: MemberUser = {
-    ...users[idx],
-    role: 'admin',
+  const existing = users[idx]!
+  const memberships = existing.memberships.length
+    ? existing.memberships.map((m) =>
+        m.siteId === DEFAULT_OBSERVATORY_SITE_ID
+          ? { ...m, siteRole: 'observatory_admin' as const }
+          : m
+      )
+    : [
+        {
+          siteId: DEFAULT_OBSERVATORY_SITE_ID,
+          siteRole: 'observatory_admin' as const,
+          imagingApprovedAt: existing.imagingApprovedAt ?? new Date().toISOString(),
+          imagingRejectedAt: existing.imagingRejectedAt ?? null,
+        },
+      ]
+  const updated = withDerivedRoleFields({
+    ...existing,
+    systemRole: 'pomfret_astro_admin',
+    memberships,
     updatedAt: new Date().toISOString(),
-  }
+  })
   users[idx] = updated
   await writeUsers(users)
   return updated
@@ -216,13 +349,11 @@ async function readUsersFromKvOrMemory(): Promise<MemberUser[]> {
 
 async function readUsers(): Promise<MemberUser[]> {
   if (postgresReadsEnabled()) {
-    try {
-      const { loadMembersFromPostgres } = await import('@/lib/db/read')
-      const pg = await loadMembersFromPostgres()
-      if (pg) return hydrateUsers(pg)
-    } catch (error) {
-      console.error('[pg-read] members failed; using KV', error)
-    }
+    const { loadMembersFromPostgres } = await import('@/lib/db/read')
+    const pg = await loadMembersFromPostgres()
+    if (pg) return hydrateUsers(pg)
+    // Postgres is live for members — do not silently treat a failed read as "no users".
+    throw new Error('MEMBER_STORE_POSTGRES_UNAVAILABLE')
   }
   return readUsersFromKvOrMemory()
 }
@@ -344,20 +475,30 @@ export async function createMember(input: {
   }
 
   const now = new Date().toISOString()
-  const user: MemberUser = {
+  const roles = roleForNewUser(email)
+  const memberships: SiteMembership[] = [
+    {
+      siteId: DEFAULT_OBSERVATORY_SITE_ID,
+      siteRole: roles.systemRole === 'pomfret_astro_admin' ? 'observatory_admin' : 'observatory_member',
+      imagingApprovedAt: null,
+      imagingRejectedAt: null,
+    },
+  ]
+  const user = withDerivedRoleFields({
     id: crypto.randomUUID(),
     email,
     passwordHash: await hashSessionPassword(input.password),
     firstName,
     lastName,
     username,
-    role: roleForNewUser(email),
+    systemRole: roles.systemRole,
+    memberships,
     createdAt: now,
     updatedAt: now,
     emailVerifiedAt: null,
     imagingApprovedAt: null,
     imagingRejectedAt: null,
-  }
+  })
 
   const users = await readUsers()
   users.push(user)
@@ -423,8 +564,12 @@ export function toPublicMemberUser(user: MemberUser): PublicMemberUser {
   return toPublicUser(user)
 }
 
-export function isAdminUser(user: Pick<MemberUser, 'role'> | null | undefined): boolean {
-  return user?.role === 'admin'
+export function isAdminUser(
+  user: Pick<MemberUser, 'role' | 'systemRole' | 'memberships'> | null | undefined
+): boolean {
+  if (!user) return false
+  if (user.systemRole === 'pomfret_astro_admin' || user.role === 'admin') return true
+  return Boolean(user.memberships?.some((m) => m.siteRole === 'observatory_admin'))
 }
 
 export function memberLevelLabel(role: MemberRole): string {
@@ -480,7 +625,7 @@ export async function deleteMemberById(
   const users = await readUsers()
   const target = users.find((u) => u.id === targetUserId)
   if (!target) return { ok: false, error: 'Member not found.' }
-  if (target.role === 'admin') {
+  if (isAdminUser(target)) {
     const actor = users.find((u) => u.id === actorUserId)
     if (!actor || !isBootstrapAdminEmail(actor.email)) {
       return { ok: false, error: 'Administrator accounts cannot be removed here.' }
@@ -516,11 +661,32 @@ export async function setMemberAsAdmin(
   const idx = users.findIndex((u) => u.id === targetUserId)
   if (idx < 0) return { ok: false, error: 'Member not found.' }
   const target = users[idx]!
-  if (target.role === 'admin') {
+  const alreadySiteAdmin = target.memberships.some(
+    (m) => m.siteId === DEFAULT_OBSERVATORY_SITE_ID && m.siteRole === 'observatory_admin'
+  )
+  if (target.systemRole === 'pomfret_astro_admin' || alreadySiteAdmin) {
     return { ok: false, error: 'This member is already an administrator.' }
   }
 
-  users[idx] = { ...target, role: 'admin', updatedAt: new Date().toISOString() }
+  const memberships = [...target.memberships]
+  const pomfretIdx = memberships.findIndex((m) => m.siteId === DEFAULT_OBSERVATORY_SITE_ID)
+  if (pomfretIdx >= 0) {
+    memberships[pomfretIdx] = { ...memberships[pomfretIdx]!, siteRole: 'observatory_admin' }
+  } else {
+    memberships.push({
+      siteId: DEFAULT_OBSERVATORY_SITE_ID,
+      siteRole: 'observatory_admin',
+      imagingApprovedAt: target.imagingApprovedAt ?? new Date().toISOString(),
+      imagingRejectedAt: target.imagingRejectedAt ?? null,
+    })
+  }
+
+  users[idx] = withDerivedRoleFields({
+    ...target,
+    systemRole: 'user',
+    memberships,
+    updatedAt: new Date().toISOString(),
+  })
   await writeUsers(users)
   return { ok: true }
 }
@@ -544,14 +710,19 @@ export async function setMemberAsMember(
   const idx = users.findIndex((u) => u.id === targetUserId)
   if (idx < 0) return { ok: false, error: 'Member not found.' }
   const target = users[idx]!
-  if (target.role !== 'admin') {
+  if (!isAdminUser(target)) {
     return { ok: false, error: 'This account is already a member.' }
   }
   if (isBootstrapAdminEmail(target.email)) {
     return { ok: false, error: 'Bootstrap administrator accounts cannot be demoted.' }
   }
 
-  users[idx] = { ...target, role: 'member', updatedAt: new Date().toISOString() }
+  users[idx] = withDerivedRoleFields({
+    ...target,
+    systemRole: 'user',
+    memberships: target.memberships.map((m) => ({ ...m, siteRole: 'observatory_member' as const })),
+    updatedAt: new Date().toISOString(),
+  })
   await writeUsers(users)
   return { ok: true }
 }
@@ -562,14 +733,36 @@ export async function markMemberEmailVerified(userId: string): Promise<MemberUse
   if (idx < 0) return null
   const now = new Date().toISOString()
   const user = users[idx]!
-  const updated: MemberUser = {
+  let memberships = user.memberships
+  let imagingApprovedAt = user.imagingApprovedAt ?? null
+  if (isPomfretOrgEmail(user.email) && !user.imagingRejectedAt) {
+    imagingApprovedAt = user.imagingApprovedAt ?? now
+    const hasPomfret = memberships.some((m) => m.siteId === DEFAULT_OBSERVATORY_SITE_ID)
+    if (hasPomfret) {
+      memberships = memberships.map((m) =>
+        m.siteId === DEFAULT_OBSERVATORY_SITE_ID && !m.imagingRejectedAt
+          ? { ...m, imagingApprovedAt: m.imagingApprovedAt ?? now }
+          : m
+      )
+    } else {
+      memberships = [
+        ...memberships,
+        {
+          siteId: DEFAULT_OBSERVATORY_SITE_ID,
+          siteRole: 'observatory_member',
+          imagingApprovedAt: now,
+          imagingRejectedAt: null,
+        },
+      ]
+    }
+  }
+  const updated = withDerivedRoleFields({
     ...user,
     emailVerifiedAt: now,
     updatedAt: now,
-    ...(isPomfretOrgEmail(user.email) && !user.imagingRejectedAt
-      ? { imagingApprovedAt: user.imagingApprovedAt ?? now }
-      : {}),
-  }
+    memberships,
+    imagingApprovedAt,
+  })
   users[idx] = updated
   await writeUsers(users)
   return updated
@@ -577,7 +770,8 @@ export async function markMemberEmailVerified(userId: string): Promise<MemberUse
 
 export async function setMemberImagingApproval(
   targetUserId: string,
-  action: 'approve' | 'reject'
+  action: 'approve' | 'reject',
+  siteId: string = DEFAULT_OBSERVATORY_SITE_ID
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!targetUserId) return { ok: false, error: 'Member id is required.' }
   const users = await readUsers()
@@ -588,21 +782,33 @@ export async function setMemberImagingApproval(
     return { ok: false, error: 'Member must verify email before imaging approval.' }
   }
   const now = new Date().toISOString()
-  if (action === 'approve') {
-    users[idx] = {
-      ...target,
-      imagingApprovedAt: now,
-      imagingRejectedAt: null,
-      updatedAt: now,
-    }
-  } else {
-    users[idx] = {
-      ...target,
-      imagingApprovedAt: null,
-      imagingRejectedAt: now,
-      updatedAt: now,
-    }
-  }
+  let memberships = [...target.memberships]
+  const mIdx = memberships.findIndex((m) => m.siteId === siteId)
+  const nextMembership: SiteMembership =
+    action === 'approve'
+      ? {
+          siteId,
+          siteRole: mIdx >= 0 ? memberships[mIdx]!.siteRole : 'observatory_member',
+          imagingApprovedAt: now,
+          imagingRejectedAt: null,
+        }
+      : {
+          siteId,
+          siteRole: mIdx >= 0 ? memberships[mIdx]!.siteRole : 'observatory_member',
+          imagingApprovedAt: null,
+          imagingRejectedAt: now,
+        }
+  if (mIdx >= 0) memberships[mIdx] = nextMembership
+  else memberships.push(nextMembership)
+
+  const pomfret = membershipImagingForSite(memberships, DEFAULT_OBSERVATORY_SITE_ID)
+  users[idx] = withDerivedRoleFields({
+    ...target,
+    memberships,
+    imagingApprovedAt: pomfret.imagingApprovedAt,
+    imagingRejectedAt: pomfret.imagingRejectedAt,
+    updatedAt: now,
+  })
   await writeUsers(users)
   return { ok: true }
 }

@@ -1,5 +1,6 @@
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import { loadVariableStarCatalog } from '@/lib/variable-star-catalog'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 
 export const runtime = 'nodejs'
 

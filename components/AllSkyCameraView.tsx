@@ -3,6 +3,7 @@
 import type { CSSProperties } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { useMember } from '@/hooks/use-member'
+import { observatorySiteFetch, useObservatorySite } from '@/components/observatory-site-provider'
 import { useObservatoryEnvelope } from '@/hooks/use-observatory-envelope'
 import { useAppStore } from '@/lib/store'
 import MJPEGStream from '@/components/MJPEGStream'
@@ -103,6 +104,7 @@ const streamAreaClass = 'relative w-full overflow-hidden rounded-lg bg-black'
 
 export default function AllSkyCameraView() {
   const member = useMember()
+  const { siteId } = useObservatorySite()
   const controller = useAppStore((s) => s.controllers.find((c) => c.roles.includes('cameras')))
   const streamURL = controller?.apiClient?.getStreamURL() ?? DEFAULT_ALL_SKY_STREAM_URL
   const { serverStatus: observatoryStatus } = useObservatoryEnvelope({
@@ -179,7 +181,7 @@ export default function AllSkyCameraView() {
     let cancelled = false
     const loadStorm = async () => {
       try {
-        const res = await fetch('/api/weather/storm-approach', { cache: 'no-store' })
+        const res = await observatorySiteFetch('/api/weather/storm-approach', siteId, { cache: 'no-store' })
         const data = (await res.json()) as { safe?: boolean }
         if (cancelled) return
         setStormSafe(res.ok && typeof data.safe === 'boolean' ? data.safe : null)
@@ -199,7 +201,7 @@ export default function AllSkyCameraView() {
     let cancelled = false
     const loadAstro = async () => {
       try {
-        const res = await fetch('/api/weather/astro-conditions', { cache: 'no-store' })
+        const res = await observatorySiteFetch('/api/weather/astro-conditions', siteId, { cache: 'no-store' })
         const data = (await res.json()) as {
           transparency?: number | null
           seeing?: number | null

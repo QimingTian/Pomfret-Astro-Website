@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { librewxrApiBaseUrl, type LibrewxrWeatherMaps } from '@/lib/librewxr'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 
 export const runtime = 'nodejs'
 

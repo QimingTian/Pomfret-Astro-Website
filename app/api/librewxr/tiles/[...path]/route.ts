@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { isAllowedLibrewxrTilePath, librewxrApiBaseUrl } from '@/lib/librewxr'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 
 export const runtime = 'nodejs'
 
@@ -7,6 +8,7 @@ export async function GET(
   _request: NextRequest,
   context: { params: Promise<{ path: string[] }> }
 ) {
+  return runWithRequestSite(_request, async () => {
   const segments = (await context.params).path
   if (!segments?.length) {
     return NextResponse.json({ error: 'Missing tile path' }, { status: 400 })
@@ -44,4 +46,5 @@ export async function GET(
       { status: 502 }
     )
   }
+  })
 }

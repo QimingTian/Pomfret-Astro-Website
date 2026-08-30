@@ -14,6 +14,8 @@ Pomfret Astro is an autonomous school observatory. Members submit imaging reques
 
 The observatory site is fixed in code at approximately 41.886°N, 71.965°W, in the America/New_York time zone. For both scheduling and delivery, a target must remain at least **30°** above the horizon for the entire session.
 
+**Multi-site:** Pomfret and additional sites (e.g. Cygnus) are defined in `lib/observatory-sites.ts`. When adding or verifying a site, follow **[docs/multi-site-checklist.md](docs/multi-site-checklist.md)** (timezone UI, schedule strip, Redis scoping, agent URLs, Weather feature matrix).
+
 Durable imaging state that must survive serverless cold starts is stored in Upstash Redis over REST. Session files and live previews are stored in R2. The website process itself retains almost no durable imaging state on the local filesystem.
 
 ---

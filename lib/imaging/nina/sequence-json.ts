@@ -1,4 +1,4 @@
-import { POMFRET_SITE } from '@/lib/observatory-sites'
+import { currentObservatorySite } from '@/lib/observatory-site-scope'
 import { firstAltitudeAllowedTimeMs, currentAltitudeDeg, MIN_ALTITUDE_DEG } from '@/lib/target-altitude'
 import { getTonightAstronomicalNightWindow } from '@/lib/sunrise-window'
 import classicSingleTemplate from '@/Classic DSO Imaging Sequence.json'
@@ -297,7 +297,7 @@ function applyExoPlanetCoordinates(coordsObj: Record<string, unknown>, raDecimal
 
 function dateToObservatoryHms(date: Date): { hours: number; minutes: number; seconds: number } {
   const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: POMFRET_SITE.timezone,
+    timeZone: currentObservatorySite().timezone,
     hourCycle: 'h23',
     hour: '2-digit',
     minute: '2-digit',

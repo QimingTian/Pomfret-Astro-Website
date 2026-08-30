@@ -3,7 +3,7 @@
 import 'leaflet/dist/leaflet.css'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import MapFrameTimeOverlay from '@/components/MapFrameTimeOverlay'
-import { formatEstDateTime } from '@/lib/est-datetime'
+import { formatObservatoryDateTime } from '@/lib/est-datetime'
 import {
   createRadarPlayback,
   goToFrameIndex,
@@ -14,11 +14,10 @@ import {
 } from '@/lib/librewxr-radar-playback'
 import {
   librewxrRadarFrames,
-  POMFRET_LAT,
-  POMFRET_LON,
   type LibrewxrFrame,
   type LibrewxrWeatherMaps,
 } from '@/lib/librewxr'
+import { useObservatorySite } from '@/components/observatory-site-provider'
 
 const MAP_ZOOM = 8
 /** Frame interval — crossfade + preload-ahead keeps the loop continuous. */
@@ -27,6 +26,9 @@ const FRAME_MS = 1100
 const BASEMAP_URL = 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png'
 
 export default function LibreWxrRadarMap() {
+  const { site } = useObservatorySite()
+  const mapLat = site.weatherLat
+  const mapLon = site.weatherLon
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<import('leaflet').Map | null>(null)
   const playbackRef = useRef<RadarPlayback | null>(null)
@@ -74,7 +76,7 @@ export default function LibreWxrRadarMap() {
       if (disposed || !containerRef.current) return
 
       const map = L.map(containerRef.current, {
-        center: [POMFRET_LAT, POMFRET_LON],
+        center: [mapLat, mapLon],
         zoom: MAP_ZOOM,
         minZoom: MAP_ZOOM,
         maxZoom: MAP_ZOOM,
@@ -118,7 +120,7 @@ export default function LibreWxrRadarMap() {
       goToFrameIndex(playback, startIdx)
       preloadNextFrame(playback, startIdx)
 
-      L.circleMarker([POMFRET_LAT, POMFRET_LON], {
+      L.circleMarker([mapLat, mapLon], {
         radius: 7,
         color: '#ffffff',
         weight: 2,
@@ -140,7 +142,7 @@ export default function LibreWxrRadarMap() {
       mapRef.current = null
       playbackRef.current = null
     }
-  }, [frames])
+  }, [frames, mapLat, mapLon])
 
   useEffect(() => {
     const playback = playbackRef.current
@@ -160,12 +162,12 @@ export default function LibreWxrRadarMap() {
   const frameTimeLabel = useMemo(() => {
     const frame = frames[frameIndex]
     if (!frame) return null
-    return formatEstDateTime(new Date(frame.time * 1000))
-  }, [frames, frameIndex])
+    return formatObservatoryDateTime(new Date(frame.time * 1000), site.timezone)
+  }, [frames, frameIndex, site.timezone])
 
   return (
     <div
-      className="relative w-full overflow-hidden rounded-lg bg-[#1a1a1a] librewxr-radar-map aspect-[4/3]"
+      className="relative w-full overflow-hidden rounded-lg bg-[#1a1a1a] librewxr-radar-map aspect-[21/9] max-h-[22rem]"
     >
       <MapFrameTimeOverlay title="Precipitation Radar" timeLabel={frameTimeLabel} />
       <div ref={containerRef} className="absolute inset-0 z-0 h-full w-full" />

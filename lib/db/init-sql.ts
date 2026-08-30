@@ -18,9 +18,25 @@ CREATE UNIQUE INDEX IF NOT EXISTS users_username_uq ON users (username);
 CREATE TABLE IF NOT EXISTS memberships (
   user_id text NOT NULL,
   site_id text NOT NULL,
+  site_role text NOT NULL DEFAULT 'observatory_member',
   imaging_approved_at timestamptz,
   imaging_rejected_at timestamptz,
   updated_at timestamptz NOT NULL,
+  PRIMARY KEY (user_id, site_id)
+);
+
+CREATE TABLE IF NOT EXISTS site_policies (
+  site_id text PRIMARY KEY,
+  guest_access text NOT NULL DEFAULT 'closed',
+  updated_at timestamptz NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS guest_site_access (
+  user_id text NOT NULL,
+  site_id text NOT NULL,
+  status text NOT NULL,
+  updated_at timestamptz NOT NULL,
+  decided_by_user_id text,
   PRIMARY KEY (user_id, site_id)
 );
 

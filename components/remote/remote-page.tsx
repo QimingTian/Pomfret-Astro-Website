@@ -14,7 +14,8 @@ import {
   type VariableStarFilterId,
 } from '@/lib/variable-star/filters'
 import { formatRaDecPair } from '@/lib/format-radec'
-import { POMFRET_SITE } from '@/lib/observatory-sites'
+import { observatorySiteFetch, useObservatorySite } from '@/components/observatory-site-provider'
+import type { ObservatorySite } from '@/lib/observatory-sites'
 import {
   MIN_ALTITUDE_DEG,
   OBS_LAT_DEG,
@@ -203,42 +204,33 @@ function solarEventUtcForDate(date: Date, zenithDeg: number, isSunrise: boolean)
   return new Date(midnightUtc + eventMin * 60000)
 }
 
+/** Stable hour key from unix ms (aligned with Open-Meteo hour buckets). */
 function buildHourKey(at: Date): string {
-  return `${at.getFullYear()}-${at.getMonth()}-${at.getDate()}-${at.getHours()}`
+  return String(Math.floor(at.getTime() / 3_600_000))
 }
 
 function parseHourKeyToMs(key: string): number | null {
-  const parts = key.split('-').map((x) => Number(x))
-  if (parts.length !== 4) return null
-  const [year, month, day, hour] = parts
-  if (![year, month, day, hour].every((x) => Number.isFinite(x))) return null
-  return new Date(year, month, day, hour, 0, 0, 0).getTime()
+  const bucket = Number(key)
+  if (!Number.isFinite(bucket)) return null
+  return bucket * 3_600_000
 }
 
-function computeTonightWindow(now: Date): { startMs: number; endMs: number } {
-  const nowUtcMidnight = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
-  const todaySunrise = solarEventUtcForDate(nowUtcMidnight, 90.833, true)
-  const scheduleStart = new Date(now)
-  scheduleStart.setHours(16, 0, 0, 0)
-  if (now.getTime() < todaySunrise.getTime()) {
-    scheduleStart.setDate(scheduleStart.getDate() - 1)
-  }
-  const scheduleEnd = new Date(scheduleStart)
-  scheduleEnd.setDate(scheduleEnd.getDate() + 1)
-  scheduleEnd.setHours(8, 0, 0, 0)
-  return { startMs: scheduleStart.getTime(), endMs: scheduleEnd.getTime() }
+function formatTonightXAxisHour(ms: number, timeZone: string): string {
+  return new Date(ms).toLocaleTimeString(undefined, {
+    timeZone,
+    hour: 'numeric',
+  })
 }
 
-function formatTonightXAxisHour(ms: number): string {
-  const d = new Date(ms)
-  const h24 = d.getHours()
-  const h12 = h24 % 12 || 12
-  const ampm = h24 < 12 ? 'AM' : 'PM'
-  return `${h12}${ampm}`
-}
-
-function mergeWithFrozenPastHours(previous: string[], incoming: string[], now: Date): string[] {
-  const { startMs, endMs } = computeTonightWindow(now)
+function mergeWithFrozenPastHours(
+  previous: string[],
+  incoming: string[],
+  now: Date,
+  site: ObservatorySite
+): string[] {
+  const strip = getTonightScheduleStrip(now, site)
+  const startMs = strip.windowStartMs
+  const endMs = strip.windowEndMs
   const nowMs = now.getTime()
   const merged = new Set<string>()
 
@@ -344,6 +336,7 @@ function variableStarDurationButtonModel(
 
 export default function RemotePage() {
   const router = useRouter()
+  const { site, siteId } = useObservatorySite()
   const member = useMember()
   const isLoggedIn = member.status === 'authenticated'
   const isAdmin = member.status === 'authenticated' && member.isAdmin
@@ -467,7 +460,7 @@ export default function RemotePage() {
     const fetchTemp = async () => {
       try {
         const res = await fetch(
-          `https://api.open-meteo.com/v1/forecast?latitude=${POMFRET_SITE.weatherLat}&longitude=${POMFRET_SITE.weatherLon}&current=temperature_2m&timezone=UTC`
+          `https://api.open-meteo.com/v1/forecast?latitude=${site.weatherLat}&longitude=${site.weatherLon}&current=temperature_2m&timezone=UTC`
         )
         const data = await res.json()
         if (!cancelled && typeof data?.current?.temperature_2m === 'number') {
@@ -479,7 +472,14 @@ export default function RemotePage() {
     fetchTemp()
     const iv = setInterval(fetchTemp, 10 * 60_000)
     return () => { cancelled = true; clearInterval(iv) }
-  }, [])
+  }, [site.weatherLat, site.weatherLon])
+
+  useEffect(() => {
+    setReadyWeatherHourKeys([])
+    setNightWeatherHourKeys([])
+    setNotPermittedReasonByHourKey({})
+    setTonightWeatherPrediction('loading')
+  }, [siteId])
 
   const loggedInContact = useMemo(() => {
     if (member.status !== 'authenticated') return null
@@ -993,22 +993,15 @@ export default function RemotePage() {
     let mounted = true
     const loadPrediction = async () => {
       const now = new Date()
-      const nowUtcMidnight = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
-      const todaySunrise = solarEventUtcForDate(nowUtcMidnight, 90.833, true)
-      const scheduleStart = new Date(now)
-      scheduleStart.setHours(16, 0, 0, 0)
-      if (now.getTime() < todaySunrise.getTime()) {
-        scheduleStart.setDate(scheduleStart.getDate() - 1)
-      }
-      const scheduleEnd = new Date(scheduleStart)
-      scheduleEnd.setDate(scheduleEnd.getDate() + 1)
-      scheduleEnd.setHours(8, 0, 0, 0)
-      const scheduleStartSec = Math.floor(scheduleStart.getTime() / 1000)
-      const scheduleEndSec = Math.floor(scheduleEnd.getTime() / 1000)
+      const strip = getTonightScheduleStrip(now, site)
+      const scheduleStartSec = Math.floor(strip.windowStartMs / 1000)
+      const scheduleEndSec = Math.floor(strip.windowEndMs / 1000)
 
       try {
-        const res = await fetch(
-          `/api/imaging/tonight-weather-prediction?startSec=${scheduleStartSec}&endSec=${scheduleEndSec}`
+        const res = await observatorySiteFetch(
+          `/api/imaging/tonight-weather-prediction?startSec=${scheduleStartSec}&endSec=${scheduleEndSec}`,
+          siteId,
+          { cache: 'no-store' }
         )
         const data = await res.json().catch(() => ({}))
         if (!mounted) return
@@ -1026,10 +1019,10 @@ export default function RemotePage() {
               .filter((v: unknown) => typeof v === 'number' && Number.isFinite(v))
               .map((sec: number) => buildHourKey(new Date(sec * 1000)))
             const nowForMerge = new Date()
-            setReadyWeatherHourKeys((prev) => mergeWithFrozenPastHours(prev, keys, nowForMerge))
+            setReadyWeatherHourKeys((prev) => mergeWithFrozenPastHours(prev, keys, nowForMerge, site))
           } else {
             const nowForMerge = new Date()
-            setReadyWeatherHourKeys((prev) => mergeWithFrozenPastHours(prev, [], nowForMerge))
+            setReadyWeatherHourKeys((prev) => mergeWithFrozenPastHours(prev, [], nowForMerge, site))
           }
           if (Array.isArray(data.notPermittedHourReasons)) {
             const mapped: Record<string, WeatherNotPermittedReason[]> = {}
@@ -1057,10 +1050,10 @@ export default function RemotePage() {
               .filter((v: unknown) => typeof v === 'number' && Number.isFinite(v))
               .map((sec: number) => buildHourKey(new Date(sec * 1000)))
             const nowForMerge = new Date()
-            setNightWeatherHourKeys((prev) => mergeWithFrozenPastHours(prev, keys, nowForMerge))
+            setNightWeatherHourKeys((prev) => mergeWithFrozenPastHours(prev, keys, nowForMerge, site))
           } else {
             const nowForMerge = new Date()
-            setNightWeatherHourKeys((prev) => mergeWithFrozenPastHours(prev, [], nowForMerge))
+            setNightWeatherHourKeys((prev) => mergeWithFrozenPastHours(prev, [], nowForMerge, site))
           }
           return
         }
@@ -1068,16 +1061,16 @@ export default function RemotePage() {
         setHasAnyPrecipitationTonight(false)
         setNotPermittedReasonByHourKey({})
         const nowForMerge = new Date()
-        setReadyWeatherHourKeys((prev) => mergeWithFrozenPastHours(prev, [], nowForMerge))
-        setNightWeatherHourKeys((prev) => mergeWithFrozenPastHours(prev, [], nowForMerge))
+        setReadyWeatherHourKeys((prev) => mergeWithFrozenPastHours(prev, [], nowForMerge, site))
+        setNightWeatherHourKeys((prev) => mergeWithFrozenPastHours(prev, [], nowForMerge, site))
       } catch {
         if (!mounted) return
         setTonightWeatherPrediction('not_permitted')
         setHasAnyPrecipitationTonight(false)
         setNotPermittedReasonByHourKey({})
         const nowForMerge = new Date()
-        setReadyWeatherHourKeys((prev) => mergeWithFrozenPastHours(prev, [], nowForMerge))
-        setNightWeatherHourKeys((prev) => mergeWithFrozenPastHours(prev, [], nowForMerge))
+        setReadyWeatherHourKeys((prev) => mergeWithFrozenPastHours(prev, [], nowForMerge, site))
+        setNightWeatherHourKeys((prev) => mergeWithFrozenPastHours(prev, [], nowForMerge, site))
       }
     }
 
@@ -1090,7 +1083,7 @@ export default function RemotePage() {
       mounted = false
       window.clearInterval(intervalId)
     }
-  }, [])
+  }, [site, siteId])
 
   const refreshQueue = useCallback(async () => {
     const res = await fetch('/api/imaging/current-sessions')
@@ -1412,43 +1405,34 @@ export default function RemotePage() {
     (terminalQueueStatus === 'in_progress' || terminalQueueStatus === 'scheduled')
 
   const showTonightWeatherHeadline = useMemo(
-    () => isBeforeTonightWeatherHeadline(new Date(scheduleNowMs)),
-    [scheduleNowMs]
+    () => isBeforeTonightWeatherHeadline(new Date(scheduleNowMs), site),
+    [scheduleNowMs, site]
   )
 
   const tonightSchedule = useMemo(() => {
     const now = new Date(scheduleNowMs)
-    const nowUtcMidnight = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
-    const todaySunrise = solarEventUtcForDate(nowUtcMidnight, 90.833, true)
-    const start = new Date(now)
-    start.setHours(16, 0, 0, 0)
-    // Switch to "new tonight" as soon as current time passes local sunrise.
-    if (now.getTime() < todaySunrise.getTime()) {
-      start.setDate(start.getDate() - 1)
-    }
-    const end = new Date(start)
-    end.setDate(end.getDate() + 1)
-    end.setHours(8, 0, 0, 0)
+    const strip = getTonightScheduleStrip(now, site)
+    const start = new Date(strip.windowStartMs)
+    const end = new Date(strip.windowEndMs)
 
     const points: Array<{ label: string; hourKey: string; hourStartMs: number }> = []
-    const cursor = new Date(start)
-    while (cursor <= end) {
+    for (let ms = strip.windowStartMs; ms <= strip.windowEndMs; ms += 3_600_000) {
+      const at = new Date(ms)
       points.push({
-        label: cursor.toLocaleTimeString([], { hour: 'numeric' }),
-        hourKey: buildHourKey(cursor),
-        hourStartMs: cursor.getTime(),
+        label: at.toLocaleTimeString(undefined, { timeZone: site.timezone, hour: 'numeric' }),
+        hourKey: buildHourKey(at),
+        hourStartMs: ms,
       })
-      cursor.setHours(cursor.getHours() + 1)
     }
 
     const { sunsetUtc: sunset, civilDuskUtc: civilDusk, nauticalDuskUtc: nauticalDusk, astronomicalDarkUtc: astronomicalDark } =
-      getTonightScheduleEveningAstronomyUtc(now)
+      getTonightScheduleEveningAstronomyUtc(now, site)
     const {
       sunriseUtc: sunrise,
       civilDawnUtc: civilDawn,
       nauticalDawnUtc: nauticalDawn,
       astronomicalDawnUtc: astronomicalDawn,
-    } = getTonightScheduleMorningAstronomyUtc(now)
+    } = getTonightScheduleMorningAstronomyUtc(now, site)
 
     const eventBlocks = [
       { label: 'Sunset', startTime: sunset },
@@ -1491,11 +1475,11 @@ export default function RemotePage() {
       .filter((x): x is { id: string; topPct: number; heightPct: number; label: string } => x != null)
 
     return { start, end, hours: points, eventBlocks, adminClosedBlocks, nowTopPct, nauticalDawn, nauticalDusk, astronomicalDawn }
-  }, [scheduleNowMs, adminClosedWindows])
+  }, [scheduleNowMs, adminClosedWindows, site])
 
   const tonightNightKey = useMemo(
-    () => getTonightScheduleStrip(new Date(scheduleNowMs)).nightKey,
-    [scheduleNowMs]
+    () => getTonightScheduleStrip(new Date(scheduleNowMs), site).nightKey,
+    [scheduleNowMs, site]
   )
 
   const persistScheduleBarPlacement = useCallback(

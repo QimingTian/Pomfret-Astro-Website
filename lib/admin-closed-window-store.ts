@@ -67,7 +67,9 @@ async function readAll(): Promise<AdminClosedWindow[]> {
       const { loadJsonDocumentsFromPostgres } = await import('@/lib/db/read')
       const pg = await loadJsonDocumentsFromPostgres<AdminClosedWindow>('windows')
       if (pg) {
-        if (kvEnabled() && pg.length > 0) await kvSetJson(closedWindowsKvKey(), { windows: pg })
+        // Seed Redis even when empty — otherwise every poll permanently hits Postgres
+        // (Redis is LIVE for this key; PG is backup-only on miss).
+        if (kvEnabled()) await kvSetJson(closedWindowsKvKey(), { windows: pg })
         return pg
       }
     } catch (error) {

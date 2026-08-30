@@ -140,4 +140,20 @@ See prior Cygnus agent email notes. Minimum:
 - Some historical docs / keynote copy that still say “Pomfret only”  
 - `OBSERVATORY_TIME_ZONE` / `formatEstDateTime` aliases (deprecated; keep for Pomfret callers)
 
+---
+
+## 9. Member roles (backend — UI later)
+
+| Role | Scope | Notes |
+|------|--------|--------|
+| Pomfret Astro Admin | Global | `users.role = pomfret_astro_admin` — all sites (ESTOP, schedule, …) |
+| Observatory Admin | Per site | `memberships.site_role = observatory_admin` |
+| Observatory Member | Per site | `memberships.site_role = observatory_member` |
+| Guest | No membership | `site_policies.guest_access`: `closed` \| `open_direct` \| `open_approval` (+ `guest_site_access`) |
+
+Auth helpers: `lib/member-roles.ts`, `canAdministerImagingSite`, `canSubmitImagingForSite`.  
+Migration: `npx tsx scripts/migrate-member-roles.ts`
+
+**UI reflection of roles** (directory labels, site switcher filtering, guest request UX) is a separate pass.
+
 When in doubt: **pass `site` explicitly** rather than relying on browser locale or Pomfret defaults.

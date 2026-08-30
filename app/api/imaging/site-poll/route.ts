@@ -1,5 +1,5 @@
-import { isAdminUser } from '@/lib/member-store'
 import { getCurrentUser } from '@/lib/member-auth'
+import { canAdministerImagingSite } from '@/lib/imaging/core/admin-auth'
 import { getEmergencyStopPublicState } from '@/lib/imaging-emergency-stop'
 import { getSitePollSnapshot } from '@/lib/imaging/site-poll-snapshot'
 import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
     return new Response(JSON.stringify({ ok: false, error: 'Unauthorized' }), { status: 401 })
   }
 
-  const isAdmin = isAdminUser(user)
+  const isAdmin = canAdministerImagingSite(user)
   const [mode, status, snapshot] = await Promise.all([
     getObservatoryMode(),
     getObservatoryStatus({ skipLivePush: true }),

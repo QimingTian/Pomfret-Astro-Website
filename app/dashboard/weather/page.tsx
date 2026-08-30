@@ -3,10 +3,23 @@
 import dynamic from 'next/dynamic'
 import AllSkyCameraView from '@/components/AllSkyCameraView'
 import NOAAGoesCloudMap from '@/components/NOAAGoesCloudMap'
+import ObservatoryWeatherDashboard from '@/components/weather/ObservatoryWeatherDashboard'
+import { useObservatorySite } from '@/components/observatory-site-provider'
 
 const LibreWxrRadarMap = dynamic(() => import('@/components/LibreWxrRadarMap'), { ssr: false })
 
 export default function WeatherPage() {
+  const { siteId } = useObservatorySite()
+  const isPomfret = siteId === 'pomfret'
+
+  if (!isPomfret) {
+    return (
+      <div className="space-y-6 pb-8 lg:-translate-x-3">
+        <ObservatoryWeatherDashboard />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6 pb-8 lg:-translate-x-3">
       <div id="all-sky-camera">

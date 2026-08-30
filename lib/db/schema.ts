@@ -36,9 +36,32 @@ export const memberships = pgTable(
   {
     userId: text('user_id').notNull(),
     siteId: text('site_id').notNull(),
+    /** observatory_admin | observatory_member */
+    siteRole: text('site_role').notNull().default('observatory_member'),
     imagingApprovedAt: timestamp('imaging_approved_at', tz),
     imagingRejectedAt: timestamp('imaging_rejected_at', tz),
     updatedAt: timestamp('updated_at', tz).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.siteId] })]
+)
+
+/** Per-site guest access policy (closed | open_direct | open_approval). */
+export const sitePolicies = pgTable('site_policies', {
+  siteId: text('site_id').primaryKey(),
+  guestAccess: text('guest_access').notNull().default('closed'),
+  updatedAt: timestamp('updated_at', tz).notNull(),
+})
+
+/** Guest approval grants when site_policies.guest_access = open_approval. */
+export const guestSiteAccess = pgTable(
+  'guest_site_access',
+  {
+    userId: text('user_id').notNull(),
+    siteId: text('site_id').notNull(),
+    /** pending | approved | rejected */
+    status: text('status').notNull(),
+    updatedAt: timestamp('updated_at', tz).notNull(),
+    decidedByUserId: text('decided_by_user_id'),
   },
   (t) => [primaryKey({ columns: [t.userId, t.siteId] })]
 )

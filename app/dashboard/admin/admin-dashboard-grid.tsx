@@ -1,5 +1,6 @@
 'use client'
 
+import { EmergencyStopButton } from '@/app/dashboard/account/emergency-stop-button'
 import { AccountFullBleedRule } from '@/app/dashboard/account/account-full-bleed-rule'
 import { accountTwoColGridObservatoryLog } from '@/app/dashboard/account/account-two-col-layout'
 import { AccountTwoColRow } from '@/app/dashboard/account/account-two-col-row'
@@ -12,6 +13,7 @@ import { AllMembersSection } from '@/app/dashboard/admin/all-members-section'
 import { AllSkyCameraControlPanel } from '@/app/dashboard/admin/allsky-camera-control-panel'
 import { ImagingEquipmentSection } from '@/components/admin/imaging-equipment-section'
 import { statusOptions, useAdminTools } from '@/app/dashboard/admin/use-admin-tools'
+import type { PublicMemberUser } from '@/lib/member-store'
 import {
   glassPillSkySm,
   glassPillAccentSm,
@@ -32,7 +34,7 @@ const pillIdle = glassPillToggleIdle
 const pillActiveBlock = glassPillToggleActiveBlock
 const pillIdleBlock = glassPillToggleIdleBlock
 
-export function AdminDashboardGrid() {
+export function AdminDashboardGrid({ user }: { user: PublicMemberUser }) {
   const t = useAdminTools()
 
   if (t.member.status === 'loading') {
@@ -45,6 +47,111 @@ export function AdminDashboardGrid() {
 
   return (
     <>
+      <AccountTwoColRow
+        left={
+          <DashboardPanel title="Emergency STOP" compact className="min-h-0">
+            <EmergencyStopButton user={user} />
+          </DashboardPanel>
+        }
+        right={
+          <DashboardPanel
+            title="Session Control"
+            action={
+              <button
+                type="button"
+                onClick={() => void t.loadSessionControl()}
+                disabled={t.sessionLoading}
+                className={`${glassPillXs} disabled:opacity-50`}
+              >
+                {t.sessionLoading ? '…' : 'Refresh'}
+              </button>
+            }
+          >
+            {t.sessionError && <p className="mb-2 text-sm text-red-400">{t.sessionError}</p>}
+            <div className="max-h-[20rem] space-y-2 overflow-y-auto">
+              {t.sessionRows.length === 0 && !t.sessionLoading ? (
+                <p className="text-sm text-gray-500">No active sessions.</p>
+              ) : (
+                t.sessionRows.map((row) => {
+                  const busy = t.sessionActionId === row.sessionId
+                  const canRun =
+                    row.status === 'pending' ||
+                    row.status === 'scheduled' ||
+                    row.status === 'planned'
+                  const canHold =
+                    row.status === 'pending' ||
+                    row.status === 'scheduled' ||
+                    row.status === 'planned'
+                  const onHold = row.status === 'on hold' || row.status === 'on_hold'
+                  return (
+                    <div key={row.sessionId} className="rounded-lg border border-gray-700 px-3 py-2 space-y-2">
+                      <div>
+                        <p className="text-sm font-medium text-white break-words">{row.label}</p>
+                        <p className="text-xs uppercase text-gray-400">{onHold ? 'on hold' : row.status}</p>
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        <button
+                          type="button"
+                          disabled={busy || !canRun || t.emergencyStopBlocking}
+                          onClick={() => void t.runSessionAction(row.sessionId, 'run')}
+                          className={`${glassPillSkySm} disabled:opacity-40`}
+                        >
+                          Run
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy || (!onHold && !canHold)}
+                          onClick={() =>
+                            void t.runSessionAction(row.sessionId, onHold ? 'release_hold' : 'hold')
+                          }
+                          className={`${glassPillAccentSm} disabled:opacity-40`}
+                        >
+                          {onHold ? 'Unhold' : 'Hold'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy || row.status === 'completed'}
+                          onClick={() => void t.runSessionAction(row.sessionId, 'complete')}
+                          className={`${glassPillSuccessSm} disabled:opacity-40`}
+                        >
+                          Complete
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy || row.status === 'failed'}
+                          onClick={() => void t.runSessionAction(row.sessionId, 'fail')}
+                          className={`${glassPillWarningSm} disabled:opacity-40`}
+                        >
+                          Fail
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy || row.status !== 'failed'}
+                          onClick={() => void t.runSessionAction(row.sessionId, 'in_progress')}
+                          className={`${glassPillInfoSm} disabled:opacity-40`}
+                        >
+                          In progress
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void t.runSessionAction(row.sessionId, 'delete')}
+                          className={`${glassPillDangerSm} disabled:opacity-40`}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </DashboardPanel>
+        }
+      />
+
+      <AccountFullBleedRule />
+
       <AccountMemberGrid />
 
       <AccountFullBleedRule />
@@ -220,114 +327,21 @@ export function AdminDashboardGrid() {
             </div>
           </DashboardPanel>
         }
-        right={
-          <DashboardPanel
-            title="Session Control"
-            action={
-              <button
-                type="button"
-                onClick={() => void t.loadSessionControl()}
-                disabled={t.sessionLoading}
-                className={`${glassPillXs} disabled:opacity-50`}
-              >
-                {t.sessionLoading ? '…' : 'Refresh'}
-              </button>
-            }
-          >
-            {t.sessionError && <p className="mb-2 text-sm text-red-400">{t.sessionError}</p>}
-            <div className="max-h-[20rem] space-y-2 overflow-y-auto">
-              {t.sessionRows.length === 0 && !t.sessionLoading ? (
-                <p className="text-sm text-gray-500">No active sessions.</p>
-              ) : (
-                t.sessionRows.map((row) => {
-                  const busy = t.sessionActionId === row.sessionId
-                  const canRun =
-                    row.status === 'pending' ||
-                    row.status === 'scheduled' ||
-                    row.status === 'planned'
-                  const canHold =
-                    row.status === 'pending' ||
-                    row.status === 'scheduled' ||
-                    row.status === 'planned'
-                  const onHold = row.status === 'on hold' || row.status === 'on_hold'
-                  return (
-                    <div key={row.sessionId} className="rounded-lg border border-gray-700 px-3 py-2 space-y-2">
-                      <div>
-                        <p className="text-sm font-medium text-white break-words">{row.label}</p>
-                        <p className="text-xs uppercase text-gray-400">{onHold ? 'on hold' : row.status}</p>
-                      </div>
-                      <div className="flex flex-wrap gap-1">
-                        <button
-                          type="button"
-                          disabled={busy || !canRun || t.emergencyStopBlocking}
-                          onClick={() => void t.runSessionAction(row.sessionId, 'run')}
-                          className={`${glassPillSkySm} disabled:opacity-40`}
-                        >
-                          Run
-                        </button>
-                        <button
-                          type="button"
-                          disabled={busy || (!onHold && !canHold)}
-                          onClick={() =>
-                            void t.runSessionAction(row.sessionId, onHold ? 'release_hold' : 'hold')
-                          }
-                          className={`${glassPillAccentSm} disabled:opacity-40`}
-                        >
-                          {onHold ? 'Unhold' : 'Hold'}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={busy || row.status === 'completed'}
-                          onClick={() => void t.runSessionAction(row.sessionId, 'complete')}
-                          className={`${glassPillSuccessSm} disabled:opacity-40`}
-                        >
-                          Complete
-                        </button>
-                        <button
-                          type="button"
-                          disabled={busy || row.status === 'failed'}
-                          onClick={() => void t.runSessionAction(row.sessionId, 'fail')}
-                          className={`${glassPillWarningSm} disabled:opacity-40`}
-                        >
-                          Fail
-                        </button>
-                        <button
-                          type="button"
-                          disabled={busy || row.status !== 'failed'}
-                          onClick={() => void t.runSessionAction(row.sessionId, 'in_progress')}
-                          className={`${glassPillInfoSm} disabled:opacity-40`}
-                        >
-                          In progress
-                        </button>
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => void t.runSessionAction(row.sessionId, 'delete')}
-                          className={`${glassPillDangerSm} disabled:opacity-40`}
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </div>
-                  )
-                })
-              )}
-            </div>
-          </DashboardPanel>
-        }
+        right={<ImagingRequestsSection />}
       />
 
       <AccountFullBleedRule />
 
-      <AllSkyCameraControlPanel />
-
-      <AccountFullBleedRule />
-
-      <ImagingEquipmentSection />
-
-      <AccountFullBleedRule />
-
-      <AccountTwoColRow left={<GalleryRequestsSection />} right={<ImagingRequestsSection />} />
+      <AccountTwoColRow
+        left={
+          <div className="flex min-h-0 flex-col">
+            <AllSkyCameraControlPanel />
+            <AccountFullBleedRule className="my-4" />
+            <ImagingEquipmentSection />
+          </div>
+        }
+        right={<GalleryRequestsSection />}
+      />
 
       <AccountFullBleedRule />
 

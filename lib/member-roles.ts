@@ -3,7 +3,11 @@
  * UI labels / directory UX come later — this module is the source of truth for ACL.
  */
 
-import type { ObservatorySiteId } from '@/lib/observatory-sites'
+import {
+  isObservatorySiteId,
+  resolveObservatorySite,
+  type ObservatorySiteId,
+} from '@/lib/observatory-sites'
 
 /** Global account class on `users.role`. */
 export type SystemRole = 'pomfret_astro_admin' | 'user'
@@ -59,6 +63,35 @@ export function legacyMemberRoleLabel(input: {
   if (input.systemRole === 'pomfret_astro_admin') return 'admin'
   if (input.memberships.some((m) => m.siteRole === 'observatory_admin')) return 'admin'
   return 'member'
+}
+
+export function siteDisplayName(siteId: string): string {
+  if (isObservatorySiteId(siteId)) return resolveObservatorySite(siteId).name
+  return siteId
+}
+
+export function siteRoleDisplayLabel(siteRole: SiteRole): string {
+  return siteRole === 'observatory_admin' ? 'Observatory Admin' : 'Observatory Member'
+}
+
+/**
+ * Human-readable roles for Account / directory UI (may be multiple).
+ * Example: ["Pomfret Astro Admin", "Observatory Admin · Pomfret School"]
+ */
+export function formatMemberRoleLabels(input: {
+  systemRole: SystemRole | string | null | undefined
+  memberships?: SiteMembership[]
+}): string[] {
+  const labels: string[] = []
+  if (isPomfretAstroAdmin(input.systemRole)) {
+    labels.push('Pomfret Astro Admin')
+  }
+  const memberships = input.memberships ?? []
+  for (const m of memberships) {
+    labels.push(`${siteRoleDisplayLabel(m.siteRole)} · ${siteDisplayName(m.siteId)}`)
+  }
+  if (labels.length === 0) labels.push('Guest')
+  return labels
 }
 
 export function isPomfretAstroAdmin(systemRole: SystemRole | string | null | undefined): boolean {

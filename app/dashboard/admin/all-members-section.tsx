@@ -12,7 +12,7 @@ import {
 import { useCallback, useEffect, useState } from 'react'
 import { DashboardPanel } from '@/app/dashboard/account/dashboard-panel'
 import { memberVerificationStatusLabel } from '@/lib/member-access'
-import { memberLevelLabel, type MemberRole } from '@/lib/member-store'
+import { memberRolesDisplay, type MemberRole } from '@/lib/member-store'
 
 type Row = {
   id: string
@@ -20,6 +20,7 @@ type Row = {
   lastName: string
   email: string
   role: MemberRole
+  roles?: string[]
   emailVerified: boolean
   imagingApproved: boolean
   imagingPending: boolean
@@ -201,7 +202,7 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
                   <span className="mx-2">·</span>
                   <span className="break-all">{m.email}</span>
                   <span className="mx-2">·</span>
-                  <span>{memberLevelLabel(m.role)}</span>
+                  <span>{memberRolesDisplay(m)}</span>
                   <span className="mx-2">·</span>
                   <span>
                     {memberVerificationStatusLabel({

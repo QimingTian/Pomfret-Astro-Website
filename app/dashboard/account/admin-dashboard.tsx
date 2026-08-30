@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSiteStream } from '@/lib/use-site-stream'
 import { AdminDashboardGrid } from '@/app/dashboard/admin/admin-dashboard-grid'
 import { AccountFullBleedRule } from '@/app/dashboard/account/account-full-bleed-rule'
@@ -8,7 +8,15 @@ import { accountTwoColGridAccountEmergency } from '@/app/dashboard/account/accou
 import { AccountTwoColRow } from '@/app/dashboard/account/account-two-col-row'
 import { AccountPageHeader } from '@/app/dashboard/account/account-page-header'
 import { AccountInfoSection } from '@/app/dashboard/account/account-info-section'
+import { observatorySiteFetch } from '@/components/observatory-site-provider'
+import { isPomfretAstroAdmin } from '@/lib/member-roles'
 import type { PublicMemberUser } from '@/lib/member-store'
+import {
+  OBSERVATORY_SITES,
+  isObservatorySiteId,
+  resolveObservatorySite,
+  type ObservatorySiteId,
+} from '@/lib/observatory-sites'
 import {
   glassPillDangerMd,
   glassPillDangerWide,
@@ -33,9 +41,10 @@ function emergencyStopButtonLabel(status: EmergencyStopStatus): string {
   return 'Emergency STOP'
 }
 
-function EmergencyStopButton() {
+function EmergencyStopButton({ user }: { user: PublicMemberUser }) {
   const [pending, setPending] = useState(false)
-  const [showConfirm, setShowConfirm] = useState(false)
+  const [step, setStep] = useState<'closed' | 'pick-site' | 'confirm'>('closed')
+  const [selectedSiteId, setSelectedSiteId] = useState<ObservatorySiteId | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [statusLoaded, setStatusLoaded] = useState(false)
   const [status, setStatus] = useState<EmergencyStopStatus>({
@@ -46,9 +55,25 @@ function EmergencyStopButton() {
     canArm: false,
   })
 
-  const refreshStatus = useCallback(async () => {
+  const siteOptions = useMemo(() => {
+    if (isPomfretAstroAdmin(user.systemRole)) {
+      return OBSERVATORY_SITES.map((s) => s.id)
+    }
+    const adminSites = (user.memberships ?? [])
+      .filter((m) => m.siteRole === 'observatory_admin' && isObservatorySiteId(m.siteId))
+      .map((m) => m.siteId as ObservatorySiteId)
+    return adminSites.length > 0 ? adminSites : (['pomfret'] as ObservatorySiteId[])
+  }, [user.memberships, user.systemRole])
+
+  const needsSitePicker = isPomfretAstroAdmin(user.systemRole) || siteOptions.length > 1
+
+  const refreshStatus = useCallback(async (siteId?: ObservatorySiteId | null) => {
+    const site = siteId ?? siteOptions[0] ?? 'pomfret'
     try {
-      const res = await fetch('/api/imaging/emergency-stop', { credentials: 'include', cache: 'no-store' })
+      const res = await observatorySiteFetch('/api/imaging/emergency-stop', site, {
+        credentials: 'include',
+        cache: 'no-store',
+      })
       const data = await res.json().catch(() => ({}))
       if (!res.ok || data?.ok !== true) {
         setError(typeof data.error === 'string' ? data.error : 'Unable to load ESTOP status.')
@@ -70,17 +95,18 @@ function EmergencyStopButton() {
     } finally {
       setStatusLoaded(true)
     }
-  }, [])
+  }, [siteOptions])
 
   useEffect(() => {
-    void refreshStatus()
-  }, [refreshStatus])
+    void refreshStatus(selectedSiteId ?? siteOptions[0] ?? 'pomfret')
+  }, [refreshStatus, selectedSiteId, siteOptions])
 
   useEffect(() => {
     if (status.phase !== 'stopping') return
-    const id = window.setInterval(() => void refreshStatus(), 2000)
+    const site = selectedSiteId ?? siteOptions[0] ?? 'pomfret'
+    const id = window.setInterval(() => void refreshStatus(site), 2000)
     return () => window.clearInterval(id)
-  }, [refreshStatus, status.phase])
+  }, [refreshStatus, selectedSiteId, siteOptions, status.phase])
 
   useSiteStream(
     {
@@ -102,12 +128,33 @@ function EmergencyStopButton() {
     true
   )
 
+  function openEmergencyStopFlow() {
+    setError(null)
+    if (needsSitePicker) {
+      setSelectedSiteId(null)
+      setStep('pick-site')
+      return
+    }
+    const only = siteOptions[0] ?? 'pomfret'
+    setSelectedSiteId(only)
+    void refreshStatus(only)
+    setStep('confirm')
+  }
+
+  function chooseSite(siteId: ObservatorySiteId) {
+    setSelectedSiteId(siteId)
+    void refreshStatus(siteId)
+    setStep('confirm')
+  }
+
   async function confirmEmergencyStop() {
-    setShowConfirm(false)
+    const site = selectedSiteId ?? siteOptions[0]
+    if (!site) return
+    setStep('closed')
     setPending(true)
     setError(null)
     try {
-      const res = await fetch('/api/imaging/emergency-stop', {
+      const res = await observatorySiteFetch('/api/imaging/emergency-stop', site, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -118,7 +165,7 @@ function EmergencyStopButton() {
         setError(typeof data.error === 'string' ? data.error : 'Emergency STOP failed.')
         return
       }
-      await refreshStatus()
+      await refreshStatus(site)
     } catch {
       setError('Emergency STOP failed.')
     } finally {
@@ -130,8 +177,9 @@ function EmergencyStopButton() {
     !statusLoaded ||
     pending ||
     status.phase !== 'idle' ||
-    !status.agentConnected ||
-    !status.canArm
+    (!needsSitePicker && (!status.agentConnected || !status.canArm))
+
+  const selectedSiteName = selectedSiteId ? resolveObservatorySite(selectedSiteId).name : null
 
   return (
     <>
@@ -140,7 +188,7 @@ function EmergencyStopButton() {
           type="button"
           className={emergencyStopPillClass}
           disabled={disabled}
-          onClick={() => setShowConfirm(true)}
+          onClick={openEmergencyStopFlow}
         >
           <div
             className="absolute inset-y-0 left-0 rounded-full bg-red-600 transition-[width] duration-500 ease-out"
@@ -158,7 +206,45 @@ function EmergencyStopButton() {
         {error ? <p className="max-w-xs text-center text-xs text-red-300">{error}</p> : null}
       </div>
 
-      {showConfirm ? (
+      {step === 'pick-site' ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div
+            role="dialog"
+            aria-labelledby="estop-site-title"
+            className="w-[600px] max-w-[calc(100vw-2rem)] rounded-xl border border-gray-700 bg-[#08090a] p-6 shadow-xl"
+          >
+            <p id="estop-site-title" className="text-center text-base text-white">
+              Which observatory should receive ESTOP?
+            </p>
+            <div className="mt-6 flex flex-col gap-2">
+              {siteOptions.map((siteId) => {
+                const site = resolveObservatorySite(siteId)
+                return (
+                  <button
+                    key={siteId}
+                    type="button"
+                    className={`${glassPillMd} w-full justify-center`}
+                    onClick={() => chooseSite(siteId)}
+                  >
+                    {site.name}
+                  </button>
+                )
+              })}
+            </div>
+            <div className="mt-6 flex justify-center">
+              <button
+                type="button"
+                className={`${glassPillMd} whitespace-nowrap`}
+                onClick={() => setStep('closed')}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {step === 'confirm' ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div
             role="dialog"
@@ -166,12 +252,31 @@ function EmergencyStopButton() {
             className="w-[600px] max-w-[calc(100vw-2rem)] rounded-xl border border-gray-700 bg-[#08090a] p-6 shadow-xl"
           >
             <p id="estop-confirm-title" className="text-center text-base text-white">
-              ESTOP will kill any ongoing observatory work and close the dome.
+              {selectedSiteName
+                ? `ESTOP will kill any ongoing work at ${selectedSiteName} and close the dome.`
+                : 'ESTOP will kill any ongoing observatory work and close the dome.'}
             </p>
+            {!status.agentConnected || !status.canArm ? (
+              <p className="mt-3 text-center text-sm text-amber-200">
+                {!status.agentConnected
+                  ? 'NINA agent is disconnected for this site.'
+                  : 'ESTOP cannot be armed for this site right now.'}
+              </p>
+            ) : null}
             <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+              {needsSitePicker ? (
+                <button
+                  type="button"
+                  disabled={pending}
+                  className={`${glassPillMd} whitespace-nowrap disabled:opacity-60`}
+                  onClick={() => setStep('pick-site')}
+                >
+                  Back
+                </button>
+              ) : null}
               <button
                 type="button"
-                disabled={pending}
+                disabled={pending || !status.agentConnected || !status.canArm}
                 className={`${glassPillDangerMd} whitespace-nowrap disabled:opacity-60`}
                 onClick={() => void confirmEmergencyStop()}
               >
@@ -181,7 +286,7 @@ function EmergencyStopButton() {
                 type="button"
                 disabled={pending}
                 className={`${glassPillMd} whitespace-nowrap disabled:opacity-60`}
-                onClick={() => setShowConfirm(false)}
+                onClick={() => setStep('closed')}
               >
                 Cancel
               </button>
@@ -201,7 +306,7 @@ export function AdminAccountDashboard({ user }: { user: PublicMemberUser }) {
       <AccountTwoColRow
         desktopGrid={accountTwoColGridAccountEmergency}
         left={<AccountInfoSection user={user} variant="panel" className="min-h-0" />}
-        right={<EmergencyStopButton />}
+        right={<EmergencyStopButton user={user} />}
       />
 
       <AccountFullBleedRule />

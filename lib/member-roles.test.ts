@@ -5,6 +5,7 @@ import {
   canAdministerSite,
   canSubmitImagingAtSite,
   coerceSystemRole,
+  formatMemberRoleLabels,
   legacyMemberRoleLabel,
 } from '@/lib/member-roles'
 
@@ -67,4 +68,21 @@ test('canSubmitImagingAtSite open_direct allows guest', () => {
     guestAccessMode: 'open_direct',
   })
   assert.equal(decision.ok, true)
+})
+
+test('formatMemberRoleLabels can include system and site roles', () => {
+  assert.deepEqual(
+    formatMemberRoleLabels({
+      systemRole: 'pomfret_astro_admin',
+      memberships: [
+        {
+          siteId: 'pomfret',
+          siteRole: 'observatory_admin',
+          imagingApprovedAt: 'x',
+          imagingRejectedAt: null,
+        },
+      ],
+    }),
+    ['Pomfret Astro Admin', 'Observatory Admin · Pomfret School']
+  )
 })

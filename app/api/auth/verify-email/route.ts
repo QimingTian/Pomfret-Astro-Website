@@ -23,6 +23,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(publicSiteUrl('/login?verify=invalid'))
   }
 
+  const { getMemberById } = await import('@/lib/member-store')
+  const existing = await getMemberById(payload.userId)
+  if (!existing || existing.email !== payload.email) {
+    return NextResponse.redirect(publicSiteUrl('/login?verify=invalid'))
+  }
+
   const user = await markMemberEmailVerified(payload.userId)
   if (!user) {
     return NextResponse.redirect(publicSiteUrl('/login?verify=invalid'))

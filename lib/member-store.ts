@@ -4,6 +4,7 @@ import { postgresReadsEnabled } from '@/lib/db'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 import {
   coerceSystemRole,
+  formatMemberRoleLabels,
   isSiteRole,
   legacyMemberRoleLabel,
   type SiteMembership,
@@ -50,7 +51,12 @@ export type PublicMemberUser = {
   firstName: string
   lastName: string
   username: string
+  /** Legacy admin|member flag for nav / isAdmin. */
   role: MemberRole
+  systemRole: SystemRole
+  memberships: Array<{ siteId: string; siteRole: SiteRole }>
+  /** Display labels (may include multiple roles). */
+  roles: string[]
   createdAt: string
   emailVerified: boolean
   imagingApproved: boolean
@@ -317,6 +323,10 @@ function toPublicUser(u: MemberUser): PublicMemberUser {
   const imagingApproved = Boolean(u.imagingApprovedAt) && !imagingRejected
   const imagingPending =
     emailVerified && !imagingApproved && !imagingRejected && !isPomfretOrgEmail(u.email)
+  const memberships = (u.memberships ?? []).map((m) => ({
+    siteId: m.siteId,
+    siteRole: m.siteRole,
+  }))
   return {
     id: u.id,
     email: u.email,
@@ -324,6 +334,9 @@ function toPublicUser(u: MemberUser): PublicMemberUser {
     lastName: u.lastName,
     username: u.username,
     role: u.role,
+    systemRole: u.systemRole,
+    memberships,
+    roles: formatMemberRoleLabels({ systemRole: u.systemRole, memberships: u.memberships }),
     createdAt: u.createdAt,
     emailVerified,
     imagingApproved,
@@ -576,6 +589,14 @@ export function memberLevelLabel(role: MemberRole): string {
   return role === 'admin' ? 'Admin' : 'Member'
 }
 
+export function memberRolesDisplay(user: {
+  role: MemberRole
+  roles?: string[] | null
+}): string {
+  if (Array.isArray(user.roles) && user.roles.length > 0) return user.roles.join(' · ')
+  return memberLevelLabel(user.role)
+}
+
 /** Admin directory: profile + access flags (no password). */
 export type AdminMemberDirectoryEntry = {
   id: string
@@ -583,6 +604,9 @@ export type AdminMemberDirectoryEntry = {
   lastName: string
   email: string
   role: MemberRole
+  systemRole: SystemRole
+  memberships: Array<{ siteId: string; siteRole: SiteRole }>
+  roles: string[]
   emailVerified: boolean
   imagingApproved: boolean
   imagingPending: boolean
@@ -600,6 +624,9 @@ export async function listMembersForAdminDirectory(): Promise<AdminMemberDirecto
       lastName: u.lastName,
       email: u.email,
       role: u.role,
+      systemRole: u.systemRole,
+      memberships: (u.memberships ?? []).map((m) => ({ siteId: m.siteId, siteRole: m.siteRole })),
+      roles: formatMemberRoleLabels({ systemRole: u.systemRole, memberships: u.memberships }),
       emailVerified: Boolean(u.emailVerifiedAt),
       imagingApproved: Boolean(u.imagingApprovedAt) && !u.imagingRejectedAt,
       imagingPending:
@@ -812,3 +839,90 @@ export async function setMemberImagingApproval(
   await writeUsers(users)
   return { ok: true }
 }
+
+export async function updateMemberProfile(
+  userId: string,
+  input: {
+    currentPassword: string
+    firstName?: string
+    lastName?: string
+    username?: string
+    email?: string
+    newPassword?: string | null
+  }
+): Promise<
+  | { ok: true; user: MemberUser; emailChanged: boolean }
+  | { ok: false; error: string }
+> {
+  const users = await readUsers()
+  const idx = users.findIndex((u) => u.id === userId)
+  if (idx < 0) return { ok: false, error: 'Member not found.' }
+  const target = users[idx]!
+
+  const valid = await verifySessionPasswordHash(input.currentPassword, target.passwordHash)
+  if (!valid) return { ok: false, error: 'Current password is incorrect.' }
+
+  const firstName =
+    typeof input.firstName === 'string' ? input.firstName.trim() : target.firstName
+  const lastName = typeof input.lastName === 'string' ? input.lastName.trim() : target.lastName
+  if (!firstName) return { ok: false, error: 'First name is required.' }
+  if (!lastName) return { ok: false, error: 'Last name is required.' }
+
+  let username = target.username
+  if (typeof input.username === 'string') {
+    const nextUsername = input.username.trim()
+    if (!nextUsername || !USERNAME_REGEX.test(nextUsername)) {
+      return {
+        ok: false,
+        error: 'Username must be 3–32 characters (letters, numbers, ., _, -).',
+      }
+    }
+    const usernameKey = normalizeMemberUsername(nextUsername)
+    const taken = users.find(
+      (u) => u.id !== userId && normalizeMemberUsername(u.username) === usernameKey
+    )
+    if (taken) return { ok: false, error: 'This username is already taken.' }
+    username = nextUsername
+  }
+
+  let email = target.email
+  let emailChanged = false
+  let emailVerifiedAt = target.emailVerifiedAt ?? null
+  if (typeof input.email === 'string') {
+    const nextEmail = normalizeMemberEmail(input.email)
+    if (!nextEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) {
+      return { ok: false, error: 'Valid email is required.' }
+    }
+    if (nextEmail !== target.email) {
+      const taken = users.find((u) => u.id !== userId && u.email === nextEmail)
+      if (taken) return { ok: false, error: 'An account with this email already exists.' }
+      email = nextEmail
+      emailChanged = true
+      emailVerifiedAt = null
+    }
+  }
+
+  let passwordHash = target.passwordHash
+  if (typeof input.newPassword === 'string' && input.newPassword.length > 0) {
+    if (input.newPassword.length < 8) {
+      return { ok: false, error: 'Password must be at least 8 characters.' }
+    }
+    passwordHash = await hashSessionPassword(input.newPassword)
+  }
+
+  const now = new Date().toISOString()
+  const updated = withDerivedRoleFields({
+    ...target,
+    firstName,
+    lastName,
+    username,
+    email,
+    passwordHash,
+    emailVerifiedAt,
+    updatedAt: now,
+  })
+  users[idx] = updated
+  await writeUsers(users)
+  return { ok: true, user: updated, emailChanged }
+}
+

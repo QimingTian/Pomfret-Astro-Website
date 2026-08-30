@@ -30,7 +30,7 @@ export function variableStarMonitorUntilMs(opts: {
 
 /**
  * Variable-star Imaging Plan: time-bounded monitoring, not count × exposure.
- * Example: `G · Monitor until 1:30 AM · Dynamic exposure · Target ADU 40%`
+ * Example: `G · Monitor until 1:30 AM · Dynamic exposure · Target ADU 30%`
  */
 export function formatVariableStarImagingPlan(opts: {
   untilMs?: number | null

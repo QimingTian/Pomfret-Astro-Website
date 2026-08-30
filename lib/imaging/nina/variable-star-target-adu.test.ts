@@ -17,7 +17,7 @@ test('variableStarAmplitudeMag uses abs(min-max)', () => {
   assert.equal(variableStarAmplitudeMag(10, undefined), null)
 })
 
-test('variableStarTargetAduFromAmplitude tiers with floor 0.4', () => {
+test('variableStarTargetAduFromAmplitude tiers with floor 0.3', () => {
   assert.equal(variableStarTargetAduFromAmplitude(null), VARIABLE_STAR_TARGET_ADU_DEFAULT)
   assert.equal(variableStarTargetAduFromAmplitude(0.2), VARIABLE_STAR_TARGET_ADU_SMALL)
   assert.equal(variableStarTargetAduFromAmplitude(0.39), VARIABLE_STAR_TARGET_ADU_SMALL)

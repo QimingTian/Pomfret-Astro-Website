@@ -95,7 +95,7 @@ test('formatVariableStarImagingPlan uses monitor-until and ADU percent', () => {
   })
   assert.match(label, /^G · Monitor until /)
   assert.match(label, /Dynamic exposure/)
-  assert.match(label, /Target ADU 40%$/)
+  assert.match(label, /Target ADU 30%$/)
   assert.equal(variableStarMonitorUntilMs({ scheduleBarEndMs: untilMs }), untilMs)
   assert.equal(
     variableStarMonitorUntilMs({

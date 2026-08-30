@@ -18,8 +18,6 @@ import {
   emitSiteSessionsChanged,
   queueStatusSignature,
 } from '@/lib/imaging/site-events'
-import { currentObservatorySiteId, scopedKvKey } from '@/lib/observatory-site-scope'
-import type { ObservatorySiteId } from '@/lib/observatory-sites'
 import { getTonightAstronomicalNightWindow, getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import { altitudeCoverageMsAtMinAltitude, pomfretTargetObservabilityError } from '@/lib/target-altitude'
 import { formatRaDecTargetLabel } from '@/lib/format-radec'
@@ -36,8 +34,6 @@ export type ImagingRequestStatus =
 
 export interface ImagingRequest {
   id: string
-  /** Observatory that owns this queue row (Redis namespace + Postgres site_id). */
-  siteId?: ObservatorySiteId
   createdAt: string
   updatedAt: string
   status: ImagingRequestStatus
@@ -152,58 +148,32 @@ function normalizeVariableStarAmplitudeMag(input: unknown): number | null | unde
   return Math.round(n * 1000) / 1000
 }
 
-type GlobalWithQueue = typeof globalThis & {
-  __pomfret_imaging_queue_by_site__?: Record<string, ImagingRequest[]>
-  __pomfret_imaging_queue_disk_loaded__?: Record<string, boolean>
-  __pomfret_imaging_queue_sig__?: Record<string, string>
-}
+type GlobalWithQueue = typeof globalThis & { __pomfret_imaging_queue__?: ImagingRequest[] }
 
 function getMemory(): ImagingRequest[] {
   const g = globalThis as GlobalWithQueue
-  if (!g.__pomfret_imaging_queue_by_site__) g.__pomfret_imaging_queue_by_site__ = {}
-  const sid = currentObservatorySiteId()
-  if (!g.__pomfret_imaging_queue_by_site__[sid]) g.__pomfret_imaging_queue_by_site__[sid] = []
-  return g.__pomfret_imaging_queue_by_site__[sid]!
+  if (!g.__pomfret_imaging_queue__) g.__pomfret_imaging_queue__ = []
+  return g.__pomfret_imaging_queue__
 }
 
 const queueFile = process.env.IMAGING_QUEUE_FILE
 
-function queueKvKey(): string {
-  return scopedKvKey(REDIS_LIVE_KEYS.queue)
-}
+/** Shared across Vercel instances when Upstash KV is configured (same pattern as imaging-session-board). */
+const KV_QUEUE_KEY = REDIS_LIVE_KEYS.queue
 
-function isDiskLoaded(): boolean {
-  const g = globalThis as GlobalWithQueue
-  return Boolean(g.__pomfret_imaging_queue_disk_loaded__?.[currentObservatorySiteId()])
-}
-
-function setDiskLoaded(v: boolean): void {
-  const g = globalThis as GlobalWithQueue
-  if (!g.__pomfret_imaging_queue_disk_loaded__) g.__pomfret_imaging_queue_disk_loaded__ = {}
-  g.__pomfret_imaging_queue_disk_loaded__[currentObservatorySiteId()] = v
-}
-
-function getLastQueueStatusSignature(): string {
-  const g = globalThis as GlobalWithQueue
-  return g.__pomfret_imaging_queue_sig__?.[currentObservatorySiteId()] ?? ''
-}
-
-function setLastQueueStatusSignature(sig: string): void {
-  const g = globalThis as GlobalWithQueue
-  if (!g.__pomfret_imaging_queue_sig__) g.__pomfret_imaging_queue_sig__ = {}
-  g.__pomfret_imaging_queue_sig__[currentObservatorySiteId()] = sig
-}
+let diskLoaded = false
+let lastQueueStatusSignature = ''
 
 type QueueFilePayload = { requests?: ImagingRequest[] }
 
 async function applyQueueList(list: ImagingRequest[]): Promise<void> {
   const mem = getMemory()
   mem.splice(0, mem.length, ...list.slice(-MAX_QUEUE))
-  setDiskLoaded(true)
+  diskLoaded = true
 }
 
 async function loadQueueFromKvIntoMemory(): Promise<'hit' | 'miss'> {
-  const raw = await kvGetString(queueKvKey())
+  const raw = await kvGetString(KV_QUEUE_KEY)
   if (raw === undefined) return 'miss'
   try {
     const remote = JSON.parse(raw) as QueueFilePayload
@@ -238,10 +208,10 @@ async function ensureLoadedFromDisk(): Promise<void> {
     }
   } else if (postgresReadsEnabled()) {
     await loadQueueFromPostgresIntoMemory()
-  } else if (!queueFile || isDiskLoaded()) {
+  } else if (!queueFile || diskLoaded) {
     // no-op
   } else {
-    setDiskLoaded(true)
+    diskLoaded = true
     const mem = getMemory()
     try {
       const raw = await readFile(queueFile, 'utf-8')
@@ -262,13 +232,13 @@ async function persist(): Promise<void> {
   const mem = getMemory()
   const snapshot = [...mem]
   const nextSig = queueStatusSignature(snapshot)
-  const statusChanged = nextSig !== getLastQueueStatusSignature()
+  const statusChanged = nextSig !== lastQueueStatusSignature
   if (kvEnabled()) {
-    await kvSetJson(queueKvKey(), { requests: snapshot })
+    await kvSetJson(KV_QUEUE_KEY, { requests: snapshot })
     const { mirrorImagingQueue } = await import('@/lib/db/mirror')
     await mirrorImagingQueue(snapshot)
     if (statusChanged) {
-      setLastQueueStatusSignature(nextSig)
+      lastQueueStatusSignature = nextSig
       emitSiteSessionsChanged('queue')
       emitAgentWakePollSequenceDebounced()
     }
@@ -278,7 +248,7 @@ async function persist(): Promise<void> {
     const { mirrorImagingQueue } = await import('@/lib/db/mirror')
     await mirrorImagingQueue(snapshot)
     if (statusChanged) {
-      setLastQueueStatusSignature(nextSig)
+      lastQueueStatusSignature = nextSig
       emitSiteSessionsChanged('queue')
       emitAgentWakePollSequenceDebounced()
     }
@@ -291,7 +261,7 @@ async function persist(): Promise<void> {
   await writeFile(tmp, payload, 'utf-8')
   await rename(tmp, queueFile)
   if (statusChanged) {
-    setLastQueueStatusSignature(nextSig)
+    lastQueueStatusSignature = nextSig
     emitSiteSessionsChanged('queue')
     emitAgentWakePollSequenceDebounced()
   }
@@ -764,7 +734,6 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
   const ts = nowIso()
   const req: ImagingRequest = {
     id,
-    siteId: currentObservatorySiteId(),
     createdAt: ts,
     updatedAt: ts,
     status: 'pending',

@@ -9,8 +9,77 @@ export const DSO_MERIDIAN_FLIP_OVERHEAD_SEC = 10 * 60
 /** Extra per filter beyond the first (filter change + refocus). */
 export const DSO_EXTRA_FILTER_OVERHEAD_SEC = 5 * 60
 
-/** Variable star: total = (N × 0.5 h block) + this overhead; stripped when building NINA JSON. */
-export const VARIABLE_STAR_SESSION_OVERHEAD_SEC = 20 * 60
+/** Variable star: total = (N × 0.5 h block) + overhead; stripped when building NINA JSON. */
+export const VARIABLE_STAR_SESSION_OVERHEAD_SEC = 30 * 60
+
+/** Extra when the planned variable-star block crosses the local meridian. */
+export const VARIABLE_STAR_MERIDIAN_FLIP_OVERHEAD_SEC = DSO_MERIDIAN_FLIP_OVERHEAD_SEC
+
+export type VariableStarOverheadInput = {
+  /** Target RA (hours). With startMs, enables meridian-flip overhead. */
+  raHours?: number
+  /** Planned session start (ms). Without this, meridian flip is not added. */
+  startMs?: number
+  /** Imaging block seconds (N × 0.5 h). Used with startMs for meridian detection. */
+  blockSeconds?: number
+}
+
+export function variableStarSessionOverheadSeconds(input: VariableStarOverheadInput = {}): number {
+  const base = VARIABLE_STAR_SESSION_OVERHEAD_SEC
+  const blockSec =
+    input.blockSeconds != null && Number.isFinite(input.blockSeconds)
+      ? Math.max(0, input.blockSeconds)
+      : 0
+  const startMs = input.startMs
+  const raHours = input.raHours
+  if (
+    startMs == null ||
+    !Number.isFinite(startMs) ||
+    raHours == null ||
+    !Number.isFinite(raHours)
+  ) {
+    return base
+  }
+  const provisionalEndMs = startMs + (blockSec + base) * 1000
+  const flip = sessionCrossesMeridian(raHours, startMs, provisionalEndMs)
+    ? VARIABLE_STAR_MERIDIAN_FLIP_OVERHEAD_SEC
+    : 0
+  return base + flip
+}
+
+export function variableStarSessionDurationSeconds(input: {
+  blockHours: number
+  raHours?: number
+  startMs?: number
+}): number {
+  const blockSec = Math.max(0, input.blockHours) * 3600
+  return (
+    blockSec +
+    variableStarSessionOverheadSeconds({
+      raHours: input.raHours,
+      startMs: input.startMs,
+      blockSeconds: blockSec,
+    })
+  )
+}
+
+/** Reverse client total duration → block hours when it matches a valid ladder step. */
+export function variableStarBlockHoursFromTotalSeconds(
+  totalSec: number,
+  opts?: { raHours?: number; startMs?: number }
+): number | null {
+  if (!Number.isFinite(totalSec) || totalSec <= 0) return null
+  for (let halves = 1; halves <= 48; halves += 1) {
+    const blockHours = halves * 0.5
+    const expected = variableStarSessionDurationSeconds({
+      blockHours,
+      raHours: opts?.raHours,
+      startMs: opts?.startMs,
+    })
+    if (Math.abs(totalSec - expected) <= 1) return blockHours
+  }
+  return null
+}
 
 export type DsoOverheadFilterPlan = {
   filterName: string

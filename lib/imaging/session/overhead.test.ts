@@ -4,10 +4,15 @@ import {
   DSO_SESSION_OVERHEAD_SEC,
   DSO_MERIDIAN_FLIP_OVERHEAD_SEC,
   DSO_EXTRA_FILTER_OVERHEAD_SEC,
+  VARIABLE_STAR_SESSION_OVERHEAD_SEC,
+  VARIABLE_STAR_MERIDIAN_FLIP_OVERHEAD_SEC,
   distinctFiltersWithFrames,
   dsoSessionOverheadSeconds,
   dsoSessionDurationSeconds,
   sessionCrossesMeridian,
+  variableStarSessionOverheadSeconds,
+  variableStarSessionDurationSeconds,
+  variableStarBlockHoursFromTotalSeconds,
 } from './overhead'
 import { hourAngleDeg, localSiderealTimeHours } from '@/lib/mount-gem-angles'
 
@@ -92,4 +97,50 @@ test('dsoSessionOverheadSeconds adds flip when provisional block crosses meridia
     startMs,
   })
   assert.equal(overhead, DSO_SESSION_OVERHEAD_SEC + DSO_MERIDIAN_FLIP_OVERHEAD_SEC)
+})
+
+test('variableStarSessionOverheadSeconds: no start → 30 min base only', () => {
+  assert.equal(variableStarSessionOverheadSeconds(), VARIABLE_STAR_SESSION_OVERHEAD_SEC)
+})
+
+test('variableStarSessionDurationSeconds: 1 h block + base overhead', () => {
+  assert.equal(
+    variableStarSessionDurationSeconds({ blockHours: 1 }),
+    3600 + VARIABLE_STAR_SESSION_OVERHEAD_SEC
+  )
+})
+
+test('variableStarSessionOverheadSeconds adds flip when block crosses meridian', () => {
+  const raHours = 20.5
+  const t0 = Date.parse('2026-07-14T00:00:00.000Z')
+  let transitMs: number | null = null
+  for (let t = t0; t < t0 + 24 * 3600_000; t += 10 * 60_000) {
+    const ha = hourAngleDeg(raHours, localSiderealTimeHours(new Date(t)))
+    if (Math.abs(ha) < 2) {
+      transitMs = t
+      break
+    }
+  }
+  assert.ok(transitMs != null)
+  const startMs = transitMs! - 20 * 60_000
+  const blockSec = 2 * 3600
+  const overhead = variableStarSessionOverheadSeconds({ raHours, startMs, blockSeconds: blockSec })
+  assert.equal(overhead, VARIABLE_STAR_SESSION_OVERHEAD_SEC + VARIABLE_STAR_MERIDIAN_FLIP_OVERHEAD_SEC)
+})
+
+test('variableStarBlockHoursFromTotalSeconds reverses client total with meridian flip', () => {
+  const raHours = 20.5
+  const t0 = Date.parse('2026-07-14T00:00:00.000Z')
+  let transitMs: number | null = null
+  for (let t = t0; t < t0 + 24 * 3600_000; t += 10 * 60_000) {
+    const ha = hourAngleDeg(raHours, localSiderealTimeHours(new Date(t)))
+    if (Math.abs(ha) < 2) {
+      transitMs = t
+      break
+    }
+  }
+  assert.ok(transitMs != null)
+  const startMs = transitMs! - 20 * 60_000
+  const total = variableStarSessionDurationSeconds({ blockHours: 2, raHours, startMs })
+  assert.equal(variableStarBlockHoursFromTotalSeconds(total, { raHours, startMs }), 2)
 })

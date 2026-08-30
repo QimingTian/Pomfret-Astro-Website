@@ -6,6 +6,8 @@ import { variableStarTargetAduFromAmplitude } from '@/lib/imaging/nina/variable-
 import {
   VARIABLE_STAR_SESSION_OVERHEAD_SEC,
   dsoSessionDurationSeconds,
+  variableStarBlockHoursFromTotalSeconds,
+  variableStarSessionDurationSeconds,
 } from '@/lib/imaging-session-overhead'
 import { hashSessionPassword } from '@/lib/session-password'
 import { postgresReadsEnabled } from '@/lib/db'
@@ -16,7 +18,9 @@ import {
   emitSiteSessionsChanged,
   queueStatusSignature,
 } from '@/lib/imaging/site-events'
-import { getTonightAstronomicalNightWindow } from '@/lib/sunrise-window'
+import { currentObservatorySiteId, scopedKvKey } from '@/lib/observatory-site-scope'
+import type { ObservatorySiteId } from '@/lib/observatory-sites'
+import { getTonightAstronomicalNightWindow, getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import { altitudeCoverageMsAtMinAltitude, pomfretTargetObservabilityError } from '@/lib/target-altitude'
 import { formatRaDecTargetLabel } from '@/lib/format-radec'
 
@@ -32,6 +36,8 @@ export type ImagingRequestStatus =
 
 export interface ImagingRequest {
   id: string
+  /** Observatory that owns this queue row (Redis namespace + Postgres site_id). */
+  siteId?: ObservatorySiteId
   createdAt: string
   updatedAt: string
   status: ImagingRequestStatus
@@ -113,20 +119,29 @@ export {
   DSO_MERIDIAN_FLIP_OVERHEAD_SEC,
   DSO_EXTRA_FILTER_OVERHEAD_SEC,
   VARIABLE_STAR_SESSION_OVERHEAD_SEC,
+  VARIABLE_STAR_MERIDIAN_FLIP_OVERHEAD_SEC,
+  variableStarSessionOverheadSeconds,
+  variableStarSessionDurationSeconds,
+  variableStarBlockHoursFromTotalSeconds,
   dsoSessionOverheadSeconds,
   dsoSessionDurationSeconds,
 } from '@/lib/imaging-session-overhead'
 
-function variableStarDurationFromClientEstimate(inputEst: unknown): { ok: true; seconds: number } | { ok: false } {
+function variableStarDurationFromClientEstimate(
+  inputEst: unknown,
+  opts?: { raHours?: number; startMs?: number }
+): { ok: true; seconds: number } | { ok: false } {
   if (typeof inputEst !== 'number' || !Number.isFinite(inputEst)) return { ok: false }
   const est = Math.round(inputEst)
-  if (est < VARIABLE_STAR_SESSION_OVERHEAD_SEC + 30 * 60) return { ok: false }
-  const blockSec = est - VARIABLE_STAR_SESSION_OVERHEAD_SEC
-  const blockH = blockSec / 3600
-  const halves = blockH * 2
-  if (Math.abs(halves - Math.round(halves)) > 0.02) return { ok: false }
-  if (blockH < 0.5 - 1e-6) return { ok: false }
-  return { ok: true, seconds: Math.max(60, est) }
+  const blockHours = variableStarBlockHoursFromTotalSeconds(est, opts)
+  if (blockHours == null || blockHours < 0.5) return { ok: false }
+  const expected = variableStarSessionDurationSeconds({
+    blockHours,
+    raHours: opts?.raHours,
+    startMs: opts?.startMs,
+  })
+  if (Math.abs(est - expected) > 1) return { ok: false }
+  return { ok: true, seconds: expected }
 }
 
 function normalizeVariableStarAmplitudeMag(input: unknown): number | null | undefined {
@@ -137,32 +152,58 @@ function normalizeVariableStarAmplitudeMag(input: unknown): number | null | unde
   return Math.round(n * 1000) / 1000
 }
 
-type GlobalWithQueue = typeof globalThis & { __pomfret_imaging_queue__?: ImagingRequest[] }
+type GlobalWithQueue = typeof globalThis & {
+  __pomfret_imaging_queue_by_site__?: Record<string, ImagingRequest[]>
+  __pomfret_imaging_queue_disk_loaded__?: Record<string, boolean>
+  __pomfret_imaging_queue_sig__?: Record<string, string>
+}
 
 function getMemory(): ImagingRequest[] {
   const g = globalThis as GlobalWithQueue
-  if (!g.__pomfret_imaging_queue__) g.__pomfret_imaging_queue__ = []
-  return g.__pomfret_imaging_queue__
+  if (!g.__pomfret_imaging_queue_by_site__) g.__pomfret_imaging_queue_by_site__ = {}
+  const sid = currentObservatorySiteId()
+  if (!g.__pomfret_imaging_queue_by_site__[sid]) g.__pomfret_imaging_queue_by_site__[sid] = []
+  return g.__pomfret_imaging_queue_by_site__[sid]!
 }
 
 const queueFile = process.env.IMAGING_QUEUE_FILE
 
-/** Shared across Vercel instances when Upstash KV is configured (same pattern as imaging-session-board). */
-const KV_QUEUE_KEY = REDIS_LIVE_KEYS.queue
+function queueKvKey(): string {
+  return scopedKvKey(REDIS_LIVE_KEYS.queue)
+}
 
-let diskLoaded = false
-let lastQueueStatusSignature = ''
+function isDiskLoaded(): boolean {
+  const g = globalThis as GlobalWithQueue
+  return Boolean(g.__pomfret_imaging_queue_disk_loaded__?.[currentObservatorySiteId()])
+}
+
+function setDiskLoaded(v: boolean): void {
+  const g = globalThis as GlobalWithQueue
+  if (!g.__pomfret_imaging_queue_disk_loaded__) g.__pomfret_imaging_queue_disk_loaded__ = {}
+  g.__pomfret_imaging_queue_disk_loaded__[currentObservatorySiteId()] = v
+}
+
+function getLastQueueStatusSignature(): string {
+  const g = globalThis as GlobalWithQueue
+  return g.__pomfret_imaging_queue_sig__?.[currentObservatorySiteId()] ?? ''
+}
+
+function setLastQueueStatusSignature(sig: string): void {
+  const g = globalThis as GlobalWithQueue
+  if (!g.__pomfret_imaging_queue_sig__) g.__pomfret_imaging_queue_sig__ = {}
+  g.__pomfret_imaging_queue_sig__[currentObservatorySiteId()] = sig
+}
 
 type QueueFilePayload = { requests?: ImagingRequest[] }
 
 async function applyQueueList(list: ImagingRequest[]): Promise<void> {
   const mem = getMemory()
   mem.splice(0, mem.length, ...list.slice(-MAX_QUEUE))
-  diskLoaded = true
+  setDiskLoaded(true)
 }
 
 async function loadQueueFromKvIntoMemory(): Promise<'hit' | 'miss'> {
-  const raw = await kvGetString(KV_QUEUE_KEY)
+  const raw = await kvGetString(queueKvKey())
   if (raw === undefined) return 'miss'
   try {
     const remote = JSON.parse(raw) as QueueFilePayload
@@ -197,10 +238,10 @@ async function ensureLoadedFromDisk(): Promise<void> {
     }
   } else if (postgresReadsEnabled()) {
     await loadQueueFromPostgresIntoMemory()
-  } else if (!queueFile || diskLoaded) {
+  } else if (!queueFile || isDiskLoaded()) {
     // no-op
   } else {
-    diskLoaded = true
+    setDiskLoaded(true)
     const mem = getMemory()
     try {
       const raw = await readFile(queueFile, 'utf-8')
@@ -221,13 +262,13 @@ async function persist(): Promise<void> {
   const mem = getMemory()
   const snapshot = [...mem]
   const nextSig = queueStatusSignature(snapshot)
-  const statusChanged = nextSig !== lastQueueStatusSignature
+  const statusChanged = nextSig !== getLastQueueStatusSignature()
   if (kvEnabled()) {
-    await kvSetJson(KV_QUEUE_KEY, { requests: snapshot })
+    await kvSetJson(queueKvKey(), { requests: snapshot })
     const { mirrorImagingQueue } = await import('@/lib/db/mirror')
     await mirrorImagingQueue(snapshot)
     if (statusChanged) {
-      lastQueueStatusSignature = nextSig
+      setLastQueueStatusSignature(nextSig)
       emitSiteSessionsChanged('queue')
       emitAgentWakePollSequenceDebounced()
     }
@@ -237,7 +278,7 @@ async function persist(): Promise<void> {
     const { mirrorImagingQueue } = await import('@/lib/db/mirror')
     await mirrorImagingQueue(snapshot)
     if (statusChanged) {
-      lastQueueStatusSignature = nextSig
+      setLastQueueStatusSignature(nextSig)
       emitSiteSessionsChanged('queue')
       emitAgentWakePollSequenceDebounced()
     }
@@ -250,7 +291,7 @@ async function persist(): Promise<void> {
   await writeFile(tmp, payload, 'utf-8')
   await rename(tmp, queueFile)
   if (statusChanged) {
-    lastQueueStatusSignature = nextSig
+    setLastQueueStatusSignature(nextSig)
     emitSiteSessionsChanged('queue')
     emitAgentWakePollSequenceDebounced()
   }
@@ -639,10 +680,20 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
     return { error: '600s is required for stacked master mode.' }
   }
   const id = crypto.randomUUID()
+  const variableStarDurationOpts =
+    sequenceTemplate === 'variable_star'
+      ? {
+          raHours,
+          startMs: getTonightSchedulingWindow(new Date()).nauticalDuskUtc.getTime(),
+        }
+      : undefined
   const estimatedDurationSeconds =
     sequenceTemplate === 'variable_star'
       ? (() => {
-          const custom = variableStarDurationFromClientEstimate(input.estimatedDurationSeconds)
+          const custom = variableStarDurationFromClientEstimate(
+            input.estimatedDurationSeconds,
+            variableStarDurationOpts
+          )
           if (custom.ok) return custom.seconds
           return Math.max(
             0,
@@ -713,6 +764,7 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
   const ts = nowIso()
   const req: ImagingRequest = {
     id,
+    siteId: currentObservatorySiteId(),
     createdAt: ts,
     updatedAt: ts,
     status: 'pending',
@@ -850,10 +902,20 @@ export async function updatePendingRequestById(
     return { error: '600s is required for stacked master mode.' }
   }
 
+  const variableStarDurationOpts =
+    sequenceTemplate === 'variable_star'
+      ? {
+          raHours,
+          startMs: getTonightSchedulingWindow(new Date()).nauticalDuskUtc.getTime(),
+        }
+      : undefined
   const estimatedDurationSeconds =
     sequenceTemplate === 'variable_star'
       ? (() => {
-          const custom = variableStarDurationFromClientEstimate(input.estimatedDurationSeconds)
+          const custom = variableStarDurationFromClientEstimate(
+            input.estimatedDurationSeconds,
+            variableStarDurationOpts
+          )
           if (custom.ok) return custom.seconds
           return Math.max(
             0,

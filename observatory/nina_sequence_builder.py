@@ -500,6 +500,7 @@ def build_run_sequence(params: dict[str, Any]) -> dict[str, Any]:
         root["PomfretAstro"] = {
             "QueueId": queue_id,
             "OutputMode": params.get("outputMode") or "raw_zip",
+            "SequenceTemplate": kind,
             "FilterName": "G" if kind == "variable_star" else plans[0]["filterName"],
             "FilterPlans": plans,
             "SessionProgressHint": 'POST JSON to /api/imaging/session-progress with { "queueId": "<QueueId>", ... }',

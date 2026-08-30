@@ -14,7 +14,7 @@ import {
   type VariableStarFilterId,
 } from '@/lib/variable-star/filters'
 import { formatRaDecPair } from '@/lib/format-radec'
-import { POMFRET_SITE } from '@/lib/observatory-sites'
+import { observatorySiteFetch, useObservatorySite } from '@/components/observatory-site-provider'
 import {
   MIN_ALTITUDE_DEG,
   OBS_LAT_DEG,
@@ -74,7 +74,8 @@ import {
 import { queueStatusBadgeClass, statusLabel, type ObservatoryStatus } from '@/lib/remote/ui-status'
 import { skyCoordsForMosaicPanel } from '@/lib/imaging/project/panel-coords'
 import {
-  VARIABLE_STAR_SESSION_OVERHEAD_SEC,
+  variableStarBlockHoursFromTotalSeconds,
+  variableStarSessionDurationSeconds,
 } from '@/lib/imaging-session-overhead'
 import { parseProjectNightSubId } from '@/lib/imaging-project-ids'
 import {
@@ -96,7 +97,6 @@ import {
 } from '@/lib/glass-ui'
 
 const jsonHeaders: HeadersInit = { 'Content-Type': 'application/json' }
-const VARIABLE_STAR_SESSION_OVERHEAD_HOURS = VARIABLE_STAR_SESSION_OVERHEAD_SEC / 3600
 /** Pomfret Astro calibration library (Google Drive). */
 const POMFRET_CALIBRATION_LIBRARY_DRIVE_URL =
   'https://drive.google.com/drive/folders/1nWZly4-op0yazXUoyr8sAAB9Rm8Jl2D4'
@@ -203,8 +203,21 @@ function solarEventUtcForDate(date: Date, zenithDeg: number, isSunrise: boolean)
   return new Date(midnightUtc + eventMin * 60000)
 }
 
-function buildHourKey(at: Date): string {
-  return `${at.getFullYear()}-${at.getMonth()}-${at.getDate()}-${at.getHours()}`
+function buildHourKey(at: Date, timeZone?: string): string {
+  if (!timeZone) {
+    return `${at.getFullYear()}-${at.getMonth()}-${at.getDate()}-${at.getHours()}`
+  }
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    hourCycle: 'h23',
+  }).formatToParts(at)
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value)
+  // Match legacy key shape: month is 0-based.
+  return `${get('year')}-${get('month') - 1}-${get('day')}-${get('hour')}`
 }
 
 function parseHourKeyToMs(key: string): number | null {
@@ -343,6 +356,11 @@ function variableStarDurationButtonModel(
 }
 
 export default function RemotePage() {
+  const { siteId, site } = useObservatorySite()
+  const siteFetch = useCallback(
+    (input: string, init?: RequestInit) => observatorySiteFetch(input, siteId, init),
+    [siteId]
+  )
   const router = useRouter()
   const member = useMember()
   const isLoggedIn = member.status === 'authenticated'
@@ -467,7 +485,7 @@ export default function RemotePage() {
     const fetchTemp = async () => {
       try {
         const res = await fetch(
-          `https://api.open-meteo.com/v1/forecast?latitude=${POMFRET_SITE.weatherLat}&longitude=${POMFRET_SITE.weatherLon}&current=temperature_2m&timezone=UTC`
+          `https://api.open-meteo.com/v1/forecast?latitude=${site.weatherLat}&longitude=${site.weatherLon}&current=temperature_2m&timezone=UTC`
         )
         const data = await res.json()
         if (!cancelled && typeof data?.current?.temperature_2m === 'number') {
@@ -861,7 +879,7 @@ export default function RemotePage() {
   useEffect(() => {
     let mounted = true
     const loadStatus = async () => {
-      const res = await fetch('/api/imaging/observatory-status')
+      const res = await siteFetch('/api/imaging/observatory-status')
       const data = await res.json().catch(() => ({}))
       if (!mounted) return
       if (
@@ -890,7 +908,7 @@ export default function RemotePage() {
     let mounted = true
     const loadAdminWindows = async () => {
       try {
-        const res = await fetch('/api/imaging/schedule-control')
+        const res = await siteFetch('/api/imaging/schedule-control')
         const data = await res.json().catch(() => ({}))
         if (!mounted) return
         if (res.ok && data?.ok === true && Array.isArray(data.windows)) {
@@ -964,7 +982,7 @@ export default function RemotePage() {
     setVariableStarCatalogError(null)
     void (async () => {
       try {
-        const res = await fetch('/api/imaging/variable-stars')
+        const res = await siteFetch('/api/imaging/variable-stars')
         const data = await res.json().catch(() => ({}))
         if (cancelled) return
         if (!res.ok || data?.ok !== true || !Array.isArray(data.stars)) {
@@ -1007,7 +1025,7 @@ export default function RemotePage() {
       const scheduleEndSec = Math.floor(scheduleEnd.getTime() / 1000)
 
       try {
-        const res = await fetch(
+        const res = await siteFetch(
           `/api/imaging/tonight-weather-prediction?startSec=${scheduleStartSec}&endSec=${scheduleEndSec}`
         )
         const data = await res.json().catch(() => ({}))
@@ -1024,7 +1042,7 @@ export default function RemotePage() {
           if (Array.isArray(data.readyHourStartsSec)) {
             const keys = data.readyHourStartsSec
               .filter((v: unknown) => typeof v === 'number' && Number.isFinite(v))
-              .map((sec: number) => buildHourKey(new Date(sec * 1000)))
+              .map((sec: number) => buildHourKey(new Date(sec * 1000), site.timezone))
             const nowForMerge = new Date()
             setReadyWeatherHourKeys((prev) => mergeWithFrozenPastHours(prev, keys, nowForMerge))
           } else {
@@ -1046,7 +1064,7 @@ export default function RemotePage() {
                   r === 'cloud' || r === 'rain' || r === 'wind'
               )
               if (reasons.length === 0) continue
-              mapped[buildHourKey(new Date(hourStartSec * 1000))] = reasons
+              mapped[buildHourKey(new Date(hourStartSec * 1000), site.timezone)] = reasons
             }
             setNotPermittedReasonByHourKey(mapped)
           } else {
@@ -1055,7 +1073,7 @@ export default function RemotePage() {
           if (Array.isArray(data.nightHourStartsSec)) {
             const keys = data.nightHourStartsSec
               .filter((v: unknown) => typeof v === 'number' && Number.isFinite(v))
-              .map((sec: number) => buildHourKey(new Date(sec * 1000)))
+              .map((sec: number) => buildHourKey(new Date(sec * 1000), site.timezone))
             const nowForMerge = new Date()
             setNightWeatherHourKeys((prev) => mergeWithFrozenPastHours(prev, keys, nowForMerge))
           } else {
@@ -1093,7 +1111,7 @@ export default function RemotePage() {
   }, [])
 
   const refreshQueue = useCallback(async () => {
-    const res = await fetch('/api/imaging/current-sessions')
+    const res = await siteFetch('/api/imaging/current-sessions')
     const data = await res.json().catch(() => ({}))
     if (res.ok && data?.ok && Array.isArray(data.sessions)) {
       const items = data.sessions as Array<{
@@ -1412,43 +1430,37 @@ export default function RemotePage() {
     (terminalQueueStatus === 'in_progress' || terminalQueueStatus === 'scheduled')
 
   const showTonightWeatherHeadline = useMemo(
-    () => isBeforeTonightWeatherHeadline(new Date(scheduleNowMs)),
-    [scheduleNowMs]
+    () => isBeforeTonightWeatherHeadline(new Date(scheduleNowMs), site),
+    [scheduleNowMs, site]
   )
 
   const tonightSchedule = useMemo(() => {
     const now = new Date(scheduleNowMs)
-    const nowUtcMidnight = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
-    const todaySunrise = solarEventUtcForDate(nowUtcMidnight, 90.833, true)
-    const start = new Date(now)
-    start.setHours(16, 0, 0, 0)
-    // Switch to "new tonight" as soon as current time passes local sunrise.
-    if (now.getTime() < todaySunrise.getTime()) {
-      start.setDate(start.getDate() - 1)
-    }
-    const end = new Date(start)
-    end.setDate(end.getDate() + 1)
-    end.setHours(8, 0, 0, 0)
+    const strip = getTonightScheduleStrip(now, site)
+    const start = new Date(strip.windowStartMs)
+    const end = new Date(strip.windowEndMs)
 
     const points: Array<{ label: string; hourKey: string; hourStartMs: number }> = []
-    const cursor = new Date(start)
-    while (cursor <= end) {
+    for (let ms = strip.windowStartMs; ms <= strip.windowEndMs; ms += 60 * 60 * 1000) {
+      const cursor = new Date(ms)
       points.push({
-        label: cursor.toLocaleTimeString([], { hour: 'numeric' }),
-        hourKey: buildHourKey(cursor),
-        hourStartMs: cursor.getTime(),
+        label: cursor.toLocaleTimeString([], {
+          timeZone: site.timezone,
+          hour: 'numeric',
+        }),
+        hourKey: buildHourKey(cursor, site.timezone),
+        hourStartMs: ms,
       })
-      cursor.setHours(cursor.getHours() + 1)
     }
 
     const { sunsetUtc: sunset, civilDuskUtc: civilDusk, nauticalDuskUtc: nauticalDusk, astronomicalDarkUtc: astronomicalDark } =
-      getTonightScheduleEveningAstronomyUtc(now)
+      getTonightScheduleEveningAstronomyUtc(now, site)
     const {
       sunriseUtc: sunrise,
       civilDawnUtc: civilDawn,
       nauticalDawnUtc: nauticalDawn,
       astronomicalDawnUtc: astronomicalDawn,
-    } = getTonightScheduleMorningAstronomyUtc(now)
+    } = getTonightScheduleMorningAstronomyUtc(now, site)
 
     const eventBlocks = [
       { label: 'Sunset', startTime: sunset },
@@ -1477,31 +1489,32 @@ export default function RemotePage() {
         const startMs = Date.parse(w.startIso)
         const endMs = Date.parse(w.endIso)
         if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return null
-        const overlapStart = Math.max(start.getTime(), startMs)
-        const overlapEnd = Math.min(end.getTime(), endMs)
-        if (overlapEnd <= overlapStart) return null
-        const topPct = ((overlapStart - start.getTime()) / (end.getTime() - start.getTime())) * 100
-        const heightPct = ((overlapEnd - overlapStart) / (end.getTime() - start.getTime())) * 100
-        const label =
-          typeof w.description === 'string' && w.description.trim()
-            ? w.description.trim()
-            : 'Closed window'
-        return { id: w.id, topPct, heightPct, label }
+        const clippedStart = Math.max(startMs, start.getTime())
+        const clippedEnd = Math.min(endMs, end.getTime())
+        if (clippedEnd <= clippedStart) return null
+        const topPct = ((clippedStart - start.getTime()) / (end.getTime() - start.getTime())) * 100
+        const heightPct = ((clippedEnd - clippedStart) / (end.getTime() - start.getTime())) * 100
+        return {
+          id: w.id,
+          topPct,
+          heightPct,
+          label: w.description?.trim() || 'Closed',
+        }
       })
-      .filter((x): x is { id: string; topPct: number; heightPct: number; label: string } => x != null)
+      .filter((x): x is NonNullable<typeof x> => x != null)
 
     return { start, end, hours: points, eventBlocks, adminClosedBlocks, nowTopPct, nauticalDawn, nauticalDusk, astronomicalDawn }
-  }, [scheduleNowMs, adminClosedWindows])
+  }, [scheduleNowMs, adminClosedWindows, site])
 
   const tonightNightKey = useMemo(
-    () => getTonightScheduleStrip(new Date(scheduleNowMs)).nightKey,
-    [scheduleNowMs]
+    () => getTonightScheduleStrip(new Date(scheduleNowMs), site).nightKey,
+    [scheduleNowMs, site]
   )
 
   const persistScheduleBarPlacement = useCallback(
     async (queueId: string, nightKey: string, startMs: number, endMs: number) => {
       try {
-        await fetch('/api/imaging/session-schedule-placement', {
+        await siteFetch('/api/imaging/session-schedule-placement', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ queueId, nightKey, startMs, endMs }),
@@ -1571,6 +1584,27 @@ export default function RemotePage() {
     decDegreePart,
     decMinutePart,
     decSecondPart,
+  ])
+
+  const variableStarEstimatedDurationPreviewSeconds = useMemo(() => {
+    if (sessionType !== 'variable_star') return null
+    if (!variableStarDurationPick?.coordsOk) return null
+    if ((variableStarDurationPick.starHalfSteps ?? 0) < 1) return null
+    if (!variableStarDurationUserSelected) return null
+    const { nauticalDuskUtc } = getTonightSchedulingWindow(new Date(scheduleNowMs))
+    return Math.round(
+      variableStarSessionDurationSeconds({
+        blockHours: variableStarBlockHours,
+        raHours: variableStarDurationPick.raHours,
+        startMs: nauticalDuskUtc.getTime(),
+      })
+    )
+  }, [
+    sessionType,
+    variableStarDurationPick,
+    variableStarDurationUserSelected,
+    variableStarBlockHours,
+    scheduleNowMs,
   ])
 
   useEffect(() => {
@@ -2057,7 +2091,7 @@ export default function RemotePage() {
       .filter((x): x is { startMs: number; endMs: number } => x != null)
     const isPermittedAtMs = (ms: number): boolean => {
       if (readyHourKeySet.size === 0) return true
-      return readyHourKeySet.has(buildHourKey(new Date(ms)))
+      return readyHourKeySet.has(buildHourKey(new Date(ms), site.timezone))
     }
     const nextPermittedStartAtOrAfter = (ms: number): number | null => {
       if (readyHourStartsMs.length === 0) return ms
@@ -2076,7 +2110,7 @@ export default function RemotePage() {
         const hourEnd = hourStart + 60 * 60 * 1000
         const overlapStart = Math.max(startMs, hourStart)
         const overlapEnd = Math.min(endMs, hourEnd)
-        if (overlapEnd > overlapStart && readyHourKeySet.has(buildHourKey(cursor))) {
+        if (overlapEnd > overlapStart && readyHourKeySet.has(buildHourKey(cursor, site.timezone))) {
           covered += overlapEnd - overlapStart
         }
         cursor.setHours(cursor.getHours() + 1)
@@ -2441,7 +2475,7 @@ export default function RemotePage() {
 
   const downloadSessionFile = useCallback(
     async (queueId: string, password: string): Promise<string | null> => {
-      const res = await fetch(`/api/imaging/download?queueId=${encodeURIComponent(queueId)}&mode=json`, {
+      const res = await siteFetch(`/api/imaging/download?queueId=${encodeURIComponent(queueId)}&mode=json`, {
         credentials: 'include',
         headers: password ? { 'x-session-password': password } : {},
       })
@@ -2461,7 +2495,7 @@ export default function RemotePage() {
       const password = passwordOverride ?? resolveSessionPassword(id)
       if (!password && !isAdmin && !canAccessSessionId(id)) return
       try {
-        const res = await fetch(
+        const res = await siteFetch(
           `/api/imaging/preview?queueId=${encodeURIComponent(id)}&mode=json&_=${Date.now()}`,
           {
             credentials: 'include',
@@ -2541,7 +2575,7 @@ export default function RemotePage() {
       }
       const headers: HeadersInit = password ? { 'x-session-password': password } : {}
       try {
-        const res = await fetch(`/api/imaging/queue/${encodeURIComponent(sessionId)}/progress`, {
+        const res = await siteFetch(`/api/imaging/queue/${encodeURIComponent(sessionId)}/progress`, {
           cache: 'no-store',
           headers,
         })
@@ -2698,9 +2732,16 @@ export default function RemotePage() {
       }
     }
 
+    const { nauticalDuskUtc } = getTonightSchedulingWindow(new Date(scheduleNowMs))
     const estimatedDurationSeconds =
       sessionType === 'variable_star'
-        ? Math.round((variableStarBlockHours + VARIABLE_STAR_SESSION_OVERHEAD_HOURS) * 3600)
+        ? Math.round(
+            variableStarSessionDurationSeconds({
+              blockHours: variableStarBlockHours,
+              raHours: variableStarDurationPick!.raHours,
+              startMs: nauticalDuskUtc.getTime(),
+            })
+          )
         : mosaicFilterPlansByPanel
           ? mosaicFilterPlansByPanel.reduce((sum, plans) => sum + estimateDurationSecondsFromPlans(plans), 0)
           : estimateDurationSecondsFromPlans(normalizedPlans)
@@ -2716,7 +2757,7 @@ export default function RemotePage() {
 
     const endpoint = editingSessionId ? `/api/imaging/queue/${encodeURIComponent(editingSessionId)}` : '/api/imaging/queue'
     const editCredential = editingSessionId ? sessionPasswords[editingSessionId] ?? '' : ''
-    const res = await fetch(endpoint, {
+    const res = await siteFetch(endpoint, {
       method: editingSessionId ? 'PUT' : 'POST',
       credentials: 'include',
       headers: {
@@ -2795,7 +2836,7 @@ export default function RemotePage() {
   }
 
   async function handleDeleteRequest(id: string, password: string) {
-    const res = await fetch(`/api/imaging/queue/${id}`, {
+    const res = await siteFetch(`/api/imaging/queue/${id}`, {
       method: 'DELETE',
       credentials: 'include',
       headers: password.trim() ? { 'x-delete-credential': password.trim() } : {},
@@ -2813,7 +2854,7 @@ export default function RemotePage() {
 
   const openProjectPickerAfterAccess = useCallback(
     async (projectId: string, purpose: 'progress' | 'download') => {
-      const res = await fetch(`/api/imaging/queue/${encodeURIComponent(projectId)}/progress`, {
+      const res = await siteFetch(`/api/imaging/queue/${encodeURIComponent(projectId)}/progress`, {
         credentials: 'include',
       })
       const data = await res.json().catch(() => ({}))
@@ -2967,10 +3008,15 @@ export default function RemotePage() {
     }
     if (item.sessionType === 'variable_star') {
       const est = item.estimatedDurationSeconds
-      if (typeof est === 'number' && Number.isFinite(est) && est > VARIABLE_STAR_SESSION_OVERHEAD_SEC) {
-        const blockH = est / 3600 - VARIABLE_STAR_SESSION_OVERHEAD_HOURS
-        const snapped = Math.round(blockH * 2) / 2
-        setVariableStarBlockHours(Number.isFinite(snapped) && snapped >= 0.5 ? snapped : 1)
+      const raHours =
+        typeof item.raHours === 'number' && Number.isFinite(item.raHours) ? item.raHours : undefined
+      const { nauticalDuskUtc } = getTonightSchedulingWindow(new Date(scheduleNowMs))
+      if (typeof est === 'number' && Number.isFinite(est) && est > 0) {
+        const blockH = variableStarBlockHoursFromTotalSeconds(est, {
+          raHours,
+          startMs: nauticalDuskUtc.getTime(),
+        })
+        setVariableStarBlockHours(blockH != null && blockH >= 0.5 ? blockH : 1)
       } else {
         setVariableStarBlockHours(1)
       }
@@ -3109,7 +3155,7 @@ export default function RemotePage() {
 
         setVariableStarSimbadSearching(true)
         try {
-          const simbadRes = await fetch(`/api/imaging/variable-star-lookup?query=${encodeURIComponent(trimmedQuery)}`)
+          const simbadRes = await siteFetch(`/api/imaging/variable-star-lookup?query=${encodeURIComponent(trimmedQuery)}`)
           const simbadData = await simbadRes.json().catch(() => ({}))
           if (!simbadRes.ok || simbadData?.ok !== true || !simbadData?.star) {
             const simbadError =
@@ -3126,7 +3172,7 @@ export default function RemotePage() {
         return
       }
 
-      const res = await fetch(`/api/imaging/object-resolve?query=${encodeURIComponent(trimmedQuery)}`)
+      const res = await siteFetch(`/api/imaging/object-resolve?query=${encodeURIComponent(trimmedQuery)}`)
       const data = await res.json().catch(() => ({}))
       if (!res.ok || data?.ok !== true || !data?.object) {
         setCatalogLookupError(typeof data.error === 'string' ? data.error : 'Target lookup failed.')
@@ -3302,6 +3348,7 @@ export default function RemotePage() {
           setSaveModalName={setSaveModalName}
           setShowSaveRemoteSessionModal={setShowSaveRemoteSessionModal}
           dsoEstimatedDurationPreviewSeconds={dsoEstimatedDurationPreviewSeconds}
+          variableStarEstimatedDurationPreviewSeconds={variableStarEstimatedDurationPreviewSeconds}
         />
         <div className="hidden lg:block h-full min-h-[16rem] w-px bg-black/10 dark:bg-white/10" />
         <RemoteScheduleStrip

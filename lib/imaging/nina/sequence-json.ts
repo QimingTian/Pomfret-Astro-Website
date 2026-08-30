@@ -591,6 +591,7 @@ export function buildNinaSequenceJson(params: NinaSequenceParams): string {
     root['PomfretAstro'] = {
       QueueId: pomfretQueueId,
       OutputMode: params.outputMode ?? 'raw_zip',
+      SequenceTemplate: templateKind,
       FilterName: templateKind === 'variable_star' ? 'G' : (normalizedPlans[0]?.filterName ?? params.filterName),
       FilterPlans: normalizedPlans,
       SessionProgressHint:

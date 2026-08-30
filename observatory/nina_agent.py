@@ -12,6 +12,7 @@ Usage:
   2) Edit the CONFIG section below (paths only — no secrets in git).
   3) Set Windows environment variables (same names as Vercel where noted):
        IMAGING_QUEUE_SECRET, POMFRET_CRON_SECRET (same as CRON_SECRET),
+       OBSERVATORY_SITE_ID (pomfret or cygnus — adaptive poll schedule),
        R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET,
        PDU_USER, PDU_PASSWORD (Digital Loggers PDU at 192.168.121.5).
   4) Run: python nina_agent.py
@@ -35,7 +36,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 _AGENT_DIR = Path(__file__).resolve().parent
 if str(_AGENT_DIR) not in sys.path:
@@ -44,6 +45,13 @@ from nina_sequence_builder import (
     is_estop_job_or_sequence,
     job_fingerprint,
     materialize_poll_payload,
+)
+from agent_poll_schedule import (
+    DAY_POLL_SECONDS,
+    NIGHT_POLL_SECONDS,
+    agent_poll_interval_seconds,
+    resolve_agent_site,
+    seconds_until_observatory_phase_change,
 )
 
 try:
@@ -112,7 +120,10 @@ RECONCILE_BEARER = ""
 # Optional bearer for nina-sequence / uploads. Required for production pomfretastro.org URLs.
 TOKEN = ""
 
-POLL_SECONDS = 45
+# Adaptive idle poll: night 45s, daytime closed window 20min (see agent_poll_schedule.py).
+# Override site on multi-observatory PCs: Windows env OBSERVATORY_SITE_ID=cygnus
+OBSERVATORY_SITE_ID = "pomfret"
+POLL_SECONDS = NIGHT_POLL_SECONDS  # legacy alias; idle polls use agent_poll_interval_seconds()
 FALLBACK_POLL_SECONDS = 300
 SSE_CONNECTED_WAIT_SECONDS = 60
 JOBS_DIR = r"C:\Users\Observatory\Downloads\NinaJobs"
@@ -184,6 +195,8 @@ PREVIEW_JPEG_QUALITY = 72
 PREVIEW_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".fit", ".fits"}
 # API receives latest preview and keeps it until replaced.
 PREVIEW_UPLOAD_URL = "https://www.pomfretastro.org/api/imaging/preview"
+# Variable-star sessions: at most one live preview upload per interval (DSO unchanged).
+PREVIEW_VARIABLE_STAR_MIN_INTERVAL_SECONDS = 600
 
 # -------- Siril stacking config --------
 # Set to True to enable stacked master output when output mode is "stacked_master".
@@ -557,6 +570,19 @@ def _wait_agent_wake(timeout_sec: float) -> Optional[str]:
     return None
 
 
+def _agent_observatory_site():
+    site_id = os.environ.get("OBSERVATORY_SITE_ID", OBSERVATORY_SITE_ID)
+    return resolve_agent_site(site_id)
+
+
+def idle_poll_timeout_seconds() -> float:
+    """Adaptive idle poll, capped so twilight flips reschedule promptly."""
+    site = _agent_observatory_site()
+    base = agent_poll_interval_seconds(site=site)
+    phase_cap = seconds_until_observatory_phase_change(site=site)
+    return min(base, phase_cap)
+
+
 def sleep_between_polls() -> Optional[str]:
     global _last_reconcile_mono
     if _agent_sse_connected_recently():
@@ -566,7 +592,7 @@ def sleep_between_polls() -> Optional[str]:
             _last_reconcile_mono = now_mono
             try_reconcile_queue_schedule()
     else:
-        timeout = float(POLL_SECONDS)
+        timeout = idle_poll_timeout_seconds()
         now_mono = time.monotonic()
         if now_mono - _last_reconcile_mono >= RECONCILE_INTERVAL_SEC:
             _last_reconcile_mono = now_mono
@@ -738,6 +764,65 @@ def extract_sequence_metadata(content: bytes) -> tuple[Optional[str], str, Optio
         if value not in (None, ""):
             return str(value), output_mode, filter_name
     return None, output_mode, filter_name
+
+
+_preview_last_upload_monotonic: Dict[str, float] = {}
+
+
+def _sequence_tree_has_type(node: Any, needle: str) -> bool:
+    if isinstance(node, dict):
+        t = node.get("$type")
+        if isinstance(t, str) and needle in t:
+            return True
+        for value in node.values():
+            if _sequence_tree_has_type(value, needle):
+                return True
+    elif isinstance(node, list):
+        for item in node:
+            if _sequence_tree_has_type(item, needle):
+                return True
+    return False
+
+
+def is_variable_star_sequence(content: bytes) -> bool:
+    """True for variable-star imaging sequences (metadata or template markers)."""
+    try:
+        payload = json.loads(content.decode("utf-8"))
+    except Exception:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    pomfret = payload.get("PomfretAstro")
+    if isinstance(pomfret, dict):
+        if pomfret.get("SequenceTemplate") == "variable_star":
+            return True
+    return _sequence_tree_has_type(payload, "CalculateExposureTime") or _sequence_tree_has_type(
+        payload, "SmartExposure"
+    )
+
+
+def preview_throttle_allows(
+    session_id: str,
+    *,
+    variable_star: bool,
+    force: bool = False,
+    now_monotonic: Optional[float] = None,
+) -> bool:
+    if not variable_star or force:
+        return True
+    if PREVIEW_VARIABLE_STAR_MIN_INTERVAL_SECONDS <= 0:
+        return True
+    now = time.monotonic() if now_monotonic is None else now_monotonic
+    last = _preview_last_upload_monotonic.get(session_id)
+    if last is None:
+        return True
+    return (now - last) >= float(PREVIEW_VARIABLE_STAR_MIN_INTERVAL_SECONDS)
+
+
+def mark_preview_uploaded(session_id: str, when_monotonic: Optional[float] = None) -> None:
+    _preview_last_upload_monotonic[session_id] = (
+        time.monotonic() if when_monotonic is None else when_monotonic
+    )
 
 
 def snapshot_output_files(root_dir: Path) -> Dict[str, int]:
@@ -953,22 +1038,44 @@ def upload_preview_to_api(session_id: str, preview_path: Path) -> bool:
     return True
 
 
-def try_push_live_preview(session_id: Optional[str], run_id: str, files: list[Path], jobs_dir: Path) -> None:
+def try_push_live_preview(session_id: Optional[str], run_id: str, files: list[Path], jobs_dir: Path) -> bool:
     if not PREVIEW_ENABLED or not session_id or not files:
-        return
+        return False
     source = pick_preview_source(files)
     if not source:
-        return
+        return False
     preview_path = build_preview_image(source, run_id, jobs_dir)
     if not preview_path:
-        return
+        return False
     try:
-        upload_preview_to_api(session_id, preview_path)
+        return upload_preview_to_api(session_id, preview_path)
     finally:
         try:
             preview_path.unlink(missing_ok=True)
         except OSError:
             pass
+
+
+def maybe_push_live_preview(
+    session_id: str,
+    run_id: str,
+    files: list[Path],
+    jobs_dir: Path,
+    *,
+    variable_star: bool,
+    force: bool = False,
+) -> bool:
+    if not preview_throttle_allows(session_id, variable_star=variable_star, force=force):
+        return False
+    if not try_push_live_preview(session_id, run_id, files, jobs_dir):
+        return False
+    mark_preview_uploaded(session_id)
+    if variable_star:
+        log(
+            f"Variable-star live preview uploaded for session {session_id} "
+            f"(min interval {PREVIEW_VARIABLE_STAR_MIN_INTERVAL_SECONDS}s)."
+        )
+    return True
 
 
 def make_zip_for_session(files: list[Path], run_id: str, jobs_dir: Path, output_root: Path) -> Optional[Path]:
@@ -1230,6 +1337,8 @@ def wait_for_nina_and_stream_previews(
     output_root: Path,
     jobs_dir: Path,
     baseline_snapshot: Dict[str, int],
+    *,
+    variable_star: bool = False,
 ) -> Optional[bytes]:
     """
     Block until NINA exits. Poll for Emergency STOP every ESTOP_POLL_SECONDS.
@@ -1242,6 +1351,17 @@ def wait_for_nina_and_stream_previews(
     while True:
         code = process.poll()
         if code is not None:
+            if PREVIEW_ENABLED and session_id and output_mode != OUTPUT_MODE_NONE and variable_star:
+                changed = find_new_or_updated_files(rolling_snapshot, output_root)
+                if changed:
+                    maybe_push_live_preview(
+                        session_id,
+                        run_id,
+                        changed,
+                        jobs_dir,
+                        variable_star=True,
+                        force=True,
+                    )
             log(f"NINA exited with code {code}. Resuming URL polling.")
             return None
         now_monotonic = time.monotonic()
@@ -1258,7 +1378,13 @@ def wait_for_nina_and_stream_previews(
         if PREVIEW_ENABLED and session_id and output_mode != OUTPUT_MODE_NONE:
             changed = find_new_or_updated_files(rolling_snapshot, output_root)
             if changed:
-                try_push_live_preview(session_id, run_id, changed, jobs_dir)
+                maybe_push_live_preview(
+                    session_id,
+                    run_id,
+                    changed,
+                    jobs_dir,
+                    variable_star=variable_star,
+                )
                 for path in changed:
                     try:
                         rolling_snapshot[str(path)] = path.stat().st_mtime_ns
@@ -1282,6 +1408,13 @@ def handle_sequence_launch(
     write_last_fingerprint(jobs_dir, sequence_fingerprint(content))
     is_estop = is_estop_sequence_content(content)
     session_id, output_mode, session_filter = extract_sequence_metadata(content)
+    variable_star = is_variable_star_sequence(content)
+    if variable_star and session_id:
+        _preview_last_upload_monotonic.pop(session_id, None)
+        log(
+            f"Variable-star session: live preview uploads throttled to "
+            f"{PREVIEW_VARIABLE_STAR_MIN_INTERVAL_SECONDS}s."
+        )
     if session_id:
         run_id = sanitize_for_key(session_id)
         if is_estop:
@@ -1311,6 +1444,7 @@ def handle_sequence_launch(
                 output_root=output_root,
                 jobs_dir=jobs_dir,
                 baseline_snapshot=before_snapshot,
+                variable_star=variable_star,
             )
     finally:
         if pdu_powered:
@@ -1380,6 +1514,12 @@ def run_loop() -> None:
         threading.Thread(target=agent_events_reader_loop, name="agent-events-sse", daemon=True).start()
 
     log("Agent started.")
+    _site = _agent_observatory_site()
+    log(
+        f"Adaptive poll: site={_site.id} tz={_site.timezone} "
+        f"night={NIGHT_POLL_SECONDS}s day={DAY_POLL_SECONDS}s "
+        f"(ESTOP while imaging stays {ESTOP_POLL_SECONDS}s)"
+    )
     last_pulsed_nina_running: Optional[bool] = None
 
     while True:

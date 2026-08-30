@@ -14,9 +14,6 @@ import { formatDurationShort } from '@/lib/remote/format'
 import type { FilterPlanFormRow } from '@/lib/remote/mosaic-form'
 import { statusLabel, type ObservatoryStatus } from '@/lib/remote/ui-status'
 import {
-  VARIABLE_STAR_SESSION_OVERHEAD_SEC,
-} from '@/lib/imaging-session-overhead'
-import {
   glassPillDisabled,
   glassPillFullWidthMd,
   glassPillMd,
@@ -26,8 +23,6 @@ import {
   glassPillToggleIdle,
   glassPillToggleIdleMd,
 } from '@/lib/glass-ui'
-
-const VARIABLE_STAR_SESSION_OVERHEAD_HOURS = VARIABLE_STAR_SESSION_OVERHEAD_SEC / 3600
 
 const FILTER_OPTIONS = [
   { value: 'L', label: 'Luminance' },
@@ -199,6 +194,7 @@ export type RemoteSessionFormProps = {
   setSaveModalName: Dispatch<SetStateAction<string>>
   setShowSaveRemoteSessionModal: Dispatch<SetStateAction<boolean>>
   dsoEstimatedDurationPreviewSeconds: number | null
+  variableStarEstimatedDurationPreviewSeconds: number | null
 }
 
 export function RemoteSessionForm({
@@ -298,6 +294,7 @@ export function RemoteSessionForm({
   setSaveModalName,
   setShowSaveRemoteSessionModal,
   dsoEstimatedDurationPreviewSeconds,
+  variableStarEstimatedDurationPreviewSeconds,
 }: RemoteSessionFormProps) {
   return (
         <section className="max-w-3xl min-w-0">
@@ -1027,13 +1024,9 @@ export function RemoteSessionForm({
           <p className="sm:col-span-2 text-xs text-gray-500">
             Estimated duration:{' '}
             {sessionType === 'variable_star'
-              ? !variableStarDurationPick?.coordsOk ||
-                (variableStarDurationPick?.starHalfSteps ?? 0) < 1 ||
-                !variableStarDurationUserSelected
+              ? variableStarEstimatedDurationPreviewSeconds == null
                 ? '--'
-                : formatDurationShort(
-                    (variableStarBlockHours + VARIABLE_STAR_SESSION_OVERHEAD_HOURS) * 3600
-                  )
+                : formatDurationShort(variableStarEstimatedDurationPreviewSeconds)
               : dsoEstimatedDurationPreviewSeconds == null
                 ? '--'
                 : formatDurationShort(dsoEstimatedDurationPreviewSeconds)}

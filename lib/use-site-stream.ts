@@ -87,7 +87,7 @@ export function useSiteStream(handlers: SiteStreamHandlers, enabled = true): Sit
     }
   }
 
-  useAdaptivePoll('site', poll, { enabled, imagingActive: siteImagingActive })
+  useAdaptivePoll('site', poll, { enabled, imagingActive: siteImagingActive, resetKey: siteId })
 
   return { siteImagingActive }
 }

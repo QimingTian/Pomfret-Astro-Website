@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSiteStream } from '@/lib/use-site-stream'
-import { AdminDashboardGrid } from '@/app/dashboard/admin/admin-dashboard-grid'
+import { AccountWorkspacePanels } from '@/app/dashboard/account/account-workspace-panels'
 import { AccountFullBleedRule } from '@/app/dashboard/account/account-full-bleed-rule'
 import { accountTwoColGridAccountEmergency } from '@/app/dashboard/account/account-two-col-layout'
 import { AccountTwoColRow } from '@/app/dashboard/account/account-two-col-row'
@@ -311,7 +311,7 @@ export function AdminAccountDashboard({ user }: { user: PublicMemberUser }) {
 
       <AccountFullBleedRule />
 
-      <AdminDashboardGrid />
+      <AccountWorkspacePanels isAdmin />
     </div>
   )
 }

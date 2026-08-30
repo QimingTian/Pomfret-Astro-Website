@@ -11,6 +11,8 @@ import {
 type Options = {
   enabled?: boolean
   imagingActive?: boolean
+  /** When this changes (e.g. observatory site id), poll immediately with the new context. */
+  resetKey?: string | number
 }
 
 /**
@@ -22,7 +24,7 @@ export function useAdaptivePoll(
   callback: () => void | Promise<void>,
   options: Options = {}
 ): void {
-  const { enabled = true, imagingActive = false } = options
+  const { enabled = true, imagingActive = false, resetKey } = options
   const callbackRef = useRef(callback)
   callbackRef.current = callback
   const imagingRef = useRef(imagingActive)
@@ -87,5 +89,5 @@ export function useAdaptivePoll(
       clearTimers()
       document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [kind, enabled, imagingActive])
+  }, [kind, enabled, imagingActive, resetKey])
 }

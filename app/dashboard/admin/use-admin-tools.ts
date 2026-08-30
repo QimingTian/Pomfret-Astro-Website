@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { observatorySiteFetch, useObservatorySite } from '@/components/observatory-site-provider'
 import { useMember } from '@/hooks/use-member'
 import { useSiteStream } from '@/lib/use-site-stream'
 
@@ -69,6 +70,7 @@ export function parseTonightTimeToDate(value: string, windowStart: Date): Date |
 
 export function useAdminTools() {
   const member = useMember()
+  const { siteId } = useObservatorySite()
   const authorized = member.status === 'authenticated' && member.isAdmin
   const [mode, setMode] = useState<ObservatoryMode>('manual')
   const [status, setStatus] = useState<ObservatoryStatus>('ready')
@@ -92,23 +94,40 @@ export function useAdminTools() {
 
   const adminHeaders = useMemo((): HeadersInit => ({}), [])
 
+  const siteFetch = useCallback(
+    (input: string, init?: RequestInit) =>
+      observatorySiteFetch(input, siteId, { credentials: 'include', cache: 'no-store', ...init }),
+    [siteId]
+  )
+
+  const loadObservatoryStatus = useCallback(async () => {
+    try {
+      const res = await siteFetch('/api/imaging/observatory-status')
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data?.status) return
+      if (data.mode === 'manual' || data.mode === 'auto') setMode(data.mode)
+      setStatus(data.status as ObservatoryStatus)
+    } catch {
+      // ignore
+    }
+  }, [siteFetch])
+
   const loadEmergencyStopStatus = useCallback(async () => {
     try {
-      const res = await fetch('/api/imaging/emergency-stop', { credentials: 'include', cache: 'no-store' })
+      const res = await siteFetch('/api/imaging/emergency-stop')
       const data = await res.json().catch(() => ({}))
       if (!res.ok || data?.ok !== true) return
       setEmergencyStopBlocking(Boolean(data.blocking))
     } catch {
       // ignore poll errors
     }
-  }, [])
+  }, [siteFetch])
 
   const loadLog = useCallback(async () => {
     setLogLoading(true)
     setLogError(null)
     try {
-      const res = await fetch('/api/imaging/audit-log?limit=200', {
-        credentials: 'include',
+      const res = await siteFetch('/api/imaging/audit-log?limit=200', {
         headers: adminHeaders,
       })
       const data = await res.json().catch(() => ({}))
@@ -121,32 +140,12 @@ export function useAdminTools() {
     } finally {
       setLogLoading(false)
     }
-  }, [adminHeaders])
-
-  useEffect(() => {
-    if (!authorized) return
-    void loadLog()
-  }, [authorized, loadLog])
-
-  useEffect(() => {
-    if (!authorized) return
-    void (async () => {
-      try {
-        const res = await fetch('/api/imaging/observatory-status', { credentials: 'include' })
-        const data = await res.json().catch(() => ({}))
-        if (!res.ok || !data?.status) return
-        if (data.mode === 'manual' || data.mode === 'auto') setMode(data.mode)
-        setStatus(data.status as ObservatoryStatus)
-      } catch {
-        // ignore
-      }
-    })()
-  }, [authorized])
+  }, [adminHeaders, siteFetch])
 
   const loadClosedWindows = useCallback(async () => {
     setScheduleError(null)
     try {
-      const res = await fetch('/api/imaging/schedule-control')
+      const res = await siteFetch('/api/imaging/schedule-control')
       const data = await res.json().catch(() => ({}))
       if (!res.ok || data?.ok !== true || !Array.isArray(data.windows)) {
         throw new Error('Failed to load schedule control')
@@ -168,19 +167,13 @@ export function useAdminTools() {
     } catch {
       setScheduleError('Unable to load schedule control.')
     }
-  }, [])
-
-  useEffect(() => {
-    if (!authorized) return
-    void loadClosedWindows()
-  }, [authorized, loadClosedWindows])
+  }, [siteFetch])
 
   const loadSessionControl = useCallback(async () => {
     setSessionLoading(true)
     setSessionError(null)
     try {
-      const res = await fetch('/api/imaging/session-control', {
-        credentials: 'include',
+      const res = await siteFetch('/api/imaging/session-control', {
         headers: adminHeaders,
       })
       const data = await res.json().catch(() => ({}))
@@ -193,20 +186,53 @@ export function useAdminTools() {
     } finally {
       setSessionLoading(false)
     }
-  }, [adminHeaders])
+  }, [adminHeaders, siteFetch])
+
+  const reloadSiteScopedAdminData = useCallback(async () => {
+    await Promise.all([
+      loadObservatoryStatus(),
+      loadEmergencyStopStatus(),
+      loadLog(),
+      loadClosedWindows(),
+      loadSessionControl(),
+    ])
+  }, [
+    loadClosedWindows,
+    loadEmergencyStopStatus,
+    loadLog,
+    loadObservatoryStatus,
+    loadSessionControl,
+  ])
 
   useEffect(() => {
     if (!authorized) return
-    void loadSessionControl()
-  }, [authorized, loadSessionControl])
-
-  useEffect(() => {
-    if (!authorized) return
-    void loadEmergencyStopStatus()
-  }, [authorized, loadEmergencyStopStatus])
+    setMode('manual')
+    setStatus('ready')
+    setLogEntries([])
+    setClosedWindows([])
+    setSessionRows([])
+    setScheduleError(null)
+    setLogError(null)
+    setSessionError(null)
+    void reloadSiteScopedAdminData()
+  }, [authorized, siteId, reloadSiteScopedAdminData])
 
   useSiteStream(
     {
+      onObservatoryStatus: (event) => {
+        if (event.mode === 'manual' || event.mode === 'auto') setMode(event.mode)
+        const next = event.status
+        if (
+          next === 'ready' ||
+          next === 'busy_in_use' ||
+          next === 'disconnected' ||
+          next === 'closed_weather_not_permitted' ||
+          next === 'closed_daytime' ||
+          next === 'closed_observatory_maintenance'
+        ) {
+          setStatus(next)
+        }
+      },
       onEstop: (event) => {
         setEmergencyStopBlocking(Boolean(event.blocking))
       },
@@ -232,9 +258,8 @@ export function useAdminTools() {
     setSessionActionId(sessionId)
     setSessionError(null)
     try {
-      const res = await fetch('/api/imaging/session-control', {
+      const res = await siteFetch('/api/imaging/session-control', {
         method: 'POST',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json', ...adminHeaders },
         body: JSON.stringify({ action, sessionId }),
       })
@@ -258,9 +283,8 @@ export function useAdminTools() {
   async function updateStatus(next: ObservatoryStatus) {
     setSaving(true)
     try {
-      const res = await fetch('/api/imaging/observatory-status', {
+      const res = await siteFetch('/api/imaging/observatory-status', {
         method: 'PATCH',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json', ...adminHeaders },
         body: JSON.stringify({ status: next }),
       })
@@ -280,9 +304,8 @@ export function useAdminTools() {
   async function updateMode(next: ObservatoryMode) {
     setSaving(true)
     try {
-      const res = await fetch('/api/imaging/observatory-status', {
+      const res = await siteFetch('/api/imaging/observatory-status', {
         method: 'PATCH',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json', ...adminHeaders },
         body: JSON.stringify({ mode: next }),
       })
@@ -330,9 +353,8 @@ export function useAdminTools() {
         setScheduleError('End must be after start.')
         return
       }
-      const res = await fetch('/api/imaging/schedule-control', {
+      const res = await siteFetch('/api/imaging/schedule-control', {
         method: 'POST',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json', ...adminHeaders },
         body: JSON.stringify({
           startIso: startDate.toISOString(),
@@ -358,6 +380,7 @@ export function useAdminTools() {
   return {
     member,
     authorized,
+    siteId,
     mode,
     status,
     saving,
@@ -379,6 +402,7 @@ export function useAdminTools() {
     sessionActionId,
     emergencyStopBlocking,
     adminHeaders,
+    siteFetch,
     loadLog,
     loadClosedWindows,
     loadSessionControl,

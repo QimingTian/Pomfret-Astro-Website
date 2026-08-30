@@ -52,10 +52,15 @@ export function useObservatoryEnvelope(options?: {
   }, [applyEnvelope, url, siteId])
 
   useEffect(() => {
+    setMode(null)
+    setServerStatus(null)
     void loadEnvelope()
-  }, [loadEnvelope])
+  }, [loadEnvelope, siteId])
 
-  useAdaptivePoll('observatory', loadEnvelope, { enabled: !siteStreamEnabled })
+  useAdaptivePoll('observatory', loadEnvelope, {
+    enabled: !siteStreamEnabled,
+    resetKey: siteId,
+  })
 
   useSiteStream(
     {

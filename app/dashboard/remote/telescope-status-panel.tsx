@@ -4,9 +4,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { observatorySiteFetch, useObservatorySite } from '@/components/observatory-site-provider'
 import { useAdaptivePoll } from '@/hooks/use-adaptive-poll'
-import { OBS_LON_DEG } from '@/lib/target-altitude'
 import { finiteOrNull, gemSpinDeltasDeg, localSiderealTimeHours } from '@/lib/mount-gem-angles'
+import type { ObservatorySiteId } from '@/lib/observatory-sites'
 
 type MountSample = {
   connected?: boolean
@@ -34,7 +35,14 @@ const BLENDER_Z_IN_GLTF = new THREE.Vector3(0, 1, 0)
 const RA_LOCAL_AXIS = BLENDER_Z_IN_GLTF
 const DEC_LOCAL_AXIS = BLENDER_Z_IN_GLTF
 const TELEMETRY_STALE_MS = 15_000
-const MODEL_URL = '/telescope-models/paramount-me.glb?v=spin-hierarchy-20260715'
+/** Pomfret keeps the original C14 / Paramount GLB — never overwrite that file. */
+const POMFRET_MODEL_URL = '/telescope-models/paramount-me.glb?v=spin-hierarchy-20260715'
+/** Cygnus: RC14 truss OTA + Amsterdam latitude wedge (separate asset). */
+const CYGNUS_MODEL_URL = '/telescope-models/cygnus-rc14.glb?v=rc14-amsterdam-20260831'
+
+function telescopeStatusModelUrl(siteId: ObservatorySiteId): string {
+  return siteId === 'cygnus' ? CYGNUS_MODEL_URL : POMFRET_MODEL_URL
+}
 
 type GemTarget = {
   raDeltaDeg: number
@@ -203,7 +211,11 @@ function makeCompassLabelSprite(text: string): THREE.Sprite {
   return sprite
 }
 
-function resolveLstHours(sample: MountSample, serverNowUtc: string | undefined): number | null {
+function resolveLstHours(
+  sample: MountSample,
+  serverNowUtc: string | undefined,
+  observerLonDeg: number
+): number | null {
   const fromPlugin = finiteOrNull(sample.siderealTimeHours)
   if (fromPlugin != null) return fromPlugin
   const utc =
@@ -212,7 +224,7 @@ function resolveLstHours(sample: MountSample, serverNowUtc: string | undefined):
     (serverNowUtc && Date.parse(serverNowUtc)) ||
     Date.now()
   if (!Number.isFinite(utc)) return null
-  return localSiderealTimeHours(new Date(utc), OBS_LON_DEG)
+  return localSiderealTimeHours(new Date(utc), observerLonDeg)
 }
 
 function findObjectByName(root: THREE.Object3D, name: string): THREE.Object3D | null {
@@ -228,6 +240,7 @@ function ncpRestTarget(): GemTarget {
 }
 
 export function TelescopeStatusPanel() {
+  const { siteId, site } = useObservatorySite()
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const gemTargetRef = useRef<GemTarget>(ncpRestTarget())
   const gemCurrentRef = useRef<GemTarget>(ncpRestTarget())
@@ -262,7 +275,7 @@ export function TelescopeStatusPanel() {
 
     const ra = finiteOrNull(sample.raHours)
     const dec = finiteOrNull(sample.decDeg)
-    const lst = resolveLstHours(sample, serverNowUtc)
+    const lst = resolveLstHours(sample, serverNowUtc, site.observerLonDeg)
     if (nowConnected && ra != null && dec != null && lst != null) {
       const spins = gemSpinDeltasDeg({
         raHours: ra,
@@ -274,27 +287,36 @@ export function TelescopeStatusPanel() {
     } else {
       gemTargetRef.current = ncpRestTarget()
     }
-  }, [])
+  }, [site.observerLonDeg])
 
-  useAdaptivePoll('mount', async () => {
-    try {
-      const res = await fetch('/api/imaging/mount-pointing', { cache: 'no-store' })
-      if (!res.ok || !mountedRef.current) return
-      const payload = (await res.json()) as {
-        ok?: boolean
-        sample?: MountSample | null
-        serverNowUtc?: string
+  useAdaptivePoll(
+    'mount',
+    async () => {
+      try {
+        // Pomfret telemetry historically lives in the default station bucket; Cygnus uses site id.
+        const pointingPath =
+          siteId === 'pomfret'
+            ? '/api/imaging/mount-pointing'
+            : `/api/imaging/mount-pointing?stationId=${encodeURIComponent(siteId)}`
+        const res = await observatorySiteFetch(pointingPath, siteId, { cache: 'no-store' })
+        if (!res.ok || !mountedRef.current) return
+        const payload = (await res.json()) as {
+          ok?: boolean
+          sample?: MountSample | null
+          serverNowUtc?: string
+        }
+        if (payload.ok !== true) return
+        applySample(payload.sample ?? null, payload.serverNowUtc)
+      } catch {
+        if (mountedRef.current) applySample(null, undefined)
       }
-      if (payload.ok !== true) return
-      applySample(payload.sample ?? null, payload.serverNowUtc)
-    } catch {
-      if (mountedRef.current) applySample(null, undefined)
-    }
-  })
-
+    },
+    { resetKey: siteId }
+  )
   useEffect(() => {
     const host = viewportRef.current
     if (!host) return
+    const modelUrl = telescopeStatusModelUrl(siteId)
 
     // Near-black night sky (keep a hair of cool tint so it's not a flat void).
     const skyColor = new THREE.Color(0x020308)
@@ -377,7 +399,7 @@ export function TelescopeStatusPanel() {
 
     const loader = new GLTFLoader()
     loader.load(
-      MODEL_URL,
+      modelUrl,
       (gltf) => {
         if (disposed) return
         const model = gltf.scene
@@ -406,7 +428,7 @@ export function TelescopeStatusPanel() {
       },
       undefined,
       (err) => {
-        console.warn('[TelescopeStatus] Failed to load paramount-me.glb', err)
+        console.warn('[TelescopeStatus] Failed to load', modelUrl, err)
       }
     )
 
@@ -468,7 +490,7 @@ export function TelescopeStatusPanel() {
       })
       if (renderer.domElement.parentElement === host) host.removeChild(renderer.domElement)
     }
-  }, [])
+  }, [siteId])
 
   return (
     <div className="bg-transparent p-3">

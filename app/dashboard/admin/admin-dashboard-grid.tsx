@@ -307,7 +307,7 @@ export function AdminDashboardGrid({ user }: { user: PublicMemberUser }) {
             </div>
           </DashboardPanel>
         }
-        right={<ImagingRequestsSection />}
+        right={<GalleryRequestsSection />}
       />
 
       {showAllSkyCamera ? (
@@ -321,7 +321,7 @@ export function AdminDashboardGrid({ user }: { user: PublicMemberUser }) {
 
       <AccountTwoColRow
         left={<ImagingEquipmentSection />}
-        right={<GalleryRequestsSection />}
+        right={<ImagingRequestsSection />}
       />
 
       <AccountFullBleedRule />

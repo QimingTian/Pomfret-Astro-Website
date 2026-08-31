@@ -101,7 +101,7 @@ export function GalleryRequestsSection({ className = '' }: { className?: string 
   }
 
   return (
-    <DashboardPanel title="Gallery Request" className={className}>
+    <DashboardPanel title="Access Control" className={className}>
       {error ? <p className="mb-2 text-sm text-red-400">{error}</p> : null}
       {submissions.length === 0 && !loading ? (
         <p className="text-sm text-gray-500">No pending gallery submissions.</p>

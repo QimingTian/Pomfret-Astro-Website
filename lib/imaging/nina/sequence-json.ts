@@ -1,4 +1,5 @@
-import { currentObservatorySite } from '@/lib/observatory-site-scope'
+import { currentObservatorySite, currentObservatorySiteId } from '@/lib/observatory-site-scope'
+import { withObservatorySiteQuery } from '@/lib/observatory-sites'
 import { firstAltitudeAllowedTimeMs, currentAltitudeDeg, MIN_ALTITUDE_DEG } from '@/lib/target-altitude'
 import { getTonightAstronomicalNightWindow } from '@/lib/sunrise-window'
 import classicSingleTemplate from '@/Classic DSO Imaging Sequence.json'
@@ -587,18 +588,21 @@ export function buildNinaSequenceJson(params: NinaSequenceParams): string {
   }
 
   const pomfretQueueId = params.pomfretQueueId?.trim() ?? ''
+  const siteId = currentObservatorySiteId()
   if (pomfretQueueId) {
     root['PomfretAstro'] = {
       QueueId: pomfretQueueId,
+      SiteId: siteId,
       OutputMode: params.outputMode ?? 'raw_zip',
       SequenceTemplate: templateKind,
       FilterName: templateKind === 'variable_star' ? 'G' : (normalizedPlans[0]?.filterName ?? params.filterName),
       FilterPlans: normalizedPlans,
       SessionProgressHint:
-        'POST JSON to /api/imaging/session-progress with { "queueId": "<QueueId>", ... }',
+        'POST JSON to /api/imaging/session-progress?site=<SiteId> with { "queueId": "<QueueId>", ... }',
     }
     applySessionProgressQueueIdInHttpPosts(root, pomfretQueueId)
   }
+  applySessionProgressSiteInHttpUris(root, siteId)
 
   if (params.cameraCoolingTempC != null) {
     applyCameraCoolingTemp(root, params.cameraCoolingTempC)
@@ -646,6 +650,30 @@ function applySessionProgressQueueIdInHttpPosts(node: unknown, queueId: string):
         const text = rawBody.replace(/\r\n/g, '\n').trim()
         rec['HttpPostContentType'] = 'application/json'
         rec['HttpPostBody'] = JSON.stringify({ queueId, text })
+      }
+    }
+    for (const child of Object.values(rec)) walk(child)
+  }
+  walk(node)
+}
+
+/** Pin session-progress HttpUri to the owning observatory so NINA POSTs do not default to Pomfret. */
+export function applySessionProgressSiteInHttpUris(
+  node: unknown,
+  siteId: ReturnType<typeof currentObservatorySiteId>
+): void {
+  const walk = (value: unknown): void => {
+    if (!value || typeof value !== 'object') return
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item)
+      return
+    }
+    const rec = value as Record<string, unknown>
+    const typeName = typeof rec['$type'] === 'string' ? rec['$type'] : ''
+    if (typeName.includes('HTTP.HttpClient')) {
+      const uri = rec['HttpUri']
+      if (typeof uri === 'string' && uri.includes('/api/imaging/session-progress')) {
+        rec['HttpUri'] = withObservatorySiteQuery(uri, siteId)
       }
     }
     for (const child of Object.values(rec)) walk(child)

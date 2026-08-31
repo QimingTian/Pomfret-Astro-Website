@@ -120,6 +120,7 @@ See prior Cygnus agent email notes. Minimum:
 3. Local NINA profile id, paths, PDU (or disable), Discord in templates
 4. Shared `IMAGING_QUEUE_SECRET` + R2 (unless per-site secrets are added later)
 5. Adaptive poll: night 45s / day 20min per site nautical window
+6. **NINA HTTP Post URIs are injected at sequence build time** (`?site=<id>` on `/api/imaging/session-progress`). Do not hand-edit templates per site; agent job `siteId` + server ALS drive this.
 
 ---
 

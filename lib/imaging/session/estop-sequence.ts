@@ -4,6 +4,8 @@ import {
   ESTOP_DISCORD_WEATHER_SAFETY,
   patchNinaDiscordMessageText,
 } from '@/lib/imaging/nina-discord-message'
+import { applySessionProgressSiteInHttpUris } from '@/lib/imaging/nina/sequence-json'
+import { currentObservatorySiteId } from '@/lib/observatory-site-scope'
 
 const ESTOP_TEMPLATE = estopTemplate as Record<string, unknown>
 
@@ -59,16 +61,19 @@ export function estopSequenceJson(
     discordText?: string
   },
 ): string {
+  const siteId = currentObservatorySiteId()
   const root = structuredClone(ESTOP_TEMPLATE) as Record<string, unknown>
   root.Name = 'Emergency Stop'
   root.PomfretAstro = {
     QueueId: queueId,
+    SiteId: siteId,
     SessionType: 'estop',
     OutputMode: 'none',
     SessionProgressHint:
-      'POST to /api/imaging/session-progress with queueId when dome is closed to clear ESTOP.',
+      'POST to /api/imaging/session-progress?site=<SiteId> with queueId when dome is closed to clear ESTOP.',
   }
   patchEstopHttpPost(root, queueId)
+  applySessionProgressSiteInHttpUris(root, siteId)
   patchNinaDiscordMessageText(
     root,
     options?.discordText ?? estopDiscordMessageForState(options ?? {}),

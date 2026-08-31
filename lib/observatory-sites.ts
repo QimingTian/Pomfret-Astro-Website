@@ -113,3 +113,12 @@ export function observatoryKvKey(siteId: string, key: string): string {
   if (!siteId || siteId === DEFAULT_OBSERVATORY_SITE_ID) return key
   return `site:${siteId}:${key}`
 }
+
+/** Append or replace `?site=` / `&site=` on a URL (NINA HttpUri, fetch helpers). */
+export function withObservatorySiteQuery(url: string, siteId: ObservatorySiteId): string {
+  const join = url.includes('?') ? '&' : '?'
+  if (/[?&]site=/.test(url)) {
+    return url.replace(/([?&])site=[^&]*/, `$1site=${encodeURIComponent(siteId)}`)
+  }
+  return `${url}${join}site=${encodeURIComponent(siteId)}`
+}

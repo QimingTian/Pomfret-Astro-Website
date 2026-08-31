@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -315,6 +316,31 @@ def _apply_cooling(node: Any, temp_c: float) -> None:
         _apply_cooling(child, temp_c)
 
 
+def _with_site_query(url: str, site_id: str) -> str:
+    """Append or replace ?site= on an HttpUri."""
+    sid = (site_id or "pomfret").strip().lower() or "pomfret"
+    if re.search(r"[?&]site=", url):
+        return re.sub(r"([?&])site=[^&]*", rf"\1site={sid}", url, count=1)
+    join = "&" if "?" in url else "?"
+    return f"{url}{join}site={sid}"
+
+
+def _apply_session_progress_site(node: Any, site_id: str) -> None:
+    if isinstance(node, list):
+        for item in node:
+            _apply_session_progress_site(item, site_id)
+        return
+    if not isinstance(node, dict):
+        return
+    t = node.get(TYPE_KEY)
+    if isinstance(t, str) and "HTTP.HttpClient" in t:
+        uri = node.get("HttpUri")
+        if isinstance(uri, str) and "/api/imaging/session-progress" in uri:
+            node["HttpUri"] = _with_site_query(uri, site_id)
+    for child in node.values():
+        _apply_session_progress_site(child, site_id)
+
+
 def _apply_session_progress_queue_id(node: Any, queue_id: str) -> None:
     if isinstance(node, list):
         for item in node:
@@ -496,30 +522,35 @@ def build_run_sequence(params: dict[str, Any]) -> dict[str, Any]:
         dso_items["$values"] = rebuilt
 
     queue_id = str(params.get("pomfretQueueId") or "").strip()
+    site_id = str(params.get("siteId") or os.environ.get("OBSERVATORY_SITE_ID") or "pomfret").strip().lower() or "pomfret"
     if queue_id:
         root["PomfretAstro"] = {
             "QueueId": queue_id,
+            "SiteId": site_id,
             "OutputMode": params.get("outputMode") or "raw_zip",
             "SequenceTemplate": kind,
             "FilterName": "G" if kind == "variable_star" else plans[0]["filterName"],
             "FilterPlans": plans,
-            "SessionProgressHint": 'POST JSON to /api/imaging/session-progress with { "queueId": "<QueueId>", ... }',
+            "SessionProgressHint": 'POST JSON to /api/imaging/session-progress?site=<SiteId> with { "queueId": "<QueueId>", ... }',
         }
         _apply_session_progress_queue_id(root, queue_id)
+    _apply_session_progress_site(root, site_id)
     if params.get("cameraCoolingTempC") is not None:
         _apply_cooling(root, float(params["cameraCoolingTempC"]))
     _assert_json_refs_clean(root)
     return root
 
 
-def build_estop_sequence(queue_id: str, discord_text: str) -> dict[str, Any]:
+def build_estop_sequence(queue_id: str, discord_text: str, site_id: Optional[str] = None) -> dict[str, Any]:
+    sid = (site_id or os.environ.get("OBSERVATORY_SITE_ID") or "pomfret").strip().lower() or "pomfret"
     root = _load_template("EStop.json")
     root["Name"] = "Emergency Stop"
     root["PomfretAstro"] = {
         "QueueId": queue_id,
+        "SiteId": sid,
         "SessionType": "estop",
         "OutputMode": "none",
-        "SessionProgressHint": "POST to /api/imaging/session-progress with queueId when dome is closed to clear ESTOP.",
+        "SessionProgressHint": "POST to /api/imaging/session-progress?site=<SiteId> with queueId when dome is closed to clear ESTOP.",
     }
     body = json.dumps(
         {"text": "Dome Closed", "queueId": queue_id, "PomfretAstro": {"QueueId": queue_id, "SessionType": "estop"}},
@@ -531,6 +562,7 @@ def build_estop_sequence(queue_id: str, discord_text: str) -> dict[str, Any]:
         client["HttpPostContentType"] = "application/json"
 
     _walk_http_clients(root, patch)
+    _apply_session_progress_site(root, sid)
     _patch_discord_text(root, discord_text)
     return root
 
@@ -590,14 +622,17 @@ def verify_job_signature(job: dict[str, Any], secret: str) -> bool:
 def materialize_job(job: dict[str, Any]) -> dict[str, Any]:
     command = job.get("command")
     queue_id = str(job.get("queueId") or "")
+    site_id = str(job.get("siteId") or os.environ.get("OBSERVATORY_SITE_ID") or "pomfret").strip().lower() or "pomfret"
     if command == "run":
         params = job.get("params")
         if not isinstance(params, dict):
             raise ValueError("run job missing params")
-        root = build_run_sequence(params)
+        merged = dict(params)
+        merged.setdefault("siteId", site_id)
+        root = build_run_sequence(merged)
     elif command == "estop":
         estop = job.get("estop") if isinstance(job.get("estop"), dict) else {}
-        root = build_estop_sequence(queue_id, str(estop.get("discordText") or "ESTOPPED"))
+        root = build_estop_sequence(queue_id, str(estop.get("discordText") or "ESTOPPED"), site_id=site_id)
     elif command == "end_night":
         end = job.get("endNight") if isinstance(job.get("endNight"), dict) else {}
         root = build_end_night_sequence(

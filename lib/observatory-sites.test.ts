@@ -8,6 +8,7 @@ import {
   observatorySiteFromSearchParams,
   POMFRET_SITE,
   resolveObservatorySite,
+  withObservatorySiteQuery,
 } from './observatory-sites'
 import { withObservatorySiteAsync, scopedKvKey, currentObservatorySiteId } from './observatory-site-scope'
 import { getTonightScheduleStrip } from './schedule-strip'
@@ -51,6 +52,20 @@ test('Pomfret KV keys stay unprefixed; Cygnus is namespaced', () => {
   assert.equal(observatoryKvKey('', 'observatory-status'), 'observatory-status')
   assert.equal(observatoryKvKey('cygnus', 'observatory-status'), 'site:cygnus:observatory-status')
   assert.equal(observatoryKvKey('cygnus', REDIS_LIVE_KEYS.queue), 'site:cygnus:imaging-queue-requests')
+})
+
+test('withObservatorySiteQuery appends or replaces site', () => {
+  assert.equal(
+    withObservatorySiteQuery('https://www.pomfretastro.org/api/imaging/session-progress', 'cygnus'),
+    'https://www.pomfretastro.org/api/imaging/session-progress?site=cygnus'
+  )
+  assert.equal(
+    withObservatorySiteQuery(
+      'https://www.pomfretastro.org/api/imaging/session-progress?site=pomfret',
+      'cygnus'
+    ),
+    'https://www.pomfretastro.org/api/imaging/session-progress?site=cygnus'
+  )
 })
 
 test('scopedKvKey follows ALS site', async () => {

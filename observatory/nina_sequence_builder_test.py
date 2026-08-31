@@ -65,6 +65,25 @@ class NinaSequenceBuilderTests(unittest.TestCase):
         self.assertEqual(root["PomfretAstro"]["SessionType"], "estop")
         self.assertIn("estop-1", json.dumps(root))
 
+    def test_cygnus_site_injected_into_http_uri(self):
+        root = build_run_sequence(
+            {
+                "raHoursDecimal": 20.9667,
+                "decDegDecimal": 44.3167,
+                "filterName": "Ha",
+                "exposureSeconds": 180,
+                "exposureCount": 2,
+                "pomfretQueueId": "queue-cygnus",
+                "templateKind": "dso",
+                "siteId": "cygnus",
+            }
+        )
+        blob = json.dumps(root)
+        self.assertIn("session-progress?site=cygnus", blob)
+        self.assertEqual(root["PomfretAstro"]["SiteId"], "cygnus")
+        estop = build_estop_sequence("estop-c", "ESTOPPED", site_id="cygnus")
+        self.assertIn("session-progress?site=cygnus", json.dumps(estop))
+
     def test_materialize_run_job(self):
         job = {
             "kind": "pomfret-nina-job",
@@ -148,7 +167,10 @@ class NinaSequenceBuilderTests(unittest.TestCase):
             if isinstance(v, dict) and "HTTP.HttpClient" in str(v.get("$type") or "") and "Target Centered" in str(v.get("HttpPostBody"))
         )
         self.assertEqual(centered["HttpAuthUsername"], "pomfretastro")
-        self.assertEqual(centered["HttpUri"], "https://www.pomfretastro.org/api/imaging/session-progress")
+        self.assertEqual(
+            centered["HttpUri"],
+            "https://www.pomfretastro.org/api/imaging/session-progress?site=pomfret",
+        )
         self.assertEqual(root["PomfretAstro"]["FilterName"], "G")
         self.assertFalse(any("WaitForTransit" in str(v.get("$type") or "") for v in values))
         loop = values[-1]

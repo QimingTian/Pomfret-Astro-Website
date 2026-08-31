@@ -15,6 +15,7 @@ import {
   OBSERVATORY_SITE_COOKIE,
   OBSERVATORY_SITES,
   resolveObservatorySite,
+  withObservatorySiteQuery,
   type ObservatorySite,
   type ObservatorySiteId,
 } from '@/lib/observatory-sites'
@@ -107,15 +108,6 @@ export function useObservatorySite(): ObservatorySiteContextValue {
   return ctx
 }
 
-/** Append `?site=` / `&site=` for Weather / Plan / Remote imaging fetches. */
-export function withObservatorySiteQuery(url: string, siteId: ObservatorySiteId): string {
-  const join = url.includes('?') ? '&' : '?'
-  if (/[?&]site=/.test(url)) {
-    return url.replace(/([?&])site=[^&]*/, `$1site=${encodeURIComponent(siteId)}`)
-  }
-  return `${url}${join}site=${encodeURIComponent(siteId)}`
-}
-
 export function observatorySiteFetch(
   input: string,
   siteId: ObservatorySiteId,
@@ -126,4 +118,4 @@ export function observatorySiteFetch(
   return fetch(withObservatorySiteQuery(input, siteId), { ...init, headers })
 }
 
-export { OBSERVATORY_SITES }
+export { OBSERVATORY_SITES, withObservatorySiteQuery }

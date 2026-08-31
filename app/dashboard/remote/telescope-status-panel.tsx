@@ -38,7 +38,7 @@ const TELEMETRY_STALE_MS = 15_000
 /** Pomfret keeps the original C14 / Paramount GLB — never overwrite that file. */
 const POMFRET_MODEL_URL = '/telescope-models/paramount-me.glb?v=spin-hierarchy-20260715'
 /** Cygnus: RC14 truss OTA + Amsterdam latitude wedge (separate asset). */
-const CYGNUS_MODEL_URL = '/telescope-models/cygnus-rc14.glb?v=rc14-pomfret-mats-20260831'
+const CYGNUS_MODEL_URL = '/telescope-models/cygnus-rc14.glb?v=rc14-black-mount-20260831'
 
 function telescopeStatusModelUrl(siteId: ObservatorySiteId): string {
   return siteId === 'cygnus' ? CYGNUS_MODEL_URL : POMFRET_MODEL_URL

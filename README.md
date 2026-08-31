@@ -1,6 +1,6 @@
 # Pomfret Astro — Technical Documentation
 
-**Version:** v7.0.6  
+**Version:** v7.0.7  
 **Production:** https://www.pomfretastro.org  
 **Repository:** https://github.com/QimingTian/Pomfret-Astro-Website
 
@@ -44,9 +44,27 @@ Legacy import paths such as `lib/imaging-emergency-stop.ts` re-export the curren
 
 ---
 
-## 4. Authentication and trust boundaries
+## 4. Authentication, members, and trust boundaries
 
-Members authenticate with an HTTP-only cookie named `pomfret_session`. Sessions and user records are stored in KV. A user is an imaging **admin** when `role` is `admin` or when the email appears in `BOOTSTRAP_ADMIN_EMAILS`. Admin-only imaging actions—**ESTOP**, observatory PATCH, session control, audit log, and schedule-control mutations—use that same admin check.
+Members authenticate with an HTTP-only cookie named `pomfret_session`. Session tokens live in Redis; **member accounts and site memberships are stored in Postgres** when `DATABASE_URL` is configured. A user is an imaging **admin** when they hold `observatory_admin` at the active site, when `systemRole` is `pomfret_astro_admin`, or when the email appears in `BOOTSTRAP_ADMIN_EMAILS`.
+
+### Multi-site membership model
+
+Each account has **one affiliation** at a time, stored in the `memberships` table (`user_id`, `site_id`, `site_role`, per-site imaging approval timestamps). Roles are **Guest** (no affiliation), **Member · {site}**, or **Admin · {site}**. **Pomfret Astro Admin** is a global system role.
+
+**Sign up** lets users choose an observatory affiliation or **Continue as Guest**. Email addresses matching a site’s configured auto-join suffixes (for example `@pomfret.org` at Pomfret) become members immediately with imaging approved. Other affiliations create a **pending membership application**; the user remains a Guest until an administrator approves the request in **Imaging & Membership Request**. Membership approval also grants imaging access at that site.
+
+**Guests** may browse the site. Whether they can submit imaging sessions depends on per-site **Access Control** (open/closed to guests, session gate policy). Pending membership does not block site access; unverified email does block session submission.
+
+**Cross-observatory access:** a member affiliated with one site may submit sessions at another when that site’s Access Control allows other observatories’ members (scope: all or specific sites). Session duration and admin-approval rules are configured separately for guests, own members, and cross-site members.
+
+**Imaging approval** is enforced per site for affiliated members (`memberships.imaging_approved_at`). Site admins approve or reject imaging from **All members → Edit**. Session submissions that exceed duration limits or require explicit approval appear in **Imaging & Membership Request**; the Remote progress terminal shows administrator approval status before NINA lines.
+
+Observatory context for Weather, Plan, Remote, and admin tools uses `?site=` / `X-Observatory-Site` / cookie via `lib/observatory-sites.ts` and `runWithRequestSite`. See **[docs/multi-site-checklist.md](docs/multi-site-checklist.md)** when adding a site.
+
+### Trust boundaries
+
+Admin-only imaging actions—**ESTOP**, observatory PATCH, session control, audit log, schedule-control mutations, Access Control, and membership decisions—require a site-scoped or global admin as above.
 
 The observatory agent does not use a member cookie. It authenticates with `IMAGING_QUEUE_SECRET` as a Bearer token on sequence poll, agent pulse, session-files, and related agent routes. Cron uses `CRON_SECRET`. The NINA progress webhook may use Basic authentication with `NINA_SESSION_PROGRESS_BASIC_PASSWORD`. Mount telemetry uses a dedicated secret. In production, missing required secrets **fail closed**; local development is more permissive.
 
@@ -58,7 +76,7 @@ Session-scoped routes such as download, edit, and delete allow the owning member
 
 When `KV_REST_API_URL` and `KV_REST_API_TOKEN` are set, **Redis is the source of truth for hot imaging state**: queue, projects, session board, audit log, admin closed windows, **ESTOP**, observatory status, and live-bus fan-out. Agent polls and schedule reconcile stay on Redis so Neon can scale to zero.
 
-**Postgres holds cold documents**: members, gallery metadata, saved-session / history archives, R2 object maps, and equipment. Login and gallery pages wake Neon; the 45-second NINA poll does not. Session files and live previews stay in R2. Without KV, selected imaging paths may fall back to files (for example `IMAGING_QUEUE_FILE`).
+**Postgres is live** for members (`users`, `memberships`), per-site policies (`site_policies`, including Access Control JSON), membership applications (`membership_applications`), guest access grants (`guest_site_access`), gallery metadata, saved-session / history archives, R2 object maps, and equipment. Login, account pages, and admin member tools read Postgres directly; the 45-second NINA poll does not wake the database for imaging hot paths. Session files and live previews stay in R2. Without KV, selected imaging paths may fall back to files (for example `IMAGING_QUEUE_FILE`).
 
 Queue rows and projects are rewritten by reconcile and delivery. The **session board** is a parallel inventory of in-progress and terminal sessions for the Remote dashboard. **ESTOP** and **end-night** flags are stored separately so shutdown state is not conflated with ordinary scheduling. Keys under the `live:` prefix provide ephemeral fan-out for progress, preview, mount, site, and agent-wake signals.
 
@@ -186,7 +204,7 @@ The Windows agent environment mirrors the queue secret, cron secret, R2 credenti
 
 ## 20. HTTP API surface
 
-Public authentication routes cover signup, login, logout, current user, password change, and email verification. Admin routes manage members, imaging access and large-project approvals, equipment, and gallery moderation.
+Public authentication routes cover signup (with affiliation), login, logout, current user, password change, and email verification. Admin routes manage members (roles, email verification, per-site imaging approval), **Access Control** per observatory, **Imaging & Membership Request** (membership applications, session approvals, and guest-account grants when enabled), equipment, and gallery moderation. Members call `/api/member/imaging-access` for site-scoped submit eligibility.
 
 The imaging API is larger. Members create and inspect queue rows; the agent updates them and consumes `nina-sequence`. Progress, pulse, preview, session-files, download, and R2 mapping connect NINA and storage to the cloud. Administrators control sessions, **ESTOP**, schedule closed windows, and read the audit log. Cron forces reconcile and cleanup. Observatory status is publicly readable and patchable by administrators. Weather helpers expose tonight’s prediction column, 7Timer astro conditions, and the storm-approach ring used by safety ESTOP. Member gallery and saved-session routes support the account experience. Proxies forward GOES imagery, radar tiles, moon SVS frames, and plate-solving without exposing upstream keys to the browser.
 
@@ -196,7 +214,7 @@ Route paths follow the `/api/...` tree in the repository. Authorization for each
 
 ## 21. Development, testing, and deployment
 
-Unit tests run with `npm test` (tsx over the `lib/**/*.test.ts` tree) and cover weather gates, planner holds, ESTOP sync, planned-start due logic, moon avoidance, reconcile fingerprints, and related helpers. `npm run test:types` performs typechecking. Locally, `npm run dev` serves the site; KV is optional when a file-backed queue is configured. Production deploys with `npm run deploy` (`vercel --prod --yes`) to the project aliased as www.pomfretastro.org. Supporting scripts sync Stellarium sky data, rebuild the variable-star shortlist, and configure R2 CORS for gallery uploads.
+Unit tests run with `npm test` (tsx over the `lib/**/*.test.ts` tree) and cover weather gates, planner holds, ESTOP sync, planned-start due logic, moon avoidance, reconcile fingerprints, member roles, site access control, and related helpers. `npm run test:types` performs typechecking. Locally, `npm run dev` serves the site; KV is optional when a file-backed queue is configured. Production deploys with `npm run deploy` (`vercel --prod --yes`) to the project aliased as www.pomfretastro.org. Supporting scripts sync Stellarium sky data, rebuild the variable-star shortlist, configure R2 CORS for gallery uploads, and audit or repair Postgres membership rows (`scripts/pg-audit.ts`, `scripts/repair-member-mirror.ts`).
 
 Administrator activity is appended to a bounded audit log with kinds such as emergency stop, end night, observatory transitions, queue status changes, holds, progress, plan changes, and NINA delivery. Administrators read it through the audit-log API.
 
@@ -210,4 +228,4 @@ Relative to one another, the **Ready** gate allows ASC cloud under **20%**, whil
 
 ---
 
-*Pomfret Astro Technical Documentation · v7.0.0*
+*Pomfret Astro Technical Documentation · v7.0.7*

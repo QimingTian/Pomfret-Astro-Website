@@ -20,6 +20,16 @@ import type { ObservatorySiteId } from '@/lib/observatory-sites'
 const pillActive = glassPillToggleActive
 const pillIdle = glassPillToggleIdle
 
+/** Hours field aligned with toggle pill height (py-2 text-sm). */
+const hoursInputClass =
+  'glass-pill glass-pill-idle inline-flex h-[2.375rem] w-[4.5rem] shrink-0 items-center justify-center px-3 text-center text-sm tabular-nums text-white disabled:opacity-50'
+
+const sectionDividerClass = 'border-t border-gray-800 pt-4'
+const sectionStackClass = 'space-y-3'
+const labelClass = 'shrink-0 text-sm font-medium text-white'
+const controlRowClass = 'flex flex-wrap items-center gap-2'
+const titledRowClass = 'flex flex-wrap items-center gap-x-3 gap-y-2'
+
 type OtherObsOption = { id: ObservatorySiteId; name: string }
 
 function SessionPolicyControls({
@@ -47,9 +57,9 @@ function SessionPolicyControls({
   }
 
   return (
-    <div className="space-y-2">
-      <p className="text-sm font-medium text-white">{label}</p>
-      <div className="flex flex-wrap gap-2">
+    <div className={sectionStackClass}>
+      <p className={labelClass}>{label}</p>
+      <div className={controlRowClass}>
         <button
           type="button"
           disabled={disabled}
@@ -74,20 +84,21 @@ function SessionPolicyControls({
         >
           Free under limit
         </button>
+        {policy.mode === 'duration_limit' ? (
+          <>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={hoursInput}
+              disabled={disabled}
+              onChange={(e) => onHoursInputChange(e.target.value)}
+              className={hoursInputClass}
+              aria-label={`${label} duration limit in hours`}
+            />
+            <span className="text-sm text-gray-400">hours</span>
+          </>
+        ) : null}
       </div>
-      {policy.mode === 'duration_limit' ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            type="text"
-            inputMode="decimal"
-            value={hoursInput}
-            disabled={disabled}
-            onChange={(e) => onHoursInputChange(e.target.value)}
-            className="w-28 rounded-lg border border-gray-600 bg-transparent px-3 py-2 text-sm text-white"
-          />
-          <span className="text-sm text-gray-400">hours</span>
-        </div>
-      ) : null}
     </div>
   )
 }
@@ -225,11 +236,11 @@ export function AccessControlSection({ className = '' }: { className?: string })
       {!settings && loading ? (
         <p className="text-sm text-gray-500">Loading…</p>
       ) : settings ? (
-        <div className="boxed-fields space-y-5">
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              <p className="text-sm font-medium text-white">Open to Guest</p>
-              <div className="flex flex-wrap gap-2">
+        <div className="boxed-fields space-y-4">
+          <div className={sectionStackClass}>
+            <div className={titledRowClass}>
+              <p className={labelClass}>Open to Guest</p>
+              <div className={controlRowClass}>
                 <button
                   type="button"
                   disabled={saving}
@@ -260,10 +271,10 @@ export function AccessControlSection({ className = '' }: { className?: string })
             ) : null}
           </div>
 
-          <div className="space-y-3 border-t border-gray-800 pt-4">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              <p className="text-sm font-medium text-white">Open to other observatories&apos; members</p>
-              <div className="flex flex-wrap gap-2">
+          <div className={`${sectionDividerClass} ${sectionStackClass}`}>
+            <div className={titledRowClass}>
+              <p className={labelClass}>Open to other observatories&apos; members</p>
+              <div className={controlRowClass}>
                 <button
                   type="button"
                   disabled={saving}
@@ -285,9 +296,9 @@ export function AccessControlSection({ className = '' }: { className?: string })
 
             {settings.openToOtherObservatoryMembers ? (
               <>
-                <div className="space-y-2">
-                  <p className="text-sm font-medium text-white">Which observatories</p>
-                  <div className="flex flex-wrap gap-2">
+                <div className={sectionStackClass}>
+                  <p className={labelClass}>Which observatories</p>
+                  <div className={controlRowClass}>
                     <button
                       type="button"
                       disabled={saving}
@@ -311,7 +322,7 @@ export function AccessControlSection({ className = '' }: { className?: string })
                     </button>
                   </div>
                   {!otherScopeIsAll ? (
-                    <div className="flex flex-wrap gap-2">
+                    <div className={controlRowClass}>
                       {otherObservatories.map((obs) => {
                         const selected = otherScopeList.includes(obs.id)
                         return (
@@ -342,23 +353,24 @@ export function AccessControlSection({ className = '' }: { className?: string })
             ) : null}
           </div>
 
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-gray-800 pt-4">
-            <p className="text-sm font-medium text-white">Own members project duration limit</p>
-            <div className="flex flex-wrap items-center gap-2">
+          <div className={`${sectionDividerClass} ${titledRowClass}`}>
+            <p className={labelClass}>Own members project duration limit</p>
+            <div className={controlRowClass}>
               <input
                 type="text"
                 inputMode="decimal"
                 value={memberLimitInput}
                 disabled={saving}
                 onChange={(e) => setMemberLimitInput(e.target.value)}
-                className="w-28 rounded-lg border border-gray-600 bg-transparent px-3 py-2 text-sm text-white"
+                className={hoursInputClass}
+                aria-label="Own members project duration limit in hours"
               />
               <span className="text-sm text-gray-400">hours</span>
             </div>
           </div>
 
-          <div className="space-y-2 border-t border-gray-800 pt-4">
-            <p className="text-sm font-medium text-white">Auto-join email suffixes</p>
+          <div className={`${sectionDividerClass} ${sectionStackClass}`}>
+            <p className={labelClass}>Auto-join email suffixes</p>
             <input
               type="text"
               value={emailSuffixesInput}
@@ -368,18 +380,20 @@ export function AccessControlSection({ className = '' }: { className?: string })
                 setMessage(null)
               }}
               placeholder="@pomfret.org"
-              className="w-full max-w-md rounded-lg border border-gray-600 bg-transparent px-3 py-2 text-sm text-white"
+              className={`${hoursInputClass} w-full max-w-md justify-start px-4 text-left`}
             />
           </div>
 
-          <button
-            type="button"
-            disabled={saving || loading}
-            onClick={() => void save()}
-            className={`${glassPillMd} disabled:opacity-50`}
-          >
-            {saving ? 'Saving…' : 'Save'}
-          </button>
+          <div className={sectionDividerClass}>
+            <button
+              type="button"
+              disabled={saving || loading}
+              onClick={() => void save()}
+              className={`${glassPillMd} disabled:opacity-50`}
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
         </div>
       ) : null}
     </DashboardPanel>

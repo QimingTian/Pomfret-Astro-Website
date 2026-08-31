@@ -79,7 +79,7 @@ export default function ObservatoryWeatherDashboard() {
       ) : null}
 
       <div className="min-w-0">
-        <LibreWxrRadarMap />
+        <LibreWxrRadarMap compact />
       </div>
     </div>
   )

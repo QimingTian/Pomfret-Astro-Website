@@ -24,7 +24,12 @@ const MAP_ZOOM = 8
 /** Frame interval — crossfade + preload-ahead keeps the loop continuous. */
 const FRAME_MS = 1100
 
-export default function LibreWxrRadarMap() {
+type LibreWxrRadarMapProps = {
+  /** Cygnus / EU dashboard: wide strip. Pomfret grid next to cloud map: match 4:3. */
+  compact?: boolean
+}
+
+export default function LibreWxrRadarMap({ compact = false }: LibreWxrRadarMapProps) {
   const { site } = useObservatorySite()
   const mapLat = site.weatherLat
   const mapLon = site.weatherLon
@@ -167,7 +172,11 @@ export default function LibreWxrRadarMap() {
 
   return (
     <div
-      className="relative w-full overflow-hidden rounded-lg bg-[#1a1a1a] librewxr-radar-map aspect-[21/9] max-h-[22rem]"
+      className={
+        compact
+          ? 'relative w-full overflow-hidden rounded-lg bg-[#1a1a1a] librewxr-radar-map aspect-[21/9] max-h-[22rem]'
+          : 'relative w-full overflow-hidden rounded-lg bg-[#1a1a1a] librewxr-radar-map aspect-[4/3]'
+      }
     >
       <MapFrameTimeOverlay title="Precipitation Radar" timeLabel={frameTimeLabel} />
       <div ref={containerRef} className="absolute inset-0 z-0 h-full w-full" />

@@ -1,6 +1,8 @@
 import { effectiveProjectStatus, listProjects } from '@/lib/imaging-project-store'
 import { listBoardEntries } from '@/lib/imaging-session-board'
 import { listAll, type ImagingRequest } from '@/lib/imaging-queue-store'
+import { withObservatorySiteAsync } from '@/lib/observatory-site-scope'
+import { OBSERVATORY_SITES } from '@/lib/observatory-sites'
 import { syncMemberSessionHistoryArchive } from '@/lib/member-session-history-archive'
 import { normalizeMemberEmail } from '@/lib/member-store'
 
@@ -50,6 +52,25 @@ export function memberSessionHistoryRowFromQueue(r: ImagingRequest): MemberSessi
 }
 
 export async function listMemberSessionHistory(
+  userId: string,
+  userEmail: string
+): Promise<MemberSessionHistoryRow[]> {
+  const byId = new Map<string, MemberSessionHistoryRow>()
+
+  for (const site of OBSERVATORY_SITES) {
+    const live = await withObservatorySiteAsync(site.id, () =>
+      listLiveMemberSessionHistory(userId, userEmail)
+    )
+    for (const row of live) {
+      byId.set(row.id, row)
+    }
+  }
+
+  const live = Array.from(byId.values()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  return syncMemberSessionHistoryArchive(userId, live)
+}
+
+async function listLiveMemberSessionHistory(
   userId: string,
   userEmail: string
 ): Promise<MemberSessionHistoryRow[]> {
@@ -115,6 +136,5 @@ export async function listMemberSessionHistory(
     }
   }
 
-  const live = Array.from(byId.values()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-  return syncMemberSessionHistoryArchive(userId, live)
+  return Array.from(byId.values()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
 }

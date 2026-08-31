@@ -44,3 +44,7 @@ test('projectTotalDurationNeedsAdminApproval respects custom site limit', () => 
 test('normalizeProjectDurationLimitHours falls back to default', () => {
   assert.equal(normalizeProjectDurationLimitHours(-1), DEFAULT_MEMBER_PROJECT_DURATION_LIMIT_HOURS)
 })
+
+test('projectDurationLimitSeconds treats zero as no limit', () => {
+  assert.equal(projectDurationLimitSeconds(0), 0)
+})

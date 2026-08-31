@@ -1,17 +1,7 @@
 'use client'
 
-import {
-  glassPillDangerSm,
-  glassPillLg,
-  glassPillLgWide,
-  glassPillMd,
-  glassPillSm,
-  glassPillSuccessSm,
-  glassPillXs,
-} from '@/lib/glass-ui'
 import { useCallback, useEffect, useState } from 'react'
 import { DashboardPanel } from '@/app/dashboard/account/dashboard-panel'
-import { observatorySiteFetch, useObservatorySite } from '@/components/observatory-site-provider'
 
 type MemberSessionRow = {
   id: string
@@ -33,7 +23,6 @@ export function SessionHistorySection({
   variant?: 'panel' | 'boxed'
   className?: string
 }) {
-  const { siteId } = useObservatorySite()
   const [sessions, setSessions] = useState<MemberSessionRow[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -42,10 +31,7 @@ export function SessionHistorySection({
     setLoading(true)
     setError(null)
     try {
-      const res = await observatorySiteFetch('/api/member/sessions', siteId, {
-        credentials: 'include',
-        cache: 'no-store',
-      })
+      const res = await fetch('/api/member/sessions', { credentials: 'include', cache: 'no-store' })
       const data = await res.json().catch(() => ({}))
       if (!res.ok || data?.ok !== true || !Array.isArray(data.sessions)) {
         setError(typeof data.error === 'string' ? data.error : 'Could not load sessions.')
@@ -57,7 +43,7 @@ export function SessionHistorySection({
     } finally {
       setLoading(false)
     }
-  }, [siteId])
+  }, [])
 
   useEffect(() => {
     void loadSessions()

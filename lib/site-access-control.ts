@@ -27,11 +27,12 @@ export function settingsFromPolicy(
 }
 
 export function normalizeProjectDurationLimitHours(value: unknown): number {
-  const n = typeof value === 'number' ? value : Number(value)
-  if (!Number.isFinite(n) || n <= 0) return DEFAULT_MEMBER_PROJECT_DURATION_LIMIT_HOURS
-  return Math.round(n * 10) / 10
+  const n = typeof value === 'number' ? value : Number(String(value ?? '').trim())
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_MEMBER_PROJECT_DURATION_LIMIT_HOURS
+  return n
 }
 
 export function projectDurationLimitSeconds(limitHours: number): number {
-  return normalizeProjectDurationLimitHours(limitHours) * 3600
+  if (!Number.isFinite(limitHours) || limitHours <= 0) return 0
+  return limitHours * 3600
 }

@@ -14,7 +14,7 @@ const pillActive = glassPillToggleActive
 const pillIdle = glassPillToggleIdle
 
 export function AccessControlSection({ className = '' }: { className?: string }) {
-  const { siteFetch, adminSiteId, adminSite } = useAdminSiteScope()
+  const { siteFetch, adminSiteId } = useAdminSiteScope()
   const [settings, setSettings] = useState<SiteAccessControlSettings | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -82,9 +82,6 @@ export function AccessControlSection({ className = '' }: { className?: string })
 
   return (
     <DashboardPanel title="Access Control" className={className}>
-      <p className="mb-3 text-sm text-gray-400">
-        Settings for {adminSite.name}. Approval requests appear in Imaging Request.
-      </p>
       {error ? <p className="mb-2 text-sm text-red-400">{error}</p> : null}
       {message ? <p className="mb-2 text-sm text-emerald-400">{message}</p> : null}
       {!settings && loading ? (
@@ -139,9 +136,6 @@ export function AccessControlSection({ className = '' }: { className?: string })
 
           <div className="space-y-2">
             <p className="text-sm font-medium text-white">Member project duration limit</p>
-            <p className="text-xs text-gray-500">
-              Projects longer than this limit require administrator approval.
-            </p>
             <div className="flex flex-wrap items-center gap-2">
               <input
                 type="number"

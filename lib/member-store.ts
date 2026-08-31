@@ -726,12 +726,11 @@ export async function deleteMemberById(
   }
 
   const nextUsers = users.filter((u) => u.id !== targetUserId)
+  const { applyPostgresMigrations } = await import('@/lib/db/migrate')
+  await applyPostgresMigrations()
+  const { purgeMemberUserFromPostgres } = await import('@/lib/db/member-purge')
+  await purgeMemberUserFromPostgres(targetUserId)
   await writeUsers(nextUsers)
-
-  const { deleteMembershipApplicationsForUser } = await import('@/lib/membership-applications')
-  const { deleteGuestSiteAccessForUser } = await import('@/lib/site-policies')
-  await deleteMembershipApplicationsForUser(targetUserId)
-  await deleteGuestSiteAccessForUser(targetUserId)
 
   const emailIndex = await readEmailIndex()
   delete emailIndex[target.email]

@@ -48,6 +48,12 @@ function membershipFromRow(row: {
 
 export async function loadMembersFromPostgres(): Promise<MemberUser[] | null> {
   if (!postgresReadsEnabled()) return null
+  const { applyPostgresMigrations } = await import('@/lib/db/migrate')
+  const migrated = await applyPostgresMigrations()
+  if (!migrated.ok) {
+    console.error('[pg-read] migrations failed', migrated.error)
+    return null
+  }
   try {
     const db = getDb()
     const userRows = await db.select().from(users)

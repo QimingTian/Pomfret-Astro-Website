@@ -170,9 +170,17 @@ export async function DELETE(request: NextRequest) {
     }
 
     if (isPaAdmin) {
-      const result = await deleteMemberById(auth.user.id, id)
-      if (!result.ok) {
-        return NextResponse.json({ ok: false, error: result.error }, { status: 400 })
+      try {
+        const result = await deleteMemberById(auth.user.id, id)
+        if (!result.ok) {
+          return NextResponse.json({ ok: false, error: result.error }, { status: 400 })
+        }
+      } catch (error) {
+        console.error('[admin/members] delete failed', error)
+        return NextResponse.json(
+          { ok: false, error: 'Could not remove member from database.' },
+          { status: 500 }
+        )
       }
     } else {
       const result = await removeMemberSiteAffiliation(auth.user.id, id, site.id)

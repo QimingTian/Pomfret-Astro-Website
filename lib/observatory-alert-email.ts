@@ -1,4 +1,5 @@
 import { listMembersForAdminDirectory } from '@/lib/member-store'
+import { isPomfretAstroAdmin } from '@/lib/member-roles'
 import { currentObservatorySite } from '@/lib/observatory-site-scope'
 
 function env(name: string): string {
@@ -21,7 +22,13 @@ function uniqueValidEmails(values: string[]): string[] {
 
 async function listAdminAlertRecipients(): Promise<string[]> {
   const members = await listMembersForAdminDirectory()
-  const fromMembers = members.filter((m) => m.role === 'admin').map((m) => m.email)
+  const fromMembers = members
+    .filter(
+      (m) =>
+        isPomfretAstroAdmin(m.systemRole) ||
+        m.memberships.some((ms) => ms.siteRole === 'observatory_admin')
+    )
+    .map((m) => m.email)
   const fallback = (process.env.BOOTSTRAP_ADMIN_EMAILS ?? '')
     .split(',')
     .map((e) => e.trim())

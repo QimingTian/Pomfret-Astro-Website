@@ -20,12 +20,7 @@ import { checkAuthRateLimitAsync } from '@/lib/auth-rate-limit'
 import { isSameSiteMutation } from '@/lib/csrf-origin'
 import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 import { requireImagingAdmin } from '@/lib/imaging/core/admin-auth'
-import { isMemberImagingPendingAtSite } from '@/lib/member-access'
-import {
-  getMemberById,
-  listMembersForAdminDirectory,
-  setMemberImagingApproval,
-} from '@/lib/member-store'
+import { getMemberById } from '@/lib/member-store'
 import {
   listPendingGuestAccessForSite,
   setGuestSiteAccessStatus,
@@ -33,15 +28,6 @@ import {
 } from '@/lib/site-policies'
 
 export const runtime = 'nodejs'
-
-type MemberRow = {
-  kind: 'member_access'
-  id: string
-  firstName: string
-  lastName: string
-  email: string
-  createdAt: string
-}
 
 type GuestRow = {
   kind: 'guest_access'
@@ -77,7 +63,7 @@ function filterSummaryFromPlans(
   return plans.map((p) => `${p.filterName} ${p.count}×${p.exposureSeconds}s`).join('; ')
 }
 
-/** GET — pending member imaging access, guest access, and large project approvals for the active site. */
+/** GET — pending guest access and large project approvals for the active site. */
 export async function GET(request: NextRequest) {
   return runWithRequestSite(request, async (site) => {
     const auth = await requireImagingAdmin(request, site.id)
@@ -86,21 +72,6 @@ export async function GET(request: NextRequest) {
     }
 
     const durationLimitHours = await getSiteProjectDurationLimitHours(site.id)
-
-    const memberRequests: MemberRow[] = []
-    for (const m of await listMembersForAdminDirectory()) {
-      if (!m.memberships.some((ms) => ms.siteId === site.id)) continue
-      const full = await getMemberById(m.id)
-      if (!full || !isMemberImagingPendingAtSite(full, site.id)) continue
-      memberRequests.push({
-        kind: 'member_access',
-        id: m.id,
-        firstName: m.firstName,
-        lastName: m.lastName,
-        email: m.email,
-        createdAt: '',
-      })
-    }
 
     const guestRequests: GuestRow[] = []
     for (const row of await listPendingGuestAccessForSite(site.id)) {
@@ -142,11 +113,10 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       ok: true as const,
-      memberRequests,
       guestRequests,
       largeProjectRequests,
       durationLimitHours,
-      total: memberRequests.length + guestRequests.length + largeProjectRequests.length,
+      total: guestRequests.length + largeProjectRequests.length,
     })
   })
 }
@@ -179,19 +149,6 @@ export async function PATCH(request: NextRequest) {
 
     if (!id || (action !== 'approve' && action !== 'reject')) {
       return NextResponse.json({ ok: false, error: 'id and action (approve|reject) are required.' }, { status: 400 })
-    }
-
-    if (kind === 'member_access') {
-      const result = await setMemberImagingApproval(id, action, site.id)
-      if (!result.ok) {
-        return NextResponse.json({ ok: false, error: result.error }, { status: 400 })
-      }
-      void appendAuditLog({
-        kind: 'member.imaging_access',
-        message: `Member imaging access ${action}d (${id}) at ${site.id}.`,
-        detail: { memberId: id, action, siteId: site.id },
-      })
-      return NextResponse.json({ ok: true as const })
     }
 
     if (kind === 'guest_access') {
@@ -238,7 +195,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     return NextResponse.json(
-      { ok: false, error: 'kind must be member_access, guest_access, or large_project.' },
+      { ok: false, error: 'kind must be guest_access or large_project.' },
       { status: 400 }
     )
   })

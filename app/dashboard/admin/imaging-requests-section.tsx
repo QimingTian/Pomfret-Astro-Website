@@ -8,14 +8,6 @@ import { useCallback, useEffect, useState } from 'react'
 import { DashboardPanel } from '@/app/dashboard/account/dashboard-panel'
 import { useAdminSiteScope } from '@/hooks/use-admin-site-scope'
 
-type MemberRow = {
-  kind: 'member_access'
-  id: string
-  firstName: string
-  lastName: string
-  email: string
-}
-
 type GuestRow = {
   kind: 'guest_access'
   id: string
@@ -38,7 +30,6 @@ type LargeProjectRow = {
 }
 
 type Payload = {
-  memberRequests: MemberRow[]
   guestRequests: GuestRow[]
   largeProjectRequests: LargeProjectRow[]
   durationLimitHours: number
@@ -48,7 +39,6 @@ type Payload = {
 export function ImagingRequestsSection({ className = '' }: { className?: string }) {
   const { siteFetch, adminSiteId } = useAdminSiteScope()
   const [data, setData] = useState<Payload>({
-    memberRequests: [],
     guestRequests: [],
     largeProjectRequests: [],
     durationLimitHours: 30,
@@ -69,7 +59,6 @@ export function ImagingRequestsSection({ className = '' }: { className?: string 
         return
       }
       setData({
-        memberRequests: Array.isArray(json.memberRequests) ? (json.memberRequests as MemberRow[]) : [],
         guestRequests: Array.isArray(json.guestRequests) ? (json.guestRequests as GuestRow[]) : [],
         largeProjectRequests: Array.isArray(json.largeProjectRequests)
           ? (json.largeProjectRequests as LargeProjectRow[])
@@ -89,11 +78,7 @@ export function ImagingRequestsSection({ className = '' }: { className?: string 
     void load()
   }, [load, adminSiteId])
 
-  async function act(
-    kind: 'member_access' | 'guest_access' | 'large_project',
-    id: string,
-    action: 'approve' | 'reject'
-  ) {
+  async function act(kind: 'guest_access' | 'large_project', id: string, action: 'approve' | 'reject') {
     const label = action === 'approve' ? 'approve' : 'reject'
     if (!window.confirm(`${label} this imaging request?`)) return
     setActingKey(`${kind}:${id}`)
@@ -153,37 +138,6 @@ export function ImagingRequestsSection({ className = '' }: { className?: string 
                     type="button"
                     disabled={busy || loading}
                     onClick={() => void act('guest_access', row.id, 'reject')}
-                    className={`${glassPillDangerSm} disabled:opacity-40`}
-                  >
-                    Reject
-                  </button>
-                </div>
-              </li>
-            )
-          })}
-          {data.memberRequests.map((row) => {
-            const name = [row.firstName, row.lastName].filter(Boolean).join(' ').trim() || row.email
-            const key = `member:${row.id}`
-            const busy = actingKey === key
-            return (
-              <li key={key} className="rounded-lg border border-gray-700 p-3 text-sm">
-                <p className="text-xs uppercase tracking-wide text-amber-200/90">Member access</p>
-                <p className="mt-1 font-medium text-white">{name}</p>
-                <p className="break-all text-gray-400">{row.email}</p>
-                <p className="mt-1 text-gray-500">Member imaging access awaiting approval.</p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    disabled={busy || loading}
-                    onClick={() => void act('member_access', row.id, 'approve')}
-                    className={`${glassPillSuccessSm} disabled:opacity-40`}
-                  >
-                    Approve
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busy || loading}
-                    onClick={() => void act('member_access', row.id, 'reject')}
                     className={`${glassPillDangerSm} disabled:opacity-40`}
                   >
                     Reject

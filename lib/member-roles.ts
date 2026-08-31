@@ -163,12 +163,6 @@ export function canSubmitImagingAtSite(input: {
 
   const membership = membershipForSite(input.memberships, input.siteId)
   if (membership) {
-    if (membership.imagingRejectedAt) {
-      return { ok: false, error: 'Imaging access was not approved for this account at this observatory.', code: 'imaging_rejected' }
-    }
-    if (!membership.imagingApprovedAt) {
-      return { ok: false, error: 'Imaging access is pending administrator approval for this observatory.', code: 'imaging_pending' }
-    }
     if (membership.siteRole === 'observatory_admin') {
       return { ok: true, as: 'site_admin' }
     }

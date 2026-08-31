@@ -7,11 +7,13 @@ import {
   formatMemberRoleLabels,
   isSiteRole,
   legacyMemberRoleLabel,
+  siteDisplayName,
   type SiteMembership,
   type SiteRole,
   type SystemRole,
 } from '@/lib/member-roles'
-import { DEFAULT_OBSERVATORY_SITE_ID } from '@/lib/observatory-sites'
+import { parseAdminMemberRoleKey } from '@/lib/admin-member-role-edit'
+import { DEFAULT_OBSERVATORY_SITE_ID, isObservatorySiteId } from '@/lib/observatory-sites'
 import { hashSessionPassword, verifySessionPasswordHash } from '@/lib/session-password'
 import { isProductionRuntime, logMissingProductionSecret } from '@/lib/production-secrets'
 
@@ -597,20 +599,19 @@ export function memberRolesDisplay(user: {
   return memberLevelLabel(user.role)
 }
 
-/** Admin directory: profile + access flags (no password). */
+/** Admin directory: profile fields for member management (no password). */
 export type AdminMemberDirectoryEntry = {
   id: string
   firstName: string
   lastName: string
+  username: string
   email: string
-  role: MemberRole
+  createdAt: string
   systemRole: SystemRole
-  memberships: Array<{ siteId: string; siteRole: SiteRole }>
+  memberships: Array<{ siteId: string; siteRole: SiteRole; siteName: string }>
   roles: string[]
   emailVerified: boolean
-  imagingApproved: boolean
-  imagingPending: boolean
-  imagingRejected: boolean
+  emailVerifiedAt: string | null
   /** True when email is in `BOOTSTRAP_ADMIN_EMAILS`. */
   bootstrapAdmin: boolean
 }
@@ -622,24 +623,24 @@ export async function listMembersForAdminDirectory(): Promise<AdminMemberDirecto
       id: u.id,
       firstName: u.firstName,
       lastName: u.lastName,
+      username: u.username,
       email: u.email,
-      role: u.role,
+      createdAt: u.createdAt,
       systemRole: u.systemRole,
-      memberships: (u.memberships ?? []).map((m) => ({ siteId: m.siteId, siteRole: m.siteRole })),
+      memberships: (u.memberships ?? []).map((m) => ({
+        siteId: m.siteId,
+        siteRole: m.siteRole,
+        siteName: siteDisplayName(m.siteId),
+      })),
       roles: formatMemberRoleLabels({ systemRole: u.systemRole, memberships: u.memberships }),
       emailVerified: Boolean(u.emailVerifiedAt),
-      imagingApproved: Boolean(u.imagingApprovedAt) && !u.imagingRejectedAt,
-      imagingPending:
-        Boolean(u.emailVerifiedAt) &&
-        !u.imagingApprovedAt &&
-        !u.imagingRejectedAt &&
-        !isPomfretOrgEmail(u.email),
-      imagingRejected: Boolean(u.imagingRejectedAt),
+      emailVerifiedAt: u.emailVerifiedAt ?? null,
       bootstrapAdmin: isBootstrapAdminEmail(u.email),
     }))
     .sort((a, b) => a.email.localeCompare(b.email))
 }
 
+/** PA Admin only: permanently delete the account. */
 export async function deleteMemberById(
   actorUserId: string,
   targetUserId: string
@@ -652,14 +653,8 @@ export async function deleteMemberById(
   const users = await readUsers()
   const target = users.find((u) => u.id === targetUserId)
   if (!target) return { ok: false, error: 'Member not found.' }
-  if (isAdminUser(target)) {
-    const actor = users.find((u) => u.id === actorUserId)
-    if (!actor || !isBootstrapAdminEmail(actor.email)) {
-      return { ok: false, error: 'Administrator accounts cannot be removed here.' }
-    }
-    if (isBootstrapAdminEmail(target.email)) {
-      return { ok: false, error: 'Bootstrap administrator accounts cannot be removed.' }
-    }
+  if (isBootstrapAdminEmail(target.email)) {
+    return { ok: false, error: 'Bootstrap administrator accounts cannot be removed.' }
   }
 
   const nextUsers = users.filter((u) => u.id !== targetUserId)
@@ -677,6 +672,51 @@ export async function deleteMemberById(
   }
 
   return { ok: true }
+}
+
+/**
+ * Observatory Admin remove: drop affiliation at one site.
+ * If that was the last membership, the account becomes Guest (not deleted).
+ */
+export async function removeMemberSiteAffiliation(
+  actorUserId: string,
+  targetUserId: string,
+  siteId: string
+): Promise<{ ok: true; becameGuest: boolean } | { ok: false; error: string }> {
+  if (!targetUserId) return { ok: false, error: 'Member id is required.' }
+  if (actorUserId === targetUserId) {
+    return { ok: false, error: 'You cannot remove your own affiliation.' }
+  }
+  if (!isObservatorySiteId(siteId)) {
+    return { ok: false, error: 'Invalid observatory site.' }
+  }
+
+  const users = await readUsers()
+  const idx = users.findIndex((u) => u.id === targetUserId)
+  if (idx < 0) return { ok: false, error: 'Member not found.' }
+  const target = users[idx]!
+  if (target.systemRole === 'pomfret_astro_admin') {
+    return { ok: false, error: 'You cannot remove Pomfret Astro Admin from an observatory.' }
+  }
+  if (isBootstrapAdminEmail(target.email)) {
+    return { ok: false, error: 'Bootstrap administrator accounts cannot be removed here.' }
+  }
+  if (!target.memberships.some((m) => m.siteId === siteId)) {
+    return { ok: false, error: 'Member is not affiliated with this observatory.' }
+  }
+
+  const memberships = target.memberships.filter((m) => m.siteId !== siteId)
+  const pomfret = membershipImagingForSite(memberships, DEFAULT_OBSERVATORY_SITE_ID)
+  users[idx] = withDerivedRoleFields({
+    ...target,
+    systemRole: 'user',
+    memberships,
+    imagingApprovedAt: pomfret.imagingApprovedAt,
+    imagingRejectedAt: pomfret.imagingRejectedAt,
+    updatedAt: new Date().toISOString(),
+  })
+  await writeUsers(users)
+  return { ok: true, becameGuest: memberships.length === 0 }
 }
 
 export async function setMemberAsAdmin(
@@ -924,5 +964,116 @@ export async function updateMemberProfile(
   users[idx] = updated
   await writeUsers(users)
   return { ok: true, user: updated, emailChanged }
+}
+
+function upsertSiteMembership(
+  memberships: SiteMembership[],
+  siteId: string,
+  siteRole: SiteRole
+): SiteMembership[] {
+  const now = new Date().toISOString()
+  const idx = memberships.findIndex((m) => m.siteId === siteId)
+  const next: SiteMembership = {
+    siteId,
+    siteRole,
+    imagingApprovedAt: idx >= 0 ? memberships[idx]!.imagingApprovedAt ?? now : now,
+    imagingRejectedAt: null,
+  }
+  if (idx >= 0) {
+    const copy = [...memberships]
+    copy[idx] = next
+    return copy
+  }
+  return [...memberships, next]
+}
+
+export async function adminSetMemberEmailVerified(
+  targetUserId: string,
+  verified: boolean
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!targetUserId) return { ok: false, error: 'Member id is required.' }
+  const users = await readUsers()
+  const idx = users.findIndex((u) => u.id === targetUserId)
+  if (idx < 0) return { ok: false, error: 'Member not found.' }
+
+  if (verified) {
+    const updated = await markMemberEmailVerified(targetUserId)
+    if (!updated) return { ok: false, error: 'Member not found.' }
+    return { ok: true }
+  }
+
+  const target = users[idx]!
+  users[idx] = withDerivedRoleFields({
+    ...target,
+    emailVerifiedAt: null,
+    updatedAt: new Date().toISOString(),
+  })
+  await writeUsers(users)
+  return { ok: true }
+}
+
+export async function adminApplyMemberRole(input: {
+  targetUserId: string
+  roleKey: string
+  actorIsPaAdmin: boolean
+  actorSiteId?: string
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const parsed = parseAdminMemberRoleKey(input.roleKey)
+  if (!parsed) return { ok: false, error: 'Invalid role selection.' }
+
+  const users = await readUsers()
+  const idx = users.findIndex((u) => u.id === input.targetUserId)
+  if (idx < 0) return { ok: false, error: 'Member not found.' }
+  const target = users[idx]!
+  const now = new Date().toISOString()
+
+  if (parsed.type === 'pomfret_astro_admin') {
+    if (!input.actorIsPaAdmin) {
+      return { ok: false, error: 'Only Pomfret Astro Admin may assign that role.' }
+    }
+    users[idx] = withDerivedRoleFields({
+      ...target,
+      systemRole: 'pomfret_astro_admin',
+      updatedAt: now,
+    })
+    await writeUsers(users)
+    return { ok: true }
+  }
+
+  if (parsed.type === 'guest') {
+    if (!input.actorIsPaAdmin) {
+      return { ok: false, error: 'Only Pomfret Astro Admin may set Guest.' }
+    }
+    users[idx] = withDerivedRoleFields({
+      ...target,
+      systemRole: 'user',
+      memberships: [],
+      imagingApprovedAt: null,
+      imagingRejectedAt: null,
+      updatedAt: now,
+    })
+    await writeUsers(users)
+    return { ok: true }
+  }
+
+  if (!isObservatorySiteId(parsed.siteId)) {
+    return { ok: false, error: 'Invalid observatory site.' }
+  }
+  if (!input.actorIsPaAdmin && input.actorSiteId !== parsed.siteId) {
+    return { ok: false, error: 'You may only change roles at your observatory.' }
+  }
+
+  const memberships = upsertSiteMembership(target.memberships ?? [], parsed.siteId, parsed.siteRole)
+  const pomfret = membershipImagingForSite(memberships, DEFAULT_OBSERVATORY_SITE_ID)
+  users[idx] = withDerivedRoleFields({
+    ...target,
+    systemRole: 'user',
+    memberships,
+    imagingApprovedAt: pomfret.imagingApprovedAt,
+    imagingRejectedAt: pomfret.imagingRejectedAt,
+    updatedAt: now,
+  })
+  await writeUsers(users)
+  return { ok: true }
 }
 

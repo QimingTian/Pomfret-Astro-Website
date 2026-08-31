@@ -8,16 +8,38 @@ import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 import { requireImagingAdmin } from '@/lib/imaging/core/admin-auth'
 import { isPomfretAstroAdmin } from '@/lib/member-roles'
 import {
+  adminApplyMemberRole,
+  adminSetMemberEmailVerified,
   deleteMemberById,
   isBootstrapAdminEmail,
   listMembersForAdminDirectory,
-  setMemberAsAdmin,
-  setMemberAsMember,
-  setMemberImagingApproval,
+  removeMemberSiteAffiliation,
 } from '@/lib/member-store'
 import { resolveObservatorySite } from '@/lib/observatory-sites'
 
 export const runtime = 'nodejs'
+
+function membersResponse(
+  auth: { user: { id: string; email: string; systemRole: string } },
+  site: { id: string },
+  scope: 'all' | string
+) {
+  const membersRaw = listMembersForAdminDirectory()
+  return membersRaw.then((membersRawList) => {
+    const members =
+      scope === 'all' ? membersRawList : filterMembersForAdminSite(membersRawList, site.id)
+    return {
+      ok: true as const,
+      total: members.length,
+      members,
+      scope: scope === 'all' ? 'all' : site.id,
+      siteName: scope === 'all' ? null : resolveObservatorySite(site.id).name,
+      canManageAdmins: isBootstrapAdminEmail(auth.user.email),
+      currentUserId: auth.user.id,
+      isPaAdmin: isPomfretAstroAdmin(auth.user.systemRole),
+    }
+  })
+}
 
 /** GET — list signed-up members. PA Admin: all sites; site admin: affiliated members only. */
 export async function GET(request: NextRequest) {
@@ -28,25 +50,12 @@ export async function GET(request: NextRequest) {
     }
 
     const scope = adminMembersDirectoryScope(auth.user)
-    const membersRaw = await listMembersForAdminDirectory()
-    const members =
-      scope === 'all'
-        ? membersRaw
-        : filterMembersForAdminSite(membersRaw, site.id)
-
-    return NextResponse.json({
-      ok: true as const,
-      total: members.length,
-      members,
-      scope: scope === 'all' ? 'all' : site.id,
-      siteName: scope === 'all' ? null : resolveObservatorySite(site.id).name,
-      canManageAdmins: isBootstrapAdminEmail(auth.user.email),
-      currentUserId: auth.user.id,
-    })
+    const payload = await membersResponse(auth, site, scope)
+    return NextResponse.json(payload)
   })
 }
 
-/** PATCH — promote admin or approve/reject imaging. Admin only. */
+/** PATCH — update member role or email verification. */
 export async function PATCH(request: NextRequest) {
   return runWithRequestSite(request, async (site) => {
     const auth = await requireImagingAdmin(request, site.id)
@@ -71,74 +80,54 @@ export async function PATCH(request: NextRequest) {
     }
 
     const scope = adminMembersDirectoryScope(auth.user)
-    if (scope !== 'all') {
-      const members = await listMembersForAdminDirectory()
-      const target = members.find((m) => m.id === id)
-      if (!target || !target.memberships.some((m) => m.siteId === site.id)) {
-        return NextResponse.json({ ok: false, error: 'Member not found at this observatory.' }, { status: 404 })
-      }
-    }
-
-    const imagingAction = rec.imagingAction
-    if (imagingAction === 'approve' || imagingAction === 'reject') {
-      const result = await setMemberImagingApproval(id, imagingAction, site.id)
-      if (!result.ok) {
-        return NextResponse.json({ ok: false, error: result.error }, { status: 400 })
-      }
-      const membersRaw = await listMembersForAdminDirectory()
-      const members =
-        scope === 'all' ? membersRaw : filterMembersForAdminSite(membersRaw, site.id)
-      return NextResponse.json({
-        ok: true as const,
-        total: members.length,
-        members,
-        scope: scope === 'all' ? 'all' : site.id,
-        siteName: scope === 'all' ? null : resolveObservatorySite(site.id).name,
-        canManageAdmins: isBootstrapAdminEmail(auth.user.email),
-        currentUserId: auth.user.id,
-      })
-    }
-
-    if (!isPomfretAstroAdmin(auth.user.systemRole)) {
-      return NextResponse.json({ ok: false, error: 'Only Pomfret Astro Admin may change roles.' }, { status: 403 })
-    }
-
-    const roleAction = rec.roleAction
-    if (roleAction === 'member') {
-      const result = await setMemberAsMember(auth.user.id, id)
-      if (!result.ok) {
-        return NextResponse.json({ ok: false, error: result.error }, { status: 400 })
-      }
-      const members = await listMembersForAdminDirectory()
-      return NextResponse.json({
-        ok: true as const,
-        total: members.length,
-        members,
-        scope: 'all' as const,
-        siteName: null,
-        canManageAdmins: isBootstrapAdminEmail(auth.user.email),
-        currentUserId: auth.user.id,
-      })
-    }
-
-    const result = await setMemberAsAdmin(id)
-    if (!result.ok) {
-      return NextResponse.json({ ok: false, error: result.error }, { status: 400 })
-    }
+    const isPaAdmin = isPomfretAstroAdmin(auth.user.systemRole)
     const members = await listMembersForAdminDirectory()
-    return NextResponse.json({
-      ok: true as const,
-      total: members.length,
-      members,
-      scope: 'all' as const,
-      siteName: null,
-      canManageAdmins: isBootstrapAdminEmail(auth.user.email),
-      currentUserId: auth.user.id,
-    })
+    const target = members.find((m) => m.id === id)
+    if (!target) {
+      return NextResponse.json({ ok: false, error: 'Member not found.' }, { status: 404 })
+    }
+    if (scope !== 'all' && !target.memberships.some((m) => m.siteId === site.id)) {
+      return NextResponse.json({ ok: false, error: 'Member not found at this observatory.' }, { status: 404 })
+    }
+    if (id === auth.user.id) {
+      return NextResponse.json({ ok: false, error: 'You cannot edit your own account here.' }, { status: 400 })
+    }
+    if (target.bootstrapAdmin && !isBootstrapAdminEmail(auth.user.email)) {
+      return NextResponse.json({ ok: false, error: 'This administrator account cannot be edited here.' }, { status: 403 })
+    }
+    if (!isPaAdmin && isPomfretAstroAdmin(target.systemRole)) {
+      return NextResponse.json({ ok: false, error: 'You cannot edit Pomfret Astro Admin accounts.' }, { status: 403 })
+    }
+
+    if (typeof rec.emailVerified === 'boolean') {
+      const result = await adminSetMemberEmailVerified(id, rec.emailVerified)
+      if (!result.ok) {
+        return NextResponse.json({ ok: false, error: result.error }, { status: 400 })
+      }
+    }
+
+    if (typeof rec.roleKey === 'string' && rec.roleKey.trim()) {
+      const result = await adminApplyMemberRole({
+        targetUserId: id,
+        roleKey: rec.roleKey.trim(),
+        actorIsPaAdmin: isPaAdmin,
+        actorSiteId: site.id,
+      })
+      if (!result.ok) {
+        return NextResponse.json({ ok: false, error: result.error }, { status: 400 })
+      }
+    }
+
+    const payload = await membersResponse(auth, site, scope)
+    return NextResponse.json(payload)
   })
 }
 
-/** DELETE — remove a member account (not admins). Admin only. */
+/**
+ * DELETE —
+ * PA Admin: permanently delete the account.
+ * Observatory Admin: remove affiliation at this site only (last site → Guest).
+ */
 export async function DELETE(request: NextRequest) {
   return runWithRequestSite(request, async (site) => {
     const auth = await requireImagingAdmin(request, site.id)
@@ -153,31 +142,37 @@ export async function DELETE(request: NextRequest) {
     if (!id) {
       return NextResponse.json({ ok: false, error: 'id is required' }, { status: 400 })
     }
+    if (id === auth.user.id) {
+      return NextResponse.json({ ok: false, error: 'You cannot remove your own account.' }, { status: 400 })
+    }
 
     const scope = adminMembersDirectoryScope(auth.user)
-    if (scope !== 'all') {
-      const members = await listMembersForAdminDirectory()
-      const target = members.find((m) => m.id === id)
-      if (!target || !target.memberships.some((m) => m.siteId === site.id)) {
-        return NextResponse.json({ ok: false, error: 'Member not found at this observatory.' }, { status: 404 })
+    const isPaAdmin = isPomfretAstroAdmin(auth.user.systemRole)
+    const members = await listMembersForAdminDirectory()
+    const target = members.find((m) => m.id === id)
+    if (!target) {
+      return NextResponse.json({ ok: false, error: 'Member not found.' }, { status: 404 })
+    }
+    if (!isPaAdmin && !target.memberships.some((m) => m.siteId === site.id)) {
+      return NextResponse.json({ ok: false, error: 'Member not found at this observatory.' }, { status: 404 })
+    }
+    if (!isPaAdmin && isPomfretAstroAdmin(target.systemRole)) {
+      return NextResponse.json({ ok: false, error: 'You cannot remove Pomfret Astro Admin.' }, { status: 403 })
+    }
+
+    if (isPaAdmin) {
+      const result = await deleteMemberById(auth.user.id, id)
+      if (!result.ok) {
+        return NextResponse.json({ ok: false, error: result.error }, { status: 400 })
+      }
+    } else {
+      const result = await removeMemberSiteAffiliation(auth.user.id, id, site.id)
+      if (!result.ok) {
+        return NextResponse.json({ ok: false, error: result.error }, { status: 400 })
       }
     }
 
-    const result = await deleteMemberById(auth.user.id, id)
-    if (!result.ok) {
-      return NextResponse.json({ ok: false, error: result.error }, { status: 400 })
-    }
-    const membersRaw = await listMembersForAdminDirectory()
-    const members =
-      scope === 'all' ? membersRaw : filterMembersForAdminSite(membersRaw, site.id)
-    return NextResponse.json({
-      ok: true as const,
-      total: members.length,
-      members,
-      scope: scope === 'all' ? 'all' : site.id,
-      siteName: scope === 'all' ? null : resolveObservatorySite(site.id).name,
-      canManageAdmins: isBootstrapAdminEmail(auth.user.email),
-      currentUserId: auth.user.id,
-    })
+    const payload = await membersResponse(auth, site, scope)
+    return NextResponse.json(payload)
   })
 }

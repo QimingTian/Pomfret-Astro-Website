@@ -2,25 +2,35 @@
 
 import {
   glassPillDangerSm,
+  glassPillMd,
+  glassPillSuccessSm,
+  glassPillToggleActive,
+  glassPillToggleIdle,
   glassPillXs,
 } from '@/lib/glass-ui'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { DashboardPanel } from '@/app/dashboard/account/dashboard-panel'
 import { useAdminSiteScope } from '@/hooks/use-admin-site-scope'
-import { memberVerificationStatusLabel } from '@/lib/member-access'
-import { memberRolesDisplay, type MemberRole } from '@/lib/member-store'
+import {
+  adminMemberRoleOptions,
+  memberRoleKey,
+  type AdminMemberRoleOption,
+} from '@/lib/admin-member-role-edit'
+import { isPomfretAstroAdmin, type SiteRole } from '@/lib/member-roles'
+import type { SystemRole } from '@/lib/member-roles'
 
 type Row = {
   id: string
   firstName: string
   lastName: string
+  username: string
   email: string
-  role: MemberRole
-  roles?: string[]
+  createdAt: string
+  systemRole: SystemRole
+  memberships: Array<{ siteId: string; siteRole: SiteRole; siteName: string }>
+  roles: string[]
   emailVerified: boolean
-  imagingApproved: boolean
-  imagingPending: boolean
-  imagingRejected: boolean
+  emailVerifiedAt: string | null
   bootstrapAdmin?: boolean
 }
 
@@ -30,13 +40,60 @@ type MembersPayload = {
   total?: number
   canManageAdmins?: boolean
   currentUserId?: string
+  isPaAdmin?: boolean
   scope?: string
   siteName?: string | null
   error?: string
 }
 
+const pillActive = glassPillToggleActive
+const pillIdle = glassPillToggleIdle
+
 function displayName(row: Row): string {
   return [row.firstName, row.lastName].filter(Boolean).join(' ').trim() || row.email
+}
+
+function rolesLabel(row: Row): string {
+  return row.roles.length > 0 ? row.roles.join(' · ') : 'Guest'
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 space-y-1 text-sm">
+      <p className="text-gray-400">{label}</p>
+      <p className="break-words text-white">{value || '—'}</p>
+    </div>
+  )
+}
+
+function MemberModal({
+  title,
+  onClose,
+  children,
+}: {
+  title: string
+  onClose: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div
+        role="dialog"
+        aria-labelledby="member-modal-title"
+        className="w-[min(100%,32rem)] rounded-xl border border-gray-700 bg-[#08090a] p-6 shadow-xl"
+      >
+        <p id="member-modal-title" className="text-lg font-medium text-white">
+          {title}
+        </p>
+        <div className="mt-4 space-y-4">{children}</div>
+        <div className="mt-6 flex justify-end">
+          <button type="button" className={glassPillMd} onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export function AllMembersSection({ className = '' }: { className?: string }) {
@@ -47,9 +104,18 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [removingId, setRemovingId] = useState<string | null>(null)
-  const [promotingId, setPromotingId] = useState<string | null>(null)
-  const [demotingId, setDemotingId] = useState<string | null>(null)
+  const [actingId, setActingId] = useState<string | null>(null)
+  const [checkRow, setCheckRow] = useState<Row | null>(null)
+  const [editRow, setEditRow] = useState<Row | null>(null)
+  const [editRoleKey, setEditRoleKey] = useState('')
+  const [editEmailVerified, setEditEmailVerified] = useState(false)
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
+
+  const roleOptions: AdminMemberRoleOption[] = useMemo(
+    () => adminMemberRoleOptions({ isPaAdmin, siteId: adminSiteId }),
+    [isPaAdmin, adminSiteId]
+  )
 
   const panelTitle =
     membersScope === 'all' ? 'All members' : `${adminSite.name} members`
@@ -94,48 +160,49 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
     return (await res.json().catch(() => ({}))) as MembersPayload
   }
 
-  async function setAsAdmin(row: Row) {
-    const name = displayName(row)
-    if (!window.confirm(`Set “${name}” (${row.email}) as Admin?`)) return
-    setPromotingId(row.id)
-    setError(null)
-    try {
-      const data = await patchMember({ id: row.id })
-      if (!data?.ok) {
-        setError(typeof data.error === 'string' ? data.error : 'Could not update member.')
-        return
-      }
-      applyPayload(data)
-    } catch {
-      setError('Could not update member.')
-    } finally {
-      setPromotingId(null)
-    }
+  function openEdit(row: Row) {
+    setEditRow(row)
+    setEditRoleKey(
+      memberRoleKey({
+        systemRole: row.systemRole,
+        memberships: row.memberships,
+        preferredSiteId: isPaAdmin ? undefined : adminSiteId,
+      })
+    )
+    setEditEmailVerified(row.emailVerified)
+    setEditError(null)
   }
 
-  async function setAsMember(row: Row) {
-    const name = displayName(row)
-    if (!window.confirm(`Set “${name}” (${row.email}) as Member? They will lose admin access.`)) return
-    setDemotingId(row.id)
-    setError(null)
+  async function saveEdit() {
+    if (!editRow) return
+    setEditSaving(true)
+    setEditError(null)
     try {
-      const data = await patchMember({ id: row.id, roleAction: 'member' })
+      const data = await patchMember({
+        id: editRow.id,
+        roleKey: editRoleKey,
+        emailVerified: editEmailVerified,
+      })
       if (!data?.ok) {
-        setError(typeof data.error === 'string' ? data.error : 'Could not update member.')
+        setEditError(typeof data.error === 'string' ? data.error : 'Could not update member.')
         return
       }
       applyPayload(data)
+      setEditRow(null)
     } catch {
-      setError('Could not update member.')
+      setEditError('Could not update member.')
     } finally {
-      setDemotingId(null)
+      setEditSaving(false)
     }
   }
 
   async function removeMember(row: Row) {
     const name = displayName(row)
-    if (!window.confirm(`Remove “${name}” (${row.email})? This cannot be undone.`)) return
-    setRemovingId(row.id)
+    const confirmText = isPaAdmin
+      ? `Permanently delete account “${name}” (${row.email})? This cannot be undone.`
+      : `Remove “${name}” from ${adminSite.name}? If this is their last observatory, they become Guest.`
+    if (!window.confirm(confirmText)) return
+    setActingId(row.id)
     setError(null)
     try {
       const res = await siteFetch(`/api/admin/members?id=${encodeURIComponent(row.id)}`, {
@@ -150,16 +217,19 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
     } catch {
       setError('Could not remove member.')
     } finally {
-      setRemovingId(null)
+      setActingId(null)
     }
   }
 
   function canManageRow(row: Row): boolean {
     if (row.id === currentUserId) return false
-    if (row.bootstrapAdmin) return false
-    if (!isPaAdmin) return false
-    if (row.role === 'member') return true
-    return canManageAdmins && row.role === 'admin'
+    if (row.bootstrapAdmin && !canManageAdmins) return false
+    if (isPaAdmin) {
+      if (isPomfretAstroAdmin(row.systemRole) && !canManageAdmins) return false
+      return true
+    }
+    if (isPomfretAstroAdmin(row.systemRole)) return false
+    return row.memberships.some((m) => m.siteId === adminSiteId)
   }
 
   return (
@@ -174,58 +244,42 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
         <ul className="max-h-[22rem] space-y-2 overflow-y-auto">
           {members.map((m) => {
             const name = displayName(m)
-            const busyRemove = removingId === m.id
-            const busyPromote = promotingId === m.id
-            const busyDemote = demotingId === m.id
-            const busy = busyRemove || busyPromote || busyDemote
+            const busy = actingId === m.id
             const manageable = canManageRow(m)
             return (
               <li
                 key={m.id}
                 className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-700 px-3 py-2 text-sm"
               >
-                <p className="min-w-0 flex-1 break-words text-white">
-                  <span>{name}</span>
-                  <span className="mx-2">·</span>
-                  <span className="break-all">{m.email}</span>
-                  <span className="mx-2">·</span>
-                  <span>{memberRolesDisplay(m)}</span>
-                  <span className="mx-2">·</span>
-                  <span>
-                    {memberVerificationStatusLabel({
-                      emailVerified: m.emailVerified,
-                      imagingApproved: m.imagingApproved,
-                    })}
-                  </span>
-                </p>
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium text-white break-words">{name}</p>
+                  <p className="text-gray-400">{rolesLabel(m)}</p>
+                </div>
                 {manageable ? (
                   <div className="flex shrink-0 flex-wrap items-center gap-2">
-                    {m.role === 'member' ? (
-                      <button
-                        type="button"
-                        disabled={busy || loading}
-                        onClick={() => void setAsAdmin(m)}
-                        className={`${glassPillXs} disabled:opacity-40`}
-                      >
-                        {busyPromote ? '…' : 'Set as Admin'}
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled={busy || loading}
-                        onClick={() => void setAsMember(m)}
-                        className={`${glassPillXs} disabled:opacity-40`}
-                      >
-                        {busyDemote ? '…' : 'Set as Member'}
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      disabled={busy || loading}
+                      onClick={() => setCheckRow(m)}
+                      className={`${glassPillXs} disabled:opacity-40`}
+                    >
+                      Check Info
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy || loading}
+                      onClick={() => openEdit(m)}
+                      className={`${glassPillXs} disabled:opacity-40`}
+                    >
+                      Edit Info
+                    </button>
                     <button
                       type="button"
                       disabled={busy || loading}
                       onClick={() => void removeMember(m)}
                       className={`${glassPillDangerSm} disabled:opacity-40`}
                     >
-                      {busyRemove ? '…' : 'Remove'}
+                      {busy ? '…' : 'Remove'}
                     </button>
                   </div>
                 ) : null}
@@ -234,6 +288,103 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
           })}
         </ul>
       )}
+
+      {checkRow ? (
+        <MemberModal title={displayName(checkRow)} onClose={() => setCheckRow(null)}>
+          <InfoRow label="First name" value={checkRow.firstName} />
+          <InfoRow label="Last name" value={checkRow.lastName} />
+          <InfoRow label="Username" value={checkRow.username} />
+          <InfoRow label="Email" value={checkRow.email} />
+          <InfoRow label="Role" value={rolesLabel(checkRow)} />
+          <InfoRow
+            label="Email verified"
+            value={checkRow.emailVerified ? 'Yes' : 'No'}
+          />
+          <InfoRow
+            label="Member since"
+            value={new Date(checkRow.createdAt).toLocaleString()}
+          />
+          {checkRow.memberships.length > 0 ? (
+            <InfoRow
+              label="Affiliations"
+              value={checkRow.memberships
+                .map((m) => `${m.siteName} (${m.siteRole === 'observatory_admin' ? 'Admin' : 'Member'})`)
+                .join(' · ')}
+            />
+          ) : null}
+        </MemberModal>
+      ) : null}
+
+      {editRow ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div
+            role="dialog"
+            aria-labelledby="member-edit-title"
+            className="w-[min(100%,32rem)] rounded-xl border border-gray-700 bg-[#08090a] p-6 shadow-xl"
+          >
+            <p id="member-edit-title" className="text-lg font-medium text-white">
+              Edit {displayName(editRow)}
+            </p>
+            {editError ? <p className="mt-2 text-sm text-red-400">{editError}</p> : null}
+            <div className="mt-4 space-y-4">
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-white">Role</p>
+                <select
+                  value={editRoleKey}
+                  disabled={editSaving}
+                  onChange={(e) => setEditRoleKey(e.target.value)}
+                  className="w-full rounded-lg border border-gray-600 bg-transparent px-3 py-2 text-sm text-white"
+                >
+                  {roleOptions.map((opt) => (
+                    <option key={opt.key} value={opt.key} className="bg-[#08090a]">
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-white">Email verified</p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={editSaving}
+                    onClick={() => setEditEmailVerified(true)}
+                    className={editEmailVerified ? pillActive : pillIdle}
+                  >
+                    Verified
+                  </button>
+                  <button
+                    type="button"
+                    disabled={editSaving}
+                    onClick={() => setEditEmailVerified(false)}
+                    className={!editEmailVerified ? pillActive : pillIdle}
+                  >
+                    Not verified
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                disabled={editSaving}
+                className={glassPillMd}
+                onClick={() => setEditRow(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={editSaving}
+                className={`${glassPillSuccessSm} disabled:opacity-40`}
+                onClick={() => void saveEdit()}
+              >
+                {editSaving ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </DashboardPanel>
   )
 }

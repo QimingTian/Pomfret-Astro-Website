@@ -8,26 +8,11 @@ import {
 } from '@/lib/site-policies'
 import {
   guestAccessModeFromSettings,
-  normalizeProjectDurationLimitHours,
-  type SiteAccessControlSettings,
+  normalizeSiteAccessControlSettings,
 } from '@/lib/site-access-control'
+import { OBSERVATORY_SITES } from '@/lib/observatory-sites'
 
 export const runtime = 'nodejs'
-
-function parseSettings(body: unknown): SiteAccessControlSettings | null {
-  if (!body || typeof body !== 'object') return null
-  const rec = body as Record<string, unknown>
-  const openToGuest = rec.openToGuest === true
-  const guestSessionRequiresApproval = rec.guestSessionRequiresApproval === true
-  const memberProjectDurationLimitHours = normalizeProjectDurationLimitHours(
-    rec.memberProjectDurationLimitHours
-  )
-  return {
-    openToGuest,
-    guestSessionRequiresApproval: openToGuest ? guestSessionRequiresApproval : false,
-    memberProjectDurationLimitHours,
-  }
-}
 
 /** GET — per-site access control settings for the active observatory. */
 export async function GET(request: NextRequest) {
@@ -44,6 +29,10 @@ export async function GET(request: NextRequest) {
       siteName: site.name,
       settings,
       guestAccessMode: guestAccessModeFromSettings(settings),
+      otherObservatories: OBSERVATORY_SITES.filter((s) => s.id !== site.id).map((s) => ({
+        id: s.id,
+        name: s.name,
+      })),
     })
   })
 }
@@ -66,9 +55,15 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Invalid JSON body' }, { status: 400 })
     }
 
-    const settings = parseSettings(body)
-    if (!settings) {
-      return NextResponse.json({ ok: false, error: 'Invalid access control settings.' }, { status: 400 })
+    const settings = normalizeSiteAccessControlSettings(body)
+    // Don't allow selecting the current site in other-obs scope.
+    if (Array.isArray(settings.otherObservatoryMemberScope)) {
+      settings.otherObservatoryMemberScope = settings.otherObservatoryMemberScope.filter(
+        (id) => id !== site.id
+      )
+      if (settings.otherObservatoryMemberScope.length === 0) {
+        settings.otherObservatoryMemberScope = 'all'
+      }
     }
 
     await setSiteAccessControlSettings(site.id, settings)

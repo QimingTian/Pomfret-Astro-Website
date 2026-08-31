@@ -46,7 +46,6 @@ import {
   type MemberSavedSessionApiEntry,
   type RemoteSavedSessionFormV1,
 } from '@/lib/remote-saved-session'
-import { canSubmitImagingPublic } from '@/lib/member-access'
 import { sexagesimalPartsFromRadec, parseCoordsFromFormParts } from '@/lib/remote/coords'
 import { formatDurationShort } from '@/lib/remote/format'
 import { queueStatusLabel, isSessionFailedTerminalLine } from '@/lib/remote/queue-status'
@@ -490,12 +489,52 @@ export default function RemotePage() {
     }
   }, [member])
 
-  const imagingAccess = useMemo(() => {
+  const [imagingAccess, setImagingAccess] = useState<
+    { ok: true } | { ok: false; error: string }
+  >({
+    ok: false,
+    error: 'Sign in to submit a session.',
+  })
+
+  const fetchImagingAccess = useCallback(async () => {
     if (member.status !== 'authenticated') {
-      return { ok: false as const, error: 'Sign in to submit a session.' }
+      setImagingAccess({ ok: false, error: 'Sign in to submit a session.' })
+      return
     }
-    return canSubmitImagingPublic(member.user)
-  }, [member])
+    try {
+      const res = await observatorySiteFetch('/api/member/imaging-access', siteId)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || data?.ok !== true) {
+        setImagingAccess({
+          ok: false,
+          error: typeof data.error === 'string' ? data.error : 'Could not check imaging access.',
+        })
+        return
+      }
+      if (data.canSubmit === true) {
+        setImagingAccess({ ok: true })
+      } else {
+        setImagingAccess({
+          ok: false,
+          error: typeof data.error === 'string' ? data.error : 'Imaging is not available.',
+        })
+      }
+    } catch {
+      setImagingAccess({ ok: false, error: 'Could not check imaging access.' })
+    }
+  }, [member, siteId])
+
+  useEffect(() => {
+    void fetchImagingAccess()
+  }, [fetchImagingAccess])
+
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') void fetchImagingAccess()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [fetchImagingAccess])
 
   const currentMemberId = member.status === 'authenticated' ? member.user.id : null
   const currentMemberEmail = member.status === 'authenticated' ? member.user.email : null
@@ -1086,7 +1125,7 @@ export default function RemotePage() {
   }, [site, siteId])
 
   const refreshQueue = useCallback(async () => {
-    const res = await fetch('/api/imaging/current-sessions')
+    const res = await observatorySiteFetch('/api/imaging/current-sessions', siteId)
     const data = await res.json().catch(() => ({}))
     if (res.ok && data?.ok && Array.isArray(data.sessions)) {
       const items = data.sessions as Array<{
@@ -1341,13 +1380,14 @@ export default function RemotePage() {
                   })
                   .filter((n): n is NonNullable<typeof n> => n != null)
               : undefined,
+            adminApprovalPending: (x as Record<string, unknown>).adminApprovalPending === true,
           }
         })
       setQueueItems(normalized)
     } else {
       setQueueItems([])
     }
-  }, [])
+  }, [siteId])
 
   useEffect(() => {
     void refreshQueue()
@@ -2729,7 +2769,7 @@ export default function RemotePage() {
 
     const endpoint = editingSessionId ? `/api/imaging/queue/${encodeURIComponent(editingSessionId)}` : '/api/imaging/queue'
     const editCredential = editingSessionId ? sessionPasswords[editingSessionId] ?? '' : ''
-    const res = await fetch(endpoint, {
+    const res = await observatorySiteFetch(endpoint, siteId, {
       method: editingSessionId ? 'PUT' : 'POST',
       credentials: 'include',
       headers: {
@@ -2801,7 +2841,7 @@ export default function RemotePage() {
         : data.adminApprovalPending === true
           ? typeof data.message === 'string'
             ? data.message
-            : 'Project submitted for administrator approval (over 30 hours total).'
+            : 'Session submitted for administrator approval.'
           : 'Session submitted. It will appear in Current Sessions when scheduled.'
     )
     await refreshQueue()

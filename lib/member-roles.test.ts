@@ -70,6 +70,55 @@ test('canSubmitImagingAtSite open_direct allows guest', () => {
   assert.equal(decision.ok, true)
 })
 
+test('canSubmitImagingAtSite site_member requires imaging approval', () => {
+  const pending = canSubmitImagingAtSite({
+    systemRole: 'user',
+    memberships: [
+      {
+        siteId: 'pomfret',
+        siteRole: 'observatory_member',
+        imagingApprovedAt: null,
+        imagingRejectedAt: null,
+      },
+    ],
+    siteId: 'pomfret',
+    guestAccessMode: 'closed',
+  })
+  assert.equal(pending.ok, false)
+  if (!pending.ok) assert.equal(pending.code, 'imaging_pending')
+
+  const rejected = canSubmitImagingAtSite({
+    systemRole: 'user',
+    memberships: [
+      {
+        siteId: 'pomfret',
+        siteRole: 'observatory_member',
+        imagingApprovedAt: null,
+        imagingRejectedAt: '2020-01-01T00:00:00.000Z',
+      },
+    ],
+    siteId: 'pomfret',
+    guestAccessMode: 'closed',
+  })
+  assert.equal(rejected.ok, false)
+  if (!rejected.ok) assert.equal(rejected.code, 'imaging_rejected')
+
+  const approved = canSubmitImagingAtSite({
+    systemRole: 'user',
+    memberships: [
+      {
+        siteId: 'pomfret',
+        siteRole: 'observatory_member',
+        imagingApprovedAt: '2020-01-01T00:00:00.000Z',
+        imagingRejectedAt: null,
+      },
+    ],
+    siteId: 'pomfret',
+    guestAccessMode: 'closed',
+  })
+  assert.equal(approved.ok, true)
+})
+
 test('formatMemberRoleLabels can include system and site roles', () => {
   assert.deepEqual(
     formatMemberRoleLabels({

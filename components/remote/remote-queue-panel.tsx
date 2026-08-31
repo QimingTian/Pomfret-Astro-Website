@@ -16,6 +16,7 @@ export type RemoteQueuePanelItem = {
   sessionType?: 'dso' | 'variable_star'
   projectMode?: boolean
   mosaicMode?: boolean
+  adminApprovalPending?: boolean
   outputMode?: 'raw_zip' | 'stacked_master' | 'none'
   hasDownload?: boolean
   nights?: Array<{ hasDownload?: boolean }>
@@ -71,6 +72,10 @@ export function RemoteQueuePanel<T extends RemoteQueuePanelItem>({
           <ul className="space-y-2">
             {queueItems.map((item) => {
               const displayStatus = item.status === 'claimed' ? 'in_progress' : item.status
+              const statusLabel =
+                item.adminApprovalPending === true && displayStatus === 'pending'
+                  ? 'Awaiting admin approval'
+                  : queueStatusLabel(displayStatus)
               const sessionTypeLabel = item.sessionType === 'variable_star' ? 'Variable Star' : 'Deep Sky Object'
               const projectLabel = item.mosaicMode
                 ? ' · Mosaic Project Mode'
@@ -91,7 +96,7 @@ export function RemoteQueuePanel<T extends RemoteQueuePanelItem>({
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="font-medium text-white">{`${item.target} | ${sessionTypeLabel}${projectLabel}`}</span>
                     <span className={`text-xs font-semibold uppercase ${queueStatusBadgeClass(displayStatus)}`}>
-                      {queueStatusLabel(displayStatus)}
+                      {statusLabel}
                     </span>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-3">

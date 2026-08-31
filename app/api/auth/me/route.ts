@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/member-auth'
-import { toPublicMemberUser } from '@/lib/member-store'
+import { toPublicMemberUserAsync } from '@/lib/member-store'
 
 export const runtime = 'nodejs'
 
@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
     )
   }
   return NextResponse.json(
-    { ok: true, user: toPublicMemberUser(user) },
+    { ok: true, user: await toPublicMemberUserAsync(user) },
     { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
   )
 }

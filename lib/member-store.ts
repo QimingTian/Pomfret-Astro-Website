@@ -64,6 +64,8 @@ export type PublicMemberUser = {
   imagingApproved: boolean
   imagingPending: boolean
   imagingRejected: boolean
+  /** Affiliation application awaiting observatory admin (account is Guest until approved). */
+  pendingMembership: { siteId: string; siteName: string } | null
 }
 
 const USERS_KEY = 'member-users'
@@ -319,7 +321,10 @@ export async function syncBootstrapAdminRole(user: MemberUser): Promise<MemberUs
   return updated
 }
 
-function toPublicUser(u: MemberUser): PublicMemberUser {
+function toPublicUser(
+  u: MemberUser,
+  extras?: { pendingMembership?: { siteId: string; siteName: string } | null }
+): PublicMemberUser {
   const emailVerified = Boolean(u.emailVerifiedAt)
   const imagingRejected = Boolean(u.imagingRejectedAt)
   const imagingApproved = Boolean(u.imagingApprovedAt) && !imagingRejected
@@ -329,6 +334,8 @@ function toPublicUser(u: MemberUser): PublicMemberUser {
     siteId: m.siteId,
     siteRole: m.siteRole,
   }))
+  const pendingMembership = extras?.pendingMembership ?? null
+  const roles = formatMemberRoleLabels({ systemRole: u.systemRole, memberships: u.memberships })
   return {
     id: u.id,
     email: u.email,
@@ -338,13 +345,24 @@ function toPublicUser(u: MemberUser): PublicMemberUser {
     role: u.role,
     systemRole: u.systemRole,
     memberships,
-    roles: formatMemberRoleLabels({ systemRole: u.systemRole, memberships: u.memberships }),
+    roles,
     createdAt: u.createdAt,
     emailVerified,
     imagingApproved,
     imagingPending,
     imagingRejected,
+    pendingMembership,
   }
+}
+
+export async function toPublicMemberUserAsync(u: MemberUser): Promise<PublicMemberUser> {
+  const { listPendingMembershipApplicationsForUser } = await import('@/lib/membership-applications')
+  const pending = await listPendingMembershipApplicationsForUser(u.id)
+  const first = pending[0]
+  const pendingMembership = first
+    ? { siteId: first.siteId, siteName: siteDisplayName(first.siteId) }
+    : null
+  return toPublicUser(u, { pendingMembership })
 }
 
 function hydrateUsers(list: MemberUser[]): MemberUser[] {
@@ -459,7 +477,12 @@ export async function createMember(input: {
   firstName: string
   lastName: string
   username: string
-}): Promise<{ ok: true; user: PublicMemberUser } | { ok: false; error: string }> {
+  /** `guest` or an observatory site id. Default guest for new accounts. */
+  affiliation?: 'guest' | string
+}): Promise<
+  | { ok: true; user: PublicMemberUser; membershipPending?: boolean }
+  | { ok: false; error: string }
+> {
   const email = normalizeMemberEmail(input.email)
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return { ok: false, error: 'Valid email is required.' }
@@ -489,16 +512,44 @@ export async function createMember(input: {
     return { ok: false, error: 'This username is already taken.' }
   }
 
+  const affiliationRaw = (input.affiliation ?? 'guest').trim().toLowerCase()
+  if (affiliationRaw !== 'guest' && !isObservatorySiteId(affiliationRaw)) {
+    return { ok: false, error: 'Invalid affiliation.' }
+  }
+  const affiliationSiteId = affiliationRaw !== 'guest' ? affiliationRaw : null
+
   const now = new Date().toISOString()
   const roles = roleForNewUser(email)
-  const memberships: SiteMembership[] = [
-    {
-      siteId: DEFAULT_OBSERVATORY_SITE_ID,
-      siteRole: roles.systemRole === 'pomfret_astro_admin' ? 'observatory_admin' : 'observatory_member',
-      imagingApprovedAt: null,
-      imagingRejectedAt: null,
-    },
-  ]
+  let memberships: SiteMembership[] = []
+  let membershipPending = false
+
+  if (roles.systemRole === 'pomfret_astro_admin') {
+    memberships = [
+      {
+        siteId: DEFAULT_OBSERVATORY_SITE_ID,
+        siteRole: 'observatory_admin',
+        imagingApprovedAt: now,
+        imagingRejectedAt: null,
+      },
+    ]
+  } else if (affiliationSiteId) {
+    const { getSiteAccessControlSettings } = await import('@/lib/site-policies')
+    const { emailMatchesAutoJoinSuffixes } = await import('@/lib/site-access-control')
+    const settings = await getSiteAccessControlSettings(affiliationSiteId)
+    if (emailMatchesAutoJoinSuffixes(email, settings.memberEmailAutoJoinSuffixes)) {
+      memberships = [
+        {
+          siteId: affiliationSiteId,
+          siteRole: 'observatory_member',
+          imagingApprovedAt: now,
+          imagingRejectedAt: null,
+        },
+      ]
+    } else {
+      membershipPending = true
+    }
+  }
+
   const user = withDerivedRoleFields({
     id: crypto.randomUUID(),
     email,
@@ -527,8 +578,17 @@ export async function createMember(input: {
   usernameIndex[usernameKey] = user.id
   await writeUsernameIndex(usernameIndex)
 
+  if (membershipPending && affiliationSiteId) {
+    const { setMembershipApplicationStatus } = await import('@/lib/membership-applications')
+    await setMembershipApplicationStatus({
+      userId: user.id,
+      siteId: affiliationSiteId,
+      status: 'pending',
+    })
+  }
+
   const synced = await syncBootstrapAdminRole(user)
-  return { ok: true, user: toPublicUser(synced) }
+  return { ok: true, user: await toPublicMemberUserAsync(synced), membershipPending }
 }
 
 export async function verifyMemberCredentials(
@@ -608,7 +668,13 @@ export type AdminMemberDirectoryEntry = {
   email: string
   createdAt: string
   systemRole: SystemRole
-  memberships: Array<{ siteId: string; siteRole: SiteRole; siteName: string }>
+  memberships: Array<{
+    siteId: string
+    siteRole: SiteRole
+    siteName: string
+    imagingApprovedAt: string | null
+    imagingRejectedAt: string | null
+  }>
   roles: string[]
   emailVerified: boolean
   emailVerifiedAt: string | null
@@ -631,6 +697,8 @@ export async function listMembersForAdminDirectory(): Promise<AdminMemberDirecto
         siteId: m.siteId,
         siteRole: m.siteRole,
         siteName: siteDisplayName(m.siteId),
+        imagingApprovedAt: m.imagingApprovedAt ?? null,
+        imagingRejectedAt: m.imagingRejectedAt ?? null,
       })),
       roles: formatMemberRoleLabels({ systemRole: u.systemRole, memberships: u.memberships }),
       emailVerified: Boolean(u.emailVerifiedAt),
@@ -659,6 +727,11 @@ export async function deleteMemberById(
 
   const nextUsers = users.filter((u) => u.id !== targetUserId)
   await writeUsers(nextUsers)
+
+  const { deleteMembershipApplicationsForUser } = await import('@/lib/membership-applications')
+  const { deleteGuestSiteAccessForUser } = await import('@/lib/site-policies')
+  await deleteMembershipApplicationsForUser(targetUserId)
+  await deleteGuestSiteAccessForUser(targetUserId)
 
   const emailIndex = await readEmailIndex()
   delete emailIndex[target.email]
@@ -803,24 +876,14 @@ export async function markMemberEmailVerified(userId: string): Promise<MemberUse
   let memberships = user.memberships
   let imagingApprovedAt = user.imagingApprovedAt ?? null
   if (isPomfretOrgEmail(user.email) && !user.imagingRejectedAt) {
-    imagingApprovedAt = user.imagingApprovedAt ?? now
     const hasPomfret = memberships.some((m) => m.siteId === DEFAULT_OBSERVATORY_SITE_ID)
     if (hasPomfret) {
+      imagingApprovedAt = user.imagingApprovedAt ?? now
       memberships = memberships.map((m) =>
         m.siteId === DEFAULT_OBSERVATORY_SITE_ID && !m.imagingRejectedAt
           ? { ...m, imagingApprovedAt: m.imagingApprovedAt ?? now }
           : m
       )
-    } else {
-      memberships = [
-        ...memberships,
-        {
-          siteId: DEFAULT_OBSERVATORY_SITE_ID,
-          siteRole: 'observatory_member',
-          imagingApprovedAt: now,
-          imagingRejectedAt: null,
-        },
-      ]
     }
   }
   const updated = withDerivedRoleFields({
@@ -966,27 +1029,6 @@ export async function updateMemberProfile(
   return { ok: true, user: updated, emailChanged }
 }
 
-function upsertSiteMembership(
-  memberships: SiteMembership[],
-  siteId: string,
-  siteRole: SiteRole
-): SiteMembership[] {
-  const now = new Date().toISOString()
-  const idx = memberships.findIndex((m) => m.siteId === siteId)
-  const next: SiteMembership = {
-    siteId,
-    siteRole,
-    imagingApprovedAt: idx >= 0 ? memberships[idx]!.imagingApprovedAt ?? now : now,
-    imagingRejectedAt: null,
-  }
-  if (idx >= 0) {
-    const copy = [...memberships]
-    copy[idx] = next
-    return copy
-  }
-  return [...memberships, next]
-}
-
 export async function adminSetMemberEmailVerified(
   targetUserId: string,
   verified: boolean
@@ -1053,6 +1095,7 @@ export async function adminApplyMemberRole(input: {
       updatedAt: now,
     })
     await writeUsers(users)
+    await clearMemberAffiliationAuxData(target.id)
     return { ok: true }
   }
 
@@ -1063,7 +1106,16 @@ export async function adminApplyMemberRole(input: {
     return { ok: false, error: 'You may only change roles at your observatory.' }
   }
 
-  const memberships = upsertSiteMembership(target.memberships ?? [], parsed.siteId, parsed.siteRole)
+  // One affiliation per account: replace all site memberships with the selected one.
+  const prev = (target.memberships ?? []).find((m) => m.siteId === parsed.siteId)
+  const memberships: SiteMembership[] = [
+    {
+      siteId: parsed.siteId,
+      siteRole: parsed.siteRole,
+      imagingApprovedAt: prev?.imagingApprovedAt ?? now,
+      imagingRejectedAt: null,
+    },
+  ]
   const pomfret = membershipImagingForSite(memberships, DEFAULT_OBSERVATORY_SITE_ID)
   users[idx] = withDerivedRoleFields({
     ...target,
@@ -1075,5 +1127,89 @@ export async function adminApplyMemberRole(input: {
   })
   await writeUsers(users)
   return { ok: true }
+}
+
+/** Approve a pending membership/affiliation application → observatory_member at that site only. */
+export async function approveMembershipAffiliation(input: {
+  userId: string
+  siteId: string
+  decidedByUserId: string
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!isObservatorySiteId(input.siteId)) {
+    return { ok: false, error: 'Invalid observatory site.' }
+  }
+  const users = await readUsers()
+  const idx = users.findIndex((u) => u.id === input.userId)
+  if (idx < 0) return { ok: false, error: 'Member not found.' }
+  const target = users[idx]!
+  const now = new Date().toISOString()
+  const prev = (target.memberships ?? []).find((m) => m.siteId === input.siteId)
+  const memberships: SiteMembership[] = [
+    {
+      siteId: input.siteId,
+      siteRole: 'observatory_member',
+      imagingApprovedAt: prev?.imagingApprovedAt ?? now,
+      imagingRejectedAt: null,
+    },
+  ]
+  const pomfret = membershipImagingForSite(memberships, DEFAULT_OBSERVATORY_SITE_ID)
+  users[idx] = withDerivedRoleFields({
+    ...target,
+    systemRole: target.systemRole === 'pomfret_astro_admin' ? 'pomfret_astro_admin' : 'user',
+    memberships,
+    imagingApprovedAt: pomfret.imagingApprovedAt,
+    imagingRejectedAt: pomfret.imagingRejectedAt,
+    updatedAt: now,
+  })
+  await writeUsers(users)
+
+  const { setMembershipApplicationStatus } = await import('@/lib/membership-applications')
+  await setMembershipApplicationStatus({
+    userId: input.userId,
+    siteId: input.siteId,
+    status: 'approved',
+    decidedByUserId: input.decidedByUserId,
+  })
+  return { ok: true }
+}
+
+export async function rejectMembershipAffiliation(input: {
+  userId: string
+  siteId: string
+  decidedByUserId: string
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!isObservatorySiteId(input.siteId)) {
+    return { ok: false, error: 'Invalid observatory site.' }
+  }
+  const users = await readUsers()
+  const idx = users.findIndex((u) => u.id === input.userId)
+  if (idx >= 0) {
+    const target = users[idx]!
+    const memberships = (target.memberships ?? []).filter((m) => m.siteId !== input.siteId)
+    const pomfret = membershipImagingForSite(memberships, DEFAULT_OBSERVATORY_SITE_ID)
+    users[idx] = withDerivedRoleFields({
+      ...target,
+      memberships,
+      imagingApprovedAt: pomfret.imagingApprovedAt,
+      imagingRejectedAt: pomfret.imagingRejectedAt,
+      updatedAt: new Date().toISOString(),
+    })
+    await writeUsers(users)
+  }
+  const { setMembershipApplicationStatus } = await import('@/lib/membership-applications')
+  await setMembershipApplicationStatus({
+    userId: input.userId,
+    siteId: input.siteId,
+    status: 'rejected',
+    decidedByUserId: input.decidedByUserId,
+  })
+  return { ok: true }
+}
+
+async function clearMemberAffiliationAuxData(userId: string): Promise<void> {
+  const { deleteMembershipApplicationsForUser } = await import('@/lib/membership-applications')
+  const { deleteGuestSiteAccessForUser } = await import('@/lib/site-policies')
+  await deleteMembershipApplicationsForUser(userId)
+  await deleteGuestSiteAccessForUser(userId)
 }
 

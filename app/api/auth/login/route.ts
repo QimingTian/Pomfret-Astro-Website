@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { checkAuthRateLimitAsync } from '@/lib/auth-rate-limit'
 import { buildSessionCookie, createMemberSession } from '@/lib/member-auth'
-import { toPublicMemberUser, verifyMemberCredentials } from '@/lib/member-store'
+import { toPublicMemberUserAsync, verifyMemberCredentials } from '@/lib/member-store'
 
 export const runtime = 'nodejs'
 
@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
   }
 
   const session = await createMemberSession(user.id)
-  const response = NextResponse.json({ ok: true, user: toPublicMemberUser(user) })
+  const response = NextResponse.json({ ok: true, user: await toPublicMemberUserAsync(user) })
   response.cookies.set(buildSessionCookie(session.token, session.maxAgeSec))
   return response
 }

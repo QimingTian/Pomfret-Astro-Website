@@ -1,4 +1,4 @@
-import { eq, inArray, not, sql } from 'drizzle-orm'
+import { and, eq, inArray, not, notInArray, sql } from 'drizzle-orm'
 
 import { getDb, withDatabaseBackup, withDatabaseMirror } from '@/lib/db'
 import { sameJson, stripNinaJsonFromProjectDocument } from '@/lib/db/skip-unchanged'
@@ -72,20 +72,7 @@ export async function mirrorMembers(list: MemberUser[]): Promise<void> {
           },
         })
 
-      const membershipList =
-        user.memberships?.length > 0
-          ? user.memberships
-          : [
-              {
-                siteId: DEFAULT_OBSERVATORY_SITE_ID,
-                siteRole:
-                  systemRole === 'pomfret_astro_admin' || user.role === 'admin'
-                    ? ('observatory_admin' as const)
-                    : ('observatory_member' as const),
-                imagingApprovedAt: user.imagingApprovedAt ?? null,
-                imagingRejectedAt: user.imagingRejectedAt ?? null,
-              },
-            ]
+      const membershipList = user.memberships ?? []
 
       for (const m of membershipList) {
         await db
@@ -107,6 +94,17 @@ export async function mirrorMembers(list: MemberUser[]): Promise<void> {
               updatedAt: user.updatedAt || now,
             },
           })
+      }
+
+      const keepSiteIds = membershipList.map((m) => m.siteId)
+      if (keepSiteIds.length === 0) {
+        await db.delete(memberships).where(eq(memberships.userId, user.id))
+      } else {
+        await db
+          .delete(memberships)
+          .where(
+            and(eq(memberships.userId, user.id), notInArray(memberships.siteId, keepSiteIds))
+          )
       }
     }
   })

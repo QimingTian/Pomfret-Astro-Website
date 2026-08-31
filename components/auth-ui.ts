@@ -3,12 +3,14 @@ export const authLineInputClass =
 
 export const authLabelClass = 'mb-1 block text-sm text-white'
 
+export const authSectionHeadingClass = 'mb-3 block text-sm font-medium text-white'
+
 export const authPrimaryButtonClass =
-  'glass-pill relative inline-flex w-full items-center justify-center px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50'
+  'glass-pill relative inline-flex items-center justify-center px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50'
 
 export const authSecondaryButtonClass =
-  'glass-pill relative inline-flex w-full items-center justify-center border-transparent bg-transparent px-6 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-white/10'
+  'glass-pill relative inline-flex items-center justify-center border-transparent bg-transparent px-6 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-white/10'
 
 export const authPageClass = 'min-h-screen flex items-center justify-center bg-[#09090a]'
 
-export const authPanelClass = 'mx-auto w-full max-w-sm px-8 py-10 text-white'
+export const authPanelClass = 'mx-auto w-full max-w-3xl px-8 py-10 text-white'

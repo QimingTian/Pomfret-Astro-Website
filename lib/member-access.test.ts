@@ -19,6 +19,7 @@ function publicUser(overrides: Partial<PublicMemberUser> = {}): PublicMemberUser
     imagingApproved: false,
     imagingPending: false,
     imagingRejected: false,
+    pendingMembership: null,
     ...overrides,
   }
 }

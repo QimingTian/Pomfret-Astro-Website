@@ -78,6 +78,33 @@ async function main() {
   if (memberFieldMismatches) issues.push(`users fields mismatches=${memberFieldMismatches}`)
   else ok.push('users fields+memberships match')
 
+  const multiMembership = (await sql.query(
+    'SELECT user_id, COUNT(*)::int AS n FROM memberships GROUP BY user_id HAVING COUNT(*) > 1'
+  )) as Array<{ user_id: string; n: number }>
+  if (multiMembership.length) {
+    issues.push(`memberships multi-site rows=${multiMembership.length}`)
+  } else {
+    ok.push('memberships single-affiliation rows ok')
+  }
+
+  const kvGuestWithPgMembership = members.filter((u) => (u.memberships?.length ?? 0) === 0)
+  let phantomGuestMemberships = 0
+  const pgMembershipByUser = new Map<string, number>()
+  for (const row of (await sql.query('SELECT user_id, site_id FROM memberships')) as Array<{
+    user_id: string
+    site_id: string
+  }>) {
+    pgMembershipByUser.set(row.user_id, (pgMembershipByUser.get(row.user_id) ?? 0) + 1)
+  }
+  for (const u of kvGuestWithPgMembership) {
+    if ((pgMembershipByUser.get(u.id) ?? 0) > 0) phantomGuestMemberships += 1
+  }
+  if (phantomGuestMemberships) {
+    issues.push(`guest accounts with phantom pg memberships=${phantomGuestMemberships}`)
+  } else {
+    ok.push('guest phantom memberships ok')
+  }
+
   const queue = (await kvGetJson<{ requests?: Array<{ id: string; ninaSequenceJson?: string }> }>('imaging-queue-requests'))?.requests ?? []
   const pgQueue = (await sql.query('SELECT id FROM imaging_requests')) as Array<{ id: string }>
   const pgPayloads = (await sql.query(

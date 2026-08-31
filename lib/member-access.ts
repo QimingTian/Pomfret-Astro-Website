@@ -3,8 +3,10 @@ import { isPomfretOrgEmail } from '@/lib/member-store'
 import { canSubmitImagingAtSite, membershipForSite } from '@/lib/member-roles'
 import { DEFAULT_OBSERVATORY_SITE_ID } from '@/lib/observatory-sites'
 import { currentObservatorySiteId } from '@/lib/observatory-site-scope'
+import { guestAccessModeFromSettings } from '@/lib/site-access-control'
 import {
   getGuestSiteAccessStatus,
+  getSiteAccessControlSettings,
   getSiteGuestAccessMode,
   setGuestSiteAccessStatus,
 } from '@/lib/site-policies'
@@ -93,12 +95,8 @@ export async function canSubmitImagingForSite(
   const site = siteId?.trim() || currentObservatorySiteId() || DEFAULT_OBSERVATORY_SITE_ID
   const memberships = user.memberships ?? []
 
-  // Legacy path: no memberships array yet — keep Pomfret imaging flags.
-  if (memberships.length === 0) {
-    return canSubmitImaging(user)
-  }
-
-  const guestAccessMode = await getSiteGuestAccessMode(site)
+  const settings = await getSiteAccessControlSettings(site)
+  const guestAccessMode = guestAccessModeFromSettings(settings)
   const guestGrant = membershipForSite(memberships, site)
     ? null
     : await getGuestSiteAccessStatus(user.id, site)
@@ -109,6 +107,8 @@ export async function canSubmitImagingForSite(
     siteId: site,
     guestAccessMode,
     guestGrant,
+    openToOtherObservatoryMembers: settings.openToOtherObservatoryMembers,
+    otherObservatoryMemberScope: settings.otherObservatoryMemberScope,
   })
 
   if (!decision.ok) return { ok: false, error: decision.error }

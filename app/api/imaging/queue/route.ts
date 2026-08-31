@@ -1,5 +1,9 @@
 import { NextRequest } from 'next/server'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
+import {
+  appendSessionApprovalTerminalLine,
+  SESSION_APPROVAL_TERMINAL,
+} from '@/lib/imaging/session-approval-progress'
 import { memberSessionHistoryRowFromQueue } from '@/lib/member-session-history'
 import { recordMemberSessionHistory } from '@/lib/member-session-history-archive'
 import { canSubmitImagingForSite, maybeCreateGuestAccessRequest } from '@/lib/member-access'
@@ -31,9 +35,14 @@ import {
   listProjects,
   setProjectAdminApprovalPending,
 } from '@/lib/imaging-project-store'
-import { projectTotalDurationNeedsAdminApproval } from '@/lib/imaging/large-project-approval'
-import { projectDurationLimitSeconds } from '@/lib/site-access-control'
-import { getSiteProjectDurationLimitHours } from '@/lib/site-policies'
+import {
+  defaultSessionGatePolicy,
+  isAllowedOtherObservatoryMember,
+  sessionNeedsAdminApproval,
+  type SessionGatePolicy,
+} from '@/lib/site-access-control'
+import { getSiteAccessControlSettings } from '@/lib/site-policies'
+import { isPomfretAstroAdmin, membershipForSite } from '@/lib/member-roles'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { planAndScheduleProjectTonight } from '@/lib/imaging-project-planner'
 import { getScheduleReservedIntervalsForActiveProject } from '@/lib/imaging-project-altitude-hold'
@@ -288,26 +297,66 @@ export async function POST(request: NextRequest) {
     })
   }
 
-  const durationLimitHours = await getSiteProjectDurationLimitHours(site.id)
-  const durationLimitSeconds = projectDurationLimitSeconds(durationLimitHours)
-  const needsLargeProjectApproval =
-    result.projectMode === true &&
-    projectTotalDurationNeedsAdminApproval(result.estimatedDurationSeconds, durationLimitSeconds) &&
-    auth.user.role !== 'admin'
+  const accessSettings = await getSiteAccessControlSettings(site.id)
+  const isSiteAffiliated = Boolean(membershipForSite(auth.user.memberships, site.id))
+  const isCrossObs =
+    !isSiteAffiliated &&
+    accessSettings.openToOtherObservatoryMembers &&
+    isAllowedOtherObservatoryMember({
+      memberships: auth.user.memberships ?? [],
+      currentSiteId: site.id,
+      scope: accessSettings.otherObservatoryMemberScope,
+    })
 
-  if (needsLargeProjectApproval) {
+  let sessionPolicy: SessionGatePolicy
+  let approvalKind: 'member_project' | 'guest_session' | 'other_obs_session' = 'member_project'
+  if (auth.user.role === 'admin' || isPomfretAstroAdmin(auth.user.systemRole)) {
+    sessionPolicy = defaultSessionGatePolicy('direct')
+  } else if (isSiteAffiliated) {
+    sessionPolicy = {
+      mode: 'duration_limit',
+      durationLimitHours: accessSettings.memberProjectDurationLimitHours,
+    }
+    approvalKind = 'member_project'
+  } else if (isCrossObs) {
+    sessionPolicy = accessSettings.otherMemberSessionPolicy
+    approvalKind = 'other_obs_session'
+  } else {
+    sessionPolicy = accessSettings.guestSessionPolicy
+    approvalKind = 'guest_session'
+  }
+
+  // Site members: only project-mode over limit (legacy large-project rule).
+  // Guest / other-obs: any session matching their gate policy.
+  const needsSessionApproval =
+    auth.user.role !== 'admin' &&
+    (isSiteAffiliated
+      ? result.projectMode === true &&
+        sessionNeedsAdminApproval(sessionPolicy, result.estimatedDurationSeconds)
+      : sessionNeedsAdminApproval(sessionPolicy, result.estimatedDurationSeconds))
+
+  if (needsSessionApproval) {
     await setRequestAdminApprovalPending(result.id, true)
-    await setProjectAdminApprovalPending(result.id, true)
+    if (result.projectMode) {
+      await setProjectAdminApprovalPending(result.id, true)
+    }
+    const limitLabel =
+      sessionPolicy.mode === 'always_approve'
+        ? 'requires administrator approval'
+        : `exceeds ${sessionPolicy.durationLimitHours} hours and requires administrator approval`
     void appendAuditLog({
       kind: 'queue.admin_approval_pending',
-      message: `Large project awaiting admin approval: ${result.target} (${result.id}).`,
+      message: `Session awaiting admin approval (${approvalKind}): ${result.target} (${result.id}).`,
       detail: {
         id: result.id,
         target: result.target,
         estimatedDurationSeconds: result.estimatedDurationSeconds ?? null,
         userId: result.userId ?? null,
+        approvalKind,
+        sessionPolicy,
       },
     })
+    void appendSessionApprovalTerminalLine(result.id, SESSION_APPROVAL_TERMINAL.pending)
     const pendingRow = await getRequestById(result.id)
     const finalRow = pendingRow ?? result
     if (finalRow.userId) {
@@ -318,8 +367,7 @@ export async function POST(request: NextRequest) {
         ok: true as const,
         adminApprovalPending: true as const,
         request: toPublicImagingRequest(finalRow),
-        message:
-          `This project exceeds ${durationLimitHours} hours total and requires administrator approval before it can be scheduled.`,
+        message: `This session ${limitLabel} before it can be scheduled.`,
       },
       201
     )

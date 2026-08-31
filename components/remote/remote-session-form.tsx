@@ -385,14 +385,6 @@ export function RemoteSessionForm({
                   </button>
                   {verifyMsg ? <p className="mt-2 text-xs text-amber-200/90">{verifyMsg}</p> : null}
                 </div>
-              ) : member.status === 'authenticated' && member.user.imagingPending ? (
-                <div className="rounded-lg border border-sky-500/40 bg-transparent px-4 py-3 text-sm text-sky-100">
-                  Imaging access is pending administrator approval for non-@pomfret.org accounts.
-                </div>
-              ) : member.status === 'authenticated' && member.user.imagingRejected ? (
-                <div className="rounded-lg border border-red-500/40 bg-red-950/30 px-4 py-3 text-sm text-red-200">
-                  Imaging access was not approved for this account. Contact the observatory team.
-                </div>
               ) : (
                 <div className="rounded-lg border border-amber-500/40 bg-transparent px-4 py-3 text-sm text-amber-100">
                   <p>{imagingAccess.error}</p>

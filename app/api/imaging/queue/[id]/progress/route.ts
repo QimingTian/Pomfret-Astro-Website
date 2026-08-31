@@ -31,10 +31,12 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 
   const lines = await listSessionProgressLines(id)
   const queueStatus = session.queueStatus
+  const adminApprovalPending = session.req?.adminApprovalPending === true
 
   return withImagingCors({
     ok: true as const,
     queueStatus,
+    adminApprovalPending,
     lines,
   })
   })

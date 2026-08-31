@@ -14,6 +14,7 @@ import {
   isBootstrapAdminEmail,
   listMembersForAdminDirectory,
   removeMemberSiteAffiliation,
+  setMemberImagingApproval,
 } from '@/lib/member-store'
 import { resolveObservatorySite } from '@/lib/observatory-sites'
 
@@ -113,6 +114,14 @@ export async function PATCH(request: NextRequest) {
         actorIsPaAdmin: isPaAdmin,
         actorSiteId: site.id,
       })
+      if (!result.ok) {
+        return NextResponse.json({ ok: false, error: result.error }, { status: 400 })
+      }
+    }
+
+    const imagingAction = rec.imagingAction
+    if (imagingAction === 'approve' || imagingAction === 'reject') {
+      const result = await setMemberImagingApproval(id, imagingAction, site.id)
       if (!result.ok) {
         return NextResponse.json({ ok: false, error: result.error }, { status: 400 })
       }

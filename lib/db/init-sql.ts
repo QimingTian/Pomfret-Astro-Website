@@ -29,11 +29,22 @@ CREATE TABLE IF NOT EXISTS site_policies (
   site_id text PRIMARY KEY,
   guest_access text NOT NULL DEFAULT 'closed',
   member_project_duration_limit_hours double precision NOT NULL DEFAULT 30,
+  access_control jsonb,
   updated_at timestamptz NOT NULL
 );
 ALTER TABLE site_policies ADD COLUMN IF NOT EXISTS member_project_duration_limit_hours double precision NOT NULL DEFAULT 30;
+ALTER TABLE site_policies ADD COLUMN IF NOT EXISTS access_control jsonb;
 
 CREATE TABLE IF NOT EXISTS guest_site_access (
+  user_id text NOT NULL,
+  site_id text NOT NULL,
+  status text NOT NULL,
+  updated_at timestamptz NOT NULL,
+  decided_by_user_id text,
+  PRIMARY KEY (user_id, site_id)
+);
+
+CREATE TABLE IF NOT EXISTS membership_applications (
   user_id text NOT NULL,
   site_id text NOT NULL,
   status text NOT NULL,

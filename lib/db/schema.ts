@@ -46,7 +46,7 @@ export const memberships = pgTable(
   (t) => [primaryKey({ columns: [t.userId, t.siteId] })]
 )
 
-/** Per-site guest access policy (closed | open_direct | open_approval). */
+/** Per-site access control policy. */
 export const sitePolicies = pgTable('site_policies', {
   siteId: text('site_id').primaryKey(),
   guestAccess: text('guest_access').notNull().default('closed'),
@@ -54,12 +54,28 @@ export const sitePolicies = pgTable('site_policies', {
   memberProjectDurationLimitHours: doublePrecision('member_project_duration_limit_hours')
     .notNull()
     .default(30),
+  /** Full Access Control document (guest + other-obs policies). */
+  accessControl: jsonb('access_control'),
   updatedAt: timestamp('updated_at', tz).notNull(),
 })
 
 /** Guest approval grants when site_policies.guest_access = open_approval. */
 export const guestSiteAccess = pgTable(
   'guest_site_access',
+  {
+    userId: text('user_id').notNull(),
+    siteId: text('site_id').notNull(),
+    /** pending | approved | rejected */
+    status: text('status').notNull(),
+    updatedAt: timestamp('updated_at', tz).notNull(),
+    decidedByUserId: text('decided_by_user_id'),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.siteId] })]
+)
+
+/** Affiliation / membership applications from signup (Choose Your Affiliation). */
+export const membershipApplications = pgTable(
+  'membership_applications',
   {
     userId: text('user_id').notNull(),
     siteId: text('site_id').notNull(),

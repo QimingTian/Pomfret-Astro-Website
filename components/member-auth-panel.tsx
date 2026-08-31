@@ -9,6 +9,10 @@ import {
   authLineInputClass,
   authLabelClass,
 } from '@/components/auth-ui'
+import {
+  SignupAffiliationPicker,
+  type AffiliationChoice,
+} from '@/components/signup-affiliation-picker'
 
 export function MemberAuthPanel({
   onSignedIn,
@@ -24,6 +28,7 @@ export function MemberAuthPanel({
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [affiliation, setAffiliation] = useState<AffiliationChoice | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
@@ -43,6 +48,10 @@ export function MemberAuthPanel({
           setError('Passwords do not match.')
           return
         }
+        if (!affiliation) {
+          setError('Choose an affiliation or continue as Guest.')
+          return
+        }
         const res = await fetch('/api/auth/signup', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -53,6 +62,7 @@ export function MemberAuthPanel({
             firstName: firstName.trim(),
             lastName: lastName.trim(),
             username: username.trim(),
+            affiliation,
           }),
         })
         const data = await res.json().catch(() => ({}))
@@ -93,6 +103,7 @@ export function MemberAuthPanel({
             email.trim() &&
             password.length >= 8 &&
             confirmPassword.length >= 8 &&
+            affiliation &&
             password === confirmPassword
         )
 
@@ -193,35 +204,44 @@ export function MemberAuthPanel({
           />
         </div>
         {mode === 'signup' ? (
-          <div>
-            <label htmlFor={`${id}-confirm-password`} className={authLabelClass}>
-              Confirm password
-            </label>
-            <input
-              id={`${id}-confirm-password`}
-              type="password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              autoComplete="new-password"
-              required
-              minLength={8}
-              className={authLineInputClass}
+          <>
+            <div>
+              <label htmlFor={`${id}-confirm-password`} className={authLabelClass}>
+                Confirm password
+              </label>
+              <input
+                id={`${id}-confirm-password`}
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                autoComplete="new-password"
+                required
+                minLength={8}
+                className={authLineInputClass}
+              />
+            </div>
+            <SignupAffiliationPicker
+              idPrefix={id}
+              value={affiliation}
+              onChange={setAffiliation}
             />
-          </div>
+          </>
         ) : null}
         {error ? <p className="text-center text-sm text-white">{error}</p> : null}
-        <button type="submit" disabled={submitting || !canSubmit} className={authPrimaryButtonClass}>
-          {submitting
-            ? mode === 'signup'
-              ? 'Creating account…'
-              : 'Logging in…'
-            : mode === 'signup'
-              ? 'Sign Up'
-              : 'Log In'}
-        </button>
+        <div className="flex justify-center">
+          <button type="submit" disabled={submitting || !canSubmit} className={authPrimaryButtonClass}>
+            {submitting
+              ? mode === 'signup'
+                ? 'Creating account…'
+                : 'Logging in…'
+              : mode === 'signup'
+                ? 'Sign Up'
+                : 'Log In'}
+          </button>
+        </div>
       </form>
 
-      <div className="mt-6 space-y-3">
+      <div className="mt-6 flex flex-col items-center gap-3">
         <p className="text-center text-sm text-white">
           {mode === 'login' ? 'No account?' : 'Already have an account?'}
         </p>

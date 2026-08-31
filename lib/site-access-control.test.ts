@@ -2,49 +2,97 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
-  DEFAULT_MEMBER_PROJECT_DURATION_LIMIT_HOURS,
+  emailMatchesAutoJoinSuffixes,
   guestAccessModeFromSettings,
-  normalizeProjectDurationLimitHours,
-  projectDurationLimitSeconds,
-  settingsFromPolicy,
+  isAllowedOtherObservatoryMember,
+  normalizeEmailSuffixes,
+  normalizeSiteAccessControlSettings,
+  sessionNeedsAdminApproval,
+  defaultSessionGatePolicy,
 } from '@/lib/site-access-control'
-import {
-  projectTotalDurationNeedsAdminApproval,
-} from '@/lib/imaging/large-project-approval'
 
-test('guestAccessModeFromSettings maps UI toggles to policy modes', () => {
-  assert.equal(
-    guestAccessModeFromSettings({ openToGuest: false, guestSessionRequiresApproval: false }),
-    'closed'
-  )
-  assert.equal(
-    guestAccessModeFromSettings({ openToGuest: true, guestSessionRequiresApproval: false }),
-    'open_direct'
-  )
-  assert.equal(
-    guestAccessModeFromSettings({ openToGuest: true, guestSessionRequiresApproval: true }),
-    'open_approval'
-  )
+test('normalizeSiteAccessControlSettings accepts full shape', () => {
+  const s = normalizeSiteAccessControlSettings({
+    openToGuest: true,
+    guestSessionPolicy: { mode: 'duration_limit', durationLimitHours: 4 },
+    openToOtherObservatoryMembers: true,
+    otherObservatoryMemberScope: ['pomfret'],
+    otherMemberSessionPolicy: { mode: 'always_approve', durationLimitHours: 8 },
+    memberProjectDurationLimitHours: 20,
+  })
+  assert.equal(s.openToGuest, true)
+  assert.equal(s.guestSessionPolicy.mode, 'duration_limit')
+  assert.equal(s.guestSessionPolicy.durationLimitHours, 4)
+  assert.deepEqual(s.otherObservatoryMemberScope, ['pomfret'])
+  assert.equal(s.otherMemberSessionPolicy.mode, 'always_approve')
 })
 
-test('settingsFromPolicy round-trips guest modes', () => {
-  assert.deepEqual(settingsFromPolicy('open_approval', 24), {
+test('legacy guestSessionRequiresApproval still maps', () => {
+  const s = normalizeSiteAccessControlSettings({
     openToGuest: true,
     guestSessionRequiresApproval: true,
-    memberProjectDurationLimitHours: 24,
+    memberProjectDurationLimitHours: 30,
   })
+  assert.equal(s.guestSessionPolicy.mode, 'always_approve')
 })
 
-test('projectTotalDurationNeedsAdminApproval respects custom site limit', () => {
-  const limit = projectDurationLimitSeconds(24)
-  assert.equal(projectTotalDurationNeedsAdminApproval(limit, limit), false)
-  assert.equal(projectTotalDurationNeedsAdminApproval(limit + 1, limit), true)
+test('guestAccessModeFromSettings is closed or open_direct', () => {
+  assert.equal(guestAccessModeFromSettings({ openToGuest: false }), 'closed')
+  assert.equal(guestAccessModeFromSettings({ openToGuest: true }), 'open_direct')
 })
 
-test('normalizeProjectDurationLimitHours falls back to default', () => {
-  assert.equal(normalizeProjectDurationLimitHours(-1), DEFAULT_MEMBER_PROJECT_DURATION_LIMIT_HOURS)
+test('sessionNeedsAdminApproval modes', () => {
+  assert.equal(sessionNeedsAdminApproval(defaultSessionGatePolicy('direct'), 99999), false)
+  assert.equal(sessionNeedsAdminApproval(defaultSessionGatePolicy('always_approve'), 1), true)
+  assert.equal(
+    sessionNeedsAdminApproval({ mode: 'duration_limit', durationLimitHours: 2 }, 2 * 3600),
+    false
+  )
+  assert.equal(
+    sessionNeedsAdminApproval({ mode: 'duration_limit', durationLimitHours: 2 }, 2 * 3600 + 1),
+    true
+  )
 })
 
-test('projectDurationLimitSeconds treats zero as no limit', () => {
-  assert.equal(projectDurationLimitSeconds(0), 0)
+test('normalizeEmailSuffixes and emailMatchesAutoJoinSuffixes', () => {
+  assert.deepEqual(normalizeEmailSuffixes('@pomfret.org, cygnus.edu'), [
+    '@pomfret.org',
+    '@cygnus.edu',
+  ])
+  assert.equal(emailMatchesAutoJoinSuffixes('a@pomfret.org', ['@pomfret.org']), true)
+  assert.equal(emailMatchesAutoJoinSuffixes('a@elsewhere.org', ['@pomfret.org']), false)
+})
+
+test('normalizeSiteAccessControlSettings keeps email suffixes', () => {
+  const s = normalizeSiteAccessControlSettings({
+    memberEmailAutoJoinSuffixes: ['pomfret.org', '@POMFRET.ORG'],
+  })
+  assert.deepEqual(s.memberEmailAutoJoinSuffixes, ['@pomfret.org'])
+})
+
+test('isAllowedOtherObservatoryMember respects scope', () => {
+  assert.equal(
+    isAllowedOtherObservatoryMember({
+      memberships: [{ siteId: 'pomfret' }],
+      currentSiteId: 'cygnus',
+      scope: 'all',
+    }),
+    true
+  )
+  assert.equal(
+    isAllowedOtherObservatoryMember({
+      memberships: [{ siteId: 'pomfret' }],
+      currentSiteId: 'cygnus',
+      scope: ['pomfret'],
+    }),
+    true
+  )
+  assert.equal(
+    isAllowedOtherObservatoryMember({
+      memberships: [{ siteId: 'pomfret' }],
+      currentSiteId: 'cygnus',
+      scope: [],
+    }),
+    false
+  )
 })

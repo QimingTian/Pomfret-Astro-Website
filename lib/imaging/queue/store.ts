@@ -351,7 +351,7 @@ export async function listPending(): Promise<ImagingRequest[]> {
 export async function listQueueAwaitingAdminApproval(): Promise<ImagingRequest[]> {
   const all = await listAll()
   return all
-    .filter((r) => r.adminApprovalPending === true && r.projectMode === true)
+    .filter((r) => r.adminApprovalPending === true)
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
 }
 

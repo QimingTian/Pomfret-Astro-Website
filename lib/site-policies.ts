@@ -15,7 +15,7 @@ import {
 import {
   DEFAULT_MEMBER_PROJECT_DURATION_LIMIT_HOURS,
   guestAccessModeFromSettings,
-  normalizeProjectDurationLimitHours,
+  normalizeSiteAccessControlSettings,
   settingsFromPolicy,
   type SiteAccessControlSettings,
 } from '@/lib/site-access-control'
@@ -38,10 +38,14 @@ function fallbackGuestAccessMode(siteId: string): GuestAccessMode {
 }
 
 function fallbackAccessControlSettings(siteId: string): SiteAccessControlSettings {
-  return settingsFromPolicy(
+  const base = settingsFromPolicy(
     fallbackGuestAccessMode(siteId),
     DEFAULT_MEMBER_PROJECT_DURATION_LIMIT_HOURS
   )
+  if (siteId === 'pomfret' && base.memberEmailAutoJoinSuffixes.length === 0) {
+    return { ...base, memberEmailAutoJoinSuffixes: ['@pomfret.org'] }
+  }
+  return base
 }
 
 export async function getSiteGuestAccessMode(siteId: string): Promise<GuestAccessMode> {
@@ -57,9 +61,31 @@ export async function getSiteAccessControlSettings(siteId: string): Promise<Site
     const rows = await db.select().from(sitePolicies).where(eq(sitePolicies.siteId, siteId)).limit(1)
     const row = rows[0]
     if (!row) return fallback
+
+    if (row.accessControl && typeof row.accessControl === 'object') {
+      const raw = row.accessControl as Record<string, unknown>
+      const settings = normalizeSiteAccessControlSettings({
+        ...raw,
+        memberProjectDurationLimitHours:
+          (raw.memberProjectDurationLimitHours as number | undefined) ??
+          row.memberProjectDurationLimitHours,
+      })
+      // Legacy rows without the field: Pomfret defaults to @pomfret.org.
+      if (
+        siteId === 'pomfret' &&
+        !Array.isArray(raw.memberEmailAutoJoinSuffixes) &&
+        settings.memberEmailAutoJoinSuffixes.length === 0
+      ) {
+        return { ...settings, memberEmailAutoJoinSuffixes: ['@pomfret.org'] }
+      }
+      return settings
+    }
+
     const guestAccess = row.guestAccess
     const mode = guestAccess && isGuestAccessMode(guestAccess) ? guestAccess : fallbackGuestAccessMode(siteId)
-    return settingsFromPolicy(mode, row.memberProjectDurationLimitHours)
+    return settingsFromPolicy(mode, row.memberProjectDurationLimitHours, {
+      memberEmailAutoJoinSuffixes: siteId === 'pomfret' ? ['@pomfret.org'] : [],
+    })
   } catch (error) {
     console.error('[site-policies] read failed', error)
   }
@@ -75,10 +101,8 @@ export async function setSiteAccessControlSettings(
   siteId: string,
   settings: SiteAccessControlSettings
 ): Promise<void> {
-  const guestAccess = guestAccessModeFromSettings(settings)
-  const memberProjectDurationLimitHours = normalizeProjectDurationLimitHours(
-    settings.memberProjectDurationLimitHours
-  )
+  const normalized = normalizeSiteAccessControlSettings(settings)
+  const guestAccess = guestAccessModeFromSettings(normalized)
   await withDatabaseMirror('site-policies', async () => {
     const db = getDb()
     const now = new Date().toISOString()
@@ -87,14 +111,16 @@ export async function setSiteAccessControlSettings(
       .values({
         siteId,
         guestAccess,
-        memberProjectDurationLimitHours,
+        memberProjectDurationLimitHours: normalized.memberProjectDurationLimitHours,
+        accessControl: normalized,
         updatedAt: now,
       })
       .onConflictDoUpdate({
         target: sitePolicies.siteId,
         set: {
           guestAccess,
-          memberProjectDurationLimitHours,
+          memberProjectDurationLimitHours: normalized.memberProjectDurationLimitHours,
+          accessControl: normalized,
           updatedAt: now,
         },
       })
@@ -107,7 +133,7 @@ export async function setSiteGuestAccessMode(
 ): Promise<void> {
   const current = await getSiteAccessControlSettings(siteId)
   await setSiteAccessControlSettings(siteId, {
-    ...settingsFromPolicy(mode, current.memberProjectDurationLimitHours),
+    ...settingsFromPolicy(mode, current.memberProjectDurationLimitHours, current),
   })
 }
 
@@ -118,12 +144,14 @@ export async function ensureDefaultSitePolicies(): Promise<void> {
     const db = getDb()
     for (const site of OBSERVATORY_SITES) {
       const mode = DEFAULT_SITE_POLICIES[site.id as ObservatorySiteId] ?? 'closed'
+      const settings = settingsFromPolicy(mode, DEFAULT_MEMBER_PROJECT_DURATION_LIMIT_HOURS)
       await db
         .insert(sitePolicies)
         .values({
           siteId: site.id,
           guestAccess: mode,
           memberProjectDurationLimitHours: DEFAULT_MEMBER_PROJECT_DURATION_LIMIT_HOURS,
+          accessControl: settings,
           updatedAt: now,
         })
         .onConflictDoNothing()
@@ -134,6 +162,10 @@ export async function ensureDefaultSitePolicies(): Promise<void> {
         siteId: DEFAULT_OBSERVATORY_SITE_ID,
         guestAccess: DEFAULT_SITE_POLICIES.pomfret,
         memberProjectDurationLimitHours: DEFAULT_MEMBER_PROJECT_DURATION_LIMIT_HOURS,
+        accessControl: settingsFromPolicy(
+          DEFAULT_SITE_POLICIES.pomfret,
+          DEFAULT_MEMBER_PROJECT_DURATION_LIMIT_HOURS
+        ),
         updatedAt: now,
       })
       .onConflictDoNothing()
@@ -208,4 +240,11 @@ export async function listPendingGuestAccessForSite(siteId: string): Promise<Pen
     console.error('[guest-site-access] list pending failed', error)
     return []
   }
+}
+
+export async function deleteGuestSiteAccessForUser(userId: string): Promise<void> {
+  await withDatabaseMirror('guest-site-access-delete', async () => {
+    const db = getDb()
+    await db.delete(guestSiteAccess).where(eq(guestSiteAccess.userId, userId))
+  })
 }

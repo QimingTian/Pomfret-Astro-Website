@@ -7,7 +7,7 @@ import {
   storeEmailVerificationToken,
 } from '@/lib/email-verification'
 import { requireUser } from '@/lib/member-auth'
-import { toPublicMemberUser, updateMemberProfile } from '@/lib/member-store'
+import { toPublicMemberUserAsync, updateMemberProfile } from '@/lib/member-store'
 
 export const runtime = 'nodejs'
 
@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({
     ok: true,
-    user: toPublicMemberUser(updated.user),
+    user: await toPublicMemberUserAsync(updated.user),
     emailChanged: updated.emailChanged,
     verificationSent,
     ...(verificationError ? { verificationError } : {}),

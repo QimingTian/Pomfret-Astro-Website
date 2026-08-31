@@ -7,7 +7,7 @@ import {
   getMemberById,
   isAdminUser,
   syncBootstrapAdminRole,
-  toPublicMemberUser,
+  toPublicMemberUserAsync,
   type MemberUser,
   type PublicMemberUser,
 } from '@/lib/member-store'
@@ -150,7 +150,7 @@ export async function requireUser(request: NextRequest): Promise<
   if (!user) {
     return { ok: false, status: 401, body: { ok: false, error: 'Authentication required.' } }
   }
-  return { ok: true, user, publicUser: toPublicMemberUser(user) }
+  return { ok: true, user, publicUser: await toPublicMemberUserAsync(user) }
 }
 
 export async function requireAdmin(request: NextRequest): Promise<

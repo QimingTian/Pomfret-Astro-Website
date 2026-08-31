@@ -76,6 +76,7 @@ export async function GET(request: NextRequest) {
     variableStarAmplitudeMag?: number | null
     projectMode?: boolean
     mosaicMode?: boolean
+    adminApprovalPending?: boolean
     mosaicPanels?: ImagingProject['mosaicPanels']
     mosaicFilterPlansByPanel?: ImagingProject['mosaicFilterPlansByPanel']
     userId?: string | null
@@ -155,6 +156,7 @@ export async function GET(request: NextRequest) {
         p.nights.find((n) => n.status === 'scheduled' || n.status === 'in_progress')?.plannedStartIso ?? null,
       projectMode: true,
       mosaicMode: p.mosaicMode === true,
+      ...(p.adminApprovalPending === true ? { adminApprovalPending: true as const } : {}),
       ...(p.mosaicMode && p.mosaicPanels?.length
         ? {
             mosaicPanels: p.mosaicPanels,
@@ -257,6 +259,7 @@ export async function GET(request: NextRequest) {
           }
         : {}),
       userId: p.userId ?? null,
+      ...(p.adminApprovalPending === true ? { adminApprovalPending: true as const } : {}),
     })
   }
 

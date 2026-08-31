@@ -8,7 +8,6 @@ export type AccountWorkspaceSectionId =
   | 'schedule'
   | 'session-control'
   | 'my-sessions'
-  | 'gallery'
   | 'imaging'
   | 'equipment'
   | 'members'
@@ -26,7 +25,6 @@ export const ACCOUNT_WORKSPACE_SECTIONS: AccountWorkspaceSection[] = [
   { id: 'schedule', label: 'Schedule', adminOnly: true },
   { id: 'session-control', label: 'Session Control', adminOnly: true },
   { id: 'my-sessions', label: 'My Sessions' },
-  { id: 'gallery', label: 'Gallery' },
   { id: 'imaging', label: 'Imaging Queue', adminOnly: true },
   { id: 'equipment', label: 'Equipment', adminOnly: true },
   { id: 'members', label: 'Members', adminOnly: true },

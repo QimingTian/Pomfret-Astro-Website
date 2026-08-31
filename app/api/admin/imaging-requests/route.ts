@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
+import {
+  appendSessionApprovalTerminalLine,
+  SESSION_APPROVAL_TERMINAL,
+} from '@/lib/imaging/session-approval-progress'
 import { deleteProjectCascade } from '@/lib/imaging-project-delete'
 import {
   formatImagingDurationHours,
@@ -20,17 +24,33 @@ import { checkAuthRateLimitAsync } from '@/lib/auth-rate-limit'
 import { isSameSiteMutation } from '@/lib/csrf-origin'
 import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 import { requireImagingAdmin } from '@/lib/imaging/core/admin-auth'
-import { getMemberById } from '@/lib/member-store'
+import {
+  approveMembershipAffiliation,
+  getMemberById,
+  rejectMembershipAffiliation,
+} from '@/lib/member-store'
+import { listPendingMembershipApplicationsForSite } from '@/lib/membership-applications'
 import {
   listPendingGuestAccessForSite,
   setGuestSiteAccessStatus,
   getSiteProjectDurationLimitHours,
+  getSiteAccessControlSettings,
 } from '@/lib/site-policies'
+import { guestAccessModeFromSettings } from '@/lib/site-access-control'
 
 export const runtime = 'nodejs'
 
 type GuestRow = {
   kind: 'guest_access'
+  id: string
+  firstName: string
+  lastName: string
+  email: string
+  updatedAt: string
+}
+
+type MembershipRow = {
+  kind: 'membership'
   id: string
   firstName: string
   lastName: string
@@ -72,12 +92,29 @@ export async function GET(request: NextRequest) {
     }
 
     const durationLimitHours = await getSiteProjectDurationLimitHours(site.id)
+    const accessSettings = await getSiteAccessControlSettings(site.id)
+    const guestAccessMode = guestAccessModeFromSettings(accessSettings)
 
     const guestRequests: GuestRow[] = []
-    for (const row of await listPendingGuestAccessForSite(site.id)) {
+    if (guestAccessMode === 'open_approval') {
+      for (const row of await listPendingGuestAccessForSite(site.id)) {
+        const user = await getMemberById(row.userId)
+        guestRequests.push({
+          kind: 'guest_access',
+          id: row.userId,
+          firstName: user?.firstName ?? '',
+          lastName: user?.lastName ?? '',
+          email: user?.email ?? row.userId,
+          updatedAt: row.updatedAt,
+        })
+      }
+    }
+
+    const membershipRequests: MembershipRow[] = []
+    for (const row of await listPendingMembershipApplicationsForSite(site.id)) {
       const user = await getMemberById(row.userId)
-      guestRequests.push({
-        kind: 'guest_access',
+      membershipRequests.push({
+        kind: 'membership',
         id: row.userId,
         firstName: user?.firstName ?? '',
         lastName: user?.lastName ?? '',
@@ -114,9 +151,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       ok: true as const,
       guestRequests,
+      membershipRequests,
       largeProjectRequests,
       durationLimitHours,
-      total: guestRequests.length + largeProjectRequests.length,
+      total: guestRequests.length + membershipRequests.length + largeProjectRequests.length,
     })
   })
 }
@@ -166,6 +204,30 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ ok: true as const })
     }
 
+    if (kind === 'membership') {
+      const result =
+        action === 'approve'
+          ? await approveMembershipAffiliation({
+              userId: id,
+              siteId: site.id,
+              decidedByUserId: auth.user.id,
+            })
+          : await rejectMembershipAffiliation({
+              userId: id,
+              siteId: site.id,
+              decidedByUserId: auth.user.id,
+            })
+      if (!result.ok) {
+        return NextResponse.json({ ok: false, error: result.error }, { status: 400 })
+      }
+      void appendAuditLog({
+        kind: 'membership.affiliation_decision',
+        message: `Membership affiliation ${action}d for ${id} at ${site.id}.`,
+        detail: { userId: id, action, siteId: site.id },
+      })
+      return NextResponse.json({ ok: true as const })
+    }
+
     if (kind === 'large_project') {
       const req = await getRequestById(id)
       const project = await getProjectById(id)
@@ -174,10 +236,11 @@ export async function PATCH(request: NextRequest) {
       }
 
       if (action === 'reject') {
+        void appendSessionApprovalTerminalLine(id, SESSION_APPROVAL_TERMINAL.rejected)
         await deleteProjectCascade(id)
         void appendAuditLog({
           kind: 'queue.admin_approval_rejected',
-          message: `Large project rejected by admin: ${req?.target ?? project?.target ?? id}.`,
+          message: `Session rejected by admin: ${req?.target ?? project?.target ?? id}.`,
           detail: { id, target: req?.target ?? project?.target ?? null },
         })
         return NextResponse.json({ ok: true as const })
@@ -186,16 +249,17 @@ export async function PATCH(request: NextRequest) {
       await setRequestAdminApprovalPending(id, false)
       await setProjectAdminApprovalPending(id, false)
       await reconcilePendingScheduleStatus({ force: true })
+      void appendSessionApprovalTerminalLine(id, SESSION_APPROVAL_TERMINAL.approved)
       void appendAuditLog({
         kind: 'queue.admin_approval_granted',
-        message: `Large project approved by admin: ${req?.target ?? project?.target ?? id}.`,
+        message: `Session approved by admin: ${req?.target ?? project?.target ?? id}.`,
         detail: { id, target: req?.target ?? project?.target ?? null },
       })
       return NextResponse.json({ ok: true as const })
     }
 
     return NextResponse.json(
-      { ok: false, error: 'kind must be guest_access or large_project.' },
+      { ok: false, error: 'kind must be membership, guest_access, or large_project.' },
       { status: 400 }
     )
   })

@@ -24,8 +24,19 @@ export async function POST(request: NextRequest) {
   const firstName = typeof body.firstName === 'string' ? body.firstName : ''
   const lastName = typeof body.lastName === 'string' ? body.lastName : ''
   const username = typeof body.username === 'string' ? body.username : ''
+  const affiliation =
+    typeof body.affiliation === 'string' && body.affiliation.trim()
+      ? body.affiliation.trim()
+      : 'guest'
 
-  const result = await createMember({ email, password, firstName, lastName, username })
+  const result = await createMember({
+    email,
+    password,
+    firstName,
+    lastName,
+    username,
+    affiliation,
+  })
   if (!result.ok) {
     return NextResponse.json({ ok: false, error: result.error }, { status: 400 })
   }
@@ -42,6 +53,7 @@ export async function POST(request: NextRequest) {
   const response = NextResponse.json({
     ok: true,
     user: result.user,
+    membershipPending: result.membershipPending === true,
     verificationEmailSent: true,
   })
   response.cookies.set(buildSessionCookie(session.token, session.maxAgeSec))

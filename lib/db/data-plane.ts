@@ -25,6 +25,9 @@ export const REDIS_LIVE_KEYS = {
 export const POSTGRES_LIVE = [
   'users',
   'memberships',
+  'site_policies',
+  'membership_applications',
+  'guest_site_access',
   'gallery_submissions',
   'imaging_equipment',
   'r2_object_map',

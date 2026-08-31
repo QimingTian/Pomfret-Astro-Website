@@ -332,14 +332,12 @@ export function AdminDashboardGrid({ user }: { user: PublicMemberUser }) {
 
       <AccountFullBleedRule />
 
+      <AllSkyCameraControlPanel />
+
+      <AccountFullBleedRule />
+
       <AccountTwoColRow
-        left={
-          <div className="flex min-h-0 flex-col">
-            <AllSkyCameraControlPanel />
-            <AccountFullBleedRule className="my-4" />
-            <ImagingEquipmentSection />
-          </div>
-        }
+        left={<ImagingEquipmentSection />}
         right={<GalleryRequestsSection />}
       />
 

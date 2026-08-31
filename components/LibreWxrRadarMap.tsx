@@ -17,13 +17,12 @@ import {
   type LibrewxrFrame,
   type LibrewxrWeatherMaps,
 } from '@/lib/librewxr'
+import { resolveRadarBasemap } from '@/lib/map-basemap'
 import { useObservatorySite } from '@/components/observatory-site-provider'
 
 const MAP_ZOOM = 8
 /** Frame interval — crossfade + preload-ahead keeps the loop continuous. */
 const FRAME_MS = 1100
-
-const BASEMAP_URL = 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png'
 
 export default function LibreWxrRadarMap() {
   const { site } = useObservatorySite()
@@ -94,9 +93,10 @@ export default function LibreWxrRadarMap() {
       const radarPane = map.getPane('radar')
       if (radarPane) radarPane.style.zIndex = '450'
 
-      L.tileLayer(BASEMAP_URL, {
-        subdomains: 'abcd',
-        maxZoom: 19,
+      const basemap = resolveRadarBasemap()
+      L.tileLayer(basemap.url, {
+        ...(basemap.subdomains ? { subdomains: basemap.subdomains } : {}),
+        maxZoom: basemap.maxZoom,
         attribution: '',
       }).addTo(map)
 

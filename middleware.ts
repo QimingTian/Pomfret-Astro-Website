@@ -6,7 +6,7 @@ const CSP = [
   "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
   "frame-src 'self'",
-  "img-src 'self' data: blob: https://cdn.star.nesdis.noaa.gov https://*.r2.cloudflarestorage.com https://svs.gsfc.nasa.gov https://www.pomfretastro.org https://cam.pomfretastro.org https://*.basemaps.cartocdn.com https://tile.openstreetmap.org",
+  "img-src 'self' data: blob: https://cdn.star.nesdis.noaa.gov https://*.r2.cloudflarestorage.com https://svs.gsfc.nasa.gov https://www.pomfretastro.org https://cam.pomfretastro.org https://*.basemaps.cartocdn.com https://tile.openstreetmap.org https://server.arcgisonline.com",
   "connect-src 'self' https://api.open-meteo.com https://air-quality-api.open-meteo.com https://svs.gsfc.nasa.gov https://cdn.star.nesdis.noaa.gov https://*.r2.cloudflarestorage.com https://cam.pomfretastro.org wss:",
   "font-src 'self' data:",
   "frame-ancestors 'none'",

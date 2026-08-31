@@ -11,6 +11,7 @@ import {
 } from '@/lib/glass-ui'
 import { useCallback, useEffect, useState } from 'react'
 import { DashboardPanel } from '@/app/dashboard/account/dashboard-panel'
+import { observatorySiteFetch, useObservatorySite } from '@/components/observatory-site-provider'
 
 type MemberSessionRow = {
   id: string
@@ -32,6 +33,7 @@ export function SessionHistorySection({
   variant?: 'panel' | 'boxed'
   className?: string
 }) {
+  const { siteId } = useObservatorySite()
   const [sessions, setSessions] = useState<MemberSessionRow[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -40,7 +42,10 @@ export function SessionHistorySection({
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch('/api/member/sessions', { credentials: 'include', cache: 'no-store' })
+      const res = await observatorySiteFetch('/api/member/sessions', siteId, {
+        credentials: 'include',
+        cache: 'no-store',
+      })
       const data = await res.json().catch(() => ({}))
       if (!res.ok || data?.ok !== true || !Array.isArray(data.sessions)) {
         setError(typeof data.error === 'string' ? data.error : 'Could not load sessions.')
@@ -52,22 +57,11 @@ export function SessionHistorySection({
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [siteId])
 
   useEffect(() => {
     void loadSessions()
   }, [loadSessions])
-
-  const refreshButton = (
-    <button
-      type="button"
-      onClick={() => void loadSessions()}
-      disabled={loading}
-      className={`${glassPillXs} disabled:opacity-50`}
-    >
-      {loading ? '…' : 'Refresh'}
-    </button>
-  )
 
   const body = (
     <>
@@ -89,11 +83,7 @@ export function SessionHistorySection({
 
   if (variant === 'panel') {
     return (
-      <DashboardPanel
-        title="Session History"
-        action={refreshButton}
-        className={`min-h-[14rem] ${className}`}
-      >
+      <DashboardPanel title="Session History" className={`min-h-[14rem] ${className}`}>
         {body}
       </DashboardPanel>
     )
@@ -101,10 +91,7 @@ export function SessionHistorySection({
 
   return (
     <section className="boxed-fields space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-medium text-white">My sessions</h2>
-        {refreshButton}
-      </div>
+      <h2 className="text-lg font-medium text-white">My sessions</h2>
       {body}
     </section>
   )

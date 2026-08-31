@@ -13,6 +13,7 @@ import { AllMembersSection } from '@/app/dashboard/admin/all-members-section'
 import { AllSkyCameraControlPanel } from '@/app/dashboard/admin/allsky-camera-control-panel'
 import { ImagingEquipmentSection } from '@/components/admin/imaging-equipment-section'
 import { statusOptions, useAdminTools } from '@/app/dashboard/admin/use-admin-tools'
+import { useAdminSiteScope } from '@/hooks/use-admin-site-scope'
 import type { PublicMemberUser } from '@/lib/member-store'
 import {
   glassPillSkySm,
@@ -36,6 +37,7 @@ const pillIdleBlock = glassPillToggleIdleBlock
 
 export function AdminDashboardGrid({ user }: { user: PublicMemberUser }) {
   const t = useAdminTools()
+  const { adminSiteId, showAllSkyCamera } = useAdminSiteScope()
 
   if (t.member.status === 'loading') {
     return <p className="text-sm text-gray-400">Loading…</p>
@@ -50,23 +52,11 @@ export function AdminDashboardGrid({ user }: { user: PublicMemberUser }) {
       <AccountTwoColRow
         left={
           <DashboardPanel title="Emergency STOP" compact className="min-h-0">
-            <EmergencyStopButton user={user} />
+            <EmergencyStopButton user={user} operatingSiteId={adminSiteId} />
           </DashboardPanel>
         }
         right={
-          <DashboardPanel
-            title="Session Control"
-            action={
-              <button
-                type="button"
-                onClick={() => void t.loadSessionControl()}
-                disabled={t.sessionLoading}
-                className={`${glassPillXs} disabled:opacity-50`}
-              >
-                {t.sessionLoading ? '…' : 'Refresh'}
-              </button>
-            }
-          >
+          <DashboardPanel title="Session Control">
             {t.sessionError && <p className="mb-2 text-sm text-red-400">{t.sessionError}</p>}
             <div className="max-h-[20rem] space-y-2 overflow-y-auto">
               {t.sessionRows.length === 0 && !t.sessionLoading ? (
@@ -201,42 +191,32 @@ export function AdminDashboardGrid({ user }: { user: PublicMemberUser }) {
           <DashboardPanel
             title="Log"
             action={
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (t.logEntries.length === 0) return
-                    const escape = (v: string) => `"${v.replace(/"/g, '""')}"`
-                    const header = 'Time (UTC),Kind,Message,Detail'
-                    const rows = t.logEntries.map((r) =>
-                      [
-                        escape(r.at),
-                        escape(r.kind),
-                        escape(r.message),
-                        escape(r.detail ? JSON.stringify(r.detail) : ''),
-                      ].join(',')
-                    )
-                    const blob = new Blob([header + '\n' + rows.join('\n')], { type: 'text/csv' })
-                    const a = document.createElement('a')
-                    a.href = URL.createObjectURL(blob)
-                    a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`
-                    a.click()
-                    URL.revokeObjectURL(a.href)
-                  }}
-                  disabled={t.logEntries.length === 0}
-                  className={`${glassPillXs} disabled:opacity-50`}
-                >
-                  Export
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void t.loadLog()}
-                  disabled={t.logLoading}
-                  className={`${glassPillXs} disabled:opacity-50`}
-                >
-                  {t.logLoading ? '…' : 'Refresh'}
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (t.logEntries.length === 0) return
+                  const escape = (v: string) => `"${v.replace(/"/g, '""')}"`
+                  const header = 'Time (UTC),Kind,Message,Detail'
+                  const rows = t.logEntries.map((r) =>
+                    [
+                      escape(r.at),
+                      escape(r.kind),
+                      escape(r.message),
+                      escape(r.detail ? JSON.stringify(r.detail) : ''),
+                    ].join(',')
+                  )
+                  const blob = new Blob([header + '\n' + rows.join('\n')], { type: 'text/csv' })
+                  const a = document.createElement('a')
+                  a.href = URL.createObjectURL(blob)
+                  a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`
+                  a.click()
+                  URL.revokeObjectURL(a.href)
+                }}
+                disabled={t.logEntries.length === 0}
+                className={`${glassPillXs} disabled:opacity-50`}
+              >
+                Export
+              </button>
             }
           >
             <AdminActivityLogPanel
@@ -330,9 +310,12 @@ export function AdminDashboardGrid({ user }: { user: PublicMemberUser }) {
         right={<ImagingRequestsSection />}
       />
 
-      <AccountFullBleedRule />
-
-      <AllSkyCameraControlPanel />
+      {showAllSkyCamera ? (
+        <>
+          <AccountFullBleedRule />
+          <AllSkyCameraControlPanel />
+        </>
+      ) : null}
 
       <AccountFullBleedRule />
 

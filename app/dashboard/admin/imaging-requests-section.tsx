@@ -2,15 +2,11 @@
 
 import {
   glassPillDangerSm,
-  glassPillLg,
-  glassPillLgWide,
-  glassPillMd,
-  glassPillSm,
   glassPillSuccessSm,
-  glassPillXs,
 } from '@/lib/glass-ui'
 import { useCallback, useEffect, useState } from 'react'
 import { DashboardPanel } from '@/app/dashboard/account/dashboard-panel'
+import { useAdminSiteScope } from '@/hooks/use-admin-site-scope'
 
 type MemberRow = {
   kind: 'member_access'
@@ -38,6 +34,7 @@ type Payload = {
 }
 
 export function ImagingRequestsSection({ className = '' }: { className?: string }) {
+  const { siteFetch, adminSiteId } = useAdminSiteScope()
   const [data, setData] = useState<Payload>({ memberRequests: [], largeProjectRequests: [], total: 0 })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -47,7 +44,7 @@ export function ImagingRequestsSection({ className = '' }: { className?: string 
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch('/api/admin/imaging-requests', { credentials: 'include', cache: 'no-store' })
+      const res = await siteFetch('/api/admin/imaging-requests')
       const json = await res.json().catch(() => ({}))
       if (!res.ok || json?.ok !== true) {
         setError(typeof json.error === 'string' ? json.error : 'Could not load imaging requests.')
@@ -65,11 +62,11 @@ export function ImagingRequestsSection({ className = '' }: { className?: string 
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [siteFetch])
 
   useEffect(() => {
     void load()
-  }, [load])
+  }, [load, adminSiteId])
 
   async function act(kind: 'member_access' | 'large_project', id: string, action: 'approve' | 'reject') {
     const label = action === 'approve' ? 'approve' : 'reject'
@@ -77,9 +74,8 @@ export function ImagingRequestsSection({ className = '' }: { className?: string 
     setActingKey(`${kind}:${id}`)
     setError(null)
     try {
-      const res = await fetch('/api/admin/imaging-requests', {
+      const res = await siteFetch('/api/admin/imaging-requests', {
         method: 'PATCH',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ kind, id, action }),
       })
@@ -96,23 +92,11 @@ export function ImagingRequestsSection({ className = '' }: { className?: string 
     }
   }
 
-  const refreshButton = (
-    <button
-      type="button"
-      onClick={() => void load()}
-      disabled={loading}
-      className={`${glassPillXs} disabled:opacity-50`}
-    >
-      {loading ? '…' : 'Refresh'}
-    </button>
-  )
-
   const empty = data.total === 0 && !loading
 
   return (
     <DashboardPanel
       title={`Imaging Request${data.total > 0 ? ` (${data.total})` : ''}`}
-      action={refreshButton}
       className={className}
     >
       {error ? <p className="mb-2 text-sm text-red-400">{error}</p> : null}

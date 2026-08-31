@@ -15,7 +15,8 @@ import {
 } from '@/lib/imaging-project-store'
 import { checkAuthRateLimitAsync } from '@/lib/auth-rate-limit'
 import { isSameSiteMutation } from '@/lib/csrf-origin'
-import { requireAdmin } from '@/lib/member-auth'
+import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
+import { requireImagingAdmin } from '@/lib/imaging/core/admin-auth'
 import { listMembersForAdminDirectory, setMemberImagingApproval } from '@/lib/member-store'
 
 export const runtime = 'nodejs'
@@ -53,62 +54,69 @@ function filterSummaryFromPlans(
   return plans.map((p) => `${p.filterName} ${p.count}×${p.exposureSeconds}s`).join('; ')
 }
 
-/** GET — pending member imaging access + large project approvals. Admin only. */
+/** GET — pending member imaging access + large project approvals for the active site. */
 export async function GET(request: NextRequest) {
-  const auth = await requireAdmin(request)
-  if (!auth.ok) {
-    return NextResponse.json(auth.body, { status: auth.status })
-  }
-
-  const members: MemberRow[] = (await listMembersForAdminDirectory())
-    .filter((m) => m.imagingPending)
-    .map((m) => ({
-      kind: 'member_access' as const,
-      id: m.id,
-      firstName: m.firstName,
-      lastName: m.lastName,
-      email: m.email,
-      createdAt: '',
-    }))
-
-  const queuePending = await listQueueAwaitingAdminApproval()
-  const projectsPending = await listProjectsAwaitingAdminApproval()
-  const projectById = new Map(projectsPending.map((p) => [p.id, p]))
-
-  const largeProjects: LargeProjectRow[] = queuePending.map((r) => {
-    const project = projectById.get(r.id)
-    const seconds =
-      typeof r.estimatedDurationSeconds === 'number' && Number.isFinite(r.estimatedDurationSeconds)
-        ? r.estimatedDurationSeconds
-        : project?.estimatedDurationSeconds ?? 0
-    const plans = r.filterPlans ?? project?.filterPlansTotal
-    return {
-      kind: 'large_project' as const,
-      id: r.id,
-      target: r.target,
-      submitterLabel: submitterLabel(r.firstName, r.lastName, r.email),
-      email: r.email ?? null,
-      estimatedDurationSeconds: seconds,
-      durationLabel: formatImagingDurationHours(Math.max(seconds, 1)),
-      filterSummary: filterSummaryFromPlans(plans),
-      createdAt: r.createdAt,
+  return runWithRequestSite(request, async (site) => {
+    const auth = await requireImagingAdmin(request, site.id)
+    if (!auth.ok) {
+      return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status })
     }
-  })
 
-  return NextResponse.json({
-    ok: true as const,
-    memberRequests: members,
-    largeProjectRequests: largeProjects,
-    total: members.length + largeProjects.length,
+    const members: MemberRow[] = (await listMembersForAdminDirectory())
+      .filter(
+        (m) =>
+          m.imagingPending &&
+          m.memberships.some((ms) => ms.siteId === site.id)
+      )
+      .map((m) => ({
+        kind: 'member_access' as const,
+        id: m.id,
+        firstName: m.firstName,
+        lastName: m.lastName,
+        email: m.email,
+        createdAt: '',
+      }))
+
+    const queuePending = await listQueueAwaitingAdminApproval()
+    const projectsPending = await listProjectsAwaitingAdminApproval()
+    const projectById = new Map(projectsPending.map((p) => [p.id, p]))
+
+    const largeProjects: LargeProjectRow[] = queuePending.map((r) => {
+      const project = projectById.get(r.id)
+      const seconds =
+        typeof r.estimatedDurationSeconds === 'number' && Number.isFinite(r.estimatedDurationSeconds)
+          ? r.estimatedDurationSeconds
+          : project?.estimatedDurationSeconds ?? 0
+      const plans = r.filterPlans ?? project?.filterPlansTotal
+      return {
+        kind: 'large_project' as const,
+        id: r.id,
+        target: r.target,
+        submitterLabel: submitterLabel(r.firstName, r.lastName, r.email),
+        email: r.email ?? null,
+        estimatedDurationSeconds: seconds,
+        durationLabel: formatImagingDurationHours(Math.max(seconds, 1)),
+        filterSummary: filterSummaryFromPlans(plans),
+        createdAt: r.createdAt,
+      }
+    })
+
+    return NextResponse.json({
+      ok: true as const,
+      memberRequests: members,
+      largeProjectRequests: largeProjects,
+      total: members.length + largeProjects.length,
+    })
   })
 }
 
 /** PATCH — approve/reject member imaging access or large project. Admin only. */
 export async function PATCH(request: NextRequest) {
-  const auth = await requireAdmin(request)
-  if (!auth.ok) {
-    return NextResponse.json(auth.body, { status: auth.status })
-  }
+  return runWithRequestSite(request, async (site) => {
+    const auth = await requireImagingAdmin(request, site.id)
+    if (!auth.ok) {
+      return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status })
+    }
   if (!(await checkAuthRateLimitAsync(request, 'admin-imaging-requests', 30))) {
     return NextResponse.json({ ok: false, error: 'Too many requests. Try again later.' }, { status: 429 })
   }
@@ -174,4 +182,5 @@ export async function PATCH(request: NextRequest) {
   }
 
   return NextResponse.json({ ok: false, error: 'kind must be member_access or large_project.' }, { status: 400 })
+  })
 }

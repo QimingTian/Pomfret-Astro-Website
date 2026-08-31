@@ -1,9 +1,17 @@
+import { currentObservatorySiteId, scopedKvKey } from '@/lib/observatory-site-scope'
+import { DEFAULT_OBSERVATORY_SITE_ID } from '@/lib/observatory-sites'
 import { postgresReadsEnabled } from '@/lib/db'
 import { kvGetJson, kvSetJson, kvEnabled } from '@/lib/kv-rest'
 import { isEquipmentValid, normalizeEquipment, type ImagingEquipment } from './equipment'
 
 export const IMAGING_EQUIPMENT_KV_KEY = 'pomfret:imaging-equipment'
 export const IMAGING_EQUIPMENT_CHANGED = 'pomfret:imaging-equipment-changed'
+
+function equipmentKvKey(): string {
+  const siteId = currentObservatorySiteId()
+  if (siteId === DEFAULT_OBSERVATORY_SITE_ID) return IMAGING_EQUIPMENT_KV_KEY
+  return scopedKvKey('imaging-equipment')
+}
 
 export function notifyImagingEquipmentChanged(): void {
   if (typeof window !== 'undefined') {
@@ -18,7 +26,7 @@ type EquipmentKvPayload =
   | undefined
 
 type GlobalWithRigs = typeof globalThis & {
-  __pomfret_imaging_equipment_rigs__?: Array<ImagingEquipment | null>
+  __pomfret_imaging_equipment_rigs_by_site__?: Record<string, Array<ImagingEquipment | null>>
 }
 
 function defaultRigs(): Array<ImagingEquipment | null> {
@@ -26,11 +34,16 @@ function defaultRigs(): Array<ImagingEquipment | null> {
 }
 
 function memoryRigs(): Array<ImagingEquipment | null> {
+  const siteId = currentObservatorySiteId()
   const g = globalThis as GlobalWithRigs
-  if (!g.__pomfret_imaging_equipment_rigs__) {
-    g.__pomfret_imaging_equipment_rigs__ = defaultRigs()
+  if (!g.__pomfret_imaging_equipment_rigs_by_site__) {
+    g.__pomfret_imaging_equipment_rigs_by_site__ = {}
   }
-  return g.__pomfret_imaging_equipment_rigs__
+  const bySite = g.__pomfret_imaging_equipment_rigs_by_site__
+  if (!bySite[siteId]) {
+    bySite[siteId] = defaultRigs()
+  }
+  return bySite[siteId]!
 }
 
 function snapshotRigs(): Array<ImagingEquipment | null> {
@@ -55,7 +68,7 @@ function normalizeRigsPayload(raw: EquipmentKvPayload): Array<ImagingEquipment |
 async function readRigsFromKv(): Promise<Array<ImagingEquipment | null> | undefined> {
   if (!kvEnabled()) return undefined
   try {
-    const raw = await kvGetJson<EquipmentKvPayload>(IMAGING_EQUIPMENT_KV_KEY)
+    const raw = await kvGetJson<EquipmentKvPayload>(equipmentKvKey())
     return normalizeRigsPayload(raw)
   } catch {
     return undefined
@@ -63,19 +76,19 @@ async function readRigsFromKv(): Promise<Array<ImagingEquipment | null> | undefi
 }
 
 async function writeRigsToKv(rigs: Array<ImagingEquipment | null>): Promise<void> {
-  if (postgresReadsEnabled()) {
+  if (postgresReadsEnabled() && currentObservatorySiteId() === DEFAULT_OBSERVATORY_SITE_ID) {
     const { mirrorImagingEquipment } = await import('@/lib/db/mirror')
     await mirrorImagingEquipment(rigs)
     return
   }
   if (!kvEnabled()) return
-  await kvSetJson(IMAGING_EQUIPMENT_KV_KEY, { rigs })
+  await kvSetJson(equipmentKvKey(), { rigs })
   const { mirrorImagingEquipment } = await import('@/lib/db/mirror')
   await mirrorImagingEquipment(rigs)
 }
 
 export async function listImagingRigs(): Promise<Array<ImagingEquipment | null>> {
-  if (postgresReadsEnabled()) {
+  if (postgresReadsEnabled() && currentObservatorySiteId() === DEFAULT_OBSERVATORY_SITE_ID) {
     try {
       const { loadEquipmentRigsFromPostgres } = await import('@/lib/db/read')
       const pg = await loadEquipmentRigsFromPostgres()

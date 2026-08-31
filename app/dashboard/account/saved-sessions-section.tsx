@@ -61,17 +61,6 @@ export function SavedSessionsSection({
     void loadSessions()
   }, [loadSessions])
 
-  const refreshButton = (
-    <button
-      type="button"
-      onClick={() => void loadSessions()}
-      disabled={loading}
-      className={`${glassPillXs} disabled:opacity-50`}
-    >
-      {loading ? '…' : 'Refresh'}
-    </button>
-  )
-
   const body = (
     <>
       {error && <p className="text-sm text-red-400">{error}</p>}
@@ -103,7 +92,7 @@ export function SavedSessionsSection({
 
   if (variant === 'panel') {
     return (
-      <DashboardPanel title="Saved Sessions" action={refreshButton} className={`min-h-[14rem] ${className}`}>
+      <DashboardPanel title="Saved Sessions" className={`min-h-[14rem] ${className}`}>
         {body}
       </DashboardPanel>
     )
@@ -111,10 +100,7 @@ export function SavedSessionsSection({
 
   return (
     <section className="boxed-fields space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-medium text-white">Saved sessions</h2>
-        {refreshButton}
-      </div>
+      <h2 className="text-lg font-medium text-white">Saved sessions</h2>
       {body}
     </section>
   )

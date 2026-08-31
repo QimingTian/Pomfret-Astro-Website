@@ -6,16 +6,16 @@ import { observatorySiteFetch } from '@/components/observatory-site-provider'
 import { isPomfretAstroAdmin } from '@/lib/member-roles'
 import type { PublicMemberUser } from '@/lib/member-store'
 import {
+  glassPillDangerMd,
+  glassPillDangerWide,
+  glassPillMd,
+} from '@/lib/glass-ui'
+import {
   OBSERVATORY_SITES,
   isObservatorySiteId,
   resolveObservatorySite,
   type ObservatorySiteId,
 } from '@/lib/observatory-sites'
-import {
-  glassPillDangerMd,
-  glassPillDangerWide,
-  glassPillMd,
-} from '@/lib/glass-ui'
 
 type EmergencyStopPhase = 'idle' | 'stopping' | 'stopped'
 
@@ -35,7 +35,13 @@ function emergencyStopButtonLabel(status: EmergencyStopStatus): string {
   return 'Emergency STOP'
 }
 
-export function EmergencyStopButton({ user }: { user: PublicMemberUser }) {
+export function EmergencyStopButton({
+  user,
+  operatingSiteId,
+}: {
+  user: PublicMemberUser
+  operatingSiteId: ObservatorySiteId
+}) {
   const [pending, setPending] = useState(false)
   const [step, setStep] = useState<'closed' | 'pick-site' | 'confirm'>('closed')
   const [selectedSiteId, setSelectedSiteId] = useState<ObservatorySiteId | null>(null)
@@ -59,10 +65,12 @@ export function EmergencyStopButton({ user }: { user: PublicMemberUser }) {
     return adminSites.length > 0 ? adminSites : (['pomfret'] as ObservatorySiteId[])
   }, [user.memberships, user.systemRole])
 
-  const needsSitePicker = isPomfretAstroAdmin(user.systemRole) || siteOptions.length > 1
+  const needsSitePicker = !isPomfretAstroAdmin(user.systemRole) && siteOptions.length > 1
+
+  const activeSiteId = needsSitePicker ? (selectedSiteId ?? siteOptions[0] ?? operatingSiteId) : operatingSiteId
 
   const refreshStatus = useCallback(async (siteId?: ObservatorySiteId | null) => {
-    const site = siteId ?? siteOptions[0] ?? 'pomfret'
+    const site = siteId ?? activeSiteId
     try {
       const res = await observatorySiteFetch('/api/imaging/emergency-stop', site, {
         credentials: 'include',
@@ -89,18 +97,17 @@ export function EmergencyStopButton({ user }: { user: PublicMemberUser }) {
     } finally {
       setStatusLoaded(true)
     }
-  }, [siteOptions])
+  }, [activeSiteId, siteOptions])
 
   useEffect(() => {
-    void refreshStatus(selectedSiteId ?? siteOptions[0] ?? 'pomfret')
-  }, [refreshStatus, selectedSiteId, siteOptions])
+    void refreshStatus(operatingSiteId)
+  }, [refreshStatus, operatingSiteId])
 
   useEffect(() => {
     if (status.phase !== 'stopping') return
-    const site = selectedSiteId ?? siteOptions[0] ?? 'pomfret'
-    const id = window.setInterval(() => void refreshStatus(site), 2000)
+    const id = window.setInterval(() => void refreshStatus(activeSiteId), 2000)
     return () => window.clearInterval(id)
-  }, [refreshStatus, selectedSiteId, siteOptions, status.phase])
+  }, [refreshStatus, activeSiteId, status.phase])
 
   useSiteStream(
     {
@@ -129,9 +136,8 @@ export function EmergencyStopButton({ user }: { user: PublicMemberUser }) {
       setStep('pick-site')
       return
     }
-    const only = siteOptions[0] ?? 'pomfret'
-    setSelectedSiteId(only)
-    void refreshStatus(only)
+    setSelectedSiteId(operatingSiteId)
+    void refreshStatus(operatingSiteId)
     setStep('confirm')
   }
 
@@ -142,7 +148,7 @@ export function EmergencyStopButton({ user }: { user: PublicMemberUser }) {
   }
 
   async function confirmEmergencyStop() {
-    const site = selectedSiteId ?? siteOptions[0]
+    const site = needsSitePicker ? (selectedSiteId ?? siteOptions[0]) : operatingSiteId
     if (!site) return
     setStep('closed')
     setPending(true)

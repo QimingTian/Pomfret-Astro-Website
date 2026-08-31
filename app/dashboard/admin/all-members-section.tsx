@@ -2,15 +2,11 @@
 
 import {
   glassPillDangerSm,
-  glassPillLg,
-  glassPillLgWide,
-  glassPillMd,
-  glassPillSm,
-  glassPillSuccessSm,
   glassPillXs,
 } from '@/lib/glass-ui'
 import { useCallback, useEffect, useState } from 'react'
 import { DashboardPanel } from '@/app/dashboard/account/dashboard-panel'
+import { useAdminSiteScope } from '@/hooks/use-admin-site-scope'
 import { memberVerificationStatusLabel } from '@/lib/member-access'
 import { memberRolesDisplay, type MemberRole } from '@/lib/member-store'
 
@@ -34,6 +30,8 @@ type MembersPayload = {
   total?: number
   canManageAdmins?: boolean
   currentUserId?: string
+  scope?: string
+  siteName?: string | null
   error?: string
 }
 
@@ -42,6 +40,7 @@ function displayName(row: Row): string {
 }
 
 export function AllMembersSection({ className = '' }: { className?: string }) {
+  const { siteFetch, adminSiteId, membersScope, adminSite, isPaAdmin } = useAdminSiteScope()
   const [members, setMembers] = useState<Row[]>([])
   const [total, setTotal] = useState(0)
   const [canManageAdmins, setCanManageAdmins] = useState(false)
@@ -51,6 +50,9 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
   const [removingId, setRemovingId] = useState<string | null>(null)
   const [promotingId, setPromotingId] = useState<string | null>(null)
   const [demotingId, setDemotingId] = useState<string | null>(null)
+
+  const panelTitle =
+    membersScope === 'all' ? 'All members' : `${adminSite.name} members`
 
   const applyPayload = (data: MembersPayload) => {
     if (Array.isArray(data.members)) {
@@ -65,7 +67,7 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch('/api/admin/members', { credentials: 'include', cache: 'no-store' })
+      const res = await siteFetch('/api/admin/members')
       const data = (await res.json().catch(() => ({}))) as MembersPayload
       if (!res.ok || data?.ok !== true || !Array.isArray(data.members)) {
         setError(typeof data.error === 'string' ? data.error : 'Could not load members.')
@@ -77,11 +79,20 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [siteFetch])
 
   useEffect(() => {
     void load()
-  }, [load])
+  }, [load, adminSiteId, membersScope])
+
+  async function patchMember(body: Record<string, unknown>) {
+    const res = await siteFetch('/api/admin/members', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    return (await res.json().catch(() => ({}))) as MembersPayload
+  }
 
   async function setAsAdmin(row: Row) {
     const name = displayName(row)
@@ -89,14 +100,8 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
     setPromotingId(row.id)
     setError(null)
     try {
-      const res = await fetch('/api/admin/members', {
-        method: 'PATCH',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: row.id }),
-      })
-      const data = (await res.json().catch(() => ({}))) as MembersPayload
-      if (!res.ok || data?.ok !== true) {
+      const data = await patchMember({ id: row.id })
+      if (!data?.ok) {
         setError(typeof data.error === 'string' ? data.error : 'Could not update member.')
         return
       }
@@ -114,14 +119,8 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
     setDemotingId(row.id)
     setError(null)
     try {
-      const res = await fetch('/api/admin/members', {
-        method: 'PATCH',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: row.id, roleAction: 'member' }),
-      })
-      const data = (await res.json().catch(() => ({}))) as MembersPayload
-      if (!res.ok || data?.ok !== true) {
+      const data = await patchMember({ id: row.id, roleAction: 'member' })
+      if (!data?.ok) {
         setError(typeof data.error === 'string' ? data.error : 'Could not update member.')
         return
       }
@@ -139,9 +138,8 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
     setRemovingId(row.id)
     setError(null)
     try {
-      const res = await fetch(`/api/admin/members?id=${encodeURIComponent(row.id)}`, {
+      const res = await siteFetch(`/api/admin/members?id=${encodeURIComponent(row.id)}`, {
         method: 'DELETE',
-        credentials: 'include',
       })
       const data = (await res.json().catch(() => ({}))) as MembersPayload
       if (!res.ok || data?.ok !== true) {
@@ -159,25 +157,14 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
   function canManageRow(row: Row): boolean {
     if (row.id === currentUserId) return false
     if (row.bootstrapAdmin) return false
+    if (!isPaAdmin) return false
     if (row.role === 'member') return true
     return canManageAdmins && row.role === 'admin'
   }
 
-  const refreshButton = (
-    <button
-      type="button"
-      onClick={() => void load()}
-      disabled={loading}
-      className={`${glassPillXs} disabled:opacity-50`}
-    >
-      {loading ? '…' : 'Refresh'}
-    </button>
-  )
-
   return (
     <DashboardPanel
-      title={`All members${total > 0 ? ` (${total})` : ''}`}
-      action={refreshButton}
+      title={`${panelTitle}${total > 0 ? ` (${total})` : ''}`}
       className={`min-h-0 ${className}`}
     >
       {error && <p className="text-sm text-red-400">{error}</p>}

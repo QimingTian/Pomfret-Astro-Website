@@ -4,6 +4,7 @@ import { useRef, useState } from 'react'
 
 import { useAdaptivePoll } from '@/hooks/use-adaptive-poll'
 import { observatorySiteFetch, useObservatorySite } from '@/components/observatory-site-provider'
+import type { ObservatorySiteId } from '@/lib/observatory-sites'
 
 export type SiteStreamObservatoryEvent = {
   type: 'observatory_status'
@@ -50,8 +51,13 @@ export type SiteStreamState = {
 /**
  * Site-wide observatory / ESTOP via adaptive HTTP polls (slow by day, faster at night when imaging).
  */
-export function useSiteStream(handlers: SiteStreamHandlers, enabled = true): SiteStreamState {
-  const { siteId } = useObservatorySite()
+export function useSiteStream(
+  handlers: SiteStreamHandlers,
+  enabled = true,
+  siteIdOverride?: ObservatorySiteId
+): SiteStreamState {
+  const { siteId: headerSiteId } = useObservatorySite()
+  const siteId = siteIdOverride ?? headerSiteId
   const handlersRef = useRef(handlers)
   handlersRef.current = handlers
   const sessionsTickRef = useRef<string | null>(null)

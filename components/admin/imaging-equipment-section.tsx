@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { DashboardPanel } from '@/app/dashboard/account/dashboard-panel'
+import { useAdminSiteScope } from '@/hooks/use-admin-site-scope'
 import {
   mergeEquipmentManualSave,
   resolveFieldRotationDeg,
@@ -41,6 +42,7 @@ function rigToForm(rig: ImagingEquipment | null) {
 }
 
 export function ImagingEquipmentSection() {
+  const { siteFetch, adminSiteId } = useAdminSiteScope()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [rigs, setRigs] = useState<Array<ImagingEquipment | null>>([null])
   const [selectedIndex, setSelectedIndex] = useState(0)
@@ -54,7 +56,7 @@ export function ImagingEquipmentSection() {
 
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch('/api/admin/imaging-equipment', { credentials: 'include', cache: 'no-store' })
+      const res = await siteFetch('/api/admin/imaging-equipment')
       const data = (await res.json().catch(() => null)) as {
         rigs?: Array<ImagingEquipment | null>
         error?: string
@@ -73,11 +75,11 @@ export function ImagingEquipmentSection() {
     } catch {
       setError('Unable to load imaging equipment.')
     }
-  }, [])
+  }, [siteFetch])
 
   useEffect(() => {
     void refresh()
-  }, [refresh])
+  }, [refresh, adminSiteId])
 
   function selectRig(index: number) {
     setSelectedIndex(index)
@@ -114,9 +116,8 @@ export function ImagingEquipmentSection() {
     setSaving(true)
     try {
       const merged = mergeEquipmentManualSave(rigs[selectedIndex] ?? null, validated.equipment)
-      const res = await fetch('/api/admin/imaging-equipment', {
+      const res = await siteFetch('/api/admin/imaging-equipment', {
         method: 'PUT',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ index: selectedIndex, equipment: merged }),
       })
@@ -143,9 +144,8 @@ export function ImagingEquipmentSection() {
     setError(null)
     setMessage(null)
     try {
-      const res = await fetch(`/api/admin/imaging-equipment?index=${selectedIndex}`, {
+      const res = await siteFetch(`/api/admin/imaging-equipment?index=${selectedIndex}`, {
         method: 'DELETE',
-        credentials: 'include',
       })
       const data = (await res.json().catch(() => null)) as {
         rigs?: Array<ImagingEquipment | null>
@@ -207,9 +207,8 @@ export function ImagingEquipmentSection() {
           rawImageOrientationDeg: result.rawImageOrientationDeg ?? undefined,
           imageParity: result.parity,
         }
-        const res = await fetch('/api/admin/imaging-equipment', {
+        const res = await siteFetch('/api/admin/imaging-equipment', {
           method: 'PUT',
-          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ index: selectedIndex, equipment: payload }),
         })

@@ -101,20 +101,7 @@ export function GalleryRequestsSection({ className = '' }: { className?: string 
   }
 
   return (
-    <DashboardPanel
-      title="Gallery Request"
-      action={
-        <button
-          type="button"
-          onClick={() => void load()}
-          disabled={loading}
-          className={`${glassPillXs} disabled:opacity-50`}
-        >
-          {loading ? '…' : 'Refresh'}
-        </button>
-      }
-      className={className}
-    >
+    <DashboardPanel title="Gallery Request" className={className}>
       {error ? <p className="mb-2 text-sm text-red-400">{error}</p> : null}
       {submissions.length === 0 && !loading ? (
         <p className="text-sm text-gray-500">No pending gallery submissions.</p>

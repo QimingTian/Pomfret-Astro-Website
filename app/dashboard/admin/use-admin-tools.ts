@@ -1,7 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { observatorySiteFetch, useObservatorySite } from '@/components/observatory-site-provider'
+import { observatorySiteFetch } from '@/components/observatory-site-provider'
+import { useAdminSiteScope } from '@/hooks/use-admin-site-scope'
 import { useMember } from '@/hooks/use-member'
 import { useSiteStream } from '@/lib/use-site-stream'
 
@@ -70,7 +71,7 @@ export function parseTonightTimeToDate(value: string, windowStart: Date): Date |
 
 export function useAdminTools() {
   const member = useMember()
-  const { siteId } = useObservatorySite()
+  const { adminSiteId } = useAdminSiteScope()
   const authorized = member.status === 'authenticated' && member.isAdmin
   const [mode, setMode] = useState<ObservatoryMode>('manual')
   const [status, setStatus] = useState<ObservatoryStatus>('ready')
@@ -96,8 +97,8 @@ export function useAdminTools() {
 
   const siteFetch = useCallback(
     (input: string, init?: RequestInit) =>
-      observatorySiteFetch(input, siteId, { credentials: 'include', cache: 'no-store', ...init }),
-    [siteId]
+      observatorySiteFetch(input, adminSiteId, { credentials: 'include', cache: 'no-store', ...init }),
+    [adminSiteId]
   )
 
   const loadObservatoryStatus = useCallback(async () => {
@@ -215,7 +216,7 @@ export function useAdminTools() {
     setLogError(null)
     setSessionError(null)
     void reloadSiteScopedAdminData()
-  }, [authorized, siteId, reloadSiteScopedAdminData])
+  }, [authorized, adminSiteId, reloadSiteScopedAdminData])
 
   useSiteStream(
     {
@@ -237,7 +238,8 @@ export function useAdminTools() {
         setEmergencyStopBlocking(Boolean(event.blocking))
       },
     },
-    authorized
+    authorized,
+    adminSiteId
   )
 
   async function runSessionAction(
@@ -380,7 +382,7 @@ export function useAdminTools() {
   return {
     member,
     authorized,
-    siteId,
+    siteId: adminSiteId,
     mode,
     status,
     saving,

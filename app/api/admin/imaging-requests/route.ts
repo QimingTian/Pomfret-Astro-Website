@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { deleteProjectCascade } from '@/lib/imaging-project-delete'
-import { formatImagingDurationHours } from '@/lib/imaging/large-project-approval'
+import {
+  formatImagingDurationHours,
+  projectTotalDurationNeedsAdminApproval,
+} from '@/lib/imaging/large-project-approval'
 import { reconcilePendingScheduleStatus } from '@/lib/imaging-queue-reconcile'
 import {
   getRequestById,
@@ -17,7 +20,17 @@ import { checkAuthRateLimitAsync } from '@/lib/auth-rate-limit'
 import { isSameSiteMutation } from '@/lib/csrf-origin'
 import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 import { requireImagingAdmin } from '@/lib/imaging/core/admin-auth'
-import { listMembersForAdminDirectory, setMemberImagingApproval } from '@/lib/member-store'
+import { isMemberImagingPendingAtSite } from '@/lib/member-access'
+import {
+  getMemberById,
+  listMembersForAdminDirectory,
+  setMemberImagingApproval,
+} from '@/lib/member-store'
+import {
+  listPendingGuestAccessForSite,
+  setGuestSiteAccessStatus,
+  getSiteProjectDurationLimitHours,
+} from '@/lib/site-policies'
 
 export const runtime = 'nodejs'
 
@@ -30,6 +43,15 @@ type MemberRow = {
   createdAt: string
 }
 
+type GuestRow = {
+  kind: 'guest_access'
+  id: string
+  firstName: string
+  lastName: string
+  email: string
+  updatedAt: string
+}
+
 type LargeProjectRow = {
   kind: 'large_project'
   id: string
@@ -38,6 +60,7 @@ type LargeProjectRow = {
   email: string | null
   estimatedDurationSeconds: number
   durationLabel: string
+  durationLimitHours: number
   filterSummary: string
   createdAt: string
 }
@@ -54,7 +77,7 @@ function filterSummaryFromPlans(
   return plans.map((p) => `${p.filterName} ${p.count}×${p.exposureSeconds}s`).join('; ')
 }
 
-/** GET — pending member imaging access + large project approvals for the active site. */
+/** GET — pending member imaging access, guest access, and large project approvals for the active site. */
 export async function GET(request: NextRequest) {
   return runWithRequestSite(request, async (site) => {
     const auth = await requireImagingAdmin(request, site.id)
@@ -62,26 +85,41 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status })
     }
 
-    const members: MemberRow[] = (await listMembersForAdminDirectory())
-      .filter(
-        (m) =>
-          m.imagingPending &&
-          m.memberships.some((ms) => ms.siteId === site.id)
-      )
-      .map((m) => ({
-        kind: 'member_access' as const,
+    const durationLimitHours = await getSiteProjectDurationLimitHours(site.id)
+
+    const memberRequests: MemberRow[] = []
+    for (const m of await listMembersForAdminDirectory()) {
+      if (!m.memberships.some((ms) => ms.siteId === site.id)) continue
+      const full = await getMemberById(m.id)
+      if (!full || !isMemberImagingPendingAtSite(full, site.id)) continue
+      memberRequests.push({
+        kind: 'member_access',
         id: m.id,
         firstName: m.firstName,
         lastName: m.lastName,
         email: m.email,
         createdAt: '',
-      }))
+      })
+    }
+
+    const guestRequests: GuestRow[] = []
+    for (const row of await listPendingGuestAccessForSite(site.id)) {
+      const user = await getMemberById(row.userId)
+      guestRequests.push({
+        kind: 'guest_access',
+        id: row.userId,
+        firstName: user?.firstName ?? '',
+        lastName: user?.lastName ?? '',
+        email: user?.email ?? row.userId,
+        updatedAt: row.updatedAt,
+      })
+    }
 
     const queuePending = await listQueueAwaitingAdminApproval()
     const projectsPending = await listProjectsAwaitingAdminApproval()
     const projectById = new Map(projectsPending.map((p) => [p.id, p]))
 
-    const largeProjects: LargeProjectRow[] = queuePending.map((r) => {
+    const largeProjectRequests: LargeProjectRow[] = queuePending.map((r) => {
       const project = projectById.get(r.id)
       const seconds =
         typeof r.estimatedDurationSeconds === 'number' && Number.isFinite(r.estimatedDurationSeconds)
@@ -96,6 +134,7 @@ export async function GET(request: NextRequest) {
         email: r.email ?? null,
         estimatedDurationSeconds: seconds,
         durationLabel: formatImagingDurationHours(Math.max(seconds, 1)),
+        durationLimitHours,
         filterSummary: filterSummaryFromPlans(plans),
         createdAt: r.createdAt,
       }
@@ -103,84 +142,104 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       ok: true as const,
-      memberRequests: members,
-      largeProjectRequests: largeProjects,
-      total: members.length + largeProjects.length,
+      memberRequests,
+      guestRequests,
+      largeProjectRequests,
+      durationLimitHours,
+      total: memberRequests.length + guestRequests.length + largeProjectRequests.length,
     })
   })
 }
 
-/** PATCH — approve/reject member imaging access or large project. Admin only. */
+/** PATCH — approve/reject member imaging access, guest access, or large project. Admin only. */
 export async function PATCH(request: NextRequest) {
   return runWithRequestSite(request, async (site) => {
     const auth = await requireImagingAdmin(request, site.id)
     if (!auth.ok) {
       return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status })
     }
-  if (!(await checkAuthRateLimitAsync(request, 'admin-imaging-requests', 30))) {
-    return NextResponse.json({ ok: false, error: 'Too many requests. Try again later.' }, { status: 429 })
-  }
-  if (!isSameSiteMutation(request)) {
-    return NextResponse.json({ ok: false, error: 'Invalid request origin.' }, { status: 403 })
-  }
-
-  let body: unknown
-  try {
-    body = await request.json()
-  } catch {
-    return NextResponse.json({ ok: false, error: 'Invalid JSON body' }, { status: 400 })
-  }
-
-  const rec = body && typeof body === 'object' ? (body as Record<string, unknown>) : {}
-  const kind = rec.kind
-  const id = typeof rec.id === 'string' ? rec.id.trim() : ''
-  const action = rec.action
-
-  if (!id || (action !== 'approve' && action !== 'reject')) {
-    return NextResponse.json({ ok: false, error: 'id and action (approve|reject) are required.' }, { status: 400 })
-  }
-
-  if (kind === 'member_access') {
-    const result = await setMemberImagingApproval(id, action)
-    if (!result.ok) {
-      return NextResponse.json({ ok: false, error: result.error }, { status: 400 })
+    if (!(await checkAuthRateLimitAsync(request, 'admin-imaging-requests', 30))) {
+      return NextResponse.json({ ok: false, error: 'Too many requests. Try again later.' }, { status: 429 })
     }
-    void appendAuditLog({
-      kind: 'member.imaging_access',
-      message: `Member imaging access ${action}d (${id}).`,
-      detail: { memberId: id, action },
-    })
-    return NextResponse.json({ ok: true as const })
-  }
-
-  if (kind === 'large_project') {
-    const req = await getRequestById(id)
-    const project = await getProjectById(id)
-    if (!req?.adminApprovalPending && !project?.adminApprovalPending) {
-      return NextResponse.json({ ok: false, error: 'Large project approval request not found.' }, { status: 404 })
+    if (!isSameSiteMutation(request)) {
+      return NextResponse.json({ ok: false, error: 'Invalid request origin.' }, { status: 403 })
     }
 
-    if (action === 'reject') {
-      await deleteProjectCascade(id)
+    let body: unknown
+    try {
+      body = await request.json()
+    } catch {
+      return NextResponse.json({ ok: false, error: 'Invalid JSON body' }, { status: 400 })
+    }
+
+    const rec = body && typeof body === 'object' ? (body as Record<string, unknown>) : {}
+    const kind = rec.kind
+    const id = typeof rec.id === 'string' ? rec.id.trim() : ''
+    const action = rec.action
+
+    if (!id || (action !== 'approve' && action !== 'reject')) {
+      return NextResponse.json({ ok: false, error: 'id and action (approve|reject) are required.' }, { status: 400 })
+    }
+
+    if (kind === 'member_access') {
+      const result = await setMemberImagingApproval(id, action, site.id)
+      if (!result.ok) {
+        return NextResponse.json({ ok: false, error: result.error }, { status: 400 })
+      }
       void appendAuditLog({
-        kind: 'queue.admin_approval_rejected',
-        message: `Large project rejected by admin: ${req?.target ?? project?.target ?? id}.`,
+        kind: 'member.imaging_access',
+        message: `Member imaging access ${action}d (${id}) at ${site.id}.`,
+        detail: { memberId: id, action, siteId: site.id },
+      })
+      return NextResponse.json({ ok: true as const })
+    }
+
+    if (kind === 'guest_access') {
+      await setGuestSiteAccessStatus({
+        userId: id,
+        siteId: site.id,
+        status: action === 'approve' ? 'approved' : 'rejected',
+        decidedByUserId: auth.user.id,
+      })
+      void appendAuditLog({
+        kind: 'guest.access_decision',
+        message: `Guest access ${action}d for ${id} at ${site.id}.`,
+        detail: { userId: id, action, siteId: site.id },
+      })
+      return NextResponse.json({ ok: true as const })
+    }
+
+    if (kind === 'large_project') {
+      const req = await getRequestById(id)
+      const project = await getProjectById(id)
+      if (!req?.adminApprovalPending && !project?.adminApprovalPending) {
+        return NextResponse.json({ ok: false, error: 'Large project approval request not found.' }, { status: 404 })
+      }
+
+      if (action === 'reject') {
+        await deleteProjectCascade(id)
+        void appendAuditLog({
+          kind: 'queue.admin_approval_rejected',
+          message: `Large project rejected by admin: ${req?.target ?? project?.target ?? id}.`,
+          detail: { id, target: req?.target ?? project?.target ?? null },
+        })
+        return NextResponse.json({ ok: true as const })
+      }
+
+      await setRequestAdminApprovalPending(id, false)
+      await setProjectAdminApprovalPending(id, false)
+      await reconcilePendingScheduleStatus({ force: true })
+      void appendAuditLog({
+        kind: 'queue.admin_approval_granted',
+        message: `Large project approved by admin: ${req?.target ?? project?.target ?? id}.`,
         detail: { id, target: req?.target ?? project?.target ?? null },
       })
       return NextResponse.json({ ok: true as const })
     }
 
-    await setRequestAdminApprovalPending(id, false)
-    await setProjectAdminApprovalPending(id, false)
-    await reconcilePendingScheduleStatus({ force: true })
-    void appendAuditLog({
-      kind: 'queue.admin_approval_granted',
-      message: `Large project approved by admin: ${req?.target ?? project?.target ?? id}.`,
-      detail: { id, target: req?.target ?? project?.target ?? null },
-    })
-    return NextResponse.json({ ok: true as const })
-  }
-
-  return NextResponse.json({ ok: false, error: 'kind must be member_access or large_project.' }, { status: 400 })
+    return NextResponse.json(
+      { ok: false, error: 'kind must be member_access, guest_access, or large_project.' },
+      { status: 400 }
+    )
   })
 }

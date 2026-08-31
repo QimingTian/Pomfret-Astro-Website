@@ -81,7 +81,7 @@ export async function PATCH(request: NextRequest) {
 
     const imagingAction = rec.imagingAction
     if (imagingAction === 'approve' || imagingAction === 'reject') {
-      const result = await setMemberImagingApproval(id, imagingAction)
+      const result = await setMemberImagingApproval(id, imagingAction, site.id)
       if (!result.ok) {
         return NextResponse.json({ ok: false, error: result.error }, { status: 400 })
       }

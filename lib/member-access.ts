@@ -3,7 +3,11 @@ import { isPomfretOrgEmail } from '@/lib/member-store'
 import { canSubmitImagingAtSite, membershipForSite } from '@/lib/member-roles'
 import { DEFAULT_OBSERVATORY_SITE_ID } from '@/lib/observatory-sites'
 import { currentObservatorySiteId } from '@/lib/observatory-site-scope'
-import { getGuestSiteAccessStatus, getSiteGuestAccessMode } from '@/lib/site-policies'
+import {
+  getGuestSiteAccessStatus,
+  getSiteGuestAccessMode,
+  setGuestSiteAccessStatus,
+} from '@/lib/site-policies'
 
 type ImagingSubmitFlags = {
   email: string
@@ -109,6 +113,34 @@ export async function canSubmitImagingForSite(
 
   if (!decision.ok) return { ok: false, error: decision.error }
   return { ok: true }
+}
+
+/** True when a site member has verified email but lacks imaging approval at that site. */
+export function isMemberImagingPendingAtSite(
+  user: Pick<MemberUser, 'email' | 'emailVerifiedAt' | 'memberships'>,
+  siteId: string
+): boolean {
+  if (!isEmailVerified(user)) return false
+  const membership = membershipForSite(user.memberships, siteId)
+  if (!membership) return false
+  if (membership.imagingRejectedAt) return false
+  if (membership.imagingApprovedAt) return false
+  return !isPomfretOrgEmail(user.email)
+}
+
+/** Create a pending guest access row when a guest first requests imaging under open_approval. */
+export async function maybeCreateGuestAccessRequest(
+  user: Pick<MemberUser, 'id' | 'memberships'>,
+  siteId: string
+): Promise<boolean> {
+  if (membershipForSite(user.memberships, siteId)) return false
+  const guestAccessMode = await getSiteGuestAccessMode(siteId)
+  if (guestAccessMode !== 'open_approval') return false
+  const existing = await getGuestSiteAccessStatus(user.id, siteId)
+  if (existing === 'pending') return true
+  if (existing) return false
+  await setGuestSiteAccessStatus({ userId: user.id, siteId, status: 'pending' })
+  return true
 }
 
 export type MemberAccessFlags = {

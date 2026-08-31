@@ -1,4 +1,5 @@
 import {
+  doublePrecision,
   index,
   jsonb,
   pgTable,
@@ -49,6 +50,10 @@ export const memberships = pgTable(
 export const sitePolicies = pgTable('site_policies', {
   siteId: text('site_id').primaryKey(),
   guestAccess: text('guest_access').notNull().default('closed'),
+  /** Projects longer than this (hours) require admin approval for site members. */
+  memberProjectDurationLimitHours: doublePrecision('member_project_duration_limit_hours')
+    .notNull()
+    .default(30),
   updatedAt: timestamp('updated_at', tz).notNull(),
 })
 

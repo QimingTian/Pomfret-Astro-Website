@@ -28,8 +28,10 @@ CREATE TABLE IF NOT EXISTS memberships (
 CREATE TABLE IF NOT EXISTS site_policies (
   site_id text PRIMARY KEY,
   guest_access text NOT NULL DEFAULT 'closed',
+  member_project_duration_limit_hours double precision NOT NULL DEFAULT 30,
   updated_at timestamptz NOT NULL
 );
+ALTER TABLE site_policies ADD COLUMN IF NOT EXISTS member_project_duration_limit_hours double precision NOT NULL DEFAULT 30;
 
 CREATE TABLE IF NOT EXISTS guest_site_access (
   user_id text NOT NULL,

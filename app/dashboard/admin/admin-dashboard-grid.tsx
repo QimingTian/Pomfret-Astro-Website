@@ -7,7 +7,7 @@ import { AccountTwoColRow } from '@/app/dashboard/account/account-two-col-row'
 import { DashboardPanel } from '@/app/dashboard/account/dashboard-panel'
 import { AccountMemberGrid } from '@/app/dashboard/account/account-member-grid'
 import { AdminActivityLogPanel } from '@/app/dashboard/admin/admin-activity-log-panel'
-import { GalleryRequestsSection } from '@/app/dashboard/admin/gallery-requests-section'
+import { AccessControlSection } from '@/app/dashboard/admin/access-control-section'
 import { ImagingRequestsSection } from '@/app/dashboard/admin/imaging-requests-section'
 import { AllMembersSection } from '@/app/dashboard/admin/all-members-section'
 import { AllSkyCameraControlPanel } from '@/app/dashboard/admin/allsky-camera-control-panel'
@@ -307,7 +307,7 @@ export function AdminDashboardGrid({ user }: { user: PublicMemberUser }) {
             </div>
           </DashboardPanel>
         }
-        right={<GalleryRequestsSection />}
+        right={<AccessControlSection />}
       />
 
       {showAllSkyCamera ? (

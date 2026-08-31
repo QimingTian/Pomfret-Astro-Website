@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { memberSessionHistoryRowFromQueue } from '@/lib/member-session-history'
 import { recordMemberSessionHistory } from '@/lib/member-session-history-archive'
-import { canSubmitImagingForSite } from '@/lib/member-access'
+import { canSubmitImagingForSite, maybeCreateGuestAccessRequest } from '@/lib/member-access'
 import { requireUser } from '@/lib/member-auth'
 import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 import {
@@ -32,6 +32,8 @@ import {
   setProjectAdminApprovalPending,
 } from '@/lib/imaging-project-store'
 import { projectTotalDurationNeedsAdminApproval } from '@/lib/imaging/large-project-approval'
+import { projectDurationLimitSeconds } from '@/lib/site-access-control'
+import { getSiteProjectDurationLimitHours } from '@/lib/site-policies'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { planAndScheduleProjectTonight } from '@/lib/imaging-project-planner'
 import { getScheduleReservedIntervalsForActiveProject } from '@/lib/imaging-project-altitude-hold'
@@ -127,14 +129,15 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  return runWithRequestSite(request, async () => {
+  return runWithRequestSite(request, async (site) => {
   const auth = await requireUser(request)
   if (!auth.ok) {
     return withImagingCors(auth.body, auth.status)
   }
 
-  const imagingAccess = await canSubmitImagingForSite(auth.user)
+  const imagingAccess = await canSubmitImagingForSite(auth.user, site.id)
   if (!imagingAccess.ok) {
+    await maybeCreateGuestAccessRequest(auth.user, site.id)
     return withImagingCors({ ok: false as const, error: imagingAccess.error }, 403)
   }
 
@@ -285,9 +288,11 @@ export async function POST(request: NextRequest) {
     })
   }
 
+  const durationLimitHours = await getSiteProjectDurationLimitHours(site.id)
+  const durationLimitSeconds = projectDurationLimitSeconds(durationLimitHours)
   const needsLargeProjectApproval =
     result.projectMode === true &&
-    projectTotalDurationNeedsAdminApproval(result.estimatedDurationSeconds) &&
+    projectTotalDurationNeedsAdminApproval(result.estimatedDurationSeconds, durationLimitSeconds) &&
     auth.user.role !== 'admin'
 
   if (needsLargeProjectApproval) {
@@ -314,7 +319,7 @@ export async function POST(request: NextRequest) {
         adminApprovalPending: true as const,
         request: toPublicImagingRequest(finalRow),
         message:
-          'This project exceeds 30 hours total and requires administrator approval before it can be scheduled.',
+          `This project exceeds ${durationLimitHours} hours total and requires administrator approval before it can be scheduled.`,
       },
       201
     )

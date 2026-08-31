@@ -2,6 +2,7 @@ import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   geocolorFramePaths,
+  geocolorSitePinPercent,
   noaaGoesProxyUrl,
   parseGeocolorFrameFilenames,
   parseGeocolorFrameUtc,
@@ -63,5 +64,18 @@ describe('noaa-goes', () => {
     assert.equal(utc!.getUTCDate(), 22)
     assert.equal(utc!.getUTCHours(), 19)
     assert.equal(utc!.getUTCMinutes(), 6)
+  })
+
+  test('geocolorSitePinPercent places Pomfret in the NE zoom viewport', () => {
+    const pin = geocolorSitePinPercent(41.9159, -71.9626)
+    assert.ok(pin)
+    assert.ok(pin!.leftPct > 50 && pin!.leftPct < 95)
+    assert.ok(pin!.topPct > 40 && pin!.topPct < 70)
+    const boston = geocolorSitePinPercent(42.36, -71.06)
+    assert.ok(boston)
+  })
+
+  test('geocolorSitePinPercent returns null for Cygnus (off CONUS)', () => {
+    assert.equal(geocolorSitePinPercent(52.352, 4.912), null)
   })
 })

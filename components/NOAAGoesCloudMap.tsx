@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import MapFrameTimeOverlay from '@/components/MapFrameTimeOverlay'
 import { formatObservatoryDateTime } from '@/lib/est-datetime'
-import { noaaGoesProxyUrl, parseGeocolorFrameUtc } from '@/lib/noaa-goes'
+import { geocolorSitePinPercent, noaaGoesProxyUrl, parseGeocolorFrameUtc } from '@/lib/noaa-goes'
 import { useAppStore } from '@/lib/store'
 import { useObservatorySite } from '@/components/observatory-site-provider'
 
@@ -92,6 +92,11 @@ export default function NOAAGoesCloudMap() {
     return utc ? formatObservatoryDateTime(utc, site.timezone) : null
   }, [currentPath, site.timezone])
 
+  const sitePin = useMemo(
+    () => geocolorSitePinPercent(site.weatherLat, site.weatherLon),
+    [site.weatherLat, site.weatherLon]
+  )
+
   return (
     <div
       className="relative w-full overflow-hidden rounded-lg bg-gray-200 aspect-[4/3] dark:bg-gray-800"
@@ -116,6 +121,15 @@ export default function NOAAGoesCloudMap() {
           className="absolute inset-0 h-full w-full object-cover"
           style={{ transform: 'scale(2)', transformOrigin: '100% 0%' }}
         />
+      ) : null}
+      {imageSrc && sitePin ? (
+        <div
+          className="pointer-events-none absolute z-[5] -translate-x-1/2 -translate-y-1/2"
+          style={{ left: `${sitePin.leftPct}%`, top: `${sitePin.topPct}%` }}
+          aria-label={`${site.name} location`}
+        >
+          <span className="block h-3.5 w-3.5 rounded-full border-2 border-white bg-sky-400 shadow-[0_0_0_1px_rgba(0,0,0,0.35)]" />
+        </div>
       ) : null}
     </div>
   )

@@ -48,6 +48,47 @@ export function noaaGoesProxyUrl(path: string): string {
   return `/api/noaa-goes?url=${encodeURIComponent(upstream)}`
 }
 
+/**
+ * Approximate geographic extent of NESDIS GOES-East CONUS GeoColor 625×375 previews.
+ * Tuned so New England stays inside the NE `scale(2)` crop used by Cloud Map.
+ */
+export const GEOCOLOR_CONUS_BOUNDS = {
+  westLon: -126,
+  eastLon: -55,
+  northLat: 52,
+  southLat: 15,
+} as const
+
+/**
+ * CSS crop on Cloud Map: `object-cover` into 4:3, then `scale(2)` from top-right.
+ * Returns pin position as % of the visible container, or null if off-frame.
+ */
+export function geocolorSitePinPercent(
+  lat: number,
+  lon: number
+): { leftPct: number; topPct: number } | null {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null
+  const { westLon, eastLon, northLat, southLat } = GEOCOLOR_CONUS_BOUNDS
+  const fx = (lon - westLon) / (eastLon - westLon)
+  const fy = (northLat - lat) / (northLat - southLat)
+  if (fx < 0 || fx > 1 || fy < 0 || fy > 1) return null
+
+  // object-cover into 4:3 from 5:3 image → crop 10% from each side of width.
+  const coverWest = 0.1
+  const coverEast = 0.9
+  // scale(2) from top-right → visible is right half × top half of the covered paint.
+  const visWest = coverWest + 0.5 * (coverEast - coverWest)
+  const visEast = coverEast
+  const visNorth = 0
+  const visSouth = 0.5
+
+  if (fx < visWest || fx > visEast || fy < visNorth || fy > visSouth) return null
+
+  const leftPct = ((fx - visWest) / (visEast - visWest)) * 100
+  const topPct = ((fy - visNorth) / (visSouth - visNorth)) * 100
+  return { leftPct, topPct }
+}
+
 /** Parse UTC observation time from GeoColor frame path or filename (`YYYY` + Julian `DDD` + `HHMM`). */
 export function parseGeocolorFrameUtc(pathOrName: string): Date | null {
   const basename = pathOrName.split('/').pop() ?? pathOrName

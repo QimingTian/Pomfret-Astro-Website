@@ -1,27 +1,54 @@
 'use client'
 
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
-import { glassPillToggleIdleMd } from '@/lib/glass-ui'
-
-/** When displayed hours equal BASE_SAFE_HOURS. */
-const SAFE_HOURS_ANCHOR_MS = Date.parse('2026-07-13T03:00:00.000Z')
-const BASE_SAFE_HOURS = 1296
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 
 const VIEWPORT_CSS = 'calc(100vh - 5rem)'
 const SF_PRO =
   "'SF Pro Display', 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, Arial, sans-serif"
-/** Shared band height for Astrophotography / Photometry / Discovery. */
-const SECTION_PANEL =
-  'relative z-10 flex min-h-[min(82vh,48rem)] flex-col justify-end px-4 sm:px-6 lg:px-8 pb-6 sm:pb-8 pt-24'
+
+function AboutEditorialSection({
+  title,
+  children,
+  titleAlign = 'left',
+}: {
+  title: string
+  children: ReactNode
+  titleAlign?: 'left' | 'right'
+}) {
+  const titleOnRight = titleAlign === 'right'
+
+  const titleClass = titleOnRight
+    ? 'order-1 lg:order-2 lg:col-span-4 lg:col-start-9 lg:self-center lg:justify-self-end lg:text-right'
+    : 'order-1 lg:order-1 lg:col-span-4 lg:col-start-1 lg:self-center lg:justify-self-start lg:text-left'
+  const bodyClass = titleOnRight
+    ? 'order-2 lg:order-1 lg:col-span-8 lg:col-start-1 lg:self-center'
+    : 'order-2 lg:order-2 lg:col-span-8 lg:col-start-5 lg:self-center'
+
+  return (
+    <article className="px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
+      <div className="mx-auto max-w-6xl">
+        <div className="grid grid-cols-1 gap-10 lg:grid-cols-12 lg:items-center lg:gap-12 xl:gap-16">
+          <h3
+            className={`${titleClass} text-[clamp(2rem,4vw,2.75rem)] font-semibold leading-[1.08] tracking-tight text-white`}
+            style={{ fontFamily: SF_PRO, letterSpacing: '-0.03em' }}
+          >
+            {title}
+          </h3>
+          <div
+            className={`${bodyClass} space-y-4 text-[17px] leading-[1.55] text-white/90 sm:text-[18px] sm:leading-[1.5]`}
+            style={{ fontFamily: SF_PRO }}
+          >
+            {children}
+          </div>
+        </div>
+      </div>
+    </article>
+  )
+}
 
 /** Long rest on each beat, short cinematic roll between. */
 const HOLD_FRAC = 0.72
 const SLIDE_COUNT = 2
-
-function safeOperatingHours(nowMs = Date.now()): number {
-  const elapsed = Math.max(0, nowMs - SAFE_HOURS_ANCHOR_MS)
-  return BASE_SAFE_HOURS + Math.floor(elapsed / (60 * 60 * 1000))
-}
 
 function easeInOutCubic(u: number): number {
   return u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2
@@ -68,23 +95,14 @@ function rollerStyle(distance: number): CSSProperties {
 
 /**
  * Shared home for `/dashboard` and `/dashboard/about`.
- * Restores the old fade/roller scroll: Welcome → intro + stats over the video.
+ * Restores the old fade/roller scroll: Welcome → intro over the video.
  */
 export function AboutHome() {
-  const [hours, setHours] = useState(() => safeOperatingHours())
   const [progress, setProgress] = useState(0)
-  const [stageOpacity, setStageOpacity] = useState(1)
   const storyRef = useRef<HTMLDivElement>(null)
   const targetRef = useRef(0)
   const currentRef = useRef(0)
   const rafRef = useRef(0)
-
-  useEffect(() => {
-    const tick = () => setHours(safeOperatingHours())
-    tick()
-    const id = window.setInterval(tick, 30_000)
-    return () => window.clearInterval(id)
-  }, [])
 
   useEffect(() => {
     const readScroll = () => {
@@ -95,10 +113,6 @@ export function AboutHome() {
       const scrollable = Math.max(1, el.offsetHeight - window.innerHeight + 80)
       const t = Math.min(1, Math.max(0, (window.scrollY - top) / scrollable))
       targetRef.current = scrollTToProgress(t)
-
-      // Fade the fixed video out as projects cover it
-      const past = -rect.bottom
-      setStageOpacity(past <= 0 ? 1 : Math.max(0, 1 - past / 160))
     }
 
     const animate = () => {
@@ -124,42 +138,40 @@ export function AboutHome() {
     }
   }, [])
 
-  const hoursLabel = hours.toLocaleString('en-US')
   // One sticky viewport + runway for hold + roll between 2 slides
   const pageHeightFactor = SLIDE_COUNT * 1.65
 
   return (
     <div className="bg-black text-white">
+      {/* Fixed video — stays behind hero + editorial; frosted sections blur over it */}
+      <div
+        className="pointer-events-none fixed inset-x-0 bottom-0 top-20 z-0 overflow-hidden"
+        aria-hidden
+      >
+        <video
+          className="absolute inset-0 h-full w-full scale-[1.02] object-cover"
+          src="/welcome-background.mp4"
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="auto"
+        />
+        <div className="absolute inset-0 bg-black/25" />
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              'radial-gradient(ellipse 75% 65% at 50% 48%, transparent 0%, rgba(0,0,0,0.22) 55%, rgba(0,0,0,0.5) 100%)',
+          }}
+        />
+      </div>
+
       <div
         ref={storyRef}
         className="relative"
         style={{ height: `calc(${pageHeightFactor} * (${VIEWPORT_CSS}))` }}
       >
-        {/* Fixed cinematic stage — original video framing */}
-        <div
-          className="pointer-events-none fixed inset-x-0 bottom-0 top-20 z-0 overflow-hidden transition-opacity duration-200"
-          style={{ opacity: stageOpacity }}
-          aria-hidden={stageOpacity < 0.05}
-        >
-          <video
-            className="absolute inset-0 h-full w-full scale-[1.02] object-cover"
-            src="/welcome-background.mp4"
-            autoPlay
-            muted
-            loop
-            playsInline
-            preload="auto"
-          />
-          <div className="absolute inset-0 bg-black/30" />
-          <div
-            className="absolute inset-0"
-            style={{
-              background:
-                'radial-gradient(ellipse 75% 65% at 50% 48%, transparent 0%, rgba(0,0,0,0.28) 55%, rgba(0,0,0,0.62) 100%)',
-            }}
-          />
-        </div>
-
         <div
           className="sticky top-20 z-10 flex items-center overflow-hidden px-4 sm:px-6 lg:px-8"
           style={{ height: VIEWPORT_CSS }}
@@ -195,8 +207,8 @@ export function AboutHome() {
               </div>
             </div>
 
-            {/* Slide 1 — intro + stats */}
-            <div className="absolute inset-0 flex items-center">
+            {/* Slide 1 — intro */}
+            <div className="absolute inset-0 flex items-center justify-center">
               <div
                 className="w-full will-change-transform"
                 style={{
@@ -205,181 +217,94 @@ export function AboutHome() {
                 }}
                 aria-hidden={progress < 0.5}
               >
-                <div className="mx-auto w-full">
-                  <div
-                    className="max-w-4xl space-y-3 text-[18px] sm:text-[20px] leading-[1.4] font-normal text-white"
-                    style={{ fontFamily: SF_PRO, letterSpacing: '-0.01em' }}
-                  >
-                    <p>Pomfret Olmsted Observatory is Pomfret School&apos;s state-of-the-art astronomical facility.</p>
-                    <p className="text-white/90">
-                      The observatory runs on Pomfret Astro — an in-house platform developed at Pomfret
-                      to operate the dome from weather monitoring and safety checks through automated
-                      scheduling and remote control. On clear nights the telescope can observe
-                      autonomously, without staff at the site, while students and faculty plan programs,
-                      follow the night&apos;s schedule, and access finished data from anywhere in the
-                      world.
-                    </p>
-                  </div>
-
-                  <div className="mt-8 sm:mt-10 grid grid-cols-1 sm:grid-cols-3 gap-7 sm:gap-6 border-t border-white/25 pt-7 sm:pt-8">
-                    <div>
-                      <p
-                        className="tabular-nums text-[clamp(2.5rem,4.5vw,3.5rem)] font-semibold leading-none tracking-tight text-white"
-                        style={{ fontFamily: SF_PRO, letterSpacing: '-0.03em' }}
-                      >
-                        {hoursLabel}
-                      </p>
-                      <p className="mt-2 text-[16px] leading-snug text-white" style={{ fontFamily: SF_PRO }}>
-                        Hours safely operating autonomously
-                      </p>
-                    </div>
-                    <div>
-                      <p
-                        className="text-[clamp(2.5rem,4.5vw,3.5rem)] font-semibold leading-none tracking-tight text-white"
-                        style={{ fontFamily: SF_PRO, letterSpacing: '-0.03em' }}
-                      >
-                        50+
-                      </p>
-                      <p className="mt-2 text-[16px] leading-snug text-white" style={{ fontFamily: SF_PRO }}>
-                        Hours of imaging every month
-                      </p>
-                    </div>
-                    <div>
-                      <p
-                        className="text-[clamp(2.5rem,4.5vw,3.5rem)] font-semibold leading-none tracking-tight text-white"
-                        style={{ fontFamily: SF_PRO, letterSpacing: '-0.03em' }}
-                      >
-                        End to end
-                      </p>
-                      <p className="mt-2 text-[16px] leading-snug text-white" style={{ fontFamily: SF_PRO }}>
-                        Weather, schedule, observe, deliver
-                      </p>
-                    </div>
-                  </div>
-                </div>
+                <p
+                  className="mx-auto max-w-5xl px-2 text-center text-[clamp(1.375rem,2.85vw,2.125rem)] font-normal leading-[1.38] tracking-[-0.02em] text-white sm:px-4"
+                  style={{ fontFamily: SF_PRO }}
+                >
+                  Pomfret Astro Network is redefining what an observatory network can be. For
+                  independent observatories around the world, it unlocks two new possibilities:
+                  unprecedented automation, and the freedom to connect.
+                </p>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      <section className="relative z-10">
-        <article>
-          <div className="relative w-full bg-black">
-            <div className="absolute inset-0">
-              <img
-                src="/about/ngc7000-complex-mosaic.webp"
-                alt="NGC7000 North America Nebula mosaic from Pomfret"
-                className="h-full w-full object-cover"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/45 to-transparent" />
-            </div>
-            <div className={SECTION_PANEL}>
-              <div className="mx-auto w-full max-w-6xl">
-                <h3
-                  className="text-[clamp(1.6rem,3.2vw,2.5rem)] font-semibold tracking-tight text-white leading-[1.1]"
-                  style={{ fontFamily: SF_PRO, letterSpacing: '-0.025em' }}
-                >
-                  Astrophotography
-                </h3>
-                <div
-                  className="mt-3 max-w-4xl space-y-3 text-[16px] sm:text-[18px] leading-snug text-white"
-                  style={{ fontFamily: SF_PRO }}
-                >
-                  <p>Professional deep-sky imaging. Delivered.</p>
-                  <p className="text-white/90">
-                    A Takahashi FSQ-106 and ZWO ASI2600MM Pro on a Software Bisque Paramount ME. LRGB and
-                    SHO. Off-axis guiding with a ZWO ASI174MM on an OAG-L. Single fields and multi-panel
-                    mosaics — broadband and narrowband — at the scale of a wide-field apo.
-                  </p>
-                </div>
-                <div className="mt-4">
-                  <a href="/dashboard/gallery?category=deep_sky" className={glassPillToggleIdleMd}>
-                    Check Out Our Data
-                  </a>
-                </div>
-              </div>
-            </div>
-          </div>
-        </article>
+      <section
+        className="relative z-10 border-t border-white/[0.08] bg-black/15 backdrop-blur-[28px] backdrop-saturate-150"
+        style={{ WebkitBackdropFilter: 'blur(28px) saturate(150%)' }}
+      >
+        <div className="divide-y divide-white/[0.08]">
+          <AboutEditorialSection title="Automation">
+          <p className="text-white">
+            Have you ever worked on an imaging project that requires dozens of hours of exposure?
+            Traditionally, that means checking the weather and Moon phase, setting up your NINA sequence
+            each night, remotely connecting to the observatory computer, and starting everything again
+            and again.
+          </p>
+          <p>
+            With Pomfret Astro Network, you submit the entire Session once. From there, the system takes
+            over. Intelligent scheduling continuously evaluates weather, target altitude, Moon
+            conditions, and other factors, automatically returning to your project on every suitable night
+            until the total exposure is complete—making precise use of every available clear window.
+          </p>
+          <p>
+            And automation becomes even more powerful when multiple people share the same observatory.
+            Designed for multi-user operation from the beginning, Pomfret Astro Network coordinates
+            Sessions intelligently rather than simply placing them in a queue.
+          </p>
+          <p>
+            If one user&apos;s broadband target is poorly suited for a bright Moon while another
+            user&apos;s narrowband observation can continue, the scheduler can adapt. If one target does
+            not rise until later in the night while another is already well positioned, the system can
+            make use of the earlier hours instead.
+          </p>
+          <p>
+            The result is an observatory that continuously works toward the most effective use of every
+            clear night. And this is only part of what automation can become—with more to come.
+          </p>
+        </AboutEditorialSection>
 
-        <article>
-          <div className="relative w-full bg-black">
-            <div className="absolute inset-0">
-              <img
-                src="/about/photometry-bg.jpg"
-                alt="Differential photometry light curve from Pomfret"
-                className="h-full w-full object-cover object-top"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/55 to-black/25" />
-            </div>
-            <div className={SECTION_PANEL}>
-              <div className="mx-auto w-full max-w-6xl">
-                <h3
-                  className="text-[clamp(1.6rem,3.2vw,2.5rem)] font-semibold tracking-tight text-white leading-[1.1]"
-                  style={{ fontFamily: SF_PRO, letterSpacing: '-0.025em' }}
-                >
-                  Photometry
-                </h3>
-                <div
-                  className="mt-3 max-w-4xl space-y-3 text-[16px] sm:text-[18px] leading-snug text-white"
-                  style={{ fontFamily: SF_PRO }}
-                >
-                  <p>Precision photometry of variable stars.</p>
-                  <p className="text-white/90">
-                    Differential light curves against check stars. Extinction corrected. Periods when the
-                    baseline earns them — contact binaries, pulsators, and other variables from Pomfret
-                    skies.
-                  </p>
-                </div>
-                <div className="mt-4">
-                  <a href="/dashboard/gallery?category=photometry" className={glassPillToggleIdleMd}>
-                    Check Out Our Data
-                  </a>
-                </div>
-              </div>
-            </div>
-          </div>
-        </article>
+        <AboutEditorialSection title="Network" titleAlign="right">
+          <p className="text-white">
+            Pomfret Astro Network brings more than powerful automation. It introduces another
+            possibility: sharing. Think of it as something like Airbnb for observatories.
+          </p>
+          <p>
+            Of course, participation is entirely up to you. You can choose to make your observatory
+            available to other members of the Pomfret Astro Network, while maintaining full control over
+            how and when it is used—including observing time, who can access it, and whether access comes
+            with a cost.
+          </p>
+          <p>
+            By allowing independently operated observatories to share capacity when they choose, the
+            Network can help make better use of existing facilities while giving observers access to a
+            wider range of instruments. When a project calls for a different wavelength, focal length,
+            or optical system, another observatory in the Network may provide exactly what is needed.
+          </p>
+        </AboutEditorialSection>
 
-        <article>
-          <div className="relative w-full bg-black">
-            <div className="absolute inset-0">
-              <img
-                src="/about/oiii-survey-bg.jpg"
-                alt="Deep [O III] nebulosity — survey science preview"
-                className="h-full w-full object-cover"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/55 to-black/20" />
-            </div>
-            <div className={SECTION_PANEL}>
-              <div className="mx-auto w-full max-w-6xl">
-                <h3
-                  className="text-[clamp(1.5rem,3vw,2.4rem)] font-semibold tracking-tight text-white leading-[1.15]"
-                  style={{ fontFamily: SF_PRO, letterSpacing: '-0.025em' }}
-                >
-                  Discovery Project
-                </h3>
-                <div
-                  className="mt-3 max-w-4xl space-y-4 text-[16px] sm:text-[18px] leading-snug text-white"
-                  style={{ fontFamily: SF_PRO }}
-                >
-                  <p>Find what has not been deeply imaged.</p>
-                  <p className="text-white/90">
-                    A survey for previously unrecorded low-surface-brightness [O III] emission — faint
-                    shells, arcs, and filaments near energetic stars and under-observed structure. Not
-                    another pass over famous H II cores.
-                  </p>
-                  <p className="text-white/90">
-                    Targets are ranked across the Pomfret-visible sky for discovery promise — energetic
-                    under-imaged fields first, tourist cores last. We invest nights in short [O III]
-                    pilots, then go deep only where structure appears.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </article>
+        <AboutEditorialSection title="Join">
+          <p className="text-white">
+            Pomfret Astro Network welcomes people from around the world—whether you operate an observatory
+            or are simply passionate about astronomy.
+          </p>
+          <p>
+            For observatory operators, we provide customized support to help ensure a smooth and
+            successful integration with the platform. If you are interested in joining, connecting an
+            observatory, or simply have questions about Pomfret Astro Network, feel free to reach out to
+            James Tian at{' '}
+            <a
+              href="mailto:qtian.28@pomfret.org"
+              className="text-white underline decoration-white/35 underline-offset-[3px] transition-colors hover:decoration-white/70"
+            >
+              qtian.28@pomfret.org
+            </a>
+            .
+          </p>
+        </AboutEditorialSection>
+        </div>
       </section>
     </div>
   )

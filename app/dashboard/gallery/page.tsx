@@ -15,7 +15,7 @@ const DEEP_SKY_IMAGES: GalleryImage[] = [
 ]
 
 const PHOTOMETRY_IMAGES: GalleryImage[] = [
-  { file: 'photo5.webp', description: 'V2563_Cyg_12.45-12.77:_Period_0.530922' },
+  { file: 'photo5.webp', description: 'XZ Dra | RR Lyrae' },
 ]
 
 type DataCategory = 'deep_sky' | 'photometry'

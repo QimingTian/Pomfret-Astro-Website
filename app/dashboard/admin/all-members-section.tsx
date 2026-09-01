@@ -164,7 +164,8 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
-    return (await res.json().catch(() => ({}))) as MembersPayload
+    const data = (await res.json().catch(() => ({}))) as MembersPayload
+    return { res, data }
   }
 
   function openEdit(row: Row) {
@@ -186,13 +187,13 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
     setEditSaving(true)
     setEditError(null)
     try {
-      const data = await patchMember({
+      const { res, data } = await patchMember({
         id: editRow.id,
         roleKey: editRoleKey,
         emailVerified: editEmailVerified,
         ...(editImagingAction ? { imagingAction: editImagingAction } : {}),
       })
-      if (!data?.ok) {
+      if (!res.ok || !data?.ok) {
         setEditError(typeof data.error === 'string' ? data.error : 'Could not update member.')
         return
       }

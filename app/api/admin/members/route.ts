@@ -108,14 +108,22 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (typeof rec.roleKey === 'string' && rec.roleKey.trim()) {
-      const result = await adminApplyMemberRole({
-        targetUserId: id,
-        roleKey: rec.roleKey.trim(),
-        actorIsPaAdmin: isPaAdmin,
-        actorSiteId: site.id,
-      })
-      if (!result.ok) {
-        return NextResponse.json({ ok: false, error: result.error }, { status: 400 })
+      try {
+        const result = await adminApplyMemberRole({
+          targetUserId: id,
+          roleKey: rec.roleKey.trim(),
+          actorIsPaAdmin: isPaAdmin,
+          actorSiteId: site.id,
+        })
+        if (!result.ok) {
+          return NextResponse.json({ ok: false, error: result.error }, { status: 400 })
+        }
+      } catch (error) {
+        console.error('[admin/members] role update failed', error)
+        return NextResponse.json(
+          { ok: false, error: 'Could not update member role in database.' },
+          { status: 500 }
+        )
       }
     }
 

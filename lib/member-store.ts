@@ -185,6 +185,11 @@ function parseMemberships(raw: Record<string, unknown>): SiteMembership[] {
   return out
 }
 
+/** @internal Exported for unit tests. */
+export function hydrateMemberUserRecord(raw: Record<string, unknown>): MemberUser | null {
+  return hydrateLegacyUser(raw)
+}
+
 function hydrateLegacyUser(raw: Record<string, unknown>): MemberUser | null {
   if (
     raw == null ||
@@ -227,8 +232,9 @@ function hydrateLegacyUser(raw: Record<string, unknown>): MemberUser | null {
         : null
   const imagingRejectedAt = typeof raw.imagingRejectedAt === 'string' ? raw.imagingRejectedAt : null
 
-  // Legacy KV blobs: single imaging flags → Pomfret membership.
-  if (memberships.length === 0) {
+  // Legacy KV blobs omitted `memberships`; infer Pomfret row from old role flags.
+  // Intentional Guest accounts use `memberships: []` — do not re-add a phantom row.
+  if (!Array.isArray(raw.memberships) && memberships.length === 0) {
     const siteRole: SiteRole =
       roleRaw === 'admin' || roleRaw === 'pomfret_astro_admin'
         ? 'observatory_admin'
@@ -396,6 +402,9 @@ async function writeUsers(users: MemberUser[]): Promise<void> {
   if (postgresReadsEnabled()) {
     const { mirrorMembers } = await import('@/lib/db/mirror')
     await mirrorMembers(trimmed)
+    if (kvEnabled()) {
+      await kvSetJson(USERS_KEY, { users: trimmed })
+    }
     return
   }
   if (kvEnabled()) {
@@ -1075,6 +1084,9 @@ export async function adminApplyMemberRole(input: {
     users[idx] = withDerivedRoleFields({
       ...target,
       systemRole: 'pomfret_astro_admin',
+      memberships: [],
+      imagingApprovedAt: null,
+      imagingRejectedAt: null,
       updatedAt: now,
     })
     await writeUsers(users)

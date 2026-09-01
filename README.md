@@ -1,6 +1,6 @@
 # Pomfret Astro — Technical Documentation
 
-**Version:** v7.1.2  
+**Version:** v7.1.3  
 **Production:** https://www.pomfretastro.org  
 **Repository:** https://github.com/QimingTian/Pomfret-Astro-Website
 
@@ -228,4 +228,4 @@ Relative to one another, the **Ready** gate allows ASC cloud under **20%**, whil
 
 ---
 
-*Pomfret Astro Technical Documentation · v7.1.2*
+*Pomfret Astro Technical Documentation · v7.1.3*

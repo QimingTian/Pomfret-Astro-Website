@@ -327,13 +327,22 @@ export async function syncBootstrapAdminRole(user: MemberUser): Promise<MemberUs
   return updated
 }
 
+function hasInstituteMembership(user: Pick<MemberUser, 'memberships'>): boolean {
+  return (user.memberships ?? []).some(
+    (m) => m.siteRole === 'observatory_member' || m.siteRole === 'observatory_admin'
+  )
+}
+
 function toPublicUser(
   u: MemberUser,
   extras?: { pendingMembership?: { siteId: string; siteName: string } | null }
 ): PublicMemberUser {
   const emailVerified = Boolean(u.emailVerifiedAt)
   const imagingRejected = Boolean(u.imagingRejectedAt)
-  const imagingApproved = Boolean(u.imagingApprovedAt) && !imagingRejected
+  const instituteMember = hasInstituteMembership(u)
+  const imagingApproved =
+    !imagingRejected &&
+    (Boolean(u.imagingApprovedAt) || instituteMember || isPomfretOrgEmail(u.email))
   const imagingPending =
     emailVerified && !imagingApproved && !imagingRejected && !isPomfretOrgEmail(u.email)
   const memberships = (u.memberships ?? []).map((m) => ({

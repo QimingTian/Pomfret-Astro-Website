@@ -58,6 +58,16 @@ test('canSubmitImagingFromFlags allows verified and approved', () => {
 
 test('canSubmitImagingPublic mirrors public member flags', () => {
   assert.equal(canSubmitImagingPublic(publicUser({ emailVerified: true, imagingApproved: true })).ok, true)
+  assert.equal(
+    canSubmitImagingPublic(
+      publicUser({
+        emailVerified: true,
+        imagingApproved: true,
+        memberships: [{ siteId: 'pomfret', siteRole: 'observatory_member' }],
+      })
+    ).ok,
+    true
+  )
   assert.equal(canSubmitImagingPublic(publicUser({ emailVerified: true, imagingPending: true })).ok, false)
 })
 

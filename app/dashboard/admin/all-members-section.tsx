@@ -115,7 +115,6 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
   const [editRow, setEditRow] = useState<Row | null>(null)
   const [editRoleKey, setEditRoleKey] = useState('')
   const [editEmailVerified, setEditEmailVerified] = useState(false)
-  const [editImagingAction, setEditImagingAction] = useState<'approve' | 'reject' | null>(null)
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
 
@@ -178,7 +177,6 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
       })
     )
     setEditEmailVerified(row.emailVerified)
-    setEditImagingAction(null)
     setEditError(null)
   }
 
@@ -191,7 +189,6 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
         id: editRow.id,
         roleKey: editRoleKey,
         emailVerified: editEmailVerified,
-        ...(editImagingAction ? { imagingAction: editImagingAction } : {}),
       })
       if (!res.ok || !data?.ok) {
         setEditError(typeof data.error === 'string' ? data.error : 'Could not update member.')
@@ -240,17 +237,6 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
     }
     if (isPomfretAstroAdmin(row.systemRole)) return false
     return row.memberships.some((m) => m.siteId === adminSiteId)
-  }
-
-  function siteMembership(row: Row) {
-    return row.memberships.find((m) => m.siteId === adminSiteId) ?? null
-  }
-
-  function imagingStatusLabel(m: Row['memberships'][number] | null): string {
-    if (!m || m.siteRole === 'observatory_admin') return '—'
-    if (m.imagingRejectedAt) return 'Imaging rejected'
-    if (m.imagingApprovedAt) return 'Imaging approved'
-    return 'Imaging pending'
   }
 
   return (
@@ -329,17 +315,9 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
             <InfoRow
               label="Affiliations"
               value={checkRow.memberships
-                .map((m) => {
-                  const imaging =
-                    m.siteRole === 'observatory_admin'
-                      ? ''
-                      : m.imagingRejectedAt
-                        ? ' · imaging rejected'
-                        : m.imagingApprovedAt
-                          ? ' · imaging approved'
-                          : ' · imaging pending'
-                  return `${m.siteName} (${m.siteRole === 'observatory_admin' ? 'Admin' : 'Member'}${imaging})`
-                })
+                .map((m) =>
+                  `${m.siteName} (${m.siteRole === 'observatory_admin' ? 'Admin' : 'Member'})`
+                )
                 .join(' · ')}
             />
           ) : null}
@@ -394,42 +372,6 @@ export function AllMembersSection({ className = '' }: { className?: string }) {
                   </button>
                 </div>
               </div>
-              {siteMembership(editRow) && siteMembership(editRow)!.siteRole === 'observatory_member' ? (
-                <div className="space-y-2">
-                  <p className="text-sm font-medium text-white">
-                    Imaging at {adminSite.name}
-                  </p>
-                  <p className="text-xs text-gray-400">
-                    Current: {imagingStatusLabel(siteMembership(editRow))}
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      disabled={editSaving}
-                      onClick={() => setEditImagingAction('approve')}
-                      className={editImagingAction === 'approve' ? pillActive : pillIdle}
-                    >
-                      Approve imaging
-                    </button>
-                    <button
-                      type="button"
-                      disabled={editSaving}
-                      onClick={() => setEditImagingAction('reject')}
-                      className={editImagingAction === 'reject' ? pillActive : pillIdle}
-                    >
-                      Reject imaging
-                    </button>
-                    <button
-                      type="button"
-                      disabled={editSaving}
-                      onClick={() => setEditImagingAction(null)}
-                      className={editImagingAction === null ? pillActive : pillIdle}
-                    >
-                      No change
-                    </button>
-                  </div>
-                </div>
-              ) : null}
             </div>
             <div className="mt-6 flex flex-wrap justify-end gap-2">
               <button

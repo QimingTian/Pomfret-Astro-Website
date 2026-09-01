@@ -115,17 +115,12 @@ export async function canSubmitImagingForSite(
   return { ok: true }
 }
 
-/** True when a site member has verified email but lacks imaging approval at that site. */
+/** @deprecated Institute members may imaging by role; kept for compatibility, always false. */
 export function isMemberImagingPendingAtSite(
-  user: Pick<MemberUser, 'email' | 'emailVerifiedAt' | 'memberships'>,
-  siteId: string
+  _user: Pick<MemberUser, 'email' | 'emailVerifiedAt' | 'memberships'>,
+  _siteId: string
 ): boolean {
-  if (!isEmailVerified(user)) return false
-  const membership = membershipForSite(user.memberships, siteId)
-  if (!membership) return false
-  if (membership.imagingRejectedAt) return false
-  if (membership.imagingApprovedAt) return false
-  return !isPomfretOrgEmail(user.email)
+  return false
 }
 
 /** Create a pending guest access row when a guest first requests imaging under open_approval. */

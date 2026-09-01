@@ -184,18 +184,12 @@ export function canSubmitImagingAtSite(input: {
     if (membership.siteRole === 'observatory_admin') {
       return { ok: true, as: 'site_admin' }
     }
+    // Observatory Member at an institute may submit imaging once email is verified (caller checks email).
     if (membership.imagingRejectedAt) {
       return {
         ok: false,
         error: 'Imaging access was not approved for this account at this observatory.',
         code: 'imaging_rejected',
-      }
-    }
-    if (!membership.imagingApprovedAt) {
-      return {
-        ok: false,
-        error: 'Imaging access requires administrator approval for this observatory.',
-        code: 'imaging_pending',
       }
     }
     return { ok: true, as: 'site_member' }

@@ -14,7 +14,6 @@ import {
   isBootstrapAdminEmail,
   listMembersForAdminDirectory,
   removeMemberSiteAffiliation,
-  setMemberImagingApproval,
 } from '@/lib/member-store'
 import { resolveObservatorySite } from '@/lib/observatory-sites'
 
@@ -124,14 +123,6 @@ export async function PATCH(request: NextRequest) {
           { ok: false, error: 'Could not update member role in database.' },
           { status: 500 }
         )
-      }
-    }
-
-    const imagingAction = rec.imagingAction
-    if (imagingAction === 'approve' || imagingAction === 'reject') {
-      const result = await setMemberImagingApproval(id, imagingAction, site.id)
-      if (!result.ok) {
-        return NextResponse.json({ ok: false, error: result.error }, { status: 400 })
       }
     }
 

@@ -30,10 +30,10 @@ function PortraitPlaceholder({ label }: { label: string }) {
 
 export default function ContactPage() {
   return (
-    <div className="space-y-8 pb-8 max-w-5xl lg:-translate-x-3">
+    <div className="space-y-8 pb-8 lg:-translate-x-3">
       <h1 className="text-2xl font-semibold text-apple-dark dark:text-white">Team</h1>
-      <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3 lg:gap-10">
-        <article className="boxed-fields space-y-3">
+      <div className="flex flex-wrap gap-x-16 gap-y-8">
+        <article className="boxed-fields w-[240px] shrink-0 space-y-3">
           <img src="/E_Lake_Joshua.jpg" alt="Joshua Lake" className="h-64 w-full rounded-lg object-cover" />
           <ContactCard
             name="Joshua Lake"
@@ -41,11 +41,11 @@ export default function ContactPage() {
             email="jlake@pomfret.org"
           />
         </article>
-        <article className="boxed-fields space-y-3">
+        <article className="boxed-fields w-[240px] shrink-0 space-y-3">
           <img src="/james.jpg" alt="James Tian" className="h-64 w-full rounded-lg object-cover" />
           <ContactCard name="James Tian" role="Pomfret Astro Admin" email="qtian.28@pomfret.org" />
         </article>
-        <article className="boxed-fields space-y-3">
+        <article className="boxed-fields w-[240px] shrink-0 space-y-3">
           <PortraitPlaceholder label="JO" />
           <ContactCard
             name="Jua Op ’t Einde"

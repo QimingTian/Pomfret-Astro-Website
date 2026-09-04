@@ -38,7 +38,7 @@ POMFRET_SITE = AgentObservatorySite(
 CYGNUS_SITE = AgentObservatorySite(
     id="cygnus",
     timezone="Europe/Amsterdam",
-    observer_lat_deg=52.352,
+    observer_lat_deg=52.3547,
     observer_lon_deg=4.912,
 )
 

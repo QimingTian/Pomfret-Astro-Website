@@ -20,6 +20,7 @@ export type ObservatorySite = {
   /** LST / altitude / 7Timer / storm ring. */
   observerLatDeg: number
   observerLonDeg: number
+  allSkyStatusUrl: string | null
   /**
    * Tonight's Schedule strip: observatory-local start hour (0–23) through next calendar
    * day's end hour. Pomfret keeps historical 16→08; Cygnus uses 15→10 so winter sunrise
@@ -38,6 +39,7 @@ export const POMFRET_SITE: ObservatorySite = {
   weatherLon: -71.9626,
   observerLatDeg: 41 + 53 / 60 + 10 / 3600,
   observerLonDeg: -(71 + 57 / 60 + 54 / 3600),
+  allSkyStatusUrl: 'https://cam.pomfretastro.org/camera/status',
   scheduleStripStartHour: 16,
   scheduleStripEndHour: 8,
 }
@@ -48,10 +50,11 @@ export const CYGNUS_SITE: ObservatorySite = {
   name: 'Cygnus Gymnasium',
   timezone: 'Europe/Amsterdam',
   elevationMeters: 20,
-  weatherLat: 52.352,
+  weatherLat: 52.3547,
   weatherLon: 4.912,
-  observerLatDeg: 52.352,
+  observerLatDeg: 52.3547,
   observerLonDeg: 4.912,
+  allSkyStatusUrl: null,
   // NL winter sunrise often ~08:45–09:00; winter sunset ~16:30 — widen vs Pomfret 16→08.
   scheduleStripStartHour: 15,
   scheduleStripEndHour: 10,

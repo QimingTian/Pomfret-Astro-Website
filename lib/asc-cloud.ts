@@ -84,11 +84,21 @@ export function isAscCloudGateApplicable(
   return true
 }
 
-export async function fetchAllSkyCamGateState(statusUrl?: string | null): Promise<{
+export type AllSkyCamGateState = {
   ascCloud: AscCloudInference | null
   sequenceActive: boolean
-}> {
-  const url = statusUrl ?? defaultAllSkyStatusUrl()
+  /** False als deze site geen all-sky camera heeft — ASC mag dan niets gaten. */
+  ascConfigured: boolean
+}
+
+export async function fetchAllSkyCamGateState(
+  statusUrl?: string | null
+): Promise<AllSkyCamGateState> {
+  // undefined = aanroeper gaf geen site mee → historische Pomfret-default.
+  // null      = deze site heeft expliciet geen camera.
+  const url = statusUrl === undefined ? defaultAllSkyStatusUrl() : statusUrl
+  if (!url) return { ascCloud: null, sequenceActive: false, ascConfigured: false }
+
   const seqUrl = allSkySequenceStatusUrlFromStatusUrl(url)
   try {
     const [statusRes, seqRes] = await Promise.all([
@@ -101,9 +111,11 @@ export async function fetchAllSkyCamGateState(statusUrl?: string | null): Promis
       const seq = (await seqRes.json()) as { active?: unknown }
       sequenceActive = seq.active === true
     }
-    return { ascCloud, sequenceActive }
+    return { ascCloud, sequenceActive, ascConfigured: true }
   } catch {
-    return { ascCloud: null, sequenceActive: false }
+    // Camera bestaat maar is onbereikbaar: gate blijft van toepassing en
+    // valt daarmee dicht — dat is het bestaande, veilige gedrag.
+    return { ascCloud: null, sequenceActive: false, ascConfigured: true }
   }
 }
 

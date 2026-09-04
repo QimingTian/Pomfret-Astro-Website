@@ -2,6 +2,7 @@
 
 import { PLAN_MOSAIC_DRAFT_KEY, type MosaicDraft, type MosaicPanel } from '@/lib/mosaic/framing-rectangle'
 
+import { currentObservatorySite } from '@/lib/observatory-site-scope'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { MemberAuthPanel } from '@/components/member-auth-panel'
@@ -18,8 +19,6 @@ import { observatorySiteFetch, useObservatorySite } from '@/components/observato
 import type { ObservatorySite } from '@/lib/observatory-sites'
 import {
   MIN_ALTITUDE_DEG,
-  OBS_LAT_DEG,
-  OBS_LON_DEG,
   altitudeSessionCoverageOk,
   pomfretTargetObservabilityError,
 } from '@/lib/target-altitude'
@@ -260,12 +259,13 @@ function currentAltitudeDegAt(raHours: number, decDeg: number, now: Date): numbe
     360.98564736629 * (jd - 2451545.0) +
     0.000387933 * t * t -
     (t * t * t) / 38710000
-  let lstDeg = (gmst + OBS_LON_DEG) % 360
+  const site = currentObservatorySite()
+  let lstDeg = (gmst + site.observerLonDeg) % 360
   if (lstDeg < 0) lstDeg += 360
   let hourAngleDeg = (lstDeg - raDeg) % 360
   if (hourAngleDeg < 0) hourAngleDeg += 360
-
-  const latRad = degToRad(OBS_LAT_DEG)
+  
+  const latRad = degToRad(site.observerLatDeg)
   const decRad = degToRad(decDeg)
   const haRad = degToRad(hourAngleDeg > 180 ? hourAngleDeg - 360 : hourAngleDeg)
   const sinAlt =

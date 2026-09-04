@@ -357,8 +357,13 @@ async function fetchRingForecasts(): Promise<LocationForecast[] | null> {
 }
 
 export async function evaluateWeatherSafetySensors(): Promise<WeatherSafetySensorSnapshot> {
-  const [gate, ringLocations] = await Promise.all([fetchAllSkyCamGateState(), fetchRingForecasts()])
-  const ascGateApplicable = isAscCloudGateApplicable(gate.ascCloud, gate.sequenceActive)
+  const site = currentObservatorySite()
+  const [gate, ringLocations] = await Promise.all([
+    fetchAllSkyCamGateState(site.allSkyStatusUrl),
+    fetchRingForecasts(),
+  ])
+  const ascGateApplicable =
+    gate.ascConfigured && isAscCloudGateApplicable(gate.ascCloud, gate.sequenceActive)
   const ascRainDetected =
     ascGateApplicable && gate.ascCloud?.rain?.detected === true
   const ascRainConfidence = ascGateApplicable ? gate.ascCloud?.rain?.confidence : undefined

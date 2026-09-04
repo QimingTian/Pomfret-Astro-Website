@@ -9,7 +9,6 @@ import {
   kvGetString,
   kvSetJson,
 } from '@/lib/kv-rest'
-import { OBS_LAT_DEG, OBS_LON_DEG } from '@/lib/target-altitude'
 import { getDaytimeClosedWindowDetail, isWithinDaytimeClosedWindow } from '@/lib/sunrise-window'
 import { observatoryAgentDisconnectedStaleMs } from '@/lib/observatory-poll-schedule'
 import { isWithinAdminClosedWindow } from '@/lib/admin-closed-window-store'
@@ -26,7 +25,11 @@ import {
 } from '@/lib/asc-cloud'
 import { fetchOpenMeteoCurrentWeather } from '@/lib/open-meteo-current'
 import { isEmergencyStopBlocking } from '@/lib/imaging-emergency-stop'
-import { currentObservatorySiteId, scopedKvKey } from '@/lib/observatory-site-scope'
+import {
+  currentObservatorySite,
+  currentObservatorySiteId,
+  scopedKvKey,
+} from '@/lib/observatory-site-scope'
 
 export type ObservatoryStatus =
   | 'ready'
@@ -168,12 +171,14 @@ async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
   }
 
   try {
+    const site = currentObservatorySite()
     const [gate, openMeteo] = await Promise.all([
-      fetchAllSkyCamGateState(),
+      fetchAllSkyCamGateState(site.allSkyStatusUrl),
       fetchOpenMeteoObservatoryGate(),
     ])
     const ascCloud = gate.ascCloud
-    const ascGateApplicable = isAscCloudGateApplicable(ascCloud, gate.sequenceActive)
+    const ascGateApplicable =
+      gate.ascConfigured && isAscCloudGateApplicable(ascCloud, gate.sequenceActive)
     const ascCloudCover = ascCloud?.cloudCoverPercent
     const cloudCover =
       ascCloudCover != null && Number.isFinite(ascCloudCover) ? ascCloudCover : null
@@ -196,7 +201,11 @@ async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
       precipProbability: openMeteo.precipProbability,
       ascGateApplicable,
       sequenceActive: gate.sequenceActive,
-      ascStaleReason: ascGateApplicable ? null : (ascCloud?.staleReason ?? (gate.sequenceActive ? 'sequence_active' : 'stale')),
+      ascStaleReason: ascGateApplicable
+        ? null
+        : !gate.ascConfigured
+          ? 'no_camera'
+          : (ascCloud?.staleReason ?? (gate.sequenceActive ? 'sequence_active' : 'stale')),
       weatherAllowed,
       ascAvailable: ascGateApplicable && cloudCover != null,
       ascFrameIso: ascCloud?.frameIso ?? null,
@@ -255,8 +264,8 @@ function weatherDetailForAudit(now: number): Record<string, unknown> | null {
     ascModelPhase: weatherCache.ascModelPhase,
     ascLastError: weatherCache.ascLastError,
     cacheAgeSeconds: Math.round((now - weatherCache.ts) / 1000),
-    observatoryLatDeg: OBS_LAT_DEG,
-    observatoryLonDeg: OBS_LON_DEG,
+    observatoryLatDeg: currentObservatorySite().observerLatDeg,
+    observatoryLonDeg: currentObservatorySite().observerLonDeg,
   }
 }
 

@@ -30,7 +30,7 @@ test('Pomfret observer coordinates match historical DMS', () => {
 test('Cygnus site resolves with Amsterdam geography', () => {
   assert.equal(resolveObservatorySite('cygnus').id, 'cygnus')
   assert.equal(CYGNUS_SITE.timezone, 'Europe/Amsterdam')
-  assert.equal(CYGNUS_SITE.weatherLat, 52.352)
+  assert.equal(CYGNUS_SITE.weatherLat, 52.3547)
   assert.equal(CYGNUS_SITE.weatherLon, 4.912)
   assert.equal(observatorySiteFromSearchParams(new URLSearchParams('site=cygnus')).id, 'cygnus')
 })

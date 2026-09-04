@@ -1,6 +1,6 @@
 import { currentObservatorySite } from '@/lib/observatory-site-scope'
 
-/** Dec waarbij de meridiaanhoogte op de actieve site ≥ 30° is. */
+/** Dec such that meridian altitude >= 30° at the active site. */
 export function minDecDegForSite(): number {
   return currentObservatorySite().observerLatDeg - 60
 }

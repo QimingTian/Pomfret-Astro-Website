@@ -41,7 +41,12 @@ export type ObservatoryStatus =
 
 export type ObservatoryMode = 'manual' | 'auto'
 
-type GlobalState = typeof globalThis & {
+/**
+ * Per-site in-process cache. Must never be a single global: one warm instance
+ * serves every observatory, and a shared `lastAgentSeenTs` would report one
+ * site as connected because another site's agent polled.
+ */
+type ObservatoryMemoryState = {
   __pomfret_manual_status__?: ObservatoryStatus
   __pomfret_mode__?: ObservatoryMode
   __pomfret_last_poll_ts__?: number
@@ -50,6 +55,12 @@ type GlobalState = typeof globalThis & {
   __pomfret_nina_running_reported_at__?: number
   /** Last auto-computed base for transition log; `undefined` = never set on this instance. */
   __pomfret_auto_audit_last_base__?: ObservatoryStatus
+  __pomfret_last_pushed_obs_status__?: ObservatoryStatus
+  __pomfret_last_persist_at__?: number
+}
+
+type GlobalState = typeof globalThis & {
+  __pomfret_observatory_memory_by_site__?: Record<string, ObservatoryMemoryState>
 }
 
 const statusFile = process.env.OBSERVATORY_STATUS_FILE
@@ -67,11 +78,6 @@ function observatoryStatusKvKey(): string {
 }
 const OBSERVATORY_PERSIST_DEBOUNCE_MS = 30_000
 
-let lastObservatoryPersistAt = 0
-
-type GlobalWithPushed = typeof globalThis & {
-  __pomfret_last_pushed_obs_status__?: ObservatoryStatus
-}
 
 export type GetObservatoryStatusOptions = {
   /** Skip SSE fan-out (used when caller will force-push). */
@@ -84,14 +90,14 @@ async function readLastPushedObservatoryStatus(): Promise<ObservatoryStatus | un
     if (raw && isObservatoryStatus(raw)) return raw
     return undefined
   }
-  return (globalThis as GlobalWithPushed).__pomfret_last_pushed_obs_status__
+  return memory().__pomfret_last_pushed_obs_status__
 }
 
 async function markLastPushedObservatoryStatus(status: ObservatoryStatus): Promise<void> {
   if (kvEnabled()) {
     await kvSetJson(lastPushedStatusKvKey(), { status, at: new Date().toISOString() })
   }
-  ;(globalThis as GlobalWithPushed).__pomfret_last_pushed_obs_status__ = status
+  memory().__pomfret_last_pushed_obs_status__ = status
 }
 
 /** Push site:observatory SSE when computed final status changes (Auto weather, busy, etc.). */
@@ -115,7 +121,7 @@ export async function forcePushObservatoryStatusLive(): Promise<void> {
   await publishObservatoryStatusLive(status, mode, true)
 }
 const KMH_TO_MS = 1 / 3.6
-let weatherCache:
+type WeatherCacheEntry =
   | {
       ts: number
       cloudCover: number
@@ -135,8 +141,31 @@ let weatherCache:
     }
   | undefined
 
-function memory(): GlobalState {
-  return globalThis as GlobalState
+type GlobalWeatherCache = typeof globalThis & {
+  __pomfret_weather_cache_by_site__?: Record<string, WeatherCacheEntry>
+}
+
+/** Weather gate snapshot is per observatory — Pomfret's sky must not describe Cygnus. */
+function weatherCacheGet(): WeatherCacheEntry {
+  const g = globalThis as GlobalWeatherCache
+  return g.__pomfret_weather_cache_by_site__?.[currentObservatorySiteId()]
+}
+
+function weatherCacheSet(entry: WeatherCacheEntry): void {
+  const g = globalThis as GlobalWeatherCache
+  if (!g.__pomfret_weather_cache_by_site__) g.__pomfret_weather_cache_by_site__ = {}
+  g.__pomfret_weather_cache_by_site__[currentObservatorySiteId()] = entry
+}
+
+function memory(): ObservatoryMemoryState {
+  const g = globalThis as GlobalState
+  if (!g.__pomfret_observatory_memory_by_site__) g.__pomfret_observatory_memory_by_site__ = {}
+  const siteId = currentObservatorySiteId()
+  const existing = g.__pomfret_observatory_memory_by_site__[siteId]
+  if (existing) return existing
+  const fresh: ObservatoryMemoryState = {}
+  g.__pomfret_observatory_memory_by_site__[siteId] = fresh
+  return fresh
 }
 
 function currentManualStatus(): ObservatoryStatus {
@@ -166,8 +195,9 @@ async function fetchOpenMeteoObservatoryGate(): Promise<{
 }
 
 async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
-  if (weatherCache && now - weatherCache.ts < WEATHER_CACHE_MS) {
-    return weatherCache.weatherAllowed
+  const cached = weatherCacheGet()
+  if (cached && now - cached.ts < WEATHER_CACHE_MS) {
+    return cached.weatherAllowed
   }
 
   try {
@@ -191,7 +221,7 @@ async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
       precipProbabilityPercent: openMeteo.precipProbability,
       ascGateApplicable,
     })
-    weatherCache = {
+    weatherCacheSet({
       ts: now,
       cloudCover: cloudCover ?? 100,
       openMeteoCloudCover: openMeteo.cloudCoverPercent,
@@ -211,14 +241,14 @@ async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
       ascFrameIso: ascCloud?.frameIso ?? null,
       ascModelPhase: ascCloud?.modelPhase ?? null,
       ascLastError: ascCloud?.lastError ?? null,
-    }
+    })
     // Weather-safety ESTOP arm + auto-clear when Open-Meteo/ASC clear; daytime arm is no-op.
     void import('@/lib/imaging/weather-safety-estop').then((m) =>
       m.triggerWeatherSafetyEmergencyStopCheck()
     )
     return weatherAllowed
   } catch {
-    weatherCache = {
+    weatherCacheSet({
       ts: now,
       cloudCover: 100,
       openMeteoCloudCover: null,
@@ -234,7 +264,7 @@ async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
       ascFrameIso: null,
       ascModelPhase: null,
       ascLastError: null,
-    }
+    })
     void import('@/lib/imaging/weather-safety-estop').then((m) =>
       m.triggerWeatherSafetyEmergencyStopCheck()
     )
@@ -243,6 +273,7 @@ async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
 }
 
 function weatherDetailForAudit(now: number): Record<string, unknown> | null {
+  const weatherCache = weatherCacheGet()
   if (!weatherCache) return null
   return {
     cloudCoverPercent: weatherCache.cloudCover,
@@ -565,10 +596,11 @@ async function syncObservatoryFromKv(): Promise<void> {
 
 async function persist(options?: { force?: boolean }) {
   const now = Date.now()
-  if (!options?.force && now - lastObservatoryPersistAt < OBSERVATORY_PERSIST_DEBOUNCE_MS) {
+  const lastPersistAt = memory().__pomfret_last_persist_at__ ?? 0
+  if (!options?.force && now - lastPersistAt < OBSERVATORY_PERSIST_DEBOUNCE_MS) {
     return
   }
-  lastObservatoryPersistAt = now
+  memory().__pomfret_last_persist_at__ = now
   const payload = {
     mode: currentMode(),
     status: currentManualStatus(),

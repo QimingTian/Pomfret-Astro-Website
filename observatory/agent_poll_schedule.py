@@ -48,6 +48,11 @@ _SITES: dict[str, AgentObservatorySite] = {
 }
 
 
+def known_agent_site_ids() -> tuple[str, ...]:
+    """Site ids this agent build knows; used to reject a typo before any hardware moves."""
+    return tuple(sorted(_SITES))
+
+
 def resolve_agent_site(site_id: str | None = None) -> AgentObservatorySite:
     key = (site_id or "pomfret").strip().lower()
     return _SITES.get(key, POMFRET_SITE)

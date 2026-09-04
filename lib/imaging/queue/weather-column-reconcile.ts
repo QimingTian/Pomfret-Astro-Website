@@ -5,9 +5,15 @@ import {
 } from '@/lib/imaging/site-events'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 
-const KV_KEY = 'imaging-queue-schedule-weather-fingerprint'
-
+import { scopedKvKey } from '@/lib/observatory-site-scope'
 import type { WeatherNotPermittedReason } from '@/lib/tonight-weather-gate'
+
+const KV_KEY_BASE = 'imaging-queue-schedule-weather-fingerprint'
+
+/** Weather fingerprint is per observatory — different sky, different schedule. */
+function weatherFingerprintKey(): string {
+  return scopedKvKey(KV_KEY_BASE)
+}
 
 export type ScheduleWeatherColumnPayload = {
   prediction: 'permitted' | 'not_permitted' | 'unavailable'
@@ -65,7 +71,7 @@ export async function maybeReconcileQueueWhenScheduleWeatherColumnChanged(
 
   let prev: Stored | undefined
   if (kvEnabled()) {
-    prev = await kvGetJson<Stored>(KV_KEY)
+    prev = await kvGetJson<Stored>(weatherFingerprintKey())
   } else {
     prev = memoryStore ?? undefined
   }
@@ -85,7 +91,7 @@ export async function maybeReconcileQueueWhenScheduleWeatherColumnChanged(
 
   const next: Stored = { windowStartSec, windowEndSec, fingerprint }
   if (kvEnabled()) {
-    await kvSetJson(KV_KEY, next)
+    await kvSetJson(weatherFingerprintKey(), next)
   } else {
     memoryStore = next
   }

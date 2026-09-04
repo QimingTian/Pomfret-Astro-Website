@@ -12,6 +12,7 @@ import {
   type FailedBoardSnapshot,
 } from '@/lib/imaging-session-board'
 import { kvDel, kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
+import { currentObservatorySiteId, scopedKvKey } from '@/lib/observatory-site-scope'
 import { lockObservatoryAfterSessionFailure } from '@/lib/imaging/session/failure-observatory-lock'
 
 export const SESSION_FAILED_TERMINAL_MESSAGE = 'Session failed -- contact support.'
@@ -25,57 +26,77 @@ export function isSessionFailedTerminalLine(text: string): boolean {
   return text.trim() === SESSION_FAILED_TERMINAL_MESSAGE
 }
 
-const NINA_REPORTED_LAST_KEY = 'observatory-nina-reported-last'
-const NINA_STOPPED_PENDING_FAIL_KEY = 'observatory-nina-stopped-pending-fail'
+const NINA_REPORTED_LAST_BASE = 'observatory-nina-reported-last'
+const NINA_STOPPED_PENDING_FAIL_BASE = 'observatory-nina-stopped-pending-fail'
+
+/** One agent per observatory: NINA running/stopped must never cross sites. */
+function ninaReportedLastKey(): string {
+  return scopedKvKey(NINA_REPORTED_LAST_BASE)
+}
+
+function ninaStoppedPendingFailKey(): string {
+  return scopedKvKey(NINA_STOPPED_PENDING_FAIL_BASE)
+}
+
 
 type NinaReportedLastPayload = { running: boolean; at: string }
 type NinaStoppedPendingFailPayload = { at: string }
 
 type GlobalWithNinaFail = typeof globalThis & {
-  __pomfret_nina_reported_last__?: NinaReportedLastPayload
-  __pomfret_nina_stopped_pending_fail__?: NinaStoppedPendingFailPayload
+  __pomfret_nina_reported_last__?: Record<string, NinaReportedLastPayload>
+  __pomfret_nina_stopped_pending_fail__?: Record<string, NinaStoppedPendingFailPayload>
+}
+
+function ninaFailMemory(): {
+  reported: Record<string, NinaReportedLastPayload>
+  pending: Record<string, NinaStoppedPendingFailPayload>
+} {
+  const g = globalThis as GlobalWithNinaFail
+  if (!g.__pomfret_nina_reported_last__) g.__pomfret_nina_reported_last__ = {}
+  if (!g.__pomfret_nina_stopped_pending_fail__) g.__pomfret_nina_stopped_pending_fail__ = {}
+  return { reported: g.__pomfret_nina_reported_last__, pending: g.__pomfret_nina_stopped_pending_fail__ }
 }
 
 async function readNinaReportedLast(): Promise<NinaReportedLastPayload | null> {
   if (kvEnabled()) {
-    const remote = await kvGetJson<NinaReportedLastPayload>(NINA_REPORTED_LAST_KEY)
+    const remote = await kvGetJson<NinaReportedLastPayload>(ninaReportedLastKey())
     if (remote && typeof remote.running === 'boolean' && typeof remote.at === 'string') return remote
   }
-  return (globalThis as GlobalWithNinaFail).__pomfret_nina_reported_last__ ?? null
+  return ninaFailMemory().reported[currentObservatorySiteId()] ?? null
 }
 
 async function writeNinaReportedLast(running: boolean, atIso: string): Promise<void> {
   const payload: NinaReportedLastPayload = { running, at: atIso }
   if (kvEnabled()) {
-    const ok = await kvSetJson(NINA_REPORTED_LAST_KEY, payload)
+    const ok = await kvSetJson(ninaReportedLastKey(), payload)
     if (ok) return
   }
-  ;(globalThis as GlobalWithNinaFail).__pomfret_nina_reported_last__ = payload
+  ninaFailMemory().reported[currentObservatorySiteId()] = payload
 }
 
 async function readNinaStoppedPendingFail(): Promise<NinaStoppedPendingFailPayload | null> {
   if (kvEnabled()) {
-    const remote = await kvGetJson<NinaStoppedPendingFailPayload>(NINA_STOPPED_PENDING_FAIL_KEY)
+    const remote = await kvGetJson<NinaStoppedPendingFailPayload>(ninaStoppedPendingFailKey())
     if (remote && typeof remote.at === 'string') return remote
   }
-  return (globalThis as GlobalWithNinaFail).__pomfret_nina_stopped_pending_fail__ ?? null
+  return ninaFailMemory().pending[currentObservatorySiteId()] ?? null
 }
 
 async function writeNinaStoppedPendingFail(atIso: string): Promise<void> {
   const payload: NinaStoppedPendingFailPayload = { at: atIso }
   if (kvEnabled()) {
-    const ok = await kvSetJson(NINA_STOPPED_PENDING_FAIL_KEY, payload)
+    const ok = await kvSetJson(ninaStoppedPendingFailKey(), payload)
     if (ok) return
   }
-  ;(globalThis as GlobalWithNinaFail).__pomfret_nina_stopped_pending_fail__ = payload
+  ninaFailMemory().pending[currentObservatorySiteId()] = payload
 }
 
 /** Session Completed arrived or NINA relaunched — cancel a pending NINA-stopped failure. */
 export async function clearNinaStoppedPendingFail(): Promise<void> {
   if (kvEnabled()) {
-    await kvDel(NINA_STOPPED_PENDING_FAIL_KEY)
+    await kvDel(ninaStoppedPendingFailKey())
   }
-  delete (globalThis as GlobalWithNinaFail).__pomfret_nina_stopped_pending_fail__
+  delete ninaFailMemory().pending[currentObservatorySiteId()]
 }
 
 export async function hasInProgressImagingSessions(): Promise<boolean> {

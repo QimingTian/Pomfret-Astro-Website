@@ -12,7 +12,7 @@ Usage:
   2) Edit the CONFIG section below (paths only — no secrets in git).
   3) Set Windows environment variables (same names as Vercel where noted):
        IMAGING_QUEUE_SECRET, POMFRET_CRON_SECRET (same as CRON_SECRET),
-       OBSERVATORY_SITE_ID (pomfret or cygnus — adaptive poll schedule),
+       OBSERVATORY_SITE_ID (pomfret or cygnus — scopes every request AND the poll schedule),
        R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET,
        PDU_USER, PDU_PASSWORD (Digital Loggers PDU at 192.168.121.5).
   4) Run: python nina_agent.py
@@ -50,6 +50,7 @@ from agent_poll_schedule import (
     DAY_POLL_SECONDS,
     NIGHT_POLL_SECONDS,
     agent_poll_interval_seconds,
+    known_agent_site_ids,
     resolve_agent_site,
     seconds_until_observatory_phase_change,
 )
@@ -88,7 +89,9 @@ else:
 # CONFIG (edit these values)
 # =========================
 
-# without ?site= the server falls back on the Pomfret location
+# Which observatory this PC serves. Sent on every request as ?site= and
+# X-Observatory-Site: without it the server falls back to Pomfret and this
+# agent would run Pomfret's imaging job on local hardware.
 OBSERVATORY_SITE_ID = (
     os.environ.get("OBSERVATORY_SITE_ID", "pomfret").strip().lower() or "pomfret"
 )
@@ -136,6 +139,7 @@ RECONCILE_BEARER = ""
 TOKEN = ""
 
 
+# Adaptive idle poll: night 45s, daytime closed window 20min (see agent_poll_schedule.py).
 POLL_SECONDS = NIGHT_POLL_SECONDS  # legacy alias; idle polls use agent_poll_interval_seconds()
 FALLBACK_POLL_SECONDS = 300
 SSE_CONNECTED_WAIT_SECONDS = 60
@@ -660,6 +664,13 @@ def wait_for_nina_exit(process: subprocess.Popen[bytes]) -> None:
 
 
 def validate_config() -> None:
+    known_sites = known_agent_site_ids()
+    if OBSERVATORY_SITE_ID not in known_sites:
+        raise ValueError(
+            f"OBSERVATORY_SITE_ID={OBSERVATORY_SITE_ID!r} is not a known observatory "
+            f"({', '.join(known_sites)}). An unknown site silently resolves to Pomfret "
+            "server-side, so this agent would run another observatory's job on local hardware."
+        )
     if "your-domain.com" in SEQUENCE_JSON_URL:
         raise ValueError("Please set SEQUENCE_JSON_URL.")
     host = (_nina_seq.hostname or "").lower()

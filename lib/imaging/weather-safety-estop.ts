@@ -26,7 +26,7 @@ import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 import { scopedKvKey } from '@/lib/observatory-site-scope'
 import { isObservatoryNight } from '@/lib/observatory-poll-schedule'
 import { setObservatoryMode } from '@/lib/observatory-status-store'
-import { currentObservatorySite } from '@/lib/observatory-site-scope'
+import { currentObservatorySite, currentObservatorySiteId } from '@/lib/observatory-site-scope'
 
 /** Lead-time ring for thunderstorm approach (≈30–60 min at typical summer storm speeds). */
 export const STORM_APPROACH_RADIUS_KM = 20
@@ -80,9 +80,29 @@ export type WeatherSafetySensorSnapshot = {
 }
 
 type GlobalWithWeatherSafety = typeof globalThis & {
-  __pomfret_weather_safety_last_arm_ms__?: number
-  __pomfret_weather_safety_clear_since_ms__?: number | null
-  __pomfret_weather_safety_arm_inflight__?: Promise<WeatherSafetyArmResult> | null
+  __pomfret_weather_safety_last_arm_ms__?: Record<string, number>
+  __pomfret_weather_safety_clear_since_ms__?: Record<string, number | null>
+  __pomfret_weather_safety_arm_inflight__?: Record<string, Promise<WeatherSafetyArmResult> | null>
+}
+
+/**
+ * Per site. The continuous-clear timer decides when a weather ESTOP unlocks;
+ * shared, one observatory's clear streak would unlock the other one's dome.
+ */
+function weatherSafetyMemory(): {
+  lastArmMs: Record<string, number>
+  clearSinceMs: Record<string, number | null>
+  armInflight: Record<string, Promise<WeatherSafetyArmResult> | null>
+} {
+  const g = globalThis as GlobalWithWeatherSafety
+  if (!g.__pomfret_weather_safety_last_arm_ms__) g.__pomfret_weather_safety_last_arm_ms__ = {}
+  if (!g.__pomfret_weather_safety_clear_since_ms__) g.__pomfret_weather_safety_clear_since_ms__ = {}
+  if (!g.__pomfret_weather_safety_arm_inflight__) g.__pomfret_weather_safety_arm_inflight__ = {}
+  return {
+    lastArmMs: g.__pomfret_weather_safety_last_arm_ms__,
+    clearSinceMs: g.__pomfret_weather_safety_clear_since_ms__,
+    armInflight: g.__pomfret_weather_safety_arm_inflight__,
+  }
 }
 
 type ForecastHourSample = {
@@ -432,12 +452,12 @@ export async function evaluateStormApproachStatus(): Promise<StormApproachStatus
 }
 
 async function readDebounceMs(): Promise<number> {
-  const mem = (globalThis as GlobalWithWeatherSafety).__pomfret_weather_safety_last_arm_ms__
+  const mem = weatherSafetyMemory().lastArmMs[currentObservatorySiteId()]
   if (typeof mem === 'number' && Number.isFinite(mem)) return mem
   if (kvEnabled()) {
     const remote = await kvGetJson<{ atMs?: number }>(weatherSafetyDebounceKey())
     if (typeof remote?.atMs === 'number' && Number.isFinite(remote.atMs)) {
-      ;(globalThis as GlobalWithWeatherSafety).__pomfret_weather_safety_last_arm_ms__ = remote.atMs
+      weatherSafetyMemory().lastArmMs[currentObservatorySiteId()] = remote.atMs
       return remote.atMs
     }
   }
@@ -445,30 +465,30 @@ async function readDebounceMs(): Promise<number> {
 }
 
 async function writeDebounceMs(atMs: number): Promise<void> {
-  ;(globalThis as GlobalWithWeatherSafety).__pomfret_weather_safety_last_arm_ms__ = atMs
+  weatherSafetyMemory().lastArmMs[currentObservatorySiteId()] = atMs
   if (kvEnabled()) {
     await kvSetJson(weatherSafetyDebounceKey(), { atMs })
   }
 }
 
 async function readClearSinceMs(): Promise<number | null> {
-  const mem = (globalThis as GlobalWithWeatherSafety).__pomfret_weather_safety_clear_since_ms__
+  const mem = weatherSafetyMemory().clearSinceMs[currentObservatorySiteId()]
   if (mem === null) return null
   if (typeof mem === 'number' && Number.isFinite(mem)) return mem
   if (kvEnabled()) {
     const remote = await kvGetJson<{ clearSinceMs?: number | null }>(weatherSafetyClearSinceKey())
     const value = remote?.clearSinceMs
     if (typeof value === 'number' && Number.isFinite(value)) {
-      ;(globalThis as GlobalWithWeatherSafety).__pomfret_weather_safety_clear_since_ms__ = value
+      weatherSafetyMemory().clearSinceMs[currentObservatorySiteId()] = value
       return value
     }
   }
-  ;(globalThis as GlobalWithWeatherSafety).__pomfret_weather_safety_clear_since_ms__ = null
+  weatherSafetyMemory().clearSinceMs[currentObservatorySiteId()] = null
   return null
 }
 
 async function writeClearSinceMs(clearSinceMs: number | null): Promise<void> {
-  ;(globalThis as GlobalWithWeatherSafety).__pomfret_weather_safety_clear_since_ms__ = clearSinceMs
+  weatherSafetyMemory().clearSinceMs[currentObservatorySiteId()] = clearSinceMs
   if (kvEnabled()) {
     await kvSetJson(weatherSafetyClearSinceKey(), { clearSinceMs })
   }
@@ -611,9 +631,11 @@ async function maybeClearWeatherSafetyEmergencyStop(
  * Manual / session-failure ESTOP is never auto-cleared.
  */
 export async function maybeArmWeatherSafetyEmergencyStop(): Promise<WeatherSafetyArmResult> {
-  const g = globalThis as GlobalWithWeatherSafety
-  if (g.__pomfret_weather_safety_arm_inflight__) {
-    return g.__pomfret_weather_safety_arm_inflight__
+  const siteId = currentObservatorySiteId()
+  const armInflight = weatherSafetyMemory().armInflight
+  const pending = armInflight[siteId]
+  if (pending) {
+    return pending
   }
 
   const run = (async (): Promise<WeatherSafetyArmResult> => {
@@ -643,12 +665,12 @@ export async function maybeArmWeatherSafetyEmergencyStop(): Promise<WeatherSafet
     }
   })()
 
-  g.__pomfret_weather_safety_arm_inflight__ = run
+  armInflight[siteId] = run
   try {
     return await run
   } finally {
-    if (g.__pomfret_weather_safety_arm_inflight__ === run) {
-      g.__pomfret_weather_safety_arm_inflight__ = null
+    if (armInflight[siteId] === run) {
+      armInflight[siteId] = null
     }
   }
 }

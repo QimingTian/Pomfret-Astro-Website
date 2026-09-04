@@ -4,21 +4,21 @@
     {
       "source": "/stellarium/(.*)\\.wasm",
       "headers": [
-        { "key": "Content-Type", "value": "application/wasm" }
+        {
+          "key": "Content-Type",
+          "value": "application/wasm"
+        }
       ]
     }
   ],
   "framework": "nextjs",
-  "regions": ["iad1"],
+  "regions": [
+    "iad1"
+  ],
   "crons": [
     {
       "path": "/api/imaging/cleanup-sessions",
       "schedule": "0 5 * * *"
-    },
-    {
-      "path": "/api/imaging/cleanup-sessions?site=cygnus",
-      "schedule": "0 5 * * *"
     }
   ]
 }
-

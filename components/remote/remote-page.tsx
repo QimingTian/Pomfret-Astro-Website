@@ -165,43 +165,6 @@ function radToDeg(rad: number): number {
   return (rad * 180) / Math.PI
 }
 
-function dayOfYearUTC(date: Date): number {
-  const start = Date.UTC(date.getUTCFullYear(), 0, 1)
-  const current = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
-  return Math.floor((current - start) / 86400000) + 1
-}
-
-function solarEventUtcForDate(date: Date, zenithDeg: number, isSunrise: boolean): Date {
-  const n = dayOfYearUTC(date)
-  const gamma = (2 * Math.PI / 365) * (n - 1)
-  const eqTime =
-    229.18 *
-    (0.000075 +
-      0.001868 * Math.cos(gamma) -
-      0.032077 * Math.sin(gamma) -
-      0.014615 * Math.cos(2 * gamma) -
-      0.040849 * Math.sin(2 * gamma))
-  const decl =
-    0.006918 -
-    0.399912 * Math.cos(gamma) +
-    0.070257 * Math.sin(gamma) -
-    0.006758 * Math.cos(2 * gamma) +
-    0.000907 * Math.sin(2 * gamma) -
-    0.002697 * Math.cos(3 * gamma) +
-    0.00148 * Math.sin(3 * gamma)
-  const latRad = degToRad(OBS_LAT_DEG)
-  const zenithRad = degToRad(zenithDeg)
-  const cosH =
-    (Math.cos(zenithRad) - Math.sin(latRad) * Math.sin(decl)) /
-    (Math.cos(latRad) * Math.cos(decl))
-  const clamped = Math.max(-1, Math.min(1, cosH))
-  const hourAngleDeg = radToDeg(Math.acos(clamped))
-  const solarNoonMin = 720 - 4 * OBS_LON_DEG - eqTime
-  const eventMin = isSunrise ? solarNoonMin - 4 * hourAngleDeg : solarNoonMin + 4 * hourAngleDeg
-  const midnightUtc = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
-  return new Date(midnightUtc + eventMin * 60000)
-}
-
 /** Stable hour key from unix ms (aligned with Open-Meteo hour buckets). */
 function buildHourKey(at: Date): string {
   return String(Math.floor(at.getTime() / 3_600_000))
@@ -264,7 +227,7 @@ function currentAltitudeDegAt(raHours: number, decDeg: number, now: Date): numbe
   if (lstDeg < 0) lstDeg += 360
   let hourAngleDeg = (lstDeg - raDeg) % 360
   if (hourAngleDeg < 0) hourAngleDeg += 360
-  
+
   const latRad = degToRad(site.observerLatDeg)
   const decRad = degToRad(decDeg)
   const haRad = degToRad(hourAngleDeg > 180 ? hourAngleDeg - 360 : hourAngleDeg)

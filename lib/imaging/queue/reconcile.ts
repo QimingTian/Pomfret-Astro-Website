@@ -32,26 +32,38 @@ import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import { isEmergencyStopBlocking } from '@/lib/imaging-emergency-stop'
 import { getTonightWeatherPermittedIntervals, type TimeInterval } from '@/lib/tonight-weather-gate'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
+import { currentObservatorySiteId, scopedKvKey } from '@/lib/observatory-site-scope'
 
-const RECONCILE_DEBOUNCE_KEY = 'imaging-reconcile-last-at'
+const RECONCILE_DEBOUNCE_BASE = 'imaging-reconcile-last-at'
+
+/** Debounce is per observatory: one site's reconcile must not swallow another's. */
+function reconcileDebounceKey(): string {
+  return scopedKvKey(RECONCILE_DEBOUNCE_BASE)
+}
 /** Skip back-to-back full reconciles (SSE agent loop + overlapping serverless). */
 const RECONCILE_DEBOUNCE_MS = 15_000
 
 type GlobalWithReconcile = typeof globalThis & {
-  __pomfret_last_reconcile_ms__?: number
+  __pomfret_last_reconcile_ms__?: Record<string, number>
+}
+
+function reconcileMemory(): Record<string, number> {
+  const g = globalThis as GlobalWithReconcile
+  if (!g.__pomfret_last_reconcile_ms__) g.__pomfret_last_reconcile_ms__ = {}
+  return g.__pomfret_last_reconcile_ms__
 }
 
 async function reconcileRecentlyRan(force?: boolean): Promise<boolean> {
   if (force) return false
   const now = Date.now()
   if (kvEnabled()) {
-    const remote = await kvGetJson<{ at: string }>(RECONCILE_DEBOUNCE_KEY)
+    const remote = await kvGetJson<{ at: string }>(reconcileDebounceKey())
     if (remote?.at) {
       const ms = Date.parse(remote.at)
       if (Number.isFinite(ms) && now - ms < RECONCILE_DEBOUNCE_MS) return true
     }
   } else {
-    const last = (globalThis as GlobalWithReconcile).__pomfret_last_reconcile_ms__
+    const last = reconcileMemory()[currentObservatorySiteId()]
     if (last != null && now - last < RECONCILE_DEBOUNCE_MS) return true
   }
   return false
@@ -60,9 +72,9 @@ async function reconcileRecentlyRan(force?: boolean): Promise<boolean> {
 async function markReconcileRan(): Promise<void> {
   const now = Date.now()
   if (kvEnabled()) {
-    await kvSetJson(RECONCILE_DEBOUNCE_KEY, { at: new Date(now).toISOString() })
+    await kvSetJson(reconcileDebounceKey(), { at: new Date(now).toISOString() })
   }
-  ;(globalThis as GlobalWithReconcile).__pomfret_last_reconcile_ms__ = now
+  reconcileMemory()[currentObservatorySiteId()] = now
 }
 
 export type ReconcileScheduleOptions = {

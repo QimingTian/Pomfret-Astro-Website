@@ -19,7 +19,7 @@ import {
 } from '@/lib/variable-star/scoring'
 import { isFamousVariableStar } from '@/lib/variable-star/famous'
 import {
-  vsxVizierUrl(),
+  vsxVizierUrl,
   vsxRowToCandidate,
   type VsxStreamRow,
 } from '@/lib/variable-star/vsx'

@@ -38,7 +38,7 @@ POMFRET_SITE = AgentObservatorySite(
 CYGNUS_SITE = AgentObservatorySite(
     id="cygnus",
     timezone="Europe/Amsterdam",
-    observer_lat_deg=52.352,
+    observer_lat_deg=52.3547,
     observer_lon_deg=4.912,
 )
 
@@ -46,6 +46,11 @@ _SITES: dict[str, AgentObservatorySite] = {
     "pomfret": POMFRET_SITE,
     "cygnus": CYGNUS_SITE,
 }
+
+
+def known_agent_site_ids() -> tuple[str, ...]:
+    """Site ids this agent build knows; used to reject a typo before any hardware moves."""
+    return tuple(sorted(_SITES))
 
 
 def resolve_agent_site(site_id: str | None = None) -> AgentObservatorySite:

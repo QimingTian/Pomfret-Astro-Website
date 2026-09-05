@@ -1,7 +1,9 @@
-import { OBS_LAT_DEG } from '@/lib/target-altitude'
+import { currentObservatorySite } from '@/lib/observatory-site-scope'
 
-/** Dec such that meridian altitude >= 30° at Pomfret. */
-export const POMFRET_MIN_DEC_DEG = OBS_LAT_DEG - 60
+/** Dec such that meridian altitude >= 30° at the active site. */
+export function minDecDegForSite(): number {
+  return currentObservatorySite().observerLatDeg - 60
+}
 
 /** Faintest V mag reachable at Bortle 4 with FSQ-106 + ASI2600MM Pro (G filter). */
 export const POMFRET_FAINTEST_MAG_LIMIT = 14.0
@@ -22,7 +24,7 @@ export type VsxCandidate = {
 }
 
 export function decPassesPomfretMeridianAlt(decDeg: number): boolean {
-  return decDeg >= POMFRET_MIN_DEC_DEG - 1e-6
+  return decDeg >= minDecDegForSite() - 1e-6
 }
 
 export function isClassicalVariableName(name: string): boolean {
@@ -109,9 +111,12 @@ export function vsxRowToCandidate(row: VsxStreamRow): VsxCandidate | null {
   }
 }
 
-export const VSX_VIZIER_URL =
-  'https://vizier.cds.unistra.fr/viz-bin/asu-tsv?' +
-  '-source=B/vsx&' +
-  '-out=Name&-out=RAJ2000&-out=DEJ2000&-out=max&-out=min&-out=f_min&-out=Type&-out=Period&' +
-  `DEJ2000=${POMFRET_MIN_DEC_DEG.toFixed(3)}..89.91&V=0&max=0.0..15.0&` +
-  '-out.max=9999999'
+export function vsxVizierUrl(): string {
+  return (
+    'https://vizier.cds.unistra.fr/viz-bin/asu-tsv?' +
+    '-source=B/vsx&' +
+    '-out=Name&-out=RAJ2000&-out=DEJ2000&-out=max&-out=min&-out=f_min&-out=Type&-out=Period&' +
+    `DEJ2000=${minDecDegForSite().toFixed(3)}..89.91&V=0&max=0.0..15.0&` +
+    '-out.max=9999999'
+  )
+}

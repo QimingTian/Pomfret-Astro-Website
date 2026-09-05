@@ -19,7 +19,7 @@ import {
 } from '@/lib/variable-star/scoring'
 import { isFamousVariableStar } from '@/lib/variable-star/famous'
 import {
-  VSX_VIZIER_URL,
+  vsxVizierUrl,
   vsxRowToCandidate,
   type VsxStreamRow,
 } from '@/lib/variable-star/vsx'
@@ -40,7 +40,7 @@ function fetchVsxStream(onRow: (row: VsxStreamRow) => void): Promise<number> {
   return new Promise((resolve, reject) => {
     let parsed = 0
     let buffer = ''
-    const req = httpGet(VSX_VIZIER_URL, (res) => {
+    const req = httpGet(vsxVizierUrl(), (res) => {
       if ((res.statusCode ?? 0) >= 400) {
         reject(new Error(`VSX VizieR HTTP ${res.statusCode}`))
         return

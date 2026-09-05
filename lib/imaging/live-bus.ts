@@ -1,4 +1,5 @@
 import { kvEnabled, kvExpire, kvListPush, kvListRange } from '@/lib/kv-rest'
+import { currentObservatorySiteId, scopedKvKey } from '@/lib/observatory-site-scope'
 
 export type LiveChannel =
   | `progress:${string}`
@@ -40,12 +41,21 @@ function nextEventId(): string {
   return `${Date.now()}-${seq}`
 }
 
+/**
+ * Channels are per observatory. `site:observatory`, `site:sessions`, `site:estop`
+ * and `agent:wake` carry no id of their own, so unscoped they would fan one
+ * observatory's events out to the other observatory's dashboards.
+ */
 function redisKey(channel: LiveChannel): string {
-  return `live:${channel}`
+  return scopedKvKey(`live:${channel}`)
 }
 
-function notifyLocal(channel: LiveChannel, payload: unknown): void {
-  const listeners = listenersMap().get(channel)
+function localKey(channel: LiveChannel): string {
+  return `${currentObservatorySiteId()}:${channel}`
+}
+
+function notifyLocal(localChannelKey: string, payload: unknown): void {
+  const listeners = listenersMap().get(localChannelKey)
   if (!listeners || listeners.size === 0) return
   for (const listener of Array.from(listeners)) {
     try {
@@ -68,7 +78,7 @@ function parseEnvelope(raw: string): LiveEnvelope | null {
 
 /** Fan-out to local subscribers and append to Redis list for cross-instance SSE. */
 export async function emitLiveEvent(channel: LiveChannel, payload: unknown): Promise<void> {
-  notifyLocal(channel, payload)
+  notifyLocal(localKey(channel), payload)
   if (!kvEnabled()) return
   const envelope: LiveEnvelope = { id: nextEventId(), at: new Date().toISOString(), payload }
   const key = redisKey(channel)
@@ -86,9 +96,12 @@ export function subscribeLiveEvents(
   signal?: AbortSignal
 ): () => void {
   const map = listenersMap()
-  const set = map.get(channel) ?? new Set<Listener>()
+  // Resolve both keys once: the tail poll runs on a timer, outside the request.
+  const localChannelKey = localKey(channel)
+  const tailKey = redisKey(channel)
+  const set = map.get(localChannelKey) ?? new Set<Listener>()
   set.add(listener)
-  map.set(channel, set)
+  map.set(localChannelKey, set)
 
   let stopped = false
   let seenIds = new Set<string>()
@@ -107,7 +120,7 @@ export function subscribeLiveEvents(
       return
     }
     try {
-      const rawItems = await kvListRange(redisKey(channel), 0, 19)
+      const rawItems = await kvListRange(tailKey, 0, 19)
       const fresh: LiveEnvelope[] = []
       for (const raw of rawItems) {
         const env = parseEnvelope(raw)
@@ -135,10 +148,10 @@ export function subscribeLiveEvents(
 
   return () => {
     stopTail()
-    const current = map.get(channel)
+    const current = map.get(localChannelKey)
     if (!current) return
     current.delete(listener)
-    if (current.size === 0) map.delete(channel)
+    if (current.size === 0) map.delete(localChannelKey)
   }
 }
 

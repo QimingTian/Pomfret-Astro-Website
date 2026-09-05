@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Suspense, useState } from 'react'
+import { ABOUT_PATH } from '@/lib/seo'
 
 const fieldClass =
   'w-full px-4 py-3 bg-apple-gray dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-apple-dark dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:border-apple-blue dark:focus:border-blue-500 focus:ring-1 focus:ring-apple-blue dark:focus:ring-blue-500 transition-colors'
@@ -10,7 +11,7 @@ const fieldClass =
 function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const nextPath = searchParams.get('next') || '/dashboard'
+  const nextPath = searchParams.get('next') || ABOUT_PATH
 
   const [login, setLogin] = useState('')
   const [password, setPassword] = useState('')

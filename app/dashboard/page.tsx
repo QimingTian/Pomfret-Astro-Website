@@ -1,5 +1,6 @@
-import { AboutHome } from '@/components/dashboard/about-home'
+import { redirect } from 'next/navigation'
+import { ABOUT_PATH } from '@/lib/seo'
 
 export default function DashboardPage() {
-  return <AboutHome />
+  redirect(ABOUT_PATH)
 }

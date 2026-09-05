@@ -1,26 +1,13 @@
 import type { MetadataRoute } from 'next'
-
-const BASE = 'https://www.pomfretastro.org'
+import { ABOUT_PATH, siteOrigin } from '@/lib/seo'
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const routes = [
-    '/',
-    '/login',
-    '/signup',
-    '/dashboard',
-    '/dashboard/account',
-    '/dashboard/about',
-    '/dashboard/contact',
-    '/dashboard/gallery',
-    '/dashboard/weather',
-    '/dashboard/remote',
+  return [
+    {
+      url: `${siteOrigin()}${ABOUT_PATH}`,
+      lastModified: new Date('2026-09-01'),
+      changeFrequency: 'weekly',
+      priority: 1,
+    },
   ]
-
-  const now = new Date()
-  return routes.map((route) => ({
-    url: `${BASE}${route}`,
-    lastModified: now,
-    changeFrequency: route === '/' ? 'daily' : 'weekly',
-    priority: route === '/' ? 1 : route === '/dashboard' ? 0.9 : 0.7,
-  }))
 }

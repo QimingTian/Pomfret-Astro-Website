@@ -28,12 +28,12 @@ function AboutEditorialSection({
     <article className="px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
       <div className="mx-auto max-w-6xl">
         <div className="grid grid-cols-1 gap-10 lg:grid-cols-12 lg:items-center lg:gap-12 xl:gap-16">
-          <h3
+          <h2
             className={`${titleClass} text-[clamp(2rem,4vw,2.75rem)] font-semibold leading-[1.08] tracking-tight text-white`}
             style={{ fontFamily: SF_PRO, letterSpacing: '-0.03em' }}
           >
             {title}
-          </h3>
+          </h2>
           <div
             className={`${bodyClass} space-y-4 text-[17px] leading-[1.55] text-white/90 sm:text-[18px] sm:leading-[1.5]`}
             style={{ fontFamily: SF_PRO }}
@@ -200,9 +200,9 @@ export function AboutHome() {
                     WebkitFontSmoothing: 'antialiased',
                   }}
                 >
-                  <p className="text-[clamp(2.25rem,5vw,3.75rem)] font-medium leading-[1.12] text-white sm:whitespace-nowrap">
+                  <h1 className="text-[clamp(2.25rem,5vw,3.75rem)] font-medium leading-[1.12] text-white sm:whitespace-nowrap">
                     Welcome To Pomfret Astro Network
-                  </p>
+                  </h1>
                 </div>
               </div>
             </div>

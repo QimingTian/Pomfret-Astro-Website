@@ -76,7 +76,7 @@ function DashboardChrome({ children }: { children: React.ReactNode }) {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="M4 7h16M4 12h16M4 17h16" />
                   </svg>
                 </button>
-                <Link href="/dashboard" className="text-lg sm:text-xl leading-none tracking-wide font-semibold text-white">
+                <Link href="/dashboard/about" className="text-lg sm:text-xl leading-none tracking-wide font-semibold text-white">
                   Pomfret Astro
                 </Link>
               </div>

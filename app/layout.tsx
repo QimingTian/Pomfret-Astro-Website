@@ -2,30 +2,40 @@ import type { Metadata } from 'next'
 import './globals.css'
 import { ThemeProvider } from '@/components/ThemeProvider'
 import { NightModeProvider } from '@/components/night-mode-provider'
+import {
+  DEFAULT_DESCRIPTION,
+  SEO_KEYWORDS,
+  SITE_NAME,
+  openGraphImages,
+  siteOrigin,
+} from '@/lib/seo'
 
 export const metadata: Metadata = {
-  title: 'Pomfret Astro',
-  description: 'Pomfret School Observatory Control System',
-  metadataBase: new URL('https://www.pomfretastro.org'),
-  alternates: {
-    canonical: '/',
+  metadataBase: new URL(siteOrigin()),
+  title: {
+    default: SITE_NAME,
+    template: `%s | ${SITE_NAME}`,
   },
+  description: DEFAULT_DESCRIPTION,
+  keywords: SEO_KEYWORDS,
   openGraph: {
-    title: 'Pomfret Astro',
-    description: 'Pomfret School Observatory Control System',
-    url: 'https://www.pomfretastro.org',
-    siteName: 'Pomfret Astro',
+    title: SITE_NAME,
+    description: DEFAULT_DESCRIPTION,
+    url: siteOrigin(),
+    siteName: SITE_NAME,
     locale: 'en_US',
     type: 'website',
+    images: openGraphImages(),
   },
   twitter: {
-    card: 'summary',
-    title: 'Pomfret Astro',
-    description: 'Pomfret School Observatory Control System',
+    card: 'summary_large_image',
+    title: SITE_NAME,
+    description: DEFAULT_DESCRIPTION,
+    images: openGraphImages().map((image) => image.url),
   },
   icons: {
-    icon: [{ url: '/favicon.png?v=1', type: 'image/png', sizes: '32x32' }],
-    shortcut: '/favicon.png?v=1',
+    icon: [{ url: '/icons/favicon-32.png?v=1', type: 'image/png', sizes: '32x32' }],
+    shortcut: '/icons/favicon-32.png?v=1',
     apple: [{ url: '/icons/apple-touch-icon.png?v=1', type: 'image/png', sizes: '180x180' }],
   },
 }

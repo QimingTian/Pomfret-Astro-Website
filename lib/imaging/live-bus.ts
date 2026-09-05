@@ -1,4 +1,5 @@
 import { kvEnabled, kvExpire, kvListPush, kvListRange } from '@/lib/kv-rest'
+import { currentObservatorySiteId, scopedKvKey } from '@/lib/observatory-site-scope'
 
 export type LiveChannel =
   | `progress:${string}`
@@ -40,12 +41,32 @@ function nextEventId(): string {
   return `${Date.now()}-${seq}`
 }
 
+function isSiteScopedChannel(channel: LiveChannel): boolean {
+  return (
+    channel === 'site:observatory' ||
+    channel === 'site:sessions' ||
+    channel === 'site:estop' ||
+    channel === 'agent:wake'
+  )
+}
+
+/** Local listener map key — site channels are namespaced so warm instances do not cross-talk. */
+function listenerKey(channel: LiveChannel): string {
+  if (isSiteScopedChannel(channel)) {
+    return `${currentObservatorySiteId()}:${channel}`
+  }
+  return channel
+}
+
 function redisKey(channel: LiveChannel): string {
+  if (isSiteScopedChannel(channel)) {
+    return scopedKvKey(`live:${channel}`)
+  }
   return `live:${channel}`
 }
 
 function notifyLocal(channel: LiveChannel, payload: unknown): void {
-  const listeners = listenersMap().get(channel)
+  const listeners = listenersMap().get(listenerKey(channel))
   if (!listeners || listeners.size === 0) return
   for (const listener of Array.from(listeners)) {
     try {
@@ -86,9 +107,10 @@ export function subscribeLiveEvents(
   signal?: AbortSignal
 ): () => void {
   const map = listenersMap()
-  const set = map.get(channel) ?? new Set<Listener>()
+  const key = listenerKey(channel)
+  const set = map.get(key) ?? new Set<Listener>()
   set.add(listener)
-  map.set(channel, set)
+  map.set(key, set)
 
   let stopped = false
   let seenIds = new Set<string>()
@@ -135,10 +157,10 @@ export function subscribeLiveEvents(
 
   return () => {
     stopTail()
-    const current = map.get(channel)
+    const current = map.get(key)
     if (!current) return
     current.delete(listener)
-    if (current.size === 0) map.delete(channel)
+    if (current.size === 0) map.delete(key)
   }
 }
 

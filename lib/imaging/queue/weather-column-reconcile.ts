@@ -4,10 +4,10 @@ import {
   emitSiteSessionsChanged,
 } from '@/lib/imaging/site-events'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
-
-const KV_KEY = 'imaging-queue-schedule-weather-fingerprint'
-
+import { currentObservatorySiteId, scopedKvKey } from '@/lib/observatory-site-scope'
 import type { WeatherNotPermittedReason } from '@/lib/tonight-weather-gate'
+
+const KV_KEY_BASE = 'imaging-queue-schedule-weather-fingerprint'
 
 export type ScheduleWeatherColumnPayload = {
   prediction: 'permitted' | 'not_permitted' | 'unavailable'
@@ -23,6 +23,10 @@ type Stored = {
   windowStartSec: number
   windowEndSec: number
   fingerprint: string
+}
+
+function fingerprintKvKey(): string {
+  return scopedKvKey(KV_KEY_BASE)
 }
 
 function fingerprintForScheduleWeatherColumn(payload: ScheduleWeatherColumnPayload): string {
@@ -45,8 +49,8 @@ function fingerprintForScheduleWeatherColumn(payload: ScheduleWeatherColumnPaylo
   })
 }
 
-/** In-process fallback when KV is not configured (dev); resets on cold start. */
-let memoryStore: Stored | null = null
+/** In-process fallback when KV is not configured (dev); per-site so switcher does not cross-talk. */
+const memoryStoreBySite: Record<string, Stored> = {}
 
 export function scheduleWeatherColumnFingerprint(payload: ScheduleWeatherColumnPayload): string {
   return fingerprintForScheduleWeatherColumn(payload)
@@ -62,12 +66,13 @@ export async function maybeReconcileQueueWhenScheduleWeatherColumnChanged(
   payload: ScheduleWeatherColumnPayload
 ): Promise<void> {
   const fingerprint = fingerprintForScheduleWeatherColumn(payload)
+  const siteId = currentObservatorySiteId()
 
   let prev: Stored | undefined
   if (kvEnabled()) {
-    prev = await kvGetJson<Stored>(KV_KEY)
+    prev = await kvGetJson<Stored>(fingerprintKvKey())
   } else {
-    prev = memoryStore ?? undefined
+    prev = memoryStoreBySite[siteId]
   }
 
   if (
@@ -85,8 +90,8 @@ export async function maybeReconcileQueueWhenScheduleWeatherColumnChanged(
 
   const next: Stored = { windowStartSec, windowEndSec, fingerprint }
   if (kvEnabled()) {
-    await kvSetJson(KV_KEY, next)
+    await kvSetJson(fingerprintKvKey(), next)
   } else {
-    memoryStore = next
+    memoryStoreBySite[siteId] = next
   }
 }

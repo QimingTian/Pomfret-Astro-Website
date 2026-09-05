@@ -2,6 +2,7 @@
 
 import { emitLiveEvent, liveMountChannel } from '@/lib/imaging/live-bus'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
+import { scopedKvKey } from '@/lib/observatory-site-scope'
 import { isWithinDaytimeClosedWindow } from '@/lib/sunrise-window'
 
 export type MountPointingPayload = {
@@ -39,8 +40,12 @@ function stationKey(stationId: string | undefined | null): string {
   return t.length > 0 ? t : 'default'
 }
 
+/**
+ * Scoped per observatory as well as per station, so a plugin left on the default
+ * station id cannot publish one site's mount into the other site's 3D panel.
+ */
 function kvKey(stationId: string | undefined | null): string {
-  return `mount-pointing:${stationKey(stationId)}`
+  return scopedKvKey(`mount-pointing:${stationKey(stationId)}`)
 }
 
 export async function setMountPointingSample(

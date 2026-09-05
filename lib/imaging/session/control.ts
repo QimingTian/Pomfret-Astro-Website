@@ -226,29 +226,35 @@ export async function adminMarkSessionComplete(sessionId: string): Promise<{ ok:
   }
 
   const board = await getBoardEntry(sessionId)
-  if (board?.status === 'in_progress') {
-    const ok = await boardMarkCompleted(sessionId)
-    if (!ok) return { error: 'Could not mark board session completed' }
-    publishProgress(sessionId, { type: 'status', queueStatus: 'completed' })
-    void appendAuditLog({
-      kind: 'queue.status',
-      message: `Admin marked session ${sessionId} completed.`,
-      detail: { id: sessionId, target: board.target },
-    })
+  const inQueue = await getRequestById(sessionId)
+  if (!board && !inQueue) return { error: 'Session not found' }
+
+  if (board?.status === 'completed' && (!inQueue || inQueue.status === 'completed')) {
     return { ok: true }
   }
 
-  const forced = await adminForceQueueStatus(sessionId, 'completed')
-  if ('error' in forced) {
-    const inQueue = await getRequestById(sessionId)
-    if (!inQueue && !board) return { error: 'Session not found' }
-    return forced
+  // Board path: in_progress or failed (UI Complete is enabled for failed rows).
+  if (board && (board.status === 'in_progress' || board.status === 'failed')) {
+    const ok = await boardMarkCompleted(sessionId)
+    if (!ok) return { error: 'Could not mark board session completed' }
   }
+
+  let target = board?.target ?? inQueue?.target ?? sessionId
+  if (inQueue && inQueue.status !== 'completed') {
+    const forced = await adminForceQueueStatus(sessionId, 'completed')
+    if ('error' in forced) return forced
+    target = forced.target
+  } else if (board && board.status !== 'in_progress' && board.status !== 'failed' && board.status !== 'completed') {
+    return {
+      error: `Cannot mark session completed from board status ${board.status}`,
+    }
+  }
+
   publishProgress(sessionId, { type: 'status', queueStatus: 'completed' })
   void appendAuditLog({
     kind: 'queue.status',
     message: `Admin marked session ${sessionId} completed.`,
-    detail: { id: sessionId, target: forced.target },
+    detail: { id: sessionId, target },
   })
   return { ok: true }
 }

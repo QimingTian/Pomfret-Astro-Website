@@ -2,7 +2,7 @@ import type { VariableStarFilterId } from '@/lib/variable-star/filters'
 import { inferShortlistBuckets } from '@/lib/variable-star/filters'
 import { famousNameScoreBonus } from '@/lib/variable-star/famous'
 import type { ObservabilityMetrics } from '@/lib/variable-star/observability'
-import { POMFRET_FAINTEST_MAG_LIMIT } from '@/lib/variable-star/vsx'
+import { NETWORK_FAINTEST_MAG_LIMIT } from '@/lib/variable-star/vsx'
 import type { VsxCandidate } from '@/lib/variable-star/vsx'
 
 export type ScoredCandidate = {
@@ -18,8 +18,8 @@ export function scoreCandidate(
   metrics: ObservabilityMetrics,
   observabilityScore: number
 ): number {
-  const faintest = candidate.faintestMag ?? POMFRET_FAINTEST_MAG_LIMIT
-  const detectability = Math.max(0, (POMFRET_FAINTEST_MAG_LIMIT - faintest) / 4)
+  const faintest = candidate.faintestMag ?? NETWORK_FAINTEST_MAG_LIMIT
+  const detectability = Math.max(0, (NETWORK_FAINTEST_MAG_LIMIT - faintest) / 4)
   const amp = candidate.amplitude ?? estimateAmplitude(candidate)
   const amplitudeScore = amp == null ? 0.5 : Math.min(1, amp / 2)
   const classicalBonus = candidate.isClassicalName ? 1.5 : 0

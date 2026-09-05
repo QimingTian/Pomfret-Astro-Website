@@ -3,9 +3,19 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
 import { postgresReadsEnabled } from '@/lib/db'
 import { kvGetJson, kvSetJson } from '@/lib/kv-rest'
+import { scopedKvKey } from '@/lib/observatory-site-scope'
 
-const KEY = 'imaging-r2-object-map'
-const PREVIEW_KEY = 'imaging-r2-preview-map'
+const KEY_BASE = 'imaging-r2-object-map'
+const PREVIEW_KEY_BASE = 'imaging-r2-preview-map'
+
+/** One shared map per observatory: both sites read-modify-write the same blob otherwise. */
+function objectMapKey(): string {
+  return scopedKvKey(KEY_BASE)
+}
+
+function previewMapKey(): string {
+  return scopedKvKey(PREVIEW_KEY_BASE)
+}
 const DEFAULT_CACHE_MS = 30_000
 const DEFAULT_SIGN_TTL_SEC = 300
 
@@ -106,9 +116,9 @@ export async function upsertR2ObjectKey(queueId: string, objectKey: string): Pro
     await mirrorR2ObjectKey('object', queueId, objectKey)
     return
   }
-  const current = ((await kvGetJson<MappingPayload>(KEY)) ?? { byQueueId: {} }) as MappingPayload
+  const current = ((await kvGetJson<MappingPayload>(objectMapKey())) ?? { byQueueId: {} }) as MappingPayload
   current.byQueueId[queueId] = objectKey
-  await kvSetJson(KEY, current)
+  await kvSetJson(objectMapKey(), current)
   const { mirrorR2ObjectKey } = await import('@/lib/db/mirror')
   await mirrorR2ObjectKey('object', queueId, objectKey)
 }
@@ -122,9 +132,9 @@ export async function upsertR2PreviewObjectKey(queueId: string, objectKey: strin
     await mirrorR2ObjectKey('preview', queueId, objectKey)
     return
   }
-  const current = ((await kvGetJson<MappingPayload>(PREVIEW_KEY)) ?? { byQueueId: {} }) as MappingPayload
+  const current = ((await kvGetJson<MappingPayload>(previewMapKey())) ?? { byQueueId: {} }) as MappingPayload
   current.byQueueId[queueId] = objectKey
-  await kvSetJson(PREVIEW_KEY, current)
+  await kvSetJson(previewMapKey(), current)
   const { mirrorR2ObjectKey } = await import('@/lib/db/mirror')
   await mirrorR2ObjectKey('preview', queueId, objectKey)
 }
@@ -135,9 +145,9 @@ async function removeR2ObjectKeyMapping(queueId: string): Promise<void> {
     await mirrorR2ObjectKey('object', queueId, null)
     return
   }
-  const current = ((await kvGetJson<MappingPayload>(KEY)) ?? { byQueueId: {} }) as MappingPayload
+  const current = ((await kvGetJson<MappingPayload>(objectMapKey())) ?? { byQueueId: {} }) as MappingPayload
   delete current.byQueueId[queueId]
-  await kvSetJson(KEY, current)
+  await kvSetJson(objectMapKey(), current)
   const { mirrorR2ObjectKey } = await import('@/lib/db/mirror')
   await mirrorR2ObjectKey('object', queueId, null)
 }
@@ -148,9 +158,9 @@ async function removeR2PreviewObjectKeyMapping(queueId: string): Promise<void> {
     await mirrorR2ObjectKey('preview', queueId, null)
     return
   }
-  const current = ((await kvGetJson<MappingPayload>(PREVIEW_KEY)) ?? { byQueueId: {} }) as MappingPayload
+  const current = ((await kvGetJson<MappingPayload>(previewMapKey())) ?? { byQueueId: {} }) as MappingPayload
   delete current.byQueueId[queueId]
-  await kvSetJson(PREVIEW_KEY, current)
+  await kvSetJson(previewMapKey(), current)
   const { mirrorR2ObjectKey } = await import('@/lib/db/mirror')
   await mirrorR2ObjectKey('preview', queueId, null)
 }
@@ -170,14 +180,14 @@ async function r2MapMerged(kind: 'object' | 'preview', kvKey: string): Promise<R
 }
 
 export async function getR2ObjectKey(queueId: string): Promise<string> {
-  const map = await r2MapMerged('object', KEY)
+  const map = await r2MapMerged('object', objectMapKey())
   const saved = map[queueId]
   if (typeof saved === 'string' && saved.trim()) return saved.trim()
   return fallbackObjectKeyForQueueId(queueId)
 }
 
 export async function getR2PreviewObjectKey(queueId: string): Promise<string | null> {
-  const map = await r2MapMerged('preview', PREVIEW_KEY)
+  const map = await r2MapMerged('preview', previewMapKey())
   const saved = map[queueId]
   if (typeof saved === 'string' && saved.trim()) return saved.trim()
   return null

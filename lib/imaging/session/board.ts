@@ -326,7 +326,10 @@ export async function boardUpsertInProgress(input: {
 
 export async function boardMarkCompleted(id: string): Promise<boolean> {
   const prev = await readEntries()
-  const idx = prev.findIndex((e) => e.id === id && e.status === 'in_progress')
+  // Admin Complete also allows failed → completed (Session Control).
+  const idx = prev.findIndex(
+    (e) => e.id === id && (e.status === 'in_progress' || e.status === 'failed')
+  )
   if (idx === -1) return false
   const ts = new Date().toISOString()
   const next = [...prev]

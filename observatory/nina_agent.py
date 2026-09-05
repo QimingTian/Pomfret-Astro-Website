@@ -12,7 +12,7 @@ Usage:
   2) Edit the CONFIG section below (paths only — no secrets in git).
   3) Set Windows environment variables (same names as Vercel where noted):
        IMAGING_QUEUE_SECRET, POMFRET_CRON_SECRET (same as CRON_SECRET),
-       OBSERVATORY_SITE_ID (pomfret or cygnus — adaptive poll schedule),
+       OBSERVATORY_SITE_ID (pomfret or cygnus — scopes every request AND the poll schedule),
        R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET,
        PDU_USER, PDU_PASSWORD (Digital Loggers PDU at 192.168.121.5).
   4) Run: python nina_agent.py
@@ -35,7 +35,7 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from typing import Any, Dict, Optional
 
 _AGENT_DIR = Path(__file__).resolve().parent
@@ -50,6 +50,7 @@ from agent_poll_schedule import (
     DAY_POLL_SECONDS,
     NIGHT_POLL_SECONDS,
     agent_poll_interval_seconds,
+    known_agent_site_ids,
     resolve_agent_site,
     seconds_until_observatory_phase_change,
 )
@@ -87,24 +88,43 @@ else:
 # =========================
 # CONFIG (edit these values)
 # =========================
-SEQUENCE_JSON_URL = "https://www.pomfretastro.org/api/imaging/nina-sequence"
+
+# Which observatory this PC serves. Sent on every request as ?site= and
+# X-Observatory-Site. Without it the server falls back to Pomfret and this
+# agent would run Pomfret's imaging job on local hardware.
+OBSERVATORY_SITE_ID = (
+    os.environ.get("OBSERVATORY_SITE_ID", "pomfret").strip().lower() or "pomfret"
+)
+
+
+def _with_site(url: str) -> str:
+    """Append or replace the site query param so the server scopes this observatory."""
+    if not url:
+        return url
+    parts = urlparse(url)
+    query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k != "site"]
+    query.append(("site", OBSERVATORY_SITE_ID))
+    return urlunparse(parts._replace(query=urlencode(query)))
+
+
+SEQUENCE_JSON_URL = _with_site("https://www.pomfretastro.org/api/imaging/nina-sequence")
 _nina_seq = urlparse(SEQUENCE_JSON_URL)
-RECONCILE_QUEUE_URL = (
+RECONCILE_QUEUE_URL = _with_site(
     f"{_nina_seq.scheme}://{_nina_seq.netloc}/api/imaging/reconcile-queue-schedule"
     if _nina_seq.scheme and _nina_seq.netloc
     else ""
 )
-AGENT_PULSE_URL = (
+AGENT_PULSE_URL = _with_site(
     f"{_nina_seq.scheme}://{_nina_seq.netloc}/api/imaging/agent-pulse"
     if _nina_seq.scheme and _nina_seq.netloc
     else ""
 )
-ESTOP_DELIVERY_URL = (
+ESTOP_DELIVERY_URL = _with_site(
     f"{_nina_seq.scheme}://{_nina_seq.netloc}/api/imaging/emergency-stop/delivery"
     if _nina_seq.scheme and _nina_seq.netloc
     else ""
 )
-AGENT_EVENTS_URL = (
+AGENT_EVENTS_URL = _with_site(
     f"{_nina_seq.scheme}://{_nina_seq.netloc}/api/imaging/agent-events"
     if _nina_seq.scheme and _nina_seq.netloc
     else ""
@@ -121,8 +141,6 @@ RECONCILE_BEARER = ""
 TOKEN = ""
 
 # Adaptive idle poll: night 45s, daytime closed window 20min (see agent_poll_schedule.py).
-# Override site on multi-observatory PCs: Windows env OBSERVATORY_SITE_ID=cygnus
-OBSERVATORY_SITE_ID = "pomfret"
 POLL_SECONDS = NIGHT_POLL_SECONDS  # legacy alias; idle polls use agent_poll_interval_seconds()
 FALLBACK_POLL_SECONDS = 300
 SSE_CONNECTED_WAIT_SECONDS = 60
@@ -185,7 +203,7 @@ R2_PREFIX = "imaging"
 # Notify backend after each upload batch so website can map queueId -> objectKey.
 # Backend endpoint: POST /api/imaging/session-files
 # Uses Authorization header from TOKEN (Bearer) if TOKEN is set.
-UPLOAD_REPORT_URL = "https://www.pomfretastro.org/api/imaging/session-files"
+UPLOAD_REPORT_URL = _with_site("https://www.pomfretastro.org/api/imaging/session-files")
 
 # -------- Live preview config (scheme A) --------
 # Generate/upload one latest JPEG preview for each session when possible.
@@ -194,7 +212,7 @@ PREVIEW_MAX_WIDTH = 1280
 PREVIEW_JPEG_QUALITY = 72
 PREVIEW_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".fit", ".fits"}
 # API receives latest preview and keeps it until replaced.
-PREVIEW_UPLOAD_URL = "https://www.pomfretastro.org/api/imaging/preview"
+PREVIEW_UPLOAD_URL = _with_site("https://www.pomfretastro.org/api/imaging/preview")
 # Variable-star sessions: at most one live preview upload per interval (DSO unchanged).
 PREVIEW_VARIABLE_STAR_MIN_INTERVAL_SECONDS = 600
 
@@ -242,7 +260,10 @@ def queue_bearer_token() -> str:
 
 
 def build_headers() -> Dict[str, str]:
-    headers: Dict[str, str] = {"Accept": "application/json"}
+    headers: Dict[str, str] = {
+        "Accept": "application/json",
+        "X-Observatory-Site": OBSERVATORY_SITE_ID,
+    }
     bearer = queue_bearer_token()
     if bearer:
         headers["Authorization"] = f"Bearer {bearer}"
@@ -318,7 +339,10 @@ def reconcile_queue_bearer_token() -> str:
 
 
 def reconcile_queue_headers() -> Dict[str, str]:
-    headers: Dict[str, str] = {"Accept": "application/json"}
+    headers: Dict[str, str] = {
+        "Accept": "application/json",
+        "X-Observatory-Site": OBSERVATORY_SITE_ID,
+    }
     bearer = reconcile_queue_bearer_token()
     if bearer:
         headers["Authorization"] = f"Bearer {bearer}"
@@ -644,6 +668,13 @@ def wait_for_nina_exit(process: subprocess.Popen[bytes]) -> None:
 
 
 def validate_config() -> None:
+    known_sites = known_agent_site_ids()
+    if OBSERVATORY_SITE_ID not in known_sites:
+        raise ValueError(
+            f"OBSERVATORY_SITE_ID={OBSERVATORY_SITE_ID!r} is not a known observatory "
+            f"({', '.join(known_sites)}). An unknown site silently resolves to Pomfret "
+            "server-side, so this agent would run another observatory's job on local hardware."
+        )
     if "your-domain.com" in SEQUENCE_JSON_URL:
         raise ValueError("Please set SEQUENCE_JSON_URL.")
     host = (_nina_seq.hostname or "").lower()

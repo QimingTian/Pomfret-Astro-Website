@@ -19,11 +19,13 @@ import {
 } from '@/lib/variable-star/scoring'
 import { isFamousVariableStar } from '@/lib/variable-star/famous'
 import {
-  VSX_VIZIER_URL,
+  vsxVizierUrl,
   vsxRowToCandidate,
   type VsxStreamRow,
 } from '@/lib/variable-star/vsx'
 import { get as httpGet } from 'node:https'
+import { resolveObservatorySite, type ObservatorySiteId } from '@/lib/observatory-sites'
+import { withObservatorySiteAsync } from '@/lib/observatory-site-scope'
 
 export type ShortlistBuildResult = {
   asOf: string
@@ -36,11 +38,14 @@ export type ShortlistBuildResult = {
   }
 }
 
-function fetchVsxStream(onRow: (row: VsxStreamRow) => void): Promise<number> {
+function fetchVsxStream(
+  vizierUrl: string,
+  onRow: (row: VsxStreamRow) => void
+): Promise<number> {
   return new Promise((resolve, reject) => {
     let parsed = 0
     let buffer = ''
-    const req = httpGet(VSX_VIZIER_URL, (res) => {
+    const req = httpGet(vizierUrl, (res) => {
       if ((res.statusCode ?? 0) >= 400) {
         reject(new Error(`VSX VizieR HTTP ${res.statusCode}`))
         return
@@ -135,84 +140,91 @@ function toVariableStarRow(
   }
 }
 
-export async function buildVariableStarShortlist(now = new Date()): Promise<ShortlistBuildResult> {
-  const asOf = now.toISOString()
-  const scoredPool: ScoredCandidate[] = []
-  let vsxRowsParsed = 0
-  let candidates = 0
+export async function buildVariableStarShortlist(
+  now = new Date(),
+  siteId?: ObservatorySiteId | string
+): Promise<ShortlistBuildResult> {
+  const site = resolveObservatorySite(siteId)
+  return withObservatorySiteAsync(site.id, async () => {
+    const asOf = now.toISOString()
+    const scoredPool: ScoredCandidate[] = []
+    let vsxRowsParsed = 0
+    let candidates = 0
+    const vizierUrl = vsxVizierUrl(site)
 
-  await fetchVsxStream((row) => {
-    vsxRowsParsed += 1
-    const candidate = vsxRowToCandidate(row)
-    if (!candidate) return
-    candidates += 1
-    const metrics = observabilityMetricsForWindow(candidate.raDeg / 15, candidate.decDeg, now)
-    if (!passesObservabilityGate(metrics)) return
-    const obsScore = observabilityScore(metrics)
-    scoredPool.push(buildScoredCandidate(candidate, metrics, obsScore))
-  })
+    await fetchVsxStream(vizierUrl, (row) => {
+      vsxRowsParsed += 1
+      const candidate = vsxRowToCandidate(row, site)
+      if (!candidate) return
+      candidates += 1
+      const metrics = observabilityMetricsForWindow(candidate.raDeg / 15, candidate.decDeg, now)
+      if (!passesObservabilityGate(metrics)) return
+      const obsScore = observabilityScore(metrics)
+      scoredPool.push(buildScoredCandidate(candidate, metrics, obsScore))
+    })
 
-  const classicalOrTyped = scoredPool.filter(
-    (s) => s.candidate.isClassicalName || s.buckets.some((b) => b.startsWith('type_'))
-  )
-  const pool = classicalOrTyped.length >= 500 ? classicalOrTyped : scoredPool
+    const classicalOrTyped = scoredPool.filter(
+      (s) => s.candidate.isClassicalName || s.buckets.some((b) => b.startsWith('type_'))
+    )
+    const pool = classicalOrTyped.length >= 500 ? classicalOrTyped : scoredPool
 
-  const already = new Set<string>()
-  const categoryByName = new Map<string, Set<VariableStarFilterId>>()
-  const scoredByName = new Map<string, ScoredCandidate>()
+    const already = new Set<string>()
+    const categoryByName = new Map<string, Set<VariableStarFilterId>>()
+    const scoredByName = new Map<string, ScoredCandidate>()
 
-  for (const s of scoredPool) {
-    scoredByName.set(s.candidate.name, s)
-  }
+    for (const s of scoredPool) {
+      scoredByName.set(s.candidate.name, s)
+    }
 
-  for (const bucket of SHORTLIST_BUCKET_IDS) {
-    const raBinCounts = new Map<number, number>()
-    const picked = pickTopForBucket(pool, bucket, SHORTLIST_PER_BUCKET, already, raBinCounts)
-    for (const s of picked) {
+    for (const bucket of SHORTLIST_BUCKET_IDS) {
+      const raBinCounts = new Map<number, number>()
+      const picked = pickTopForBucket(pool, bucket, SHORTLIST_PER_BUCKET, already, raBinCounts)
+      for (const s of picked) {
+        const set = categoryByName.get(s.candidate.name) ?? new Set<VariableStarFilterId>()
+        set.add(bucket)
+        categoryByName.set(s.candidate.name, set)
+      }
+    }
+
+    const globalTop = [...pool]
+      .sort((a, b) => b.score - a.score || a.candidate.name.localeCompare(b.candidate.name))
+      .slice(0, SHORTLIST_HIGH_PRIORITY_COUNT)
+    const highPriorityNames = new Set(globalTop.map((s) => s.candidate.name))
+
+    for (const s of globalTop) {
+      already.add(s.candidate.name)
       const set = categoryByName.get(s.candidate.name) ?? new Set<VariableStarFilterId>()
-      set.add(bucket)
       categoryByName.set(s.candidate.name, set)
     }
-  }
 
-  const globalTop = [...pool]
-    .sort((a, b) => b.score - a.score || a.candidate.name.localeCompare(b.candidate.name))
-    .slice(0, SHORTLIST_HIGH_PRIORITY_COUNT)
-  const highPriorityNames = new Set(globalTop.map((s) => s.candidate.name))
-
-  for (const s of globalTop) {
-    already.add(s.candidate.name)
-    const set = categoryByName.get(s.candidate.name) ?? new Set<VariableStarFilterId>()
-    categoryByName.set(s.candidate.name, set)
-  }
-
-  const rows: VariableStarRow[] = []
-  const selectedNames: string[] = []
-  already.forEach((n) => selectedNames.push(n))
-  selectedNames.sort((a, b) => a.localeCompare(b))
-  for (const name of selectedNames) {
-    const scored = scoredByName.get(name)
-    if (!scored) continue
-    const catSet = categoryByName.get(name)
-    const categories: VariableStarFilterId[] = []
-    if (catSet) catSet.forEach((c) => categories.push(c))
-    if (isFamousVariableStar(name) && !categories.includes('famous')) {
-      categories.push('famous')
+    const rows: VariableStarRow[] = []
+    const selectedNames: string[] = []
+    already.forEach((n) => selectedNames.push(n))
+    selectedNames.sort((a, b) => a.localeCompare(b))
+    for (const name of selectedNames) {
+      const scored = scoredByName.get(name)
+      if (!scored) continue
+      const catSet = categoryByName.get(name)
+      const categories: VariableStarFilterId[] = []
+      if (catSet) catSet.forEach((c) => categories.push(c))
+      if (isFamousVariableStar(name) && !categories.includes('famous')) {
+        categories.push('famous')
+      }
+      categories.sort()
+      rows.push(toVariableStarRow(scored, categories, highPriorityNames.has(name)))
     }
-    categories.sort()
-    rows.push(toVariableStarRow(scored, categories, highPriorityNames.has(name)))
-  }
 
-  return {
-    asOf,
-    rows,
-    stats: {
-      vsxRowsParsed,
-      candidates,
-      observable: scoredPool.length,
-      selected: rows.length,
-    },
-  }
+    return {
+      asOf,
+      rows,
+      stats: {
+        vsxRowsParsed,
+        candidates,
+        observable: scoredPool.length,
+        selected: rows.length,
+      },
+    }
+  })
 }
 
 export function shortlistToCsv(result: ShortlistBuildResult): string {

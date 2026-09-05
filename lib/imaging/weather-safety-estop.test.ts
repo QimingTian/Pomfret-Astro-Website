@@ -280,6 +280,40 @@ test('isWeatherSafetyClearForAutoUnlock requires Open-Meteo and ASC both availab
   )
 })
 
+test('isWeatherSafetyClearForAutoUnlock on non-ASC sites requires Open-Meteo only', async () => {
+  const { withObservatorySiteAsync } = await import('@/lib/observatory-site-scope')
+  await withObservatorySiteAsync('cygnus', async () => {
+    assert.equal(
+      isWeatherSafetyClearForAutoUnlock({
+        threat: null,
+        openMeteoAvailable: true,
+        ascGateApplicable: false,
+      }),
+      true
+    )
+    assert.equal(
+      isWeatherSafetyClearForAutoUnlock({
+        threat: null,
+        openMeteoAvailable: false,
+        ascGateApplicable: false,
+      }),
+      false
+    )
+    assert.equal(
+      isWeatherSafetyClearForAutoUnlock({
+        threat: {
+          kind: 'site_precip',
+          reason: 'precip',
+          detail: {},
+        },
+        openMeteoAvailable: true,
+        ascGateApplicable: false,
+      }),
+      false
+    )
+  })
+})
+
 test('weatherSafetyClearHoldElapsed requires 20 minutes of continuous clear', () => {
   const start = Date.parse('2026-08-23T05:00:00.000Z')
   assert.equal(weatherSafetyClearHoldElapsed(null, start + WEATHER_SAFETY_CLEAR_HOLD_MS), false)

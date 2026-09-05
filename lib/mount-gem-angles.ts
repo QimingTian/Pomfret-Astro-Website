@@ -1,6 +1,6 @@
 /** GEM hour-angle / declination helpers for the Remote Telescope Status 3D view. */
 
-import { OBS_LON_DEG } from '@/lib/target-altitude'
+import { currentObservatorySite } from '@/lib/observatory-site-scope'
 
 export function finiteOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
@@ -24,7 +24,10 @@ export function normalize360(deg: number): number {
  * Local sidereal time in hours [0, 24), matching `lib/target-altitude` GMST convention.
  * NINA often omits `siderealTimeHours`; compute from UTC + site longitude (east-positive).
  */
-export function localSiderealTimeHours(date: Date, longitudeDeg: number = OBS_LON_DEG): number {
+export function localSiderealTimeHours(
+  date: Date,
+  longitudeDeg: number = currentObservatorySite().observerLonDeg
+): number {
   const jd = date.getTime() / 86400000 + 2440587.5
   const t = (jd - 2451545.0) / 36525
   let gmstDeg =

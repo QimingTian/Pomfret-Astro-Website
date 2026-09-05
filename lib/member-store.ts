@@ -809,81 +809,6 @@ export async function removeMemberSiteAffiliation(
   return { ok: true, becameGuest: memberships.length === 0 }
 }
 
-export async function setMemberAsAdmin(
-  targetUserId: string
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  if (!targetUserId) return { ok: false, error: 'Member id is required.' }
-
-  const users = await readUsers()
-  const idx = users.findIndex((u) => u.id === targetUserId)
-  if (idx < 0) return { ok: false, error: 'Member not found.' }
-  const target = users[idx]!
-  const alreadySiteAdmin = target.memberships.some(
-    (m) => m.siteId === DEFAULT_OBSERVATORY_SITE_ID && m.siteRole === 'observatory_admin'
-  )
-  if (target.systemRole === 'pomfret_astro_admin' || alreadySiteAdmin) {
-    return { ok: false, error: 'This member is already an administrator.' }
-  }
-
-  const memberships = [...target.memberships]
-  const pomfretIdx = memberships.findIndex((m) => m.siteId === DEFAULT_OBSERVATORY_SITE_ID)
-  if (pomfretIdx >= 0) {
-    memberships[pomfretIdx] = { ...memberships[pomfretIdx]!, siteRole: 'observatory_admin' }
-  } else {
-    memberships.push({
-      siteId: DEFAULT_OBSERVATORY_SITE_ID,
-      siteRole: 'observatory_admin',
-      imagingApprovedAt: target.imagingApprovedAt ?? new Date().toISOString(),
-      imagingRejectedAt: target.imagingRejectedAt ?? null,
-    })
-  }
-
-  users[idx] = withDerivedRoleFields({
-    ...target,
-    systemRole: 'user',
-    memberships,
-    updatedAt: new Date().toISOString(),
-  })
-  await writeUsers(users)
-  return { ok: true }
-}
-
-/** Demote admin → member. Only `BOOTSTRAP_ADMIN_EMAILS` actors; cannot demote bootstrap peers or self. */
-export async function setMemberAsMember(
-  actorUserId: string,
-  targetUserId: string
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  if (!targetUserId) return { ok: false, error: 'Member id is required.' }
-  if (actorUserId === targetUserId) {
-    return { ok: false, error: 'You cannot demote your own account.' }
-  }
-
-  const users = await readUsers()
-  const actor = users.find((u) => u.id === actorUserId)
-  if (!actor || !isBootstrapAdminEmail(actor.email)) {
-    return { ok: false, error: 'Only bootstrap administrators can demote admins.' }
-  }
-
-  const idx = users.findIndex((u) => u.id === targetUserId)
-  if (idx < 0) return { ok: false, error: 'Member not found.' }
-  const target = users[idx]!
-  if (!isAdminUser(target)) {
-    return { ok: false, error: 'This account is already a member.' }
-  }
-  if (isBootstrapAdminEmail(target.email)) {
-    return { ok: false, error: 'Bootstrap administrator accounts cannot be demoted.' }
-  }
-
-  users[idx] = withDerivedRoleFields({
-    ...target,
-    systemRole: 'user',
-    memberships: target.memberships.map((m) => ({ ...m, siteRole: 'observatory_member' as const })),
-    updatedAt: new Date().toISOString(),
-  })
-  await writeUsers(users)
-  return { ok: true }
-}
-
 export async function markMemberEmailVerified(userId: string): Promise<MemberUser | null> {
   const users = await readUsers()
   const idx = users.findIndex((u) => u.id === userId)
@@ -913,51 +838,6 @@ export async function markMemberEmailVerified(userId: string): Promise<MemberUse
   users[idx] = updated
   await writeUsers(users)
   return updated
-}
-
-export async function setMemberImagingApproval(
-  targetUserId: string,
-  action: 'approve' | 'reject',
-  siteId: string = DEFAULT_OBSERVATORY_SITE_ID
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  if (!targetUserId) return { ok: false, error: 'Member id is required.' }
-  const users = await readUsers()
-  const idx = users.findIndex((u) => u.id === targetUserId)
-  if (idx < 0) return { ok: false, error: 'Member not found.' }
-  const target = users[idx]!
-  if (!target.emailVerifiedAt) {
-    return { ok: false, error: 'Member must verify email before imaging approval.' }
-  }
-  const now = new Date().toISOString()
-  let memberships = [...target.memberships]
-  const mIdx = memberships.findIndex((m) => m.siteId === siteId)
-  const nextMembership: SiteMembership =
-    action === 'approve'
-      ? {
-          siteId,
-          siteRole: mIdx >= 0 ? memberships[mIdx]!.siteRole : 'observatory_member',
-          imagingApprovedAt: now,
-          imagingRejectedAt: null,
-        }
-      : {
-          siteId,
-          siteRole: mIdx >= 0 ? memberships[mIdx]!.siteRole : 'observatory_member',
-          imagingApprovedAt: null,
-          imagingRejectedAt: now,
-        }
-  if (mIdx >= 0) memberships[mIdx] = nextMembership
-  else memberships.push(nextMembership)
-
-  const pomfret = membershipImagingForSite(memberships, DEFAULT_OBSERVATORY_SITE_ID)
-  users[idx] = withDerivedRoleFields({
-    ...target,
-    memberships,
-    imagingApprovedAt: pomfret.imagingApprovedAt,
-    imagingRejectedAt: pomfret.imagingRejectedAt,
-    updatedAt: now,
-  })
-  await writeUsers(users)
-  return { ok: true }
 }
 
 export async function updateMemberProfile(

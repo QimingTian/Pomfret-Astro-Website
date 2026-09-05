@@ -49,9 +49,10 @@ const nextConfig = {
       './End Night Session.json',
       './EStop.json',
       './Variables/index.csv',
+      './Variables/index.cygnus.csv',
     ],
-    '/api/imaging/variable-stars': ['./Variables/index.csv'],
-    '/api/imaging/variable-star-lookup': ['./Variables/index.csv'],
+    '/api/imaging/variable-stars': ['./Variables/index.csv', './Variables/index.cygnus.csv'],
+    '/api/imaging/variable-star-lookup': ['./Variables/index.csv', './Variables/index.cygnus.csv'],
   },
 }
 

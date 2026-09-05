@@ -1,6 +1,14 @@
 import { readFile } from 'fs/promises'
 import path from 'path'
 
+import {
+  DEFAULT_OBSERVATORY_SITE_ID,
+  isObservatorySiteId,
+  type ObservatorySiteId,
+} from '@/lib/observatory-sites'
+import { currentObservatorySiteId } from '@/lib/observatory-site-scope'
+import { variableStarCatalogRelativePath } from '@/lib/variable-star/vsx'
+
 export type VariableStarRow = {
   name: string
   raHours: number
@@ -14,7 +22,7 @@ export type VariableStarRow = {
   categories?: string[]
 }
 
-let cache: VariableStarRow[] | null = null
+const cacheBySite = new Map<string, VariableStarRow[]>()
 
 function parseCsvLine(line: string): string[] {
   const out: string[] = []
@@ -135,10 +143,17 @@ function parseIndexCsv(text: string): VariableStarRow[] {
   return out
 }
 
-async function readCatalogCsv(): Promise<string> {
+function resolveSiteId(siteId?: ObservatorySiteId | string | null): ObservatorySiteId {
+  if (siteId && isObservatorySiteId(siteId)) return siteId
+  const current = currentObservatorySiteId()
+  return isObservatorySiteId(current) ? current : DEFAULT_OBSERVATORY_SITE_ID
+}
+
+async function readCatalogCsv(siteId: ObservatorySiteId): Promise<string> {
+  const rel = variableStarCatalogRelativePath(siteId)
   const candidates = [
-    path.join(process.cwd(), 'Variables', 'index.csv'),
-    path.join(process.cwd(), '..', 'Variables', 'index.csv'),
+    path.join(process.cwd(), rel),
+    path.join(process.cwd(), '..', rel),
   ]
   for (const csvPath of candidates) {
     try {
@@ -148,17 +163,26 @@ async function readCatalogCsv(): Promise<string> {
     }
   }
   throw new Error(
-    'Variable star catalog missing (Variables/index.csv). Ensure it is deployed and included in outputFileTracingIncludes.',
+    `Variable star catalog missing (${rel}). Ensure it is deployed and included in outputFileTracingIncludes.`
   )
 }
 
-export async function loadVariableStarCatalog(): Promise<VariableStarRow[]> {
-  if (cache) return cache
-  const raw = await readCatalogCsv()
-  cache = parseIndexCsv(raw)
-  return cache
+export async function loadVariableStarCatalog(
+  siteId?: ObservatorySiteId | string | null
+): Promise<VariableStarRow[]> {
+  const id = resolveSiteId(siteId)
+  const cached = cacheBySite.get(id)
+  if (cached) return cached
+  const raw = await readCatalogCsv(id)
+  const rows = parseIndexCsv(raw)
+  cacheBySite.set(id, rows)
+  return rows
 }
 
-export function clearVariableStarCatalogCache(): void {
-  cache = null
+export function clearVariableStarCatalogCache(siteId?: ObservatorySiteId | string | null): void {
+  if (siteId == null) {
+    cacheBySite.clear()
+    return
+  }
+  cacheBySite.delete(resolveSiteId(siteId))
 }

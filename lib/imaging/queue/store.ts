@@ -1094,7 +1094,11 @@ export async function adminForceQueueStatus(
   const idx = mem.findIndex((r) => r.id === id)
   if (idx === -1) return { error: 'Not found' }
   const current = mem[idx]
-  if (current.status === 'completed' || current.status === 'failed' || current.status === 'rejected') {
+  // Admin Session Control may override failed → completed; other terminal states stay locked.
+  if (current.status === 'completed' || current.status === 'rejected') {
+    return { error: 'Request is already finished' }
+  }
+  if (current.status === 'failed' && status !== 'completed') {
     return { error: 'Request is already finished' }
   }
   const next: ImagingRequest = { ...current, status, updatedAt: nowIso() }

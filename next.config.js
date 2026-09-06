@@ -41,18 +41,21 @@ const nextConfig = {
   images: {
     domains: ['localhost'],
   },
-  outputFileTracingIncludes: {
-    '/*': [
-      './Classic DSO Imaging Sequence.json',
-      './Classic DSO Imaging Sequence Multi Filter.json',
-      './Variable Star Sequence.json',
-      './End Night Session.json',
-      './EStop.json',
-      './Variables/index.csv',
-      './Variables/index.cygnus.csv',
-    ],
-    '/api/imaging/variable-stars': ['./Variables/index.csv', './Variables/index.cygnus.csv'],
-    '/api/imaging/variable-star-lookup': ['./Variables/index.csv', './Variables/index.cygnus.csv'],
+  // Next 14.2 only applies tracing includes from experimental (top-level is ignored).
+  experimental: {
+    outputFileTracingIncludes: {
+      '/*': [
+        './Classic DSO Imaging Sequence.json',
+        './Classic DSO Imaging Sequence Multi Filter.json',
+        './Variable Star Sequence.json',
+        './End Night Session.json',
+        './EStop.json',
+        './Variables/index.csv',
+        './Variables/index.cygnus.csv',
+      ],
+      '/api/imaging/variable-stars': ['./Variables/index.csv', './Variables/index.cygnus.csv'],
+      '/api/imaging/variable-star-lookup': ['./Variables/index.csv', './Variables/index.cygnus.csv'],
+    },
   },
 }
 

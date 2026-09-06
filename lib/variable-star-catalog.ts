@@ -151,10 +151,21 @@ function resolveSiteId(siteId?: ObservatorySiteId | string | null): ObservatoryS
 
 async function readCatalogCsv(siteId: ObservatorySiteId): Promise<string> {
   const rel = variableStarCatalogRelativePath(siteId)
-  const candidates = [
-    path.join(process.cwd(), rel),
-    path.join(process.cwd(), '..', rel),
-  ]
+  // Keep site file names as string literals (not only via `rel`) so file tracers can see them.
+  const candidates =
+    siteId === 'cygnus'
+      ? [
+          path.join(process.cwd(), 'Variables', 'index.cygnus.csv'),
+          path.join(process.cwd(), '..', 'Variables', 'index.cygnus.csv'),
+          path.join(process.cwd(), rel),
+          path.join(process.cwd(), '..', rel),
+        ]
+      : [
+          path.join(process.cwd(), 'Variables', 'index.csv'),
+          path.join(process.cwd(), '..', 'Variables', 'index.csv'),
+          path.join(process.cwd(), rel),
+          path.join(process.cwd(), '..', rel),
+        ]
   for (const csvPath of candidates) {
     try {
       return await readFile(csvPath, 'utf-8')
@@ -163,7 +174,7 @@ async function readCatalogCsv(siteId: ObservatorySiteId): Promise<string> {
     }
   }
   throw new Error(
-    `Variable star catalog missing (${rel}). Ensure it is deployed and included in outputFileTracingIncludes.`
+    `Variable star catalog missing (${rel}). Ensure it is deployed and included in experimental.outputFileTracingIncludes.`
   )
 }
 

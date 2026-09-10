@@ -124,7 +124,9 @@ const KMH_TO_MS = 1 / 3.6
 type WeatherCacheEntry =
   | {
       ts: number
+      /** Legacy numeric cache slot: 0 when ASC sky clear, 100 otherwise (audit/compat). */
       cloudCover: number
+      ascSky: 'clear' | 'cloudy' | null
       openMeteoCloudCover: number | null
       rainDetected: boolean
       precipitation: number
@@ -209,6 +211,8 @@ async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
 
     let ascGateApplicable = false
     let cloudCover: number | null = null
+    let ascSky: 'clear' | 'cloudy' | null = null
+    let ascSkyClear: boolean | null = null
     let rainDetected = false
     let sequenceActive = false
     let ascStaleReason: string | null = 'no_camera'
@@ -220,9 +224,20 @@ async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
       const ascCloud = gate.ascCloud
       sequenceActive = gate.sequenceActive
       ascGateApplicable = isAscCloudGateApplicable(ascCloud, gate.sequenceActive)
-      const ascCloudCover = ascCloud?.cloudCoverPercent
-      cloudCover =
-        ascCloudCover != null && Number.isFinite(ascCloudCover) ? ascCloudCover : null
+      const sky = ascCloud?.sky
+      if (sky === 'clear' || sky === 'cloudy') {
+        ascSky = sky
+        ascSkyClear = sky === 'clear'
+        cloudCover = sky === 'clear' ? 0 : 100
+      } else {
+        const ascCloudCover = ascCloud?.cloudCoverPercent
+        cloudCover =
+          ascCloudCover != null && Number.isFinite(ascCloudCover) ? ascCloudCover : null
+        if (cloudCover != null) {
+          ascSkyClear = cloudCover < 20
+          ascSky = ascSkyClear ? 'clear' : 'cloudy'
+        }
+      }
       rainDetected = ascCloud?.rain?.detected === true
       ascStaleReason = ascGateApplicable
         ? null
@@ -233,6 +248,7 @@ async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
     }
 
     const weatherAllowed = evaluateObservatoryReadyWeather({
+      ascSkyClear,
       cloudCoverPercent: cloudCover,
       openMeteoCloudCoverPercent: openMeteo.cloudCoverPercent,
       rainDetected,
@@ -243,6 +259,7 @@ async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
     weatherCacheSet({
       ts: now,
       cloudCover: cloudCover ?? 100,
+      ascSky,
       openMeteoCloudCover: openMeteo.cloudCoverPercent,
       rainDetected,
       precipitation: rainDetected ? 1 : 0,
@@ -252,7 +269,7 @@ async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
       sequenceActive,
       ascStaleReason,
       weatherAllowed,
-      ascAvailable: ascGateApplicable && cloudCover != null,
+      ascAvailable: ascGateApplicable && ascSkyClear != null,
       ascFrameIso,
       ascModelPhase,
       ascLastError,
@@ -266,6 +283,7 @@ async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
     weatherCacheSet({
       ts: now,
       cloudCover: 100,
+      ascSky: null,
       openMeteoCloudCover: null,
       rainDetected: true,
       precipitation: 1,
@@ -292,6 +310,7 @@ function weatherDetailForAudit(now: number): Record<string, unknown> | null {
   if (!weatherCache) return null
   return {
     cloudCoverPercent: weatherCache.cloudCover,
+    ascSky: weatherCache.ascSky,
     cloudSource: weatherCache.ascGateApplicable ? 'asc_ai' : 'open_meteo_current',
     openMeteoCloudCoverPercent: weatherCache.openMeteoCloudCover,
     rainDetected: weatherCache.rainDetected,

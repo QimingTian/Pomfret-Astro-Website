@@ -1,16 +1,14 @@
 {
-  "version": "v1.1",
-  "label": "ASC AI Model Version 1.1",
-  "released": "2026-07-25",
-  "summary": "Retrained Night_Cloud_Model (Teachable Machine, Jul 25 2026). Day cloud and rain bundles unchanged from v1.",
-  "framework": "Teachable Machine Image (TensorFlow.js export)",
-  "cloudLabels": ["0", "10", "20", "30", "40", "50", "60", "70", "80", "90", "100"],
-  "bundles": {
-    "Day_Cloud_Model": "Cloud cover, nautical dawn → nautical dusk",
-    "Night_Cloud_Model": "Cloud cover, nautical dusk → nautical dawn (retrained 2026-07-25)",
-    "Day_Rain_Model": "Rain vs no rain, day phase",
-    "Night_Rain_Model": "Rain vs no rain, night phase"
+  "version": "v1",
+  "label": "ASC AI v1 — Clear/Cloudy + Rain (PyTorch ResNet18)",
+  "released": "2026-09-09",
+  "summary": "Next-gen ASC: one ResNet18 dual-head (sky ∈ {clear, cloudy}, rain ∈ {true, false}). More MFT data, tighter labels, stronger training than the Teachable Machine four-model stack. Ready cloud gate: sky == clear. Trained on 2135 MFT frames; frozen Test n=178 (sky ~93.8%, gate ~92.1%).",
+  "framework": "PyTorch (torchvision ResNet18)",
+  "checkpoint": "ASC_AI_v1/best.pt",
+  "outputs": {
+    "sky": ["clear", "cloudy"],
+    "rain": ["false", "true"]
   },
   "deployPathPi": "observatory/models/",
-  "notes": "v1.1 replaces Night_Cloud_Model weights only; previous backup on Pi at Night_Cloud_Model.bak-20260725."
+  "notes": "Removes Teachable Machine Day/Night Cloud+Rain models and ASC AI v0.6 from the repo. Frozen Test metrics in ASC_AI_v1/MANIFEST.json."
 }

@@ -67,7 +67,7 @@ export default function HomePage() {
   const [lastFrameAt, setLastFrameAt] = useState<Date | null>(null)
   const [obsMode, setObsMode] = useState<"manual" | "auto" | null>(null)
   const [serverObsStatus, setServerObsStatus] = useState<ObservatoryOverlayStatus | null>(null)
-  const [cloudPct, setCloudPct] = useState<number | null>(null)
+  const [ascSky, setAscSky] = useState<"clear" | "cloudy" | null>(null)
   const [windKmh, setWindKmh] = useState<number | null>(null)
   const [tempC, setTempC] = useState<number | null>(null)
   const [humidityPct, setHumidityPct] = useState<number | null>(null)
@@ -168,6 +168,7 @@ export default function HomePage() {
               lastStreamFrameIso?: string | null
               lastAutoFrameIso?: string | null
               ascCloud?: {
+                sky?: "clear" | "cloudy" | null
                 cloudCoverPercent?: number | null
                 rain?: { detected?: boolean } | null
               }
@@ -175,9 +176,16 @@ export default function HomePage() {
           }
         }
         const cam = data?.sensors?.allSkyCam
-        const ascCloud = cam?.ascCloud?.cloudCoverPercent
-        if (typeof ascCloud === "number" && Number.isFinite(ascCloud) && !cancelled) {
-          setCloudPct(ascCloud)
+        const skyRaw = cam?.ascCloud?.sky
+        if (!cancelled) {
+          if (skyRaw === "clear" || skyRaw === "cloudy") {
+            setAscSky(skyRaw)
+          } else {
+            const pct = cam?.ascCloud?.cloudCoverPercent
+            if (typeof pct === "number" && Number.isFinite(pct)) {
+              setAscSky(pct < 20 ? "clear" : "cloudy")
+            }
+          }
         }
         const rainDetected = cam?.ascCloud?.rain?.detected
         if (!cancelled) {
@@ -209,7 +217,7 @@ export default function HomePage() {
 
   const overlayRows = useMemo(() => {
     const obsText = observatoryOverlayStatusLabel(serverObsStatus)
-    const cloudText = cloudPct != null && Number.isFinite(cloudPct) ? `${Math.round(cloudPct)}%` : "—"
+    const cloudText = ascSky == null ? "—" : ascSky === "clear" ? "Clear" : "Cloudy"
     const windText = windKmh != null && Number.isFinite(windKmh) ? `${windKmh.toFixed(0)} km/h` : "—"
     const tempText = tempC != null && Number.isFinite(tempC) ? `${tempC.toFixed(1)}°C` : "—"
     const humText = humidityPct != null && Number.isFinite(humidityPct) ? `${Math.round(humidityPct)}%` : "—"
@@ -224,7 +232,7 @@ export default function HomePage() {
       ["Humidity", humText],
       ["Raining", rainingText],
     ]
-  }, [now, lastFrameAt, serverObsStatus, cloudPct, windKmh, tempC, humidityPct, raining])
+  }, [now, lastFrameAt, serverObsStatus, ascSky, windKmh, tempC, humidityPct, raining])
 
   return (
     <main>

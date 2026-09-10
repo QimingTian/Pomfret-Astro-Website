@@ -112,16 +112,20 @@ export async function fetchAscCloud(statusUrl?: string | null): Promise<AscCloud
   return ascCloud
 }
 
-/** Observatory Ready weather gate — ASC or Open-Meteo cloud; wind/precip from Open-Meteo. */
-export const OBSERVATORY_READY_MAX_ASC_CLOUD_PERCENT = 20
+/** Observatory Ready weather gate — ASC sky clear + no rain, or Open-Meteo cloud; wind/precip from Open-Meteo. */
 export const OBSERVATORY_READY_MAX_OPEN_METEO_CLOUD_PERCENT = 10
 export const OBSERVATORY_READY_MAX_WIND_MS = 10
 export const OBSERVATORY_READY_MAX_PRECIP_PROBABILITY = 20
+/** @deprecated ASC AI v1 uses clear/cloudy; kept for overlay/docs compatibility. */
+export const OBSERVATORY_READY_MAX_ASC_CLOUD_PERCENT = 20
 export const OBSERVATORY_READY_GATE_RULE =
-  'ASC AI cloud < 20% and no rain (when ASC gate applies) OR Open-Meteo cloud_cover < 10% (when ASC unavailable); wind_speed_10m < 10 m/s; precipitation_probability <= 20%'
+  'ASC AI sky clear and no rain (when ASC gate applies) OR Open-Meteo cloud_cover < 10% (when ASC unavailable); wind_speed_10m < 10 m/s; precipitation_probability <= 20%'
 
 export function evaluateObservatoryReadyWeather(args: {
-  cloudCoverPercent: number | null | undefined
+  /** When ASC gate applies: must be true (sky === clear). */
+  ascSkyClear?: boolean | null | undefined
+  /** @deprecated Prefer ascSkyClear. Legacy TM percent still accepted if sky missing. */
+  cloudCoverPercent?: number | null | undefined
   /** Open-Meteo cloud_cover when ASC cloud/rain gate does not apply. */
   openMeteoCloudCoverPercent?: number | null | undefined
   rainDetected: boolean | undefined
@@ -132,10 +136,17 @@ export function evaluateObservatoryReadyWeather(args: {
 }): boolean {
   const ascGateApplicable = args.ascGateApplicable !== false
   if (ascGateApplicable) {
-    const cloud = args.cloudCoverPercent
-    if (cloud == null || !Number.isFinite(cloud)) return false
     if (args.rainDetected === true) return false
-    if (cloud >= OBSERVATORY_READY_MAX_ASC_CLOUD_PERCENT) return false
+    if (args.ascSkyClear === true) {
+      /* ok */
+    } else if (args.ascSkyClear === false) {
+      return false
+    } else {
+      // Legacy TM payloads without sky: fall back to < 20% cloud.
+      const cloud = args.cloudCoverPercent
+      if (cloud == null || !Number.isFinite(cloud)) return false
+      if (cloud >= OBSERVATORY_READY_MAX_ASC_CLOUD_PERCENT) return false
+    }
   } else {
     const omCloud = args.openMeteoCloudCoverPercent
     if (omCloud == null || !Number.isFinite(omCloud)) return false

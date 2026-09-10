@@ -12,8 +12,8 @@ import {
   allSkyCameraStatusUrl,
   DEFAULT_ALL_SKY_STREAM_URL,
   defaultAllSkySequenceStatusUrl,
-  OBSERVATORY_READY_MAX_ASC_CLOUD_PERCENT,
 } from '@/lib/asc-cloud'
+import type { AscSkyLabel } from '@/lib/types'
 import { moonPhaseInfo } from '@/lib/moon-avoidance'
 import {
   type AstroConditionScale,
@@ -116,7 +116,7 @@ export default function AllSkyCameraView() {
   const [lastFrameAt, setLastFrameAt] = useState<Date | null>(null)
   const [exposureUs, setExposureUs] = useState<number | null>(null)
   const [gain, setGain] = useState<number | null>(null)
-  const [cloudPct, setCloudPct] = useState<number | null>(null)
+  const [ascSky, setAscSky] = useState<AscSkyLabel | null>(null)
   const [raining, setRaining] = useState<boolean | null>(null)
   const [windKmh, setWindKmh] = useState<number | null>(null)
   const [windGustKmh, setWindGustKmh] = useState<number | null>(null)
@@ -241,7 +241,7 @@ export default function AllSkyCameraView() {
       setLastFrameAt(null)
       setExposureUs(null)
       setGain(null)
-      setCloudPct(null)
+      setAscSky(null)
       setRaining(null)
       return
     }
@@ -268,6 +268,7 @@ export default function AllSkyCameraView() {
                 photoExposureUs?: number | null
               } | null
               ascCloud?: {
+                sky?: AscSkyLabel | null
                 cloudCoverPercent?: number | null
                 rain?: {
                   detected?: boolean
@@ -277,13 +278,16 @@ export default function AllSkyCameraView() {
           }
         }
         const cam = data?.sensors?.allSkyCam
-        const ascCloud = cam?.ascCloud?.cloudCoverPercent
-        if (
-          typeof ascCloud === 'number' &&
-          Number.isFinite(ascCloud) &&
-          !cancelled
-        ) {
-          setCloudPct(ascCloud)
+        const skyRaw = cam?.ascCloud?.sky
+        if (!cancelled) {
+          if (skyRaw === 'clear' || skyRaw === 'cloudy') {
+            setAscSky(skyRaw)
+          } else {
+            const pct = cam?.ascCloud?.cloudCoverPercent
+            if (typeof pct === 'number' && Number.isFinite(pct)) {
+              setAscSky(pct < 20 ? 'clear' : 'cloudy')
+            }
+          }
         }
         const rainDetected = cam?.ascCloud?.rain?.detected
         if (!cancelled) {
@@ -349,15 +353,8 @@ export default function AllSkyCameraView() {
             : '—'
 
     const cloudText =
-      ascUnavailable || cloudPct == null || !Number.isFinite(cloudPct)
-        ? '—'
-        : `${Math.round(cloudPct)}%`
-    const cloudValueRed =
-      !ascUnavailable &&
-      cloudPct != null &&
-      Number.isFinite(cloudPct) &&
-      cloudPct >= OBSERVATORY_READY_MAX_ASC_CLOUD_PERCENT
-
+      ascUnavailable || ascSky == null ? '—' : ascSky === 'clear' ? 'Clear' : 'Cloudy'
+    const cloudValueRed = !ascUnavailable && ascSky === 'cloudy'
     const transparencyText = formatAstroConditionLabel(transparency)
     const transparencyValueRed = astroConditionIsRed(transparency)
     const seeingText = formatAstroConditionLabel(seeing)
@@ -518,7 +515,7 @@ export default function AllSkyCameraView() {
     exposureUs,
     gain,
     observatoryStatus,
-    cloudPct,
+    ascSky,
     transparency,
     seeing,
     usAqi,

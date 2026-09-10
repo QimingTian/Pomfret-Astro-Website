@@ -38,7 +38,7 @@ The Next.js application under `app/` provides the member and admin dashboards (W
 
 Domain logic resides in `lib/`. Imaging is concentrated under `lib/imaging/`: the multi-night project planner, queue store and reconcile, session board, hold and release, emergency stop, weather-safety ESTOP, and NINA JSON helpers. Related modules outside that package include `lib/asc-cloud.ts` for the **Ready** gate, `lib/tonight-weather-gate.ts` for schedule weather, `lib/observatory-status-store.ts` for mode and status, `lib/schedule-strip.ts` and `lib/sunrise-window.ts` for night windows, and `lib/moon-avoidance.ts` for filter-dependent moon separation. Persistence helpers are in `lib/kv-rest.ts`. R2 download and object maps are in `lib/r2-session-download.ts`.
 
-On site, `observatory/nina_agent.py` is the Windows poller. It builds NINA JSON from `observatory/nina_templates/` (copies of the repo-root sequence templates). `observatory/camera_service.py` serves the all-sky MJPEG stream and status endpoints. `observatory/asc_cloud_ai.py` runs the Teachable Machine cloud and rain models. The repository-root templates `EStop.json` and `End Night Session.json` are the NINA sequences used for emergency close and normal end-of-night shutdown.
+On site, `observatory/nina_agent.py` is the Windows poller. It builds NINA JSON from `observatory/nina_templates/` (copies of the repo-root sequence templates). `observatory/camera_service.py` serves the all-sky MJPEG stream and status endpoints. `observatory/asc_cloud_ai.py` runs ASC AI v1 (PyTorch ResNet18 dual-head: clear/cloudy + rain). The repository-root templates `EStop.json` and `End Night Session.json` are the NINA sequences used for emergency close and normal end-of-night shutdown.
 
 Legacy import paths such as `lib/imaging-emergency-stop.ts` re-export the current module layout for compatibility.
 
@@ -98,7 +98,7 @@ Administrators may PATCH mode and status. Leaving the maintenance lock while **E
 
 Weather participates in three independent decisions, plus a display-only astro layer.
 
-The **Ready** gate decides whether the observatory may accept work at the present moment. When the ASC gate applies, ASC cloud must be below **20%** and rain must not be detected. When ASC is stale or an all-sky sequence is active, the gate falls back to Open-Meteo cloud cover below **10%**. Wind must remain under **10 m/s**, and precipitation probability must remain at or below **20%**. Since v6.3.1, 7Timer transparency and seeing are never **Ready** gates; they appear only on the all-sky overlay and are highlighted when the scale is **5** or worse.
+The **Ready** gate decides whether the observatory may accept work at the present moment. When the ASC gate applies, ASC sky must be **clear** and rain must not be detected. When ASC is stale or an all-sky sequence is active, the gate falls back to Open-Meteo cloud cover below **10%**. Wind must remain under **10 m/s**, and precipitation probability must remain at or below **20%**. Since v6.3.1, 7Timer transparency and seeing are never **Ready** gates; they appear only on the all-sky overlay and are highlighted when the scale is **5** or worse.
 
 The **tonight schedule** gate decides which hours may receive planned sessions. It uses hourly Open-Meteo near the site. An hour is permitted only when cloud cover is under **10%**, precipitation probability is under **10%**, and wind is at most **10 m/s**. Across the imaging night a global hard block also applies: every counting hour must keep precip under **10%**, at most **three** hours may exceed **10 m/s** of wind, and at least **two consecutive** hours must pass all three checks. Hours that have already fully ended after night start no longer veto the remainder of the night. Each candidate session requires at least **80%** of its duration inside permitted intervals. The Remote tonight-permitted header further restricts its counting window to nautical dusk through nautical dawn.
 
@@ -164,7 +164,7 @@ Moon avoidance uses a Lorentzian separation model compatible with ACP and NINA. 
 
 ## 14. All-sky camera and ASC AI
 
-The Pi serves the MJPEG stream at `https://cam.pomfretastro.org/camera/stream` and exposes camera and sequence status endpoints consumed by the cloud. ASC inference returns cloud cover percent, a rain detection with confidence and label, a day or night model phase, and staleness metadata. When a long all-sky sequence is running, the **Ready** and weather-safety paths treat ASC as not applicable so a frozen sky frame cannot falsely gate or arm the observatory. Auto exposure and white balance history may be recorded for administrators through the camera auto-tuning API.
+The Pi serves the MJPEG stream at `https://cam.pomfretastro.org/camera/stream` and exposes camera and sequence status endpoints consumed by the cloud. ASC inference (v1 PyTorch) returns sky ∈ {clear, cloudy}, a rain detection with confidence and label, a day or night phase tag, and staleness metadata. When a long all-sky sequence is running, the **Ready** and weather-safety paths treat ASC as not applicable so a frozen sky frame cannot falsely gate or arm the observatory. Auto exposure and white balance history may be recorded for administrators through the camera auto-tuning API.
 
 ---
 
@@ -224,7 +224,7 @@ Administrator activity is appended to a bounded audit log with kinds such as eme
 
 When the agent requests work, delivery follows this order. An undelivered **ESTOP** sequence is delivered immediately. While **ESTOP** blocks, or while NINA is freshly running, ordinary imaging is refused. Without **Ready**, before the planned start, below **30°** altitude, or inside an admin closed window, candidates are skipped or refused. If **end night** is due and no imaging remains, the end-night template is delivered. Otherwise a due, **Ready**, sufficiently high **scheduled** session is delivered as ordinary NINA JSON.
 
-Relative to one another, the **Ready** gate allows ASC cloud under **20%**, while the schedule hourly cloud rule requires under **10%**. Schedule precip is stricter than **Ready** precip. **Weather-safety ESTOP** uses site precip above **20%**, the storm ring, and high-confidence ASC rain. Display-only 7Timer values never change those gates.
+Relative to one another, the **Ready** gate allows ASC **sky clear**, while the schedule hourly cloud rule requires under **10%**. Schedule precip is stricter than **Ready** precip. **Weather-safety ESTOP** uses site precip above **20%**, the storm ring, and high-confidence ASC rain. Display-only 7Timer values never change those gates.
 
 ---
 

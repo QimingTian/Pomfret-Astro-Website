@@ -1,19 +1,10 @@
-# ASC AI Models
+# ASC AI models (Pi)
 
-**Current release: [ASC AI Model Version 1](ASC_AI_MODEL_VERSION.json)** (`v1`)
+**Current:** ASC AI **v1** — single PyTorch ResNet18 dual-head (`observatory/models/ASC_AI_v1/best.pt`)
 
-Teachable Machine exports used for all-sky **cloud cover %** and **rain** inference on the Pi (`observatory/asc_cloud_ai.py`).
+Outputs:
 
-| Bundle | Role |
-|--------|------|
-| `Day_Cloud_Model` | Cloud % during nautical dawn → nautical dusk |
-| `Night_Cloud_Model` | Cloud % during nautical dusk → nautical dawn |
-| `Day_Rain_Model` | Rain detection, day phase |
-| `Night_Rain_Model` | Rain detection, night phase |
+- `sky`: `clear` | `cloudy` — Ready cloud gate requires `clear`
+- `rain`: detected true/false — same rain gate as before
 
-Runtime copies live in `observatory/models/` (deployed to the Pi with `camera_service`).
-
-## Versioning
-
-- **v1** — initial production set (see `ASC_AI_MODEL_VERSION.json`).
-- **v2+** — future stronger models: update weights under each `*_Model/` folder, bump `version` / `label` in `ASC_AI_MODEL_VERSION.json` (both here and `observatory/models/`), and tag the repo (e.g. `asc-ai-v2`).
+Replaces the Teachable Machine black-box stack (four separate day/night cloud + rain models) and the interim ASC AI v0.6 checkpoint. Those artifacts are removed from this repository.

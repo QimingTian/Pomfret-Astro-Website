@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke tests for ASC all-sky AI (skip inference when TensorFlow is unavailable)."""
+"""Smoke tests for ASC all-sky AI v1 (skip inference when torch is unavailable)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ import sys
 import unittest
 from datetime import datetime, timezone
 
-# Allow running from repo root or observatory/
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
@@ -31,99 +30,55 @@ class TestAscSolar(unittest.TestCase):
         self.assertFalse(obs_solar.is_asc_model_daytime(now))
 
 
-class TestAscModelsPresent(unittest.TestCase):
-    def test_model_directories_exist(self):
+class TestAscV1CheckpointPresent(unittest.TestCase):
+    def test_checkpoint_and_manifest(self):
         models_dir = os.path.join(_HERE, 'models')
-        for name in (
-            'Day_Cloud_Model',
-            'Night_Cloud_Model',
-            'Day_Rain_Model',
-            'Night_Rain_Model',
-        ):
-            path = os.path.join(models_dir, name)
-            self.assertTrue(os.path.isdir(path), path)
-            self.assertTrue(os.path.isfile(os.path.join(path, 'model.json')))
-            self.assertTrue(os.path.isfile(os.path.join(path, 'metadata.json')))
-            self.assertTrue(os.path.isfile(os.path.join(path, 'weights.bin')))
+        ckpt = os.path.join(models_dir, 'ASC_AI_v1', 'best.pt')
+        version = os.path.join(models_dir, 'ASC_AI_MODEL_VERSION.json')
+        self.assertTrue(os.path.isfile(ckpt), ckpt)
+        self.assertTrue(os.path.isfile(version), version)
+        import json
+
+        with open(version, encoding='utf-8') as f:
+            data = json.load(f)
+        self.assertEqual(data.get('version'), 'v1')
 
 
-class TestCloudCoverMath(unittest.TestCase):
-    def test_cloud_cover_argmax_when_confident(self):
+class TestAscStatusPayloadShape(unittest.TestCase):
+    def test_sequence_active_marks_stale(self):
         import asc_cloud_ai
 
-        labels = ['0', '10', '20', '30']
-        probs = [0.05, 0.55, 0.30, 0.10]
-        cover, conf = asc_cloud_ai._cloud_expected_percent(probs, labels)
-        self.assertEqual(cover, 10)
-        self.assertAlmostEqual(conf, 0.55)
-
-    def test_cloud_cover_weighted_when_uncertain(self):
-        import asc_cloud_ai
-
-        labels = ['0', '10', '20']
-        probs = [0.40, 0.35, 0.25]
-        cover, conf = asc_cloud_ai._cloud_expected_percent(probs, labels)
-        self.assertEqual(cover, 8)  # weighted 8.5 → 8
-        self.assertAlmostEqual(conf, 0.40)
-
-
-class TestAscPreprocess(unittest.TestCase):
-    def test_preprocess_tm_normalization(self):
-        try:
-            import asc_cloud_ai
-            import numpy as np
-            from PIL import Image
-        except ImportError:
-            self.skipTest('asc_cloud_ai or Pillow not importable')
-
-        img = Image.new('RGB', (1920, 1080), color=(128, 128, 128))
-        batch = asc_cloud_ai._preprocess(img)
-        self.assertEqual(batch.shape, (1, 224, 224, 3))
-        self.assertGreaterEqual(float(batch.min()), -1.01)
-        self.assertLessEqual(float(batch.max()), 1.01)
-        # Mid-gray → ~0 after (x/127 - 1)
-        self.assertAlmostEqual(float(batch[0, 112, 112, 0]), 0.0, delta=0.05)
-
-
-class TestAscStatusPayload(unittest.TestCase):
-    def test_status_payload_stale_during_sequence(self):
-        import asc_cloud_ai
-
-        asc_cloud_ai._last_result = {
-            'cloudCoverPercent': 80,
-            'rain': {'detected': True},
-        }
         payload = asc_cloud_ai.status_payload(sequence_active=True)
         self.assertIsNotNone(payload)
+        assert payload is not None
         self.assertTrue(payload.get('stale'))
         self.assertEqual(payload.get('staleReason'), 'sequence_active')
-        self.assertIsNone(payload.get('cloudCoverPercent'))
+        self.assertIsNone(payload.get('sky'))
 
 
-class TestAscInference(unittest.TestCase):
-    def test_analyze_frame_with_dummy_image(self):
+class TestAscInferenceOptional(unittest.TestCase):
+    def test_analyze_frame_when_torch_available(self):
         try:
-            import asc_cloud_ai
+            import torch  # noqa: F401
             from PIL import Image
+            import asc_cloud_ai
         except ImportError:
-            self.skipTest('asc_cloud_ai or Pillow not importable')
+            self.skipTest('torch or Pillow not installed')
 
-        try:
-            import tensorflow  # noqa: F401
-        except ImportError:
-            self.skipTest('tensorflow not installed')
+        ckpt = os.path.join(_HERE, 'models', 'ASC_AI_v1', 'best.pt')
+        if not os.path.isfile(ckpt):
+            self.skipTest('checkpoint missing')
 
-        img = Image.new('RGB', (640, 480), color=(40, 40, 80))
-        result = asc_cloud_ai.analyze_frame(img)
-        self.assertIn('cloudCoverPercent', result)
-        self.assertIn('modelPhase', result)
-        self.assertIn('rain', result)
+        img = Image.new('RGB', (640, 480), color=(20, 20, 40))
+        result = asc_cloud_ai.analyze_frame(img, datetime(2026, 6, 15, 6, 0, tzinfo=timezone.utc))
         if result.get('lastError'):
-            self.skipTest(f"inference unavailable: {result['lastError']}")
-        self.assertIsInstance(result['cloudCoverPercent'], int)
-        self.assertGreaterEqual(result['cloudCoverPercent'], 0)
-        self.assertLessEqual(result['cloudCoverPercent'], 100)
-        self.assertIn(result['modelPhase'], ('day', 'night'))
+            self.fail(result['lastError'])
+        self.assertIn(result.get('sky'), ('clear', 'cloudy'))
+        self.assertIsInstance(result.get('skyConfidence'), float)
+        rain = result.get('rain') or {}
+        self.assertIn('detected', rain)
+        self.assertIn(rain.get('label'), ('Rain', 'No Rain'))
+        self.assertEqual(result.get('modelVersion', {}).get('version'), 'v1')
 
 
 if __name__ == '__main__':

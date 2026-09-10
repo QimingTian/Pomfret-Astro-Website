@@ -24,8 +24,8 @@ test('parseAscCloudFromStatus extracts ascCloud payload', () => {
     sensors: {
       allSkyCam: {
         ascCloud: {
-          cloudCoverPercent: 40,
-          cloudConfidence: 0.91,
+          sky: 'cloudy',
+          skyConfidence: 0.91,
           modelPhase: 'night',
           frameIso: '2026-06-01T02:00:00+00:00',
           rain: { detected: false, confidence: 0.12, label: 'No Rain' },
@@ -35,7 +35,7 @@ test('parseAscCloudFromStatus extracts ascCloud payload', () => {
     },
   }
   const parsed = parseAscCloudFromStatus(payload)
-  assert.equal(parsed?.cloudCoverPercent, 40)
+  assert.equal(parsed?.sky, 'cloudy')
   assert.equal(parsed?.modelPhase, 'night')
   assert.equal(parsed?.rain?.label, 'No Rain')
 })
@@ -45,10 +45,10 @@ test('parseAscCloudFromStatus returns null when missing', () => {
   assert.equal(parseAscCloudFromStatus({ sensors: {} }), null)
 })
 
-test('evaluateObservatoryReadyWeather uses ASC cloud and rain with Open-Meteo wind and precip', () => {
+test('evaluateObservatoryReadyWeather uses ASC sky clear and rain with Open-Meteo wind and precip', () => {
   assert.equal(
     evaluateObservatoryReadyWeather({
-      cloudCoverPercent: 9,
+      ascSkyClear: true,
       rainDetected: false,
       windSpeedMs: 9,
       precipProbabilityPercent: 20,
@@ -57,7 +57,7 @@ test('evaluateObservatoryReadyWeather uses ASC cloud and rain with Open-Meteo wi
   )
   assert.equal(
     evaluateObservatoryReadyWeather({
-      cloudCoverPercent: 99,
+      ascSkyClear: false,
       openMeteoCloudCoverPercent: 9,
       rainDetected: true,
       windSpeedMs: 9,
@@ -68,7 +68,7 @@ test('evaluateObservatoryReadyWeather uses ASC cloud and rain with Open-Meteo wi
   )
   assert.equal(
     evaluateObservatoryReadyWeather({
-      cloudCoverPercent: 99,
+      ascSkyClear: false,
       openMeteoCloudCoverPercent: 12,
       rainDetected: true,
       windSpeedMs: 9,
@@ -79,24 +79,50 @@ test('evaluateObservatoryReadyWeather uses ASC cloud and rain with Open-Meteo wi
   )
   assert.equal(
     evaluateObservatoryReadyWeather({
-      cloudCoverPercent: 9,
+      ascSkyClear: true,
       rainDetected: false,
       windSpeedMs: 9,
       precipProbabilityPercent: 21,
-      ascGateApplicable: false,
-      openMeteoCloudCoverPercent: 5,
     }),
     false
   )
   assert.equal(
     evaluateObservatoryReadyWeather({
-      cloudCoverPercent: 9,
+      ascSkyClear: true,
       rainDetected: false,
-      windSpeedMs: 9,
-      precipProbabilityPercent: 21,
+      windSpeedMs: 5,
+      precipProbabilityPercent: 0,
+    }),
+    true
+  )
+  assert.equal(
+    evaluateObservatoryReadyWeather({
+      ascSkyClear: false,
+      rainDetected: false,
+      windSpeedMs: 5,
+      precipProbabilityPercent: 0,
     }),
     false
   )
+  assert.equal(
+    evaluateObservatoryReadyWeather({
+      ascSkyClear: true,
+      rainDetected: true,
+      windSpeedMs: 5,
+      precipProbabilityPercent: 0,
+    }),
+    false
+  )
+  assert.equal(
+    evaluateObservatoryReadyWeather({
+      ascSkyClear: null,
+      rainDetected: false,
+      windSpeedMs: 5,
+      precipProbabilityPercent: 0,
+    }),
+    false
+  )
+  // Legacy TM percent fallback when sky missing
   assert.equal(
     evaluateObservatoryReadyWeather({
       cloudCoverPercent: 19,
@@ -117,50 +143,14 @@ test('evaluateObservatoryReadyWeather uses ASC cloud and rain with Open-Meteo wi
   )
   assert.equal(
     evaluateObservatoryReadyWeather({
-      cloudCoverPercent: 21,
-      rainDetected: false,
-      windSpeedMs: 5,
-      precipProbabilityPercent: 0,
-    }),
-    false
-  )
-  assert.equal(
-    evaluateObservatoryReadyWeather({
-      cloudCoverPercent: 10,
-      rainDetected: true,
-      windSpeedMs: 5,
-      precipProbabilityPercent: 0,
-    }),
-    false
-  )
-  assert.equal(
-    evaluateObservatoryReadyWeather({
-      cloudCoverPercent: null,
-      rainDetected: false,
-      windSpeedMs: 5,
-      precipProbabilityPercent: 0,
-    }),
-    false
-  )
-  assert.equal(
-    evaluateObservatoryReadyWeather({
-      cloudCoverPercent: 10,
+      ascSkyClear: true,
       rainDetected: false,
       windSpeedMs: 10,
       precipProbabilityPercent: 0,
     }),
     false
   )
-  assert.equal(
-    evaluateObservatoryReadyWeather({
-      cloudCoverPercent: 9,
-      rainDetected: false,
-      windSpeedMs: 5,
-      precipProbabilityPercent: 0,
-    }),
-    true
-  )
   assert.equal(isAscCloudGateApplicable({ stale: true }, false), false)
-  assert.equal(isAscCloudGateApplicable({ cloudCoverPercent: 10 }, true), false)
-  assert.equal(isAscCloudGateApplicable({ cloudCoverPercent: 10 }, false), true)
+  assert.equal(isAscCloudGateApplicable({ sky: 'clear' }, true), false)
+  assert.equal(isAscCloudGateApplicable({ sky: 'clear' }, false), true)
 })

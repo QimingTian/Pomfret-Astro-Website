@@ -50,8 +50,17 @@ export interface AscCloudModelVersion {
   released?: string
 }
 
+/** ASC AI v1: clear/cloudy sky + rain (no cloud %). */
+export type AscSkyLabel = 'clear' | 'cloudy'
+
 export interface AscCloudInference {
+  /** ASC AI v1 sky class. Ready cloud gate requires `clear`. */
+  sky?: AscSkyLabel | null
+  skyConfidence?: number | null
+  skyProbs?: { clear?: number; cloudy?: number } | null
+  /** @deprecated TM-era percent; ASC AI v1 omits this. */
   cloudCoverPercent?: number | null
+  /** @deprecated Prefer skyConfidence. */
   cloudConfidence?: number | null
   modelPhase?: 'day' | 'night' | null
   modelVersion?: AscCloudModelVersion | null

@@ -19,21 +19,21 @@ type AlsBridge = {
 }
 
 let alsBridge: AlsBridge | null = null
-let clientSiteId: ObservatorySiteId = DEFAULT_OBSERVATORY_SITE_ID
+let clientSiteId: ObservatorySiteId | null = null
 
 /** Called once from server-only `observatory-site-als.ts`. */
 export function registerObservatorySiteAls(bridge: AlsBridge): void {
   alsBridge = bridge
 }
 
-export function setClientObservatorySiteId(id: ObservatorySiteId): void {
+export function setClientObservatorySiteId(id: ObservatorySiteId | null): void {
   clientSiteId = id
 }
 
 export function currentObservatorySiteId(): ObservatorySiteId {
   const fromAls = alsBridge?.getStore()
   if (fromAls) return fromAls
-  return clientSiteId
+  return clientSiteId ?? DEFAULT_OBSERVATORY_SITE_ID
 }
 
 export function currentObservatorySite(): ObservatorySite {

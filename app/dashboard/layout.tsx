@@ -5,11 +5,14 @@ import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { MemberProvider, useMember } from '@/hooks/use-member'
 import { NightModeToggle } from '@/components/night-mode-toggle'
-import { ObservatorySiteProvider } from '@/components/observatory-site-provider'
+import { ObservatorySiteProvider, useObservatorySite } from '@/components/observatory-site-provider'
 import {
+  DASHBOARD_ABOUT_LINKS,
+  DASHBOARD_TOOL_LINKS,
+  DashboardAboutTrigger,
+  DashboardToolsTrigger,
   ObservatorySiteHeaderShell,
   ObservatorySiteMenuProvider,
-  ObservatorySitePanel,
   ObservatorySiteTrigger,
 } from '@/components/observatory-site-switcher'
 import { glassNavLink, glassNavLinkActive, glassNavLinkMobile, glassPillIcon } from '@/lib/glass-ui'
@@ -39,19 +42,18 @@ function DashboardChrome({ children }: { children: React.ReactNode }) {
   const isHomePage = pathname === '/dashboard' || pathname === '/dashboard/about'
   const [menuOpen, setMenuOpen] = useState(false)
   const member = useMember()
+  const { hasSite } = useObservatorySite()
+  const accountHref = '/dashboard/account'
+  const accountLabel = accountNavLabel(member)
 
   useEffect(() => {
     void member.refresh()
   }, [pathname, member.refresh])
 
-  const navItems = [
-    { href: '/dashboard/about', label: 'About' },
-    { href: '/dashboard/weather', label: 'Weather' },
-    { href: '/dashboard/plan', label: 'Plan' },
-    { href: '/dashboard/remote', label: 'Remote' },
-    { href: '/dashboard/gallery', label: 'Data' },
-    { href: '/dashboard/contact', label: 'Team' },
-    { href: '/dashboard/account', label: accountNavLabel(member) },
+  const mobileNavItems = [
+    ...DASHBOARD_ABOUT_LINKS,
+    ...(hasSite ? [...DASHBOARD_TOOL_LINKS] : []),
+    { href: accountHref, label: accountLabel },
   ]
 
   const navItemActive = (href: string) => {
@@ -62,9 +64,9 @@ function DashboardChrome({ children }: { children: React.ReactNode }) {
   return (
     <div className="dashboard-surface min-h-screen text-apple-dark dark:text-[#eee9dc]">
       <ObservatorySiteMenuProvider>
-        <ObservatorySiteHeaderShell className="sticky top-0 z-50 relative bg-white/75 dark:bg-[#09090a] backdrop-blur-xl">
-          <div className="mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-10">
-            <div className="h-20 flex items-center justify-between gap-4">
+        <ObservatorySiteHeaderShell className="sticky top-0 z-50 relative overflow-visible border-b border-black/10 bg-white/75 backdrop-blur-xl dark:border-white/10 dark:bg-[#09090a]">
+          <div className="mx-auto max-w-[1400px] overflow-visible px-4 sm:px-6 lg:px-10">
+            <div className="flex h-20 items-center justify-between gap-4 overflow-visible">
               <div className="flex items-center gap-2 sm:gap-3">
                 <button
                   type="button"
@@ -81,33 +83,29 @@ function DashboardChrome({ children }: { children: React.ReactNode }) {
                 </Link>
               </div>
 
-              <div className="flex items-center gap-2">
-                <nav className="hidden md:flex items-center gap-2">
-                  {navItems.map((item) => {
-                    const isActive = navItemActive(item.href)
-                    return (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        className={isActive ? glassNavLinkActive : glassNavLink}
-                      >
-                        <span>{item.label}</span>
-                      </Link>
-                    )
-                  })}
+              <div className="flex h-full items-stretch gap-2">
+                <nav className="hidden md:flex items-stretch gap-2">
+                  <DashboardAboutTrigger />
+                  <DashboardToolsTrigger />
+                  <Link
+                    href={accountHref}
+                    className={`${navItemActive(accountHref) ? glassNavLinkActive : glassNavLink} self-center`}
+                  >
+                    <span>{accountLabel}</span>
+                  </Link>
                 </nav>
                 <ObservatorySiteTrigger />
-                <NightModeToggle />
+                <div className="flex items-center">
+                  <NightModeToggle />
+                </div>
               </div>
             </div>
           </div>
 
-          <ObservatorySitePanel />
-
           {menuOpen && (
             <div className="md:hidden border-t border-black/10 dark:border-white/10 bg-white/90 dark:bg-[#12151b]/95">
               <nav className="px-4 py-3 space-y-1.5">
-                {navItems.map((item) => {
+                {mobileNavItems.map((item) => {
                   const isActive = navItemActive(item.href)
                   return (
                     <Link
@@ -120,6 +118,11 @@ function DashboardChrome({ children }: { children: React.ReactNode }) {
                     </Link>
                   )
                 })}
+                {!hasSite && (
+                  <p className="px-3 py-2 text-sm text-apple-dark/70 dark:text-[#eee9dc]/70">
+                    Please Choose An Observatory First.
+                  </p>
+                )}
               </nav>
             </div>
           )}

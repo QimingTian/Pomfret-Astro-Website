@@ -292,6 +292,7 @@ export async function GET(request: NextRequest) {
             ? b.estimatedDurationSeconds
             : undefined,
         filterPlans: Array.isArray(b.filterPlans) ? b.filterPlans : undefined,
+        plannedStartIso: typeof b.plannedStartIso === 'string' ? b.plannedStartIso : null,
         failedAt: b.failedAt ?? null,
         scheduleStripNightKey: b.scheduleStripNightKey ?? null,
         scheduleBarStartMs:

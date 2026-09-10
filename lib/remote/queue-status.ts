@@ -1,4 +1,4 @@
-export const SESSION_FAILED_TERMINAL_MESSAGE = 'Session failed -- contact support.'
+export const SESSION_FAILED_TERMINAL_MESSAGE = 'Session failed.'
 
 export function queueStatusLabel(status: string): string {
   switch (status) {
@@ -24,5 +24,6 @@ export function queueStatusLabel(status: string): string {
 }
 
 export function isSessionFailedTerminalLine(text: string): boolean {
-  return text.trim() === SESSION_FAILED_TERMINAL_MESSAGE
+  const t = text.trim()
+  return t === SESSION_FAILED_TERMINAL_MESSAGE || t === 'Session failed -- contact support.'
 }

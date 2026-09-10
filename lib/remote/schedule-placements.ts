@@ -115,12 +115,12 @@ export function fallbackPlacementForTerminalSession(
     const t = Date.parse(item.plannedStartIso)
     if (Number.isFinite(t)) startMs = t
   }
+  if (startMs == null && item.status === 'in_progress') {
+    startMs = nowMs
+  }
   if (startMs == null) {
     const c = Date.parse(item.createdAt)
     if (Number.isFinite(c)) startMs = c
-  }
-  if (startMs == null && item.status === 'in_progress') {
-    startMs = nowMs
   }
   if (startMs == null) return null
 
@@ -142,7 +142,8 @@ export function fallbackPlacementForTerminalSession(
 
 /**
  * in_progress sessions must stay on one full-duration bar for tonight — never re-pack to weather windows.
- * Start: frozen lock → planned → created → now. End: start + estimated duration (cap at dawn only).
+ * Start: frozen lock → planned → now. Never createdAt (queue submit time is often near dusk and wrong).
+ * End: prefer frozen lock end; otherwise start + estimated duration (cap at dawn only).
  */
 export function inProgressSchedulePlacement(
   item: TerminalSessionLike,
@@ -154,16 +155,21 @@ export function inProgressSchedulePlacement(
   const durationMs = sessionDurationMsFromItem(item)
   const existing = locked[item.id]
 
+  if (
+    existing &&
+    Number.isFinite(existing.startMs) &&
+    Number.isFinite(existing.endMs) &&
+    existing.endMs > existing.startMs
+  ) {
+    const start = Math.max(existing.startMs, imagingStartMs)
+    const end = Math.min(existing.endMs, schedulingDeadlineMs)
+    if (end > start) return { startMs: start, endMs: end }
+  }
+
   let startMs: number | null = null
-  if (existing && Number.isFinite(existing.startMs)) {
-    startMs = existing.startMs
-  } else if (item.plannedStartIso) {
+  if (item.plannedStartIso) {
     const t = Date.parse(item.plannedStartIso)
     if (Number.isFinite(t)) startMs = t
-  }
-  if (startMs == null) {
-    const c = Date.parse(item.createdAt)
-    if (Number.isFinite(c)) startMs = c
   }
   if (startMs == null) startMs = nowMs
 

@@ -86,7 +86,7 @@ export function GallerySubmissionSection({ className = '' }: { className?: strin
           })
         } catch {
           throw new Error(
-            'Image upload blocked by the browser. Try a file under 4 MB, or ask an admin to configure R2 CORS.'
+            'Image upload blocked by the browser. Try a file under 4 MB.'
           )
         }
         if (!putRes.ok) {

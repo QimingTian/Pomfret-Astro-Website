@@ -1,4 +1,5 @@
 import {
+  estimateSessionDurationMs,
   fallbackScheduleBarPlacement,
   hasAnyFrozenScheduleBar,
   type ScheduleBarPlacement,
@@ -32,6 +33,8 @@ export type SessionBoardEntry = {
   outputMode?: 'raw_zip' | 'stacked_master' | 'none'
   filterPlans?: Array<{ filterName: string; exposureSeconds: number; count: number }>
   estimatedDurationSeconds?: number
+  /** Planned strip start carried from the queue so Remote does not fall back to createdAt. */
+  plannedStartIso?: string | null
   completedAt?: string
   failedAt?: string
   downloadedAt?: string
@@ -96,6 +99,8 @@ function normalizeEntries(raw: unknown): SessionBoardEntry[] {
       ((e as SessionBoardEntry).filterPlans == null || Array.isArray((e as SessionBoardEntry).filterPlans)) &&
       ((e as SessionBoardEntry).estimatedDurationSeconds == null ||
         typeof (e as SessionBoardEntry).estimatedDurationSeconds === 'number') &&
+      ((e as SessionBoardEntry).plannedStartIso == null ||
+        typeof (e as SessionBoardEntry).plannedStartIso === 'string') &&
       ((e as SessionBoardEntry).completedAt == null || typeof (e as SessionBoardEntry).completedAt === 'string') &&
       ((e as SessionBoardEntry).failedAt == null || typeof (e as SessionBoardEntry).failedAt === 'string') &&
       ((e as SessionBoardEntry).downloadedAt == null || typeof (e as SessionBoardEntry).downloadedAt === 'string') &&
@@ -280,6 +285,7 @@ export async function boardUpsertInProgress(input: {
   outputMode?: 'raw_zip' | 'stacked_master' | 'none'
   filterPlans?: Array<{ filterName: string; exposureSeconds: number; count: number }>
   estimatedDurationSeconds?: number
+  plannedStartIso?: string | null
   sessionPasswordHash?: string
   userId?: string
   projectMode?: boolean
@@ -289,7 +295,11 @@ export async function boardUpsertInProgress(input: {
   const ts = new Date().toISOString()
   const prev = await readEntries()
   const without = prev.filter((e) => e.id !== input.id)
-  const entry: SessionBoardEntry = {
+  const plannedStartIso =
+    typeof input.plannedStartIso === 'string' && input.plannedStartIso.trim()
+      ? input.plannedStartIso
+      : null
+  let entry: SessionBoardEntry = {
     id: input.id,
     siteId: currentObservatorySiteId(),
     target: input.target,
@@ -307,6 +317,7 @@ export async function boardUpsertInProgress(input: {
     outputMode: input.outputMode,
     filterPlans: input.filterPlans,
     estimatedDurationSeconds: input.estimatedDurationSeconds,
+    plannedStartIso,
     completedAt: undefined,
     downloadedAt: undefined,
     sessionPasswordHash: input.sessionPasswordHash,
@@ -321,6 +332,27 @@ export async function boardUpsertInProgress(input: {
       ? { variableStarAmplitudeMag: input.variableStarAmplitudeMag }
       : {}),
   }
+
+  // Freeze the strip bar at delivery from planned start. Without this, Remote falls back to
+  // createdAt (often near nautical dusk) once the queue row is gone and plannedStartIso is lost.
+  const plannedMs = plannedStartIso ? Date.parse(plannedStartIso) : Number.NaN
+  if (Number.isFinite(plannedMs)) {
+    const strip = getTonightScheduleStrip(new Date())
+    const durationMs = estimateSessionDurationMs({
+      estimatedDurationSeconds: input.estimatedDurationSeconds,
+      exposureSeconds: input.exposureSeconds,
+      count: input.count,
+      filterPlans: input.filterPlans,
+      raHours: input.raHours ?? undefined,
+      plannedStartIso,
+    })
+    const startMs = Math.max(plannedMs, strip.windowStartMs, strip.nauticalDuskMs)
+    const endMs = Math.min(startMs + durationMs, strip.schedulingDeadlineMs)
+    if (endMs > startMs) {
+      entry = applyScheduleBar(entry, { nightKey: strip.nightKey, startMs, endMs })
+    }
+  }
+
   await writeEntries([...without, entry])
 }
 

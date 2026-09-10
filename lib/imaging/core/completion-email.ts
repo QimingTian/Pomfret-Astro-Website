@@ -223,7 +223,7 @@ export async function sendSessionFailedEmail(
     `Session ID: ${input.queueId}`,
     `Failed: ${failedLocal} (${currentObservatorySite().timezone})`,
     '',
-    'Please open the Remote dashboard for details, or contact support if you need help.',
+    'Open the Remote dashboard for details.',
     '',
     'Clear skies,',
     'Pomfret Astro',
@@ -237,7 +237,7 @@ export async function sendSessionFailedEmail(
       <li><strong>Session ID:</strong> ${queueIdSafe}</li>
       <li><strong>Failed:</strong> ${failedLocal} (${currentObservatorySite().timezone})</li>
     </ul>
-    <p>Please open the Remote dashboard for details, or contact support if you need help.</p>
+    <p>Open the Remote dashboard for details.</p>
     <p>Clear skies,<br/>Pomfret Astro</p>
   `
 

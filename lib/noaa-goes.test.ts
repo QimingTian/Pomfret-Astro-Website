@@ -2,6 +2,7 @@ import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   geocolorFramePaths,
+  geocolorLatLonToScan,
   geocolorSitePinPercent,
   noaaGoesProxyUrl,
   parseGeocolorFrameFilenames,
@@ -69,10 +70,20 @@ describe('noaa-goes', () => {
   test('geocolorSitePinPercent places Pomfret in the NE zoom viewport', () => {
     const pin = geocolorSitePinPercent(41.9159, -71.9626)
     assert.ok(pin)
-    assert.ok(pin!.leftPct > 50 && pin!.leftPct < 95)
-    assert.ok(pin!.topPct > 40 && pin!.topPct < 70)
+    // ABI projection: inland CT, north of Long Island — not the old ocean pin (~65%, ~55%).
+    assert.ok(pin!.leftPct > 55 && pin!.leftPct < 85)
+    assert.ok(pin!.topPct > 25 && pin!.topPct < 50)
     const boston = geocolorSitePinPercent(42.36, -71.06)
     assert.ok(boston)
+    assert.ok(boston!.leftPct > pin!.leftPct)
+    assert.ok(boston!.topPct < pin!.topPct)
+  })
+
+  test('geocolorLatLonToScan returns ABI angles for Pomfret', () => {
+    const scan = geocolorLatLonToScan(41.9159, -71.9626)
+    assert.ok(scan)
+    assert.ok(scan!.x > 0 && scan!.x < 0.02)
+    assert.ok(scan!.y > 0.1 && scan!.y < 0.13)
   })
 
   test('geocolorSitePinPercent returns null for Cygnus (off CONUS)', () => {

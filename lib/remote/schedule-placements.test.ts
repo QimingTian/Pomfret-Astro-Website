@@ -97,6 +97,40 @@ test('inProgressSchedulePlacement prefers locked start', () => {
   const locked = { ip1: { startMs: 1000, endMs: 5000 } }
   const placement = inProgressSchedulePlacement(item, locked, 500, 10_000, 2000)
   assert.equal(placement?.startMs, 1000)
+  assert.equal(placement?.endMs, 5000)
+})
+
+test('inProgressSchedulePlacement uses plannedStartIso not createdAt (dusk trap)', () => {
+  // M33-style: queued near nautical dusk, planned when target hits 30°, then delivered.
+  const createdAt = '2026-09-07T00:30:45.879Z'
+  const plannedStartIso = '2026-09-07T02:15:45.819Z'
+  const item = {
+    id: 'm33',
+    status: 'in_progress',
+    createdAt,
+    plannedStartIso,
+    estimatedDurationSeconds: 17_400,
+  }
+  const imagingStartMs = Date.parse('2026-09-07T00:20:00.000Z')
+  const deadlineMs = Date.parse('2026-09-07T09:00:00.000Z')
+  const nowMs = Date.parse('2026-09-07T02:20:00.000Z')
+  const placement = inProgressSchedulePlacement(item, {}, imagingStartMs, deadlineMs, nowMs)
+  assert.equal(placement?.startMs, Date.parse(plannedStartIso))
+  assert.ok(placement != null && placement.startMs > Date.parse(createdAt))
+})
+
+test('inProgressSchedulePlacement without planned uses now not createdAt', () => {
+  const item = {
+    id: 'ip2',
+    status: 'in_progress',
+    createdAt: '2026-09-07T00:30:45.879Z',
+    estimatedDurationSeconds: 3600,
+  }
+  const imagingStartMs = Date.parse('2026-09-07T00:20:00.000Z')
+  const deadlineMs = Date.parse('2026-09-07T09:00:00.000Z')
+  const nowMs = Date.parse('2026-09-07T02:20:00.000Z')
+  const placement = inProgressSchedulePlacement(item, {}, imagingStartMs, deadlineMs, nowMs)
+  assert.equal(placement?.startMs, nowMs)
 })
 
 test('fallbackPlacementForTerminalSession returns existing lock', () => {

@@ -12,7 +12,8 @@ import {
 
 test('isSessionFailedTerminalLine matches only the failure terminal phrase', () => {
   assert.equal(isSessionFailedTerminalLine(SESSION_FAILED_TERMINAL_MESSAGE), true)
-  assert.equal(isSessionFailedTerminalLine('  Session failed -- contact support.  '), true)
+  assert.equal(isSessionFailedTerminalLine('  Session failed.  '), true)
+  assert.equal(isSessionFailedTerminalLine('Session failed -- contact support.'), true)
   assert.equal(isSessionFailedTerminalLine('Capturing frame 12'), false)
 })
 

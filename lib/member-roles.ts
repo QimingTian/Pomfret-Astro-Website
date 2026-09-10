@@ -210,13 +210,12 @@ export function canSubmitImagingAtSite(input: {
   }
 
   // Guest path — no affiliation at this site (and not allowed as other-obs member).
+  // Keep errors factual only — no “request / contact admin” instructions (no in-app request flow).
   switch (input.guestAccessMode) {
     case 'closed':
       return {
         ok: false,
-        error: input.openToOtherObservatoryMembers
-          ? 'This observatory is not open to guests, and you are not an allowed member of another observatory.'
-          : 'This observatory is not open to guests. Request affiliation from an observatory administrator.',
+        error: 'This observatory is not open to guests.',
         code: 'guest_closed',
       }
     case 'open_direct':
@@ -226,20 +225,20 @@ export function canSubmitImagingAtSite(input: {
       if (input.guestGrant === 'pending') {
         return {
           ok: false,
-          error: 'Guest access to this observatory is pending administrator approval.',
+          error: 'Guest access is pending approval.',
           code: 'guest_pending',
         }
       }
       if (input.guestGrant === 'rejected') {
         return {
           ok: false,
-          error: 'Guest access to this observatory was not approved.',
+          error: 'Guest access was not approved.',
           code: 'guest_rejected',
         }
       }
       return {
         ok: false,
-        error: 'Guest access to this observatory requires administrator approval.',
+        error: 'Guest access is not available.',
         code: 'guest_pending',
       }
     }

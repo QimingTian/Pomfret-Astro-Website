@@ -48,10 +48,25 @@ export function noaaGoesProxyUrl(path: string): string {
   return `/api/noaa-goes?url=${encodeURIComponent(upstream)}`
 }
 
+/** GOES-East ABI perspective (GOES-16/19). */
+const GOES_EAST_LON0_DEG = -75.2
+const GOES_REQ_M = 6_378_137.0
+const GOES_RPOL_M = 6_356_752.31414
+const GOES_H_M = 42_164_160.0
+const GOES_E2 = (GOES_REQ_M ** 2 - GOES_RPOL_M ** 2) / GOES_REQ_M ** 2
+
 /**
- * Approximate geographic extent of NESDIS GOES-East CONUS GeoColor 625×375 previews.
- * Tuned so New England stays inside the NE `scale(2)` crop used by Cloud Map.
+ * NESDIS CONUS GeoColor sector in ABI fixed-grid scan angles (radians).
+ * Matches GOES-R CONUS L1b image bounds (north at top of the JPG).
  */
+export const GEOCOLOR_CONUS_SCAN = {
+  xWest: -0.101332,
+  xEast: 0.038612,
+  yNorth: 0.128212,
+  ySouth: 0.044248,
+} as const
+
+/** @deprecated Linear lon/lat box — kept only for tests/compat; pin math uses {@link GEOCOLOR_CONUS_SCAN}. */
 export const GEOCOLOR_CONUS_BOUNDS = {
   westLon: -126,
   eastLon: -55,
@@ -59,18 +74,43 @@ export const GEOCOLOR_CONUS_BOUNDS = {
   southLat: 15,
 } as const
 
+/** Geographic → GOES-East ABI fixed-grid scan angles (radians). */
+export function geocolorLatLonToScan(latDeg: number, lonDeg: number): { x: number; y: number } | null {
+  if (!Number.isFinite(latDeg) || !Number.isFinite(lonDeg)) return null
+  if (latDeg <= -90 || latDeg >= 90) return null
+
+  const lat = (latDeg * Math.PI) / 180
+  const lon = (lonDeg * Math.PI) / 180
+  const lon0 = (GOES_EAST_LON0_DEG * Math.PI) / 180
+
+  const latc = Math.atan((GOES_RPOL_M ** 2 / GOES_REQ_M ** 2) * Math.tan(lat))
+  const rc = GOES_RPOL_M / Math.sqrt(1 - GOES_E2 * Math.cos(latc) ** 2)
+  const sx = GOES_H_M - rc * Math.cos(latc) * Math.cos(lon - lon0)
+  const sy = -rc * Math.cos(latc) * Math.sin(lon - lon0)
+  const sz = rc * Math.sin(latc)
+
+  if (!(sx > 0)) return null
+  const x = Math.atan(-sy / sx)
+  const y = Math.asin(sz / Math.sqrt(sx * sx + sy * sy + sz * sz))
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+  return { x, y }
+}
+
 /**
  * CSS crop on Cloud Map: `object-cover` into 4:3, then `scale(2)` from top-right.
+ * Uses GOES-East ABI fixed-grid projection (not linear lon/lat).
  * Returns pin position as % of the visible container, or null if off-frame.
  */
 export function geocolorSitePinPercent(
   lat: number,
   lon: number
 ): { leftPct: number; topPct: number } | null {
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null
-  const { westLon, eastLon, northLat, southLat } = GEOCOLOR_CONUS_BOUNDS
-  const fx = (lon - westLon) / (eastLon - westLon)
-  const fy = (northLat - lat) / (northLat - southLat)
+  const scan = geocolorLatLonToScan(lat, lon)
+  if (!scan) return null
+
+  const { xWest, xEast, yNorth, ySouth } = GEOCOLOR_CONUS_SCAN
+  const fx = (scan.x - xWest) / (xEast - xWest)
+  const fy = (yNorth - scan.y) / (yNorth - ySouth)
   if (fx < 0 || fx > 1 || fy < 0 || fy > 1) return null
 
   // object-cover into 4:3 from 5:3 image → crop 10% from each side of width.

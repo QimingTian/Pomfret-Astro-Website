@@ -287,6 +287,7 @@ async function deliverProjectSubSessionJson(
           raHours: sky.raHours,
         })
       })(),
+      plannedStartIso: nightRef.plannedStartIso ?? null,
       sessionPasswordHash: projectRef.sessionPasswordHash,
       userId: projectRef.userId,
       projectMode: true,
@@ -684,6 +685,7 @@ export async function GET(request: NextRequest) {
     outputMode: consumed.outputMode,
     filterPlans: consumed.filterPlans,
     estimatedDurationSeconds: consumed.estimatedDurationSeconds,
+    plannedStartIso: consumed.plannedStartIso ?? null,
     sessionPasswordHash: consumed.sessionPasswordHash,
     userId: consumed.userId,
     sequenceTemplate: consumed.sequenceTemplate === 'variable_star' ? 'variable_star' : 'dso',

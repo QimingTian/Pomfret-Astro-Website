@@ -15,7 +15,7 @@ import { kvDel, kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 import { currentObservatorySiteId, scopedKvKey } from '@/lib/observatory-site-scope'
 import { lockObservatoryAfterSessionFailure } from '@/lib/imaging/session/failure-observatory-lock'
 
-export const SESSION_FAILED_TERMINAL_MESSAGE = 'Session failed -- contact support.'
+export const SESSION_FAILED_TERMINAL_MESSAGE = 'Session failed.'
 
 /** Grace after agent reports NINA stopped before failing in-progress sessions (Session Completed may lag). */
 export const NINA_STOPPED_FAIL_GRACE_MS = 45_000
@@ -23,7 +23,8 @@ export const NINA_STOPPED_FAIL_GRACE_MS = 45_000
 export const NINA_STOPPED_WITHOUT_COMPLETION_REASON = 'nina_stopped_without_completion'
 
 export function isSessionFailedTerminalLine(text: string): boolean {
-  return text.trim() === SESSION_FAILED_TERMINAL_MESSAGE
+  const t = text.trim()
+  return t === SESSION_FAILED_TERMINAL_MESSAGE || t === 'Session failed -- contact support.'
 }
 
 const NINA_REPORTED_LAST_BASE = 'observatory-nina-reported-last'

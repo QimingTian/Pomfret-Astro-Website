@@ -16,5 +16,6 @@ test('queueStatusLabel maps known statuses', () => {
 test('isSessionFailedTerminalLine matches exact terminal message', () => {
   assert.equal(isSessionFailedTerminalLine(SESSION_FAILED_TERMINAL_MESSAGE), true)
   assert.equal(isSessionFailedTerminalLine(`  ${SESSION_FAILED_TERMINAL_MESSAGE}  `), true)
-  assert.equal(isSessionFailedTerminalLine('Session failed'), false)
+  assert.equal(isSessionFailedTerminalLine('Session failed -- contact support.'), true)
+  assert.equal(isSessionFailedTerminalLine('Something else'), false)
 })

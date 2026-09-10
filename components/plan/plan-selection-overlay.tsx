@@ -21,6 +21,16 @@ type Props = {
   live: LiveSkyInfo
 }
 
+/**
+ * Stellarium Web object ids often include a catalog token, e.g. `NAME Sun`
+ * for common names. Strip that prefix for the HUD title only.
+ */
+function formatSelectionTitle(id: string): string {
+  const t = id.trim()
+  if (!t) return '—'
+  return t.replace(/^NAME\s+/i, '')
+}
+
 function formatSky(sky: SkyCoord | null): string {
   if (!sky || !Number.isFinite(sky.raHours) || !Number.isFinite(sky.decDeg)) return '—'
   return `${formatRaHoursHms(sky.raHours)}  ${formatDecDegDms(sky.decDeg)}`
@@ -116,7 +126,9 @@ export function PlanSelectionOverlay({ selection, live }: Props) {
     <SmoothGlassBox contentKey={contentKey}>
       {hasSelection && selection ? (
         <div aria-label="Selected object">
-          <p className="break-words text-sm font-medium leading-snug text-white">{selection.id || '—'}</p>
+          <p className="break-words text-sm font-medium leading-snug text-white">
+            {formatSelectionTitle(selection.id)}
+          </p>
           {compactRows.length > 0 ? (
             <dl className="mt-2 space-y-1">
               {compactRows.map((row) => (

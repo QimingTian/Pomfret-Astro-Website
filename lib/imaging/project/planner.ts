@@ -1,6 +1,10 @@
 import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { currentObservatorySite } from '@/lib/observatory-site-scope'
 import {
+  ensureFailedSubTonightAutoHoldAckLoaded,
+  isFailedSubTonightAutoHoldAcknowledged,
+} from '@/lib/imaging/session/failed-sub-auto-hold-ack'
+import {
   logSessionImagingPlanChanged,
   logSessionStatusChange,
   projectNightStatusToAuditStatus,
@@ -1278,7 +1282,9 @@ export function plansToScheduledNights(
 ): ProjectNight[] {
   const nightKey = plans[0]?.nightKey
   if (!nightKey) return []
-  const autoHoldAfterFailed = hasFailedSubTonight(project, nightKey)
+  // After ESTOP clear, ack suppresses sticky auto-hold so the night can resume.
+  const autoHoldAfterFailed =
+    hasFailedSubTonight(project, nightKey) && !isFailedSubTonightAutoHoldAcknowledged(nightKey)
   // Reuse tonight scheduled *and* planned rows. Unhold restores remaining
   // subs to planned; treating them as new would mint a later index and skip
   // the operator-released session.
@@ -1403,6 +1409,7 @@ export async function applyProjectTonightPlans(
   const project = await getProjectById(projectId)
   if (!project) return
   const nightKey = plans[0]!.nightKey
+  await ensureFailedSubTonightAutoHoldAckLoaded()
   const prevNightById = new Map(
     project.nights.filter((n) => n.nightKey === nightKey).map((n) => [n.id, n] as const)
   )

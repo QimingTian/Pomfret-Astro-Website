@@ -13,9 +13,9 @@ import {
 } from '@/lib/imaging-emergency-stop'
 import {
   applyEmergencyStopHolds,
-  releaseEmergencyStopHolds,
-  releaseFailedSubTonightAutoHolds,
+  resumeTonightAfterEmergencyStopClear,
 } from '@/lib/imaging-emergency-stop-holds'
+import { lockObservatoryForEmergencyStop } from '@/lib/imaging/session/failure-observatory-lock'
 import { isWeatherSafetyEmergencyStopActor } from '@/lib/imaging/session/estop-sequence'
 import {
   clearNinaStoppedPendingFail,
@@ -521,6 +521,7 @@ async function armWeatherSafetyEmergencyStop(
   if (!newlyArmed) {
     return { armed: false, skipped: 'already_blocking', threat }
   }
+  await lockObservatoryForEmergencyStop('weather_safety_auto')
   if (heldSessionIds.length !== state.heldSessionIds.length) {
     await updateEmergencyStopHeldSessionIds(heldSessionIds)
   }
@@ -564,15 +565,9 @@ async function clearWeatherSafetyEmergencyStop(
     return { armed: false, skipped: 'error', queueId: state.queueId }
   }
 
-  const releasedHolds: string[] = []
-  if (cleared.heldSessionIds.length) {
-    await releaseEmergencyStopHolds(cleared.heldSessionIds)
-    releasedHolds.push(...cleared.heldSessionIds)
-  }
-  const failedSubHolds = await releaseFailedSubTonightAutoHolds()
-  if (failedSubHolds.length) {
-    releasedHolds.push(...failedSubHolds)
-  }
+  const { releasedFailedSubHolds, releasedEstopHolds, ackNightKey } =
+    await resumeTonightAfterEmergencyStopClear(cleared.heldSessionIds)
+  const releasedHolds = [...releasedEstopHolds, ...releasedFailedSubHolds]
 
   await setObservatoryMode('auto')
   await writeDebounceMs(Date.now())
@@ -595,6 +590,7 @@ async function clearWeatherSafetyEmergencyStop(
       source: 'weather_safety_auto_unlock',
       clearHoldMs: WEATHER_SAFETY_CLEAR_HOLD_MS,
       releasedHolds,
+      failedSubAutoHoldAckNightKey: ackNightKey,
       previousPhase: cleared.phase,
       mode: 'auto',
     }),

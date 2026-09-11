@@ -11,8 +11,7 @@ import {
   emergencyStopAuditDetailFromState,
   emergencyStopTriggeredBySuffix,
 } from '@/lib/imaging-emergency-stop'
-import { releaseEmergencyStopHolds, releaseFailedSubTonightAutoHolds } from '@/lib/imaging-emergency-stop-holds'
-import { reconcilePendingScheduleStatus } from '@/lib/imaging-queue-reconcile'
+import { resumeTonightAfterEmergencyStopClear } from '@/lib/imaging-emergency-stop-holds'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import {
   getObservatoryMode,
@@ -86,33 +85,21 @@ export async function PATCH(request: NextRequest) {
   const nextMode = await getObservatoryMode()
   const nextStatus = await getObservatoryStatus()
 
-  const patchTouchesObservatory = mode !== undefined || status !== undefined
-  const shouldClearStopped =
-    (await isEmergencyStopStopped()) &&
-    shouldClearEmergencyStopOnObservatoryPatch({
-      mode: typeof mode === 'string' ? (mode as ObservatoryMode) : undefined,
-      status: typeof status === 'string' ? (status as ObservatoryStatus) : undefined,
-      currentMode: nextMode,
-      currentStatus: nextStatus,
-    })
-  const shouldClearStopping =
-    (await isEmergencyStopStopping()) && patchTouchesObservatory
+  const patchArgs = {
+    mode: typeof mode === 'string' ? (mode as ObservatoryMode) : undefined,
+    status: typeof status === 'string' ? (status as ObservatoryStatus) : undefined,
+    currentMode: nextMode,
+    currentStatus: nextStatus,
+  }
+  const leavesLock = shouldClearEmergencyStopOnObservatoryPatch(patchArgs)
+  const shouldClearStopped = (await isEmergencyStopStopped()) && leavesLock
+  const shouldClearStopping = (await isEmergencyStopStopping()) && leavesLock
 
   if ((shouldClearStopped || shouldClearStopping) && (await isEmergencyStopBlocking())) {
     const cleared = await clearEmergencyStopAfterManualUnlock()
-    const releasedHolds: string[] = []
-    if (cleared?.heldSessionIds.length) {
-      await releaseEmergencyStopHolds(cleared.heldSessionIds)
-      releasedHolds.push(...cleared.heldSessionIds)
-    }
-    const failedSubHolds = await releaseFailedSubTonightAutoHolds()
-    if (failedSubHolds.length) {
-      releasedHolds.push(...failedSubHolds)
-    }
-    if (!releasedHolds.length) {
-      /* Still replan: holds may have been empty / already released while ESTOP blocked reconcile. */
-      await reconcilePendingScheduleStatus({ force: true })
-    }
+    const { releasedFailedSubHolds, releasedEstopHolds, ackNightKey } =
+      await resumeTonightAfterEmergencyStopClear(cleared?.heldSessionIds ?? [])
+    const releasedHolds = [...releasedEstopHolds, ...releasedFailedSubHolds]
     void appendAuditLog({
       kind: 'emergency_stop',
       message: shouldClearStopping
@@ -129,6 +116,7 @@ export async function PATCH(request: NextRequest) {
         mode: nextMode,
         status: nextStatus,
         releasedHolds,
+        failedSubAutoHoldAckNightKey: ackNightKey,
         previousPhase: cleared?.phase ?? null,
       }),
     })

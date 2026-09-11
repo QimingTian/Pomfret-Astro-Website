@@ -127,7 +127,9 @@ async function notifySessionFailed(snapshot: FailedBoardSnapshot, reason: string
   if (board?.projectMode) {
     const nightId = await getInProgressProjectNightSubId(snapshot.id)
     if (nightId) {
-      await markNightFailed(snapshot.id, nightId)
+      await markNightFailed(snapshot.id, nightId, {
+        clearFailedSubAck: reason !== 'emergency_stop',
+      })
       queueId = nightId
     }
   }
@@ -178,10 +180,11 @@ export async function inactiveProjectBoardSkipIds(): Promise<Set<string>> {
 /** Same rule as leaving busy without completion, applied per project sub-session id. */
 export async function failInProgressProjectSubSessions(reason: string): Promise<string[]> {
   const failed: string[] = []
+  const clearFailedSubAck = reason !== 'emergency_stop'
   for (const project of await listProjects()) {
     for (const night of project.nights) {
       if (night.status !== 'in_progress') continue
-      await markNightFailed(project.id, night.id)
+      await markNightFailed(project.id, night.id, { clearFailedSubAck })
       await recordSessionFailure(night.id, reason)
       failed.push(night.id)
       void appendAuditLog({

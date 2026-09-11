@@ -1,4 +1,5 @@
 import { logSessionStatusChange, projectNightStatusToAuditStatus } from '@/lib/imaging/session/status-audit'
+import { clearFailedSubTonightAutoHoldAck } from '@/lib/imaging/session/failed-sub-auto-hold-ack'
 import { buildNinaSequenceJson } from '@/lib/build-nina-sequence-json'
 import { projectNightSubId } from '@/lib/imaging-project-ids'
 import { dsoSessionDurationSeconds } from '@/lib/imaging-session-overhead'
@@ -1193,7 +1194,11 @@ export async function markNightCompleted(
   return { project: updated, projectCompleted }
 }
 
-export async function markNightFailed(projectId: string, nightSubId: string): Promise<void> {
+export async function markNightFailed(
+  projectId: string,
+  nightSubId: string,
+  options?: { clearFailedSubAck?: boolean }
+): Promise<void> {
   const project = await getProjectById(projectId)
   if (!project) return
   const failedAt = new Date().toISOString()
@@ -1201,6 +1206,10 @@ export async function markNightFailed(projectId: string, nightSubId: string): Pr
     n.id === nightSubId ? { ...n, status: 'failed' as const, failedAt } : n
   )
   await patchProject(projectId, { nights, status: 'in_progress' })
+  /* Real failures re-enable sticky auto-hold; ESTOP's own fails preserve a prior clear-ack. */
+  if (options?.clearFailedSubAck !== false) {
+    await clearFailedSubTonightAutoHoldAck()
+  }
 }
 
 export async function removeProjectNight(projectId: string, nightSubId: string): Promise<boolean> {

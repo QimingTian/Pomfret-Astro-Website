@@ -2,6 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { plansToScheduledNights, type ProjectTonightPlan } from './planner'
 import { getDeliverableNight, isStaleUndeliveredNight, type ImagingProject } from './store'
+import {
+  acknowledgeFailedSubTonightAutoHold,
+  resetFailedSubTonightAutoHoldAckForTests,
+} from '@/lib/imaging/session/failed-sub-auto-hold-ack'
 
 const nightKey = '2026-06-04'
 const projectId = 'a9a609e6-0e7c-41e7-a1b0-857ae61105d7'
@@ -36,6 +40,10 @@ function samplePlan(): ProjectTonightPlan {
   }
 }
 
+test.beforeEach(() => {
+  resetFailedSubTonightAutoHoldAckForTests()
+})
+
 test('plansToScheduledNights auto-holds new subs when tonight has a failed sub', () => {
   const project = baseProject([
     {
@@ -55,6 +63,23 @@ test('plansToScheduledNights auto-holds new subs when tonight has a failed sub',
   assert.equal(sub.plannedStartIso, null)
   assert.equal(sub.scheduleBarStartMs, null)
   assert.equal(sub.ninaSequenceJson != null && sub.ninaSequenceJson.length > 0, true)
+})
+
+test('plansToScheduledNights schedules after ESTOP clear ack despite failed sub tonight', async () => {
+  await acknowledgeFailedSubTonightAutoHold(nightKey)
+  const project = baseProject([
+    {
+      id: `${projectId}::night-5`,
+      nightKey,
+      nightIndex: 5,
+      status: 'failed',
+      filterPlansTonight: [{ filterName: 'R', exposureSeconds: 600, count: 10 }],
+      failedAt: '2026-06-05T01:51:15.166Z',
+    },
+  ])
+  const subs = plansToScheduledNights(project, [samplePlan()])
+  assert.equal(subs[0]!.status, 'scheduled')
+  assert.equal(subs[0]!.plannedStartIso, samplePlan().plannedStartIso)
 })
 
 test('plansToScheduledNights stays scheduled when no failed sub tonight', () => {

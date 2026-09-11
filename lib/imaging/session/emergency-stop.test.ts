@@ -243,3 +243,26 @@ test('shouldClearEmergencyStopOnObservatoryPatch when status or mode leaves lock
     true
   )
 })
+
+test('STOPPING abort uses the same leave-lock gate as STOPPED (reaffirm lock does not clear)', () => {
+  const locked = {
+    currentMode: 'manual' as const,
+    currentStatus: 'closed_observatory_maintenance' as const,
+  }
+  /* Observatory PATCH while STOPPING must not abort on reaffirm Manual+Maintenance. */
+  assert.equal(
+    shouldClearEmergencyStopOnObservatoryPatch({
+      ...locked,
+      mode: 'manual',
+      status: 'closed_observatory_maintenance',
+    }),
+    false
+  )
+  assert.equal(
+    shouldClearEmergencyStopOnObservatoryPatch({
+      ...locked,
+      mode: 'auto',
+    }),
+    true
+  )
+})

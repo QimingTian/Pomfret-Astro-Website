@@ -293,7 +293,7 @@ export function AboutHome() {
           <p>
             For observatory operators, we provide customized support to help ensure a smooth and
             successful integration with the platform. If you are interested in joining, connecting an
-            observatory, or simply have questions about Pomfret Astro Network, Reach Out:{' '}
+            observatory, or simply have questions about Pomfret Astro Network, please reach out to{' '}
             <a
               href="mailto:contact@pomfretastro.org"
               className="text-white underline decoration-white/35 underline-offset-[3px] transition-colors hover:decoration-white/70"

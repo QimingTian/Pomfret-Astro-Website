@@ -50,7 +50,7 @@ const aboutJsonLd = {
       url: siteOrigin(),
       logo: absoluteUrl('/icons/apple-touch-icon.png'),
       description: DEFAULT_DESCRIPTION,
-      email: 'qtian.28@pomfret.org',
+      email: 'contact@pomfretastro.org',
     },
     {
       '@type': 'WebSite',

@@ -296,10 +296,10 @@ export function AboutHome() {
             observatory, or simply have questions about Pomfret Astro Network, feel free to reach out to
             James Tian at{' '}
             <a
-              href="mailto:qtian.28@pomfret.org"
+              href="mailto:contact@pomfretastro.org"
               className="text-white underline decoration-white/35 underline-offset-[3px] transition-colors hover:decoration-white/70"
             >
-              qtian.28@pomfret.org
+              contact@pomfretastro.org
             </a>
             .
           </p>

@@ -32,3 +32,15 @@ test('imaging equipment Redis keys are site-scoped', async () => {
     assert.equal(imagingEquipmentKvKey(), 'site:cygnus:imaging-equipment')
   })
 })
+
+test('live-bus and mount memory keys do not collide across sites', async () => {
+  const { scopedKvKey } = await import('@/lib/observatory-site-scope')
+  await withObservatorySiteAsync(POMFRET_SITE.id, async () => {
+    assert.equal(scopedKvKey('live:mount:default'), 'live:mount:default')
+    assert.equal(scopedKvKey('imaging-preview-meta:q1'), 'imaging-preview-meta:q1')
+  })
+  await withObservatorySiteAsync(CYGNUS_SITE.id, async () => {
+    assert.equal(scopedKvKey('live:mount:default'), 'site:cygnus:live:mount:default')
+    assert.equal(scopedKvKey('imaging-preview-meta:q1'), 'site:cygnus:imaging-preview-meta:q1')
+  })
+})

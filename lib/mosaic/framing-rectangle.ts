@@ -28,3 +28,8 @@ export type MosaicDraft = {
 }
 
 export const PLAN_MOSAIC_DRAFT_KEY = 'pomfret:plan-mosaic-draft'
+
+/** Per-site mosaic draft key so Plan/Remote drafts never cross observatories. */
+export function planMosaicDraftKey(siteId: string): string {
+  return `${PLAN_MOSAIC_DRAFT_KEY}:${siteId}`
+}

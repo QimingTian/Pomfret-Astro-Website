@@ -313,7 +313,7 @@ export async function armEmergencyStop(
     typeof actor === 'string'
       ? { displayName: actor, userId: '', username: actor, email: '' }
       : actor
-  const queueId = `estop-${Date.now()}`
+  const queueId = `${currentObservatorySiteId()}:estop-${Date.now()}`
   const state: EmergencyStopState = {
     phase: 'stopping',
     queueId,

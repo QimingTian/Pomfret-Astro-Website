@@ -1,6 +1,6 @@
 'use client'
 
-import { PLAN_MOSAIC_DRAFT_KEY, type MosaicDraft, type MosaicPanel } from '@/lib/mosaic/framing-rectangle'
+import { planMosaicDraftKey, type MosaicDraft, type MosaicPanel } from '@/lib/mosaic/framing-rectangle'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -643,7 +643,7 @@ export default function RemotePage() {
     const params = new URLSearchParams(window.location.search)
     if (params.get('mosaic') === '1') {
       try {
-        const raw = sessionStorage.getItem(PLAN_MOSAIC_DRAFT_KEY)
+        const raw = sessionStorage.getItem(planMosaicDraftKey(siteId))
         if (raw) {
           const draft = JSON.parse(raw) as MosaicDraft
           if (draft?.panels?.length) {
@@ -706,7 +706,7 @@ export default function RemotePage() {
     url.searchParams.delete('prefillRa')
     url.searchParams.delete('prefillDec')
     window.history.replaceState({}, '', url.toString())
-  }, [])
+  }, [siteId])
 
   const enableMosaicMode = useCallback(() => {
     setProjectModeTri('mosaic')
@@ -863,7 +863,7 @@ export default function RemotePage() {
   useEffect(() => {
     let mounted = true
     const loadStatus = async () => {
-      const res = await fetch('/api/imaging/observatory-status')
+      const res = await observatorySiteFetch('/api/imaging/observatory-status', siteId)
       const data = await res.json().catch(() => ({}))
       if (!mounted) return
       if (
@@ -886,13 +886,13 @@ export default function RemotePage() {
     return () => {
       mounted = false
     }
-  }, [])
+  }, [siteId])
 
   useEffect(() => {
     let mounted = true
     const loadAdminWindows = async () => {
       try {
-        const res = await fetch('/api/imaging/schedule-control')
+        const res = await observatorySiteFetch('/api/imaging/schedule-control', siteId)
         const data = await res.json().catch(() => ({}))
         if (!mounted) return
         if (res.ok && data?.ok === true && Array.isArray(data.windows)) {
@@ -925,7 +925,7 @@ export default function RemotePage() {
       mounted = false
       window.clearInterval(intervalId)
     }
-  }, [])
+  }, [siteId])
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -966,7 +966,7 @@ export default function RemotePage() {
     setVariableStarCatalogError(null)
     void (async () => {
       try {
-        const res = await fetch('/api/imaging/variable-stars')
+        const res = await observatorySiteFetch('/api/imaging/variable-stars', siteId)
         const data = await res.json().catch(() => ({}))
         if (cancelled) return
         if (!res.ok || data?.ok !== true || !Array.isArray(data.stars)) {
@@ -989,7 +989,7 @@ export default function RemotePage() {
     return () => {
       cancelled = true
     }
-  }, [sessionType])
+  }, [sessionType, siteId])
 
   useEffect(() => {
     let mounted = true
@@ -1488,7 +1488,7 @@ export default function RemotePage() {
   const persistScheduleBarPlacement = useCallback(
     async (queueId: string, nightKey: string, startMs: number, endMs: number) => {
       try {
-        await fetch('/api/imaging/session-schedule-placement', {
+        await observatorySiteFetch('/api/imaging/session-schedule-placement', siteId, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ queueId, nightKey, startMs, endMs }),
@@ -1497,7 +1497,7 @@ export default function RemotePage() {
         // ignore network errors; server may already have frozen bar
       }
     },
-    []
+    [siteId]
   )
 
   useEffect(() => {
@@ -2449,10 +2449,14 @@ export default function RemotePage() {
 
   const downloadSessionFile = useCallback(
     async (queueId: string, password: string): Promise<string | null> => {
-      const res = await fetch(`/api/imaging/download?queueId=${encodeURIComponent(queueId)}&mode=json`, {
-        credentials: 'include',
-        headers: password ? { 'x-session-password': password } : {},
-      })
+      const res = await observatorySiteFetch(
+        `/api/imaging/download?queueId=${encodeURIComponent(queueId)}&mode=json`,
+        siteId,
+        {
+          credentials: 'include',
+          headers: password ? { 'x-session-password': password } : {},
+        }
+      )
       const data = await res.json().catch(() => ({}))
       if (!res.ok || data?.ok !== true || typeof data.signedUrl !== 'string') {
         return typeof data.error === 'string' ? data.error : 'Download failed.'
@@ -2461,7 +2465,7 @@ export default function RemotePage() {
       await refreshQueue()
       return null
     },
-    [refreshQueue]
+    [refreshQueue, siteId]
   )
 
   const loadTerminalPreview = useCallback(
@@ -2469,8 +2473,9 @@ export default function RemotePage() {
       const password = passwordOverride ?? resolveSessionPassword(id)
       if (!password && !isAdmin && !canAccessSessionId(id)) return
       try {
-        const res = await fetch(
+        const res = await observatorySiteFetch(
           `/api/imaging/preview?queueId=${encodeURIComponent(id)}&mode=json&_=${Date.now()}`,
+          siteId,
           {
             credentials: 'include',
             headers: password ? { 'x-session-password': password } : {},
@@ -2512,7 +2517,7 @@ export default function RemotePage() {
         setTerminalPreviewError('Preview unavailable.')
       }
     },
-    [resolveSessionPassword, isAdmin, canAccessSessionId]
+    [resolveSessionPassword, isAdmin, canAccessSessionId, siteId]
   )
 
   const loadTerminalPreviewRef = useRef(loadTerminalPreview)
@@ -2549,7 +2554,7 @@ export default function RemotePage() {
       }
       const headers: HeadersInit = password ? { 'x-session-password': password } : {}
       try {
-        const res = await fetch(`/api/imaging/queue/${encodeURIComponent(sessionId)}/progress`, {
+        const res = await observatorySiteFetch(`/api/imaging/queue/${encodeURIComponent(sessionId)}/progress`, siteId, {
           cache: 'no-store',
           headers,
         })
@@ -2811,7 +2816,7 @@ export default function RemotePage() {
   }
 
   async function handleDeleteRequest(id: string, password: string) {
-    const res = await fetch(`/api/imaging/queue/${id}`, {
+    const res = await observatorySiteFetch(`/api/imaging/queue/${id}`, siteId, {
       method: 'DELETE',
       credentials: 'include',
       headers: password.trim() ? { 'x-delete-credential': password.trim() } : {},
@@ -2829,7 +2834,7 @@ export default function RemotePage() {
 
   const openProjectPickerAfterAccess = useCallback(
     async (projectId: string, purpose: 'progress' | 'download') => {
-      const res = await fetch(`/api/imaging/queue/${encodeURIComponent(projectId)}/progress`, {
+      const res = await observatorySiteFetch(`/api/imaging/queue/${encodeURIComponent(projectId)}/progress`, siteId, {
         credentials: 'include',
       })
       const data = await res.json().catch(() => ({}))
@@ -2841,7 +2846,7 @@ export default function RemotePage() {
       setNightPickerPurpose(purpose)
       return true
     },
-    []
+    [siteId]
   )
 
   const handleCheckProgressClick = useCallback(
@@ -3130,7 +3135,7 @@ export default function RemotePage() {
 
         setVariableStarSimbadSearching(true)
         try {
-          const simbadRes = await fetch(`/api/imaging/variable-star-lookup?query=${encodeURIComponent(trimmedQuery)}`)
+          const simbadRes = await observatorySiteFetch(`/api/imaging/variable-star-lookup?query=${encodeURIComponent(trimmedQuery)}`, siteId)
           const simbadData = await simbadRes.json().catch(() => ({}))
           if (!simbadRes.ok || simbadData?.ok !== true || !simbadData?.star) {
             const simbadError =
@@ -3147,7 +3152,7 @@ export default function RemotePage() {
         return
       }
 
-      const res = await fetch(`/api/imaging/object-resolve?query=${encodeURIComponent(trimmedQuery)}`)
+      const res = await observatorySiteFetch(`/api/imaging/object-resolve?query=${encodeURIComponent(trimmedQuery)}`, siteId)
       const data = await res.json().catch(() => ({}))
       if (!res.ok || data?.ok !== true || !data?.object) {
         setCatalogLookupError(typeof data.error === 'string' ? data.error : 'Target lookup failed.')

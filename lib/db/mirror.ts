@@ -459,8 +459,13 @@ export async function mirrorAdminClosedWindows(rows: WindowRow[]): Promise<void>
 export async function mirrorR2ObjectKey(kind: 'object' | 'preview', queueId: string, objectKey: string | null): Promise<void> {
   await withDatabaseMirror('r2-map', async () => {
     const db = getDb()
+    const sid = imagingSiteId()
     if (!objectKey) {
-      await db.delete(r2ObjectMap).where(sql`${r2ObjectMap.kind} = ${kind} AND ${r2ObjectMap.queueId} = ${queueId}`)
+      await db
+        .delete(r2ObjectMap)
+        .where(
+          and(eq(r2ObjectMap.kind, kind), eq(r2ObjectMap.queueId, queueId), eq(r2ObjectMap.siteId, sid))
+        )
       return
     }
     await db
@@ -468,12 +473,12 @@ export async function mirrorR2ObjectKey(kind: 'object' | 'preview', queueId: str
       .values({
         queueId,
         kind,
-        siteId: imagingSiteId(),
+        siteId: sid,
         objectKey,
       })
       .onConflictDoUpdate({
         target: [r2ObjectMap.kind, r2ObjectMap.queueId],
-        set: { objectKey },
+        set: { objectKey, siteId: sid },
       })
   })
 }

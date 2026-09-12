@@ -41,28 +41,13 @@ function nextEventId(): string {
   return `${Date.now()}-${seq}`
 }
 
-function isSiteScopedChannel(channel: LiveChannel): boolean {
-  return (
-    channel === 'site:observatory' ||
-    channel === 'site:sessions' ||
-    channel === 'site:estop' ||
-    channel === 'agent:wake'
-  )
-}
-
-/** Local listener map key — site channels are namespaced so warm instances do not cross-talk. */
+/** Local listener map key — always site-namespaced so warm instances do not cross-talk. */
 function listenerKey(channel: LiveChannel): string {
-  if (isSiteScopedChannel(channel)) {
-    return `${currentObservatorySiteId()}:${channel}`
-  }
-  return channel
+  return `${currentObservatorySiteId()}:${channel}`
 }
 
 function redisKey(channel: LiveChannel): string {
-  if (isSiteScopedChannel(channel)) {
-    return scopedKvKey(`live:${channel}`)
-  }
-  return `live:${channel}`
+  return scopedKvKey(`live:${channel}`)
 }
 
 function notifyLocal(channel: LiveChannel, payload: unknown): void {

@@ -16,7 +16,7 @@ import { calculateMosaicPanels } from '@/lib/mosaic/calculate-mosaic-panels'
 import {
   defaultPositionAngleDeg,
 } from '@/lib/mosaic/panel-coordinates'
-import { PLAN_MOSAIC_DRAFT_KEY } from '@/lib/mosaic/framing-rectangle'
+import { planMosaicDraftKey } from '@/lib/mosaic/framing-rectangle'
 import type { MosaicPanel } from '@/lib/mosaic/framing-rectangle'
 import {
   glassPillMd,
@@ -1120,7 +1120,7 @@ export default function PlanPage() {
       const targetName = trackingTarget?.name ?? 'Mosaic target'
       const isMosaicSend = customMosaic ? livePanels.length > 1 : livePanels.length > 1 || mosaicResult.isMosaic
       sessionStorage.setItem(
-        PLAN_MOSAIC_DRAFT_KEY,
+        planMosaicDraftKey(siteId),
         JSON.stringify({
           targetName,
           panels: livePanels,
@@ -1129,13 +1129,15 @@ export default function PlanPage() {
           centerDecDeg: livePanels[0]?.decDeg ?? 0,
         }),
       )
-      window.location.href = isMosaicSend
-        ? '/dashboard/remote?mosaic=1'
-        : `/dashboard/remote?${new URLSearchParams({
-            prefillTarget: targetName,
-            prefillRa: String(livePanels[0]!.raHours),
-            prefillDec: String(livePanels[0]!.decDeg),
-          }).toString()}`
+      const remoteParams = new URLSearchParams({ site: siteId })
+      if (isMosaicSend) {
+        remoteParams.set('mosaic', '1')
+      } else {
+        remoteParams.set('prefillTarget', targetName)
+        remoteParams.set('prefillRa', String(livePanels[0]!.raHours))
+        remoteParams.set('prefillDec', String(livePanels[0]!.decDeg))
+      }
+      window.location.href = `/dashboard/remote?${remoteParams.toString()}`
       return
     }
     let raHours: number
@@ -1159,12 +1161,13 @@ export default function PlanPage() {
       name = `Plan view ${formatRaHoursHms(raHours)} ${formatDecDegDms(decDeg)}`
     }
     const params = new URLSearchParams({
+      site: siteId,
       prefillTarget: name,
       prefillRa: raHours.toFixed(6),
       prefillDec: decDeg.toFixed(6),
     }).toString()
     window.location.href = `/dashboard/remote?${params}`
-  }, [getStel, trackingTarget, cameraFrameProfile, planMode, equipment, getLiveFramingPanelsForSend, customMosaic, mosaicResult.isMosaic])
+  }, [getStel, trackingTarget, cameraFrameProfile, planMode, equipment, getLiveFramingPanelsForSend, customMosaic, mosaicResult.isMosaic, siteId])
 
   const canSendToRemote =
     planMode === 'framing' &&

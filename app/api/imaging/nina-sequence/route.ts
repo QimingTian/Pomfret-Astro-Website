@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { sendSessionStartedEmail } from '@/lib/imaging-completion-email'
 import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
+import { currentObservatorySiteId } from '@/lib/observatory-site-scope'
 import {
   imagingCorsHeadersResolved,
   imagingCorsOptions,
@@ -578,14 +579,14 @@ export async function GET(request: NextRequest) {
       endNightDue || (hasTonightActivity && !estopSuppressesActivityFallback)
 
     if (afterSessionsEligible && !(await wasEndNightAfterSessionsSent(nightKey))) {
-      const queueId = `end-night-${nightKey}-${Date.now()}`
+      const queueId = `${currentObservatorySiteId()}:end-night-${nightKey}-${Date.now()}`
       await markEndNightAfterSessionsSent(nightKey)
       void logEndNightDelivered({ nightKey, queueId, trigger: 'after_sessions' })
       return ninaAgentJobResponse(endNightJob(queueId, 'after_sessions'))
     }
 
     if (nowMs >= nauticalDawnMs && !(await wasEndNightDawnSent(nightKey))) {
-      const queueId = `end-night-${nightKey}-dawn`
+      const queueId = `${currentObservatorySiteId()}:end-night-${nightKey}-dawn`
       await markEndNightDawnSent(nightKey)
       void logEndNightDelivered({ nightKey, queueId, trigger: 'nautical_dawn' })
       return ninaAgentJobResponse(endNightJob(queueId, 'dawn'))

@@ -1,5 +1,6 @@
 import { kvDel, kvEnabled, kvExpire, kvListPush, kvListRange } from '@/lib/kv-rest'
 import type { SessionProgressLine } from '@/lib/imaging/core/audit-log'
+import { currentObservatorySiteId, scopedKvKey } from '@/lib/observatory-site-scope'
 
 const KEY_PREFIX = 'imaging-session-progress:'
 const MAX_LINES = 400
@@ -18,8 +19,12 @@ function memoryMap(): Map<string, SessionProgressLine[]> {
   return g.__pomfret_session_progress_lines__
 }
 
+function memKey(queueId: string): string {
+  return `${currentObservatorySiteId()}:${queueId}`
+}
+
 function progressKey(queueId: string): string {
-  return `${KEY_PREFIX}${queueId}`
+  return scopedKvKey(`${KEY_PREFIX}${queueId}`)
 }
 
 function parseLine(raw: string): SessionProgressLine | null {
@@ -46,9 +51,10 @@ export async function appendSessionProgressLine(
   }
 
   const mem = memoryMap()
-  const prev = mem.get(id) ?? []
+  const key = memKey(id)
+  const prev = mem.get(key) ?? []
   const next = [...prev, entry]
-  mem.set(id, next.length > MAX_LINES ? next.slice(-MAX_LINES) : next)
+  mem.set(key, next.length > MAX_LINES ? next.slice(-MAX_LINES) : next)
 
   if (!kvEnabled()) return
   await kvListPush(progressKey(id), JSON.stringify(entry), MAX_LINES)
@@ -78,7 +84,7 @@ export async function listSessionProgressLines(
     lines.reverse()
     if (lines.length > 0) return lines
   } else {
-    const mem = memoryMap().get(id)
+    const mem = memoryMap().get(memKey(id))
     if (mem && mem.length > 0) return mem.slice(-n)
   }
 
@@ -89,6 +95,6 @@ export async function listSessionProgressLines(
 export async function clearSessionProgressLines(queueId: string): Promise<void> {
   const id = queueId.trim()
   if (!id) return
-  memoryMap().delete(id)
+  memoryMap().delete(memKey(id))
   if (kvEnabled()) await kvDel(progressKey(id))
 }

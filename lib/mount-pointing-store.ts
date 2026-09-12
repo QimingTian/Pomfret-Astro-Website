@@ -2,7 +2,7 @@
 
 import { emitLiveEvent, liveMountChannel } from '@/lib/imaging/live-bus'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
-import { scopedKvKey } from '@/lib/observatory-site-scope'
+import { currentObservatorySiteId, scopedKvKey } from '@/lib/observatory-site-scope'
 import { isWithinDaytimeClosedWindow } from '@/lib/sunrise-window'
 
 export type MountPointingPayload = {
@@ -40,6 +40,11 @@ function stationKey(stationId: string | undefined | null): string {
   return t.length > 0 ? t : 'default'
 }
 
+/** In-memory map key includes site so warm instances never mix Pomfret/Cygnus samples. */
+function memoryStationKey(stationId: string | undefined | null): string {
+  return `${currentObservatorySiteId()}:${stationKey(stationId)}`
+}
+
 /**
  * Scoped per observatory as well as per station, so a plugin left on the default
  * station id cannot publish one site's mount into the other site's 3D panel.
@@ -52,7 +57,7 @@ export async function setMountPointingSample(
   stationId: string | undefined | null,
   payload: MountPointingPayload
 ): Promise<StoredMountSample> {
-  const key = stationKey(stationId)
+  const key = memoryStationKey(stationId)
   const receivedAtUtc = new Date().toISOString()
   const stored: StoredMountSample = {
     ...payload,
@@ -73,7 +78,7 @@ export async function setMountPointingSample(
 export async function getMountPointingSample(
   stationId: string | undefined | null
 ): Promise<StoredMountSample | null> {
-  const key = stationKey(stationId)
+  const key = memoryStationKey(stationId)
   if (kvEnabled()) {
     const remote = await kvGetJson<StoredMountSample>(kvKey(stationId))
     if (remote && typeof remote === 'object') {

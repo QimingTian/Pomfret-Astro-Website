@@ -1,4 +1,5 @@
 import { kvDel, kvEnabled, kvGetJson, kvIncrFromSeed, kvSetJson } from '@/lib/kv-rest'
+import { currentObservatorySiteId, scopedKvKey } from '@/lib/observatory-site-scope'
 import {
   deleteLivePreviewObject,
   putLivePreviewObject,
@@ -29,16 +30,20 @@ type GlobalWithPreview = typeof globalThis & {
   __pomfret_imaging_preview_frame_by_queue__?: Record<string, number>
 }
 
+function memKey(queueId: string): string {
+  return `${currentObservatorySiteId()}:${queueId}`
+}
+
 function previewMetaKvKey(queueId: string): string {
-  return `${META_KEY_PREFIX}${queueId}`
+  return scopedKvKey(`${META_KEY_PREFIX}${queueId}`)
 }
 
 function previewFrameKvKey(queueId: string): string {
-  return `${FRAME_KEY_PREFIX}${queueId}`
+  return scopedKvKey(`${FRAME_KEY_PREFIX}${queueId}`)
 }
 
 function legacyBlobKvKey(queueId: string): string {
-  return `${LEGACY_BLOB_KEY_PREFIX}${queueId}`
+  return scopedKvKey(`${LEGACY_BLOB_KEY_PREFIX}${queueId}`)
 }
 
 function memoryMap(): Record<string, PreviewEntry> {
@@ -81,7 +86,7 @@ async function migrateLegacyBlobToMemory(queueId: string): Promise<PreviewEntry 
   purgeLegacyPreviewMonolithOnce()
   const perQueue = await kvGetJson<PreviewEntry>(legacyBlobKvKey(queueId))
   if (perQueue?.dataBase64) {
-    memoryMap()[queueId] = perQueue
+    memoryMap()[memKey(queueId)] = perQueue
     await kvDel(legacyBlobKvKey(queueId))
     const body = Buffer.from(perQueue.dataBase64, 'base64')
     await putLivePreviewObject(queueId, body, perQueue.contentType || 'image/jpeg')
@@ -92,7 +97,7 @@ async function migrateLegacyBlobToMemory(queueId: string): Promise<PreviewEntry 
 }
 
 async function legacyFrameSeed(queueId: string): Promise<number> {
-  const mem = memoryMap()[queueId]
+  const mem = memoryMap()[memKey(queueId)]
   if (mem?.frameNumber != null && mem.frameNumber > 0) return mem.frameNumber
   const meta = await readMetaFromKv(queueId)
   if (meta?.frameNumber != null && meta.frameNumber > 0) return meta.frameNumber
@@ -105,14 +110,14 @@ async function nextPreviewFrameNumber(queueId: string): Promise<number> {
     const seed = await legacyFrameSeed(queueId)
     const fromKv = await kvIncrFromSeed(previewFrameKvKey(queueId), seed)
     if (fromKv != null) {
-      memoryFrameMap()[queueId] = fromKv
+      memoryFrameMap()[memKey(queueId)] = fromKv
       return fromKv
     }
   }
 
-  const prev = memoryFrameMap()[queueId] ?? (await legacyFrameSeed(queueId))
+  const prev = memoryFrameMap()[memKey(queueId)] ?? (await legacyFrameSeed(queueId))
   const frameNumber = prev + 1
-  memoryFrameMap()[queueId] = frameNumber
+  memoryFrameMap()[memKey(queueId)] = frameNumber
   return frameNumber
 }
 
@@ -127,7 +132,7 @@ async function readPreviewFromR2(queueId: string, meta: PreviewMeta): Promise<Pr
   if (!fromR2) return null
   const entry = entryFromMetaAndBytes(meta, fromR2.body)
   if (fromR2.contentType) entry.contentType = fromR2.contentType
-  memoryMap()[queueId] = entry
+  memoryMap()[memKey(queueId)] = entry
   return entry
 }
 
@@ -148,7 +153,7 @@ export async function upsertPreviewImage(
   const body = Buffer.from(dataBase64, 'base64')
   const entry: PreviewEntry = { ...meta, dataBase64 }
 
-  memoryMap()[queueId] = entry
+  memoryMap()[memKey(queueId)] = entry
   await putLivePreviewObject(queueId, body, contentType)
   await persistMeta(meta)
 
@@ -157,7 +162,7 @@ export async function upsertPreviewImage(
 
 export async function getPreviewImage(queueId: string): Promise<PreviewEntry | null> {
   purgeLegacyPreviewMonolithOnce()
-  const mem = memoryMap()[queueId]
+  const mem = memoryMap()[memKey(queueId)]
   if (mem?.dataBase64) return mem
 
   const meta = await readMetaFromKv(queueId)
@@ -171,7 +176,7 @@ export async function getPreviewImage(queueId: string): Promise<PreviewEntry | n
 
 export async function hasPreviewImage(queueId: string): Promise<boolean> {
   purgeLegacyPreviewMonolithOnce()
-  const mem = memoryMap()[queueId]
+  const mem = memoryMap()[memKey(queueId)]
   if (mem?.dataBase64) return true
 
   const meta = await readMetaFromKv(queueId)
@@ -183,9 +188,10 @@ export async function hasPreviewImage(queueId: string): Promise<boolean> {
 
 export async function removePreviewImage(queueId: string): Promise<void> {
   const mem = memoryMap()
-  if (queueId in mem) delete mem[queueId]
+  const mk = memKey(queueId)
+  if (mk in mem) delete mem[mk]
   const frameMem = memoryFrameMap()
-  if (queueId in frameMem) delete frameMem[queueId]
+  if (mk in frameMem) delete frameMem[mk]
 
   await deleteLivePreviewObject(queueId)
   await kvDel(previewMetaKvKey(queueId))

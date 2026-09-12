@@ -26,7 +26,7 @@ function imagingSiteId(): string {
   return currentObservatorySiteId() || DEFAULT_OBSERVATORY_SITE_ID
 }
 
-/** Gallery / equipment / some member docs stay Pomfret until product scopes them. */
+/** Gallery / membership docs stay network-global (Pomfret row) until product scopes them. */
 function membershipSiteId(): string {
   return DEFAULT_OBSERVATORY_SITE_ID
 }
@@ -402,7 +402,7 @@ export async function mirrorGallerySubmissions(rows: GalleryRow[]): Promise<void
 export async function mirrorImagingEquipment(rigs: unknown): Promise<void> {
   await withDatabaseMirror('equipment', async () => {
     const db = getDb()
-    const sid = membershipSiteId()
+    const sid = imagingSiteId()
     await db
       .insert(imagingEquipment)
       .values({

@@ -150,10 +150,11 @@ export async function loadEquipmentRigsFromPostgres(): Promise<unknown[] | null>
   if (!postgresReadsEnabled()) return null
   try {
     const db = getDb()
+    const site = imagingSiteId()
     const rows = await db
       .select()
       .from(imagingEquipment)
-      .where(eq(imagingEquipment.siteId, DEFAULT_OBSERVATORY_SITE_ID))
+      .where(eq(imagingEquipment.siteId, site))
     const rigs = rows[0]?.rigs
     return Array.isArray(rigs) ? rigs : null
   } catch (error) {

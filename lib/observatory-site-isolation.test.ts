@@ -22,3 +22,13 @@ test('end-night flags do not cross sites for the same calendar nightKey', async 
     assert.equal(await isEndNightDue(nightKey), false)
   })
 })
+
+test('imaging equipment Redis keys are site-scoped', async () => {
+  const { imagingEquipmentKvKey } = await import('@/lib/imaging/equipment/equipment-store')
+  await withObservatorySiteAsync(POMFRET_SITE.id, async () => {
+    assert.equal(imagingEquipmentKvKey(), 'pomfret:imaging-equipment')
+  })
+  await withObservatorySiteAsync(CYGNUS_SITE.id, async () => {
+    assert.equal(imagingEquipmentKvKey(), 'site:cygnus:imaging-equipment')
+  })
+})

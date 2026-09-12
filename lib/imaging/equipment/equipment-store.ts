@@ -1,4 +1,4 @@
-import { currentObservatorySiteId, scopedKvKey } from '@/lib/observatory-site-scope'
+import { currentObservatorySiteId } from '@/lib/observatory-site-scope'
 import { DEFAULT_OBSERVATORY_SITE_ID } from '@/lib/observatory-sites'
 import { postgresReadsEnabled } from '@/lib/db'
 import { kvGetJson, kvSetJson, kvEnabled } from '@/lib/kv-rest'
@@ -7,10 +7,14 @@ import { isEquipmentValid, normalizeEquipment, type ImagingEquipment } from './e
 export const IMAGING_EQUIPMENT_KV_KEY = 'pomfret:imaging-equipment'
 export const IMAGING_EQUIPMENT_CHANGED = 'pomfret:imaging-equipment-changed'
 
-function equipmentKvKey(): string {
-  const siteId = currentObservatorySiteId()
+/** Site-scoped Redis key for imaging equipment (Pomfret keeps legacy unprefixed key). */
+export function imagingEquipmentKvKey(siteId = currentObservatorySiteId()): string {
   if (siteId === DEFAULT_OBSERVATORY_SITE_ID) return IMAGING_EQUIPMENT_KV_KEY
-  return scopedKvKey('imaging-equipment')
+  return `site:${siteId}:imaging-equipment`
+}
+
+function equipmentKvKey(): string {
+  return imagingEquipmentKvKey()
 }
 
 export function notifyImagingEquipmentChanged(): void {
@@ -76,19 +80,16 @@ async function readRigsFromKv(): Promise<Array<ImagingEquipment | null> | undefi
 }
 
 async function writeRigsToKv(rigs: Array<ImagingEquipment | null>): Promise<void> {
-  if (postgresReadsEnabled() && currentObservatorySiteId() === DEFAULT_OBSERVATORY_SITE_ID) {
-    const { mirrorImagingEquipment } = await import('@/lib/db/mirror')
-    await mirrorImagingEquipment(rigs)
-    return
+  // Always keep site-scoped KV + Postgres in sync. Never write Cygnus into Pomfret.
+  if (kvEnabled()) {
+    await kvSetJson(equipmentKvKey(), { rigs })
   }
-  if (!kvEnabled()) return
-  await kvSetJson(equipmentKvKey(), { rigs })
   const { mirrorImagingEquipment } = await import('@/lib/db/mirror')
   await mirrorImagingEquipment(rigs)
 }
 
 export async function listImagingRigs(): Promise<Array<ImagingEquipment | null>> {
-  if (postgresReadsEnabled() && currentObservatorySiteId() === DEFAULT_OBSERVATORY_SITE_ID) {
+  if (postgresReadsEnabled()) {
     try {
       const { loadEquipmentRigsFromPostgres } = await import('@/lib/db/read')
       const pg = await loadEquipmentRigsFromPostgres()

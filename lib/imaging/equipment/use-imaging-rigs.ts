@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { observatorySiteFetch, useObservatorySite } from '@/components/observatory-site-provider'
 import { IMAGING_EQUIPMENT_CHANGED, rigDisplayLabel } from '@/lib/imaging/equipment/equipment-store'
 import { isEquipmentValid, type ImagingEquipment } from './equipment'
 
@@ -10,12 +11,14 @@ export type ImagingRigEntry = {
   label: string
 }
 
-const SELECTED_RIG_KEY = 'pomfret:plan-selected-rig-index'
+function selectedRigStorageKey(siteId: string): string {
+  return `pomfret:plan-selected-rig-index:${siteId}`
+}
 
-function readStoredRigIndex(): number {
+function readStoredRigIndex(siteId: string): number {
   if (typeof window === 'undefined') return 0
   try {
-    const raw = window.localStorage.getItem(SELECTED_RIG_KEY)
+    const raw = window.localStorage.getItem(selectedRigStorageKey(siteId))
     const n = raw != null ? Number.parseInt(raw, 10) : 0
     return Number.isFinite(n) && n >= 0 ? n : 0
   } catch {
@@ -23,9 +26,9 @@ function readStoredRigIndex(): number {
   }
 }
 
-function writeStoredRigIndex(index: number): void {
+function writeStoredRigIndex(siteId: string, index: number): void {
   try {
-    window.localStorage.setItem(SELECTED_RIG_KEY, String(index))
+    window.localStorage.setItem(selectedRigStorageKey(siteId), String(index))
   } catch {
     /* ignore quota / private mode */
   }
@@ -37,12 +40,16 @@ export function useImagingRigs(): {
   selectedRigIndex: number
   setSelectedRigIndex: (index: number) => void
 } {
+  const { siteId } = useObservatorySite()
   const [rigs, setRigs] = useState<ImagingRigEntry[]>([])
   const [selectedRigIndex, setSelectedRigIndexState] = useState(0)
 
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch('/api/imaging/equipment', { cache: 'no-store', credentials: 'include' })
+      const res = await observatorySiteFetch('/api/imaging/equipment', siteId, {
+        cache: 'no-store',
+        credentials: 'include',
+      })
       const data = (await res.json().catch(() => null)) as {
         rigs?: Array<{ index: number; equipment: ImagingEquipment }>
       } | null
@@ -59,16 +66,16 @@ export function useImagingRigs(): {
         }))
       setRigs(next)
       setSelectedRigIndexState((cur) => {
-        const stored = readStoredRigIndex()
+        const stored = readStoredRigIndex(siteId)
         const pick = next.some((r) => r.index === stored) ? stored : (next[0]?.index ?? 0)
         const resolved = next.some((r) => r.index === cur) ? cur : pick
-        writeStoredRigIndex(resolved)
+        writeStoredRigIndex(siteId, resolved)
         return resolved
       })
     } catch {
       setRigs([])
     }
-  }, [])
+  }, [siteId])
 
   useEffect(() => {
     void refresh()
@@ -81,10 +88,13 @@ export function useImagingRigs(): {
     }
   }, [refresh])
 
-  const setSelectedRigIndex = useCallback((index: number) => {
-    setSelectedRigIndexState(index)
-    writeStoredRigIndex(index)
-  }, [])
+  const setSelectedRigIndex = useCallback(
+    (index: number) => {
+      setSelectedRigIndexState(index)
+      writeStoredRigIndex(siteId, index)
+    },
+    [siteId]
+  )
 
   const selectedRig = useMemo(() => {
     const hit = rigs.find((r) => r.index === selectedRigIndex)

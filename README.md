@@ -1,6 +1,6 @@
 # Pomfret Astro — Technical Documentation
 
-**Version:** v7.1.8  
+**Version:** v7.4.0  
 **Production:** https://www.pomfretastro.org  
 **Repository:** https://github.com/QimingTian/Pomfret-Astro-Website
 
@@ -228,4 +228,4 @@ Relative to one another, the **Ready** gate allows ASC **sky clear**, while the 
 
 ---
 
-*Pomfret Astro Technical Documentation · v7.1.8*
+*Pomfret Astro Technical Documentation · v7.4.0*

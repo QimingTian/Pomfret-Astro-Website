@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Suspense, useState } from 'react'
+import { SiteCopyrightFooter } from '@/components/site-copyright-footer'
 import { ABOUT_PATH } from '@/lib/seo'
 
 const fieldClass =
@@ -44,50 +45,53 @@ function LoginForm() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-white dark:bg-gray-900">
-      <div className="w-full max-w-md px-8">
-        <div className="text-center mb-12">
-          <h1 className="text-4xl font-semibold mb-3 text-apple-dark dark:text-white">Pomfret Astro</h1>
-          <p className="text-gray-600 dark:text-gray-400 text-lg">Log in to continue</p>
+    <div className="flex min-h-screen flex-col bg-white dark:bg-gray-900">
+      <div className="flex flex-1 items-center justify-center">
+        <div className="w-full max-w-md px-8 py-12">
+          <div className="mb-12 text-center">
+            <h1 className="mb-3 text-4xl font-semibold text-apple-dark dark:text-white">Pomfret Astro</h1>
+            <p className="text-lg text-gray-600 dark:text-gray-400">Log in to continue</p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <input
+              type="text"
+              value={login}
+              onChange={(e) => setLogin(e.target.value)}
+              placeholder="Email or username"
+              className={fieldClass}
+              autoComplete="username"
+              required
+              autoFocus
+            />
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Password"
+              className={fieldClass}
+              autoComplete="current-password"
+              required
+            />
+            {error && <p className="text-center text-sm text-red-600 dark:text-red-400">{error}</p>}
+            <button
+              type="submit"
+              disabled={submitting || !login.trim() || !password}
+              className="w-full rounded-lg bg-apple-blue py-3 font-medium text-white transition-colors hover:bg-apple-blue-hover disabled:cursor-not-allowed disabled:bg-gray-300 dark:disabled:bg-gray-700"
+            >
+              {submitting ? 'Logging in…' : 'Log in'}
+            </button>
+          </form>
+
+          <p className="mt-6 text-center text-sm text-gray-500 dark:text-gray-400">
+            No account?{' '}
+            <Link href={`/signup?next=${encodeURIComponent(nextPath)}`} className="text-apple-blue dark:text-blue-400">
+              Sign up
+            </Link>
+          </p>
         </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <input
-            type="text"
-            value={login}
-            onChange={(e) => setLogin(e.target.value)}
-            placeholder="Email or username"
-            className={fieldClass}
-            autoComplete="username"
-            required
-            autoFocus
-          />
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Password"
-            className={fieldClass}
-            autoComplete="current-password"
-            required
-          />
-          {error && <p className="text-red-600 dark:text-red-400 text-sm text-center">{error}</p>}
-          <button
-            type="submit"
-            disabled={submitting || !login.trim() || !password}
-            className="w-full py-3 bg-apple-blue hover:bg-apple-blue-hover disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
-          >
-            {submitting ? 'Logging in…' : 'Log in'}
-          </button>
-        </form>
-
-        <p className="text-sm text-center text-gray-500 dark:text-gray-400 mt-6">
-          No account?{' '}
-          <Link href={`/signup?next=${encodeURIComponent(nextPath)}`} className="text-apple-blue dark:text-blue-400">
-            Sign up
-          </Link>
-        </p>
       </div>
+      <SiteCopyrightFooter compact tone="onDark" />
     </div>
   )
 }

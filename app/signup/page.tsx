@@ -6,11 +6,11 @@ import { Suspense, useId, useState } from 'react'
 import {
   authLabelClass,
   authLineInputClass,
-  authPageClass,
   authPanelClass,
   authPrimaryButtonClass,
   authSecondaryButtonClass,
 } from '@/components/auth-ui'
+import { SiteCopyrightFooter } from '@/components/site-copyright-footer'
 import {
   SignupAffiliationPicker,
   type AffiliationChoice,
@@ -90,41 +90,42 @@ function SignUpForm() {
     ) && password === confirmPassword
 
   return (
-    <div className={authPageClass}>
-      <div className={authPanelClass}>
-        <p className="mb-2 text-center text-lg font-semibold text-white">Pomfret Astro</p>
-        <p className="mb-8 text-center text-xl font-semibold sm:text-2xl">Create An Account</p>
+    <div className="flex min-h-screen flex-col bg-[#09090a]">
+      <div className="flex flex-1 items-center justify-center px-4 py-10">
+        <div className={authPanelClass}>
+          <p className="mb-2 text-center text-lg font-semibold text-white">Pomfret Astro</p>
+          <p className="mb-8 text-center text-xl font-semibold sm:text-2xl">Create An Account</p>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            <div>
-              <label htmlFor={`${id}-first`} className={authLabelClass}>
-                First name
-              </label>
-              <input
-                id={`${id}-first`}
-                type="text"
-                value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
-                autoComplete="given-name"
-                required
-                className={authLineInputClass}
-              />
-            </div>
-            <div>
-              <label htmlFor={`${id}-last`} className={authLabelClass}>
-                Last name
-              </label>
-              <input
-                id={`${id}-last`}
-                type="text"
-                value={lastName}
-                onChange={(e) => setLastName(e.target.value)}
-                autoComplete="family-name"
-                required
-                className={authLineInputClass}
-              />
-            </div>
+          <form onSubmit={handleSubmit} className="space-y-6">
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              <div>
+                <label htmlFor={`${id}-first`} className={authLabelClass}>
+                  First name
+                </label>
+                <input
+                  id={`${id}-first`}
+                  type="text"
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  autoComplete="given-name"
+                  required
+                  className={authLineInputClass}
+                />
+              </div>
+              <div>
+                <label htmlFor={`${id}-last`} className={authLabelClass}>
+                  Last name
+                </label>
+                <input
+                  id={`${id}-last`}
+                  type="text"
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  autoComplete="family-name"
+                  required
+                  className={authLineInputClass}
+                />
+              </div>
             <div className="sm:col-span-2 lg:col-span-1">
               <label htmlFor={`${id}-username`} className={authLabelClass}>
                 Username
@@ -212,7 +213,9 @@ function SignUpForm() {
             Log In
           </Link>
         </div>
+        </div>
       </div>
+      <SiteCopyrightFooter compact tone="onDark" />
     </div>
   )
 }

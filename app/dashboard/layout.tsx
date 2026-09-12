@@ -15,6 +15,7 @@ import {
   ObservatorySiteMenuProvider,
   ObservatorySiteTrigger,
 } from '@/components/observatory-site-switcher'
+import { SiteCopyrightFooter } from '@/components/site-copyright-footer'
 import { glassNavLink, glassNavLinkActive, glassNavLinkMobile, glassPillIcon } from '@/lib/glass-ui'
 
 function accountNavLabel(member: ReturnType<typeof useMember>): string {
@@ -62,7 +63,7 @@ function DashboardChrome({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="dashboard-surface min-h-screen text-apple-dark dark:text-[#eee9dc]">
+    <div className="dashboard-surface flex min-h-screen flex-col text-apple-dark dark:text-[#eee9dc]">
       <ObservatorySiteMenuProvider>
         <ObservatorySiteHeaderShell className="sticky top-0 z-50 relative overflow-visible border-b border-black/10 bg-white/75 backdrop-blur-xl dark:border-white/10 dark:bg-[#09090a]">
           <div className="mx-auto max-w-[1400px] overflow-visible px-4 sm:px-6 lg:px-10">
@@ -132,12 +133,14 @@ function DashboardChrome({ children }: { children: React.ReactNode }) {
       <main
         className={
           isHomePage
-            ? 'min-h-[calc(100vh-5rem)]'
-            : 'mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-10 py-8'
+            ? 'flex-1'
+            : 'mx-auto w-full max-w-[1400px] flex-1 px-4 py-8 sm:px-6 lg:px-10'
         }
       >
         {children}
       </main>
+      {/* About embeds its own copyright above the fixed video layer. */}
+      {!isHomePage ? <SiteCopyrightFooter /> : null}
     </div>
   )
 }

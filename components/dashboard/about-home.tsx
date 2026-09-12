@@ -305,6 +305,14 @@ export function AboutHome() {
           </p>
         </AboutEditorialSection>
         </div>
+        <div className="border-t border-white/[0.08] px-4 py-10 text-center sm:px-6 lg:px-8">
+          <p
+            className="text-[11px] leading-relaxed tracking-[0.05em] text-white/50 sm:text-xs"
+            style={{ fontFamily: SF_PRO }}
+          >
+            © {new Date().getFullYear()} Qiming Tian. Pomfret Astro. All rights reserved.
+          </p>
+        </div>
       </section>
     </div>
   )

@@ -3,7 +3,9 @@ import assert from 'node:assert/strict'
 import {
   geocolorFramePaths,
   geocolorLatLonToScan,
+  geocolorSiteInCoverFrame,
   geocolorSitePinPercent,
+  geocolorSiteView,
   noaaGoesProxyUrl,
   parseGeocolorFrameFilenames,
   parseGeocolorFrameUtc,
@@ -67,16 +69,30 @@ describe('noaa-goes', () => {
     assert.equal(utc!.getUTCMinutes(), 6)
   })
 
-  test('geocolorSitePinPercent places Pomfret in the NE zoom viewport', () => {
+  test('geocolorSitePinPercent centers Pomfret in the zoomed viewport', () => {
     const pin = geocolorSitePinPercent(41.9159, -71.9626)
     assert.ok(pin)
-    // ABI projection: inland CT, north of Long Island — not the old ocean pin (~65%, ~55%).
-    assert.ok(pin!.leftPct > 55 && pin!.leftPct < 85)
-    assert.ok(pin!.topPct > 25 && pin!.topPct < 50)
-    const boston = geocolorSitePinPercent(42.36, -71.06)
+    assert.ok(Math.abs(pin!.leftPct - 50) < 0.01)
+    assert.ok(Math.abs(pin!.topPct - 50) < 0.01)
+
+    const pomfret = geocolorSiteInCoverFrame(41.9159, -71.9626)
+    const boston = geocolorSiteInCoverFrame(42.36, -71.06)
+    assert.ok(pomfret)
     assert.ok(boston)
-    assert.ok(boston!.leftPct > pin!.leftPct)
-    assert.ok(boston!.topPct < pin!.topPct)
+    // Boston is east/north of Pomfret in the covered CONUS paint.
+    assert.ok(boston!.x > pomfret!.x)
+    assert.ok(boston!.y < pomfret!.y)
+  })
+
+  test('geocolorSiteView zooms around Pomfret cover coordinates', () => {
+    const view = geocolorSiteView(41.9159, -71.9626)
+    const cover = geocolorSiteInCoverFrame(41.9159, -71.9626)
+    assert.ok(view)
+    assert.ok(cover)
+    assert.equal(view!.transformOrigin, `${cover!.x * 100}% ${cover!.y * 100}%`)
+    assert.match(view!.transform, /scale\(2\)/)
+    assert.equal(view!.pinLeftPct, 50)
+    assert.equal(view!.pinTopPct, 50)
   })
 
   test('geocolorLatLonToScan returns ABI angles for Pomfret', () => {
@@ -88,5 +104,6 @@ describe('noaa-goes', () => {
 
   test('geocolorSitePinPercent returns null for Cygnus (off CONUS)', () => {
     assert.equal(geocolorSitePinPercent(52.352, 4.912), null)
+    assert.equal(geocolorSiteView(52.352, 4.912), null)
   })
 })

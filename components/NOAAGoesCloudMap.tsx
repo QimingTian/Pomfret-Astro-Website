@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import MapFrameTimeOverlay from '@/components/MapFrameTimeOverlay'
 import { formatObservatoryDateTime } from '@/lib/est-datetime'
-import { geocolorSiteView, noaaGoesProxyUrl, parseGeocolorFrameUtc } from '@/lib/noaa-goes'
+import { geocolorSitePinPercent, noaaGoesProxyUrl, parseGeocolorFrameUtc } from '@/lib/noaa-goes'
 import { useAppStore } from '@/lib/store'
 import { useObservatorySite } from '@/components/observatory-site-provider'
 
@@ -92,8 +92,8 @@ export default function NOAAGoesCloudMap() {
     return utc ? formatObservatoryDateTime(utc, site.timezone) : null
   }, [currentPath, site.timezone])
 
-  const siteView = useMemo(
-    () => geocolorSiteView(site.weatherLat, site.weatherLon),
+  const sitePin = useMemo(
+    () => geocolorSitePinPercent(site.weatherLat, site.weatherLon),
     [site.weatherLat, site.weatherLon]
   )
 
@@ -112,20 +112,20 @@ export default function NOAAGoesCloudMap() {
           {error}
         </p>
       ) : null}
-      {imageSrc && siteView ? (
+      {imageSrc ? (
         /* eslint-disable-next-line @next/next/no-img-element */
         <img
           key={currentPath}
           src={imageSrc}
           alt="NOAA GOES-East CONUS GeoColor cloud animation"
           className="absolute inset-0 h-full w-full object-cover"
-          style={{ transform: siteView.transform, transformOrigin: siteView.transformOrigin }}
+          style={{ transform: 'scale(2)', transformOrigin: '100% 0%' }}
         />
       ) : null}
-      {imageSrc && siteView ? (
+      {imageSrc && sitePin ? (
         <div
           className="pointer-events-none absolute z-[5] -translate-x-1/2 -translate-y-1/2"
-          style={{ left: `${siteView.pinLeftPct}%`, top: `${siteView.pinTopPct}%` }}
+          style={{ left: `${sitePin.leftPct}%`, top: `${sitePin.topPct}%` }}
           aria-label={`${site.name} location`}
         >
           <span className="block h-3.5 w-3.5 rounded-full border-2 border-white bg-sky-400 shadow-[0_0_0_1px_rgba(0,0,0,0.35)]" />

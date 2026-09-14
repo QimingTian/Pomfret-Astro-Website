@@ -97,13 +97,14 @@ export function geocolorLatLonToScan(latDeg: number, lonDeg: number): { x: numbe
 }
 
 /**
- * object-cover into 4:3 from 5:3 GeoColor → crop 10% from each side of width.
- * Returns site position as fractions of the covered element box, or null if off CONUS / cropped out.
+ * CSS crop on Cloud Map: `object-cover` into 4:3, then `scale(2)` from top-right.
+ * Uses GOES-East ABI fixed-grid projection (not linear lon/lat).
+ * Returns pin position as % of the visible container, or null if off-frame.
  */
-export function geocolorSiteInCoverFrame(
+export function geocolorSitePinPercent(
   lat: number,
   lon: number
-): { x: number; y: number } | null {
+): { leftPct: number; topPct: number } | null {
   const scan = geocolorLatLonToScan(lat, lon)
   if (!scan) return null
 
@@ -112,56 +113,20 @@ export function geocolorSiteInCoverFrame(
   const fy = (yNorth - scan.y) / (yNorth - ySouth)
   if (fx < 0 || fx > 1 || fy < 0 || fy > 1) return null
 
+  // object-cover into 4:3 from 5:3 image → crop 10% from each side of width.
   const coverWest = 0.1
   const coverEast = 0.9
-  if (fx < coverWest || fx > coverEast) return null
+  // scale(2) from top-right → visible is right half × top half of the covered paint.
+  const visWest = coverWest + 0.5 * (coverEast - coverWest)
+  const visEast = coverEast
+  const visNorth = 0
+  const visSouth = 0.5
 
-  return {
-    x: (fx - coverWest) / (coverEast - coverWest),
-    y: fy,
-  }
-}
+  if (fx < visWest || fx > visEast || fy < visNorth || fy > visSouth) return null
 
-export const GEOCOLOR_VIEW_SCALE = 2
-
-/**
- * Cloud Map CSS: `object-cover` into 4:3, then scale centered on the observatory.
- * Pin sits at the viewport center when the site is on CONUS.
- */
-export function geocolorSiteView(
-  lat: number,
-  lon: number
-): {
-  transformOrigin: string
-  transform: string
-  pinLeftPct: number
-  pinTopPct: number
-} | null {
-  const p = geocolorSiteInCoverFrame(lat, lon)
-  if (!p) return null
-  const ox = p.x * 100
-  const oy = p.y * 100
-  const tx = (0.5 - p.x) * 100
-  const ty = (0.5 - p.y) * 100
-  return {
-    transformOrigin: `${ox}% ${oy}%`,
-    transform: `translate(${tx}%, ${ty}%) scale(${GEOCOLOR_VIEW_SCALE})`,
-    pinLeftPct: 50,
-    pinTopPct: 50,
-  }
-}
-
-/**
- * Pin position as % of the visible Cloud Map container, or null if off-frame.
- * With site-centered crop the pin is at 50%/50%.
- */
-export function geocolorSitePinPercent(
-  lat: number,
-  lon: number
-): { leftPct: number; topPct: number } | null {
-  const view = geocolorSiteView(lat, lon)
-  if (!view) return null
-  return { leftPct: view.pinLeftPct, topPct: view.pinTopPct }
+  const leftPct = ((fx - visWest) / (visEast - visWest)) * 100
+  const topPct = ((fy - visNorth) / (visSouth - visNorth)) * 100
+  return { leftPct, topPct }
 }
 
 /** Parse UTC observation time from GeoColor frame path or filename (`YYYY` + Julian `DDD` + `HHMM`). */

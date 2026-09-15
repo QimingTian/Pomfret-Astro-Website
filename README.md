@@ -1,22 +1,20 @@
 # Pomfret Astro — Technical Documentation
 
-**Version:** v7.4.2  
+**Version:** v8.0.0  
 **Production:** https://www.pomfretastro.org  
 **Repository:** https://github.com/QimingTian/Pomfret-Astro-Website
 
-This document describes the architecture and operating rules of the Pomfret Astro observatory stack: the cloud application, the scheduling and safety logic, the Windows NINA agent, and the all-sky camera services that support autonomous imaging nights.
+This document describes the architecture and operating rules of the **Pomfret Astro Network**: the multi-site cloud application, scheduling and safety logic, Windows NINA agents, and all-sky camera services that support autonomous imaging nights.
 
 ---
 
 ## 1. System overview
 
-Pomfret Astro is an autonomous school observatory. Members submit imaging requests through a Next.js web application hosted on Vercel. A server-side scheduler decides what can run tonight under weather and altitude constraints. A Windows PC at the dome runs a Python agent that polls the cloud for NINA sequences, powers equipment through a Digital Loggers PDU, executes those sequences, and uploads results to Cloudflare R2. A Raspberry Pi beside the dome provides the all-sky camera stream and the ASC cloud and rain models used by weather decisions.
+Pomfret Astro Network is a multi-observatory imaging platform. Members submit requests through a Next.js app on Vercel. A server-side scheduler decides what can run tonight under each site’s weather and altitude constraints. At each dome, a Windows PC runs a Python agent that polls the cloud for NINA sequences, powers equipment through a Digital Loggers PDU, executes those sequences, and uploads results to Cloudflare R2. Where configured, a Raspberry Pi provides the all-sky camera stream and ASC cloud/rain models used by weather decisions.
 
-The observatory site is fixed in code at approximately 41.886°N, 71.965°W, in the America/New_York time zone. For both scheduling and delivery, a target must remain at least **30°** above the horizon for the entire session.
+**Sites** (timezone, coordinates, elevation, schedule-strip hours, Redis key prefix) live in `lib/observatory-sites.ts`. Current sites include Pomfret School and Cygnus Gymnasium; request context uses `?site=` / `X-Observatory-Site` / cookie. When adding or verifying a site, follow **[docs/multi-site-checklist.md](docs/multi-site-checklist.md)** (timezone UI, schedule strip, Redis scoping, agent URLs, Weather feature matrix). For both scheduling and delivery, a target must remain at least **30°** above the horizon for the entire session at the active site.
 
-**Multi-site:** Pomfret and additional sites (e.g. Cygnus) are defined in `lib/observatory-sites.ts`. When adding or verifying a site, follow **[docs/multi-site-checklist.md](docs/multi-site-checklist.md)** (timezone UI, schedule strip, Redis scoping, agent URLs, Weather feature matrix).
-
-Durable imaging state that must survive serverless cold starts is stored in Upstash Redis over REST. Session files and live previews are stored in R2. The website process itself retains almost no durable imaging state on the local filesystem.
+Durable imaging state that must survive serverless cold starts is stored in Upstash Redis over REST, **scoped per observatory**. Session files and live previews are stored in R2. The website process itself retains almost no durable imaging state on the local filesystem.
 
 ---
 
@@ -110,7 +108,7 @@ When that stop was armed by weather safety and has reached the **stopped** phase
 
 ## 8. Scheduling and reconcile
 
-The Remote “tonight” strip runs from **4:00 PM** local time to **8:00 AM** the following morning. The **night key** is the calendar day on which that strip starts. Scheduling windows and nautical daytime closure use nautical dusk and dawn (zenith angle **102°**). Open-Meteo nightly weather bounds follow sunset to the following sunrise for hourly samples.
+The Remote “tonight” strip uses each site’s local `scheduleStripStartHour` → `scheduleStripEndHour` from `lib/observatory-sites.ts` (for example Pomfret 16→08, Cygnus 15→10). The **night key** is the calendar day on which that strip starts. Scheduling windows and nautical daytime closure use nautical dusk and dawn (zenith angle **102°**). Open-Meteo nightly weather bounds follow sunset to the following sunrise for hourly samples.
 
 **Reconcile** is the scheduling orchestrator. It debounces for **15 s** unless forced, performs no work while **ESTOP** is blocking, drops stale sub-sessions from prior nights, and unschedules pending work when weather is unknown or globally hard-blocked. Otherwise it first maintains any project already on the board, builds free time by subtracting altitude holds, admin force-runs, and existing occupancy, then walks pending rows in creation order. Project rows use the multi-night planner; ordinary queue rows use schedule insight. Reconcile still runs when the pending list is empty because in-progress projects may require replan. Completions, holds, weather routes, observatory changes, and cron may all trigger it.
 
@@ -142,7 +140,7 @@ Progress posts from NINA append lines on the session, complete sessions when the
 
 There are three arm paths. An administrator may arm **ESTOP** from the dashboard. **Weather-safety ESTOP** may arm automatically under the storm, precip, or ASC rain rules in Section 7. A genuine session failure may lock the observatory and arm **ESTOP** so the dome still closes, except when the failure reason is already an emergency stop or an intentional delivery handoff. On arm, the site locks immediately to **manual** and **Closed — Maintenance**, end-night due flags are cleared, activity-only end-night is suppressed for that night, and in-progress work is failed.
 
-Clearing is either manual—an administrator leaves the maintenance lock—or, for weather-safety **ESTOP** only, automatic once the phase is **stopped** and both Open-Meteo and ASC report clear conditions. Holds release and scheduling resumes.
+Clearing is either manual—an administrator leaves the maintenance lock—or, for weather-safety **ESTOP** only, automatic once the phase is **stopped** and both Open-Meteo and ASC report clear conditions. Manual clear acknowledges failed-sub-tonight sticky holds for that night, releases holds, and runs a single reconcile so imaging can resume tonight.
 
 **End night** is separate from **ESTOP**. After the last real session of the night is consumed, or at nautical dawn, the agent may receive an end-night sequence that closes the dome and posts the ordinary completion Discord message. After an **ESTOP**, the activity-only fallback is suppressed so clearing the lock does not falsely announce that tonight’s session completed.
 
@@ -164,7 +162,7 @@ Moon avoidance uses a Lorentzian separation model compatible with ACP and NINA. 
 
 ## 14. All-sky camera and ASC AI
 
-The Pi serves the MJPEG stream at `https://cam.pomfretastro.org/camera/stream` and exposes camera and sequence status endpoints consumed by the cloud. ASC inference (v1 PyTorch) returns sky ∈ {clear, cloudy}, a rain detection with confidence and label, a day or night phase tag, and staleness metadata. When a long all-sky sequence is running, the **Ready** and weather-safety paths treat ASC as not applicable so a frozen sky frame cannot falsely gate or arm the observatory. Auto exposure and white balance history may be recorded for administrators through the camera auto-tuning API.
+Each site that enables ASC points its camera service URL in site/agent configuration (Pomfret uses `https://cam.pomfretastro.org/camera/stream`). ASC inference (**ASC AI v1**, PyTorch ResNet18 dual-head) returns sky ∈ {clear, cloudy}, a rain detection with confidence and label, a day or night phase tag, and staleness metadata. The **Ready** gate requires `sky === clear` when ASC applies. When a long all-sky sequence is running, the **Ready** and weather-safety paths treat ASC as not applicable so a frozen sky frame cannot falsely gate or arm the observatory. Auto exposure and white balance history may be recorded for administrators through the camera auto-tuning API.
 
 ---
 
@@ -228,4 +226,4 @@ Relative to one another, the **Ready** gate allows ASC **sky clear**, while the 
 
 ---
 
-*Pomfret Astro Technical Documentation · v7.4.2*
+*Pomfret Astro Technical Documentation · v8.0.0*

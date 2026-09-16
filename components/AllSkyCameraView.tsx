@@ -67,34 +67,81 @@ const overlayTextShadowStyle: CSSProperties = {
   textShadow: '0 1px 4px rgba(0,0,0,0.95), 0 0 14px rgba(0,0,0,0.55)',
 }
 
-/** All-sky frame: north up; axis-aligned cross. */
+/**
+ * Cardinal arms as they actually lie on the all-sky frame, from the camera's
+ * astrometric solution (0.28 px RMS, ASC `CARDINAL_DIRECTIONS.md`). The camera
+ * looks up, so the frame is mirrored: east is to the left and azimuth increases
+ * counter-clockwise. The 1.71° mount tilt also means the arms are not exactly
+ * 90° apart on screen, so each one carries its own angle.
+ *
+ * Screen angle is measured from straight up, clockwise (x right, y down).
+ */
+const ASC_COMPASS_ARMS = [
+  { label: 'N', screenAngleDeg: 31.2 },
+  { label: 'E', screenAngleDeg: 300.5 },
+  { label: 'S', screenAngleDeg: 211.5 },
+  { label: 'W', screenAngleDeg: 122.1 },
+] as const
+
+const ASC_ARM_RADIUS = 30
+const ASC_LABEL_RADIUS = 43
+
+/** Offset from the rose centre, in percent of the rose box. */
+function ascArmOffset(screenAngleDeg: number, radius: number): { x: number; y: number } {
+  const rad = (screenAngleDeg * Math.PI) / 180
+  return { x: Math.sin(rad) * radius, y: -Math.cos(rad) * radius }
+}
+
 function AscCompassRose({ className = '' }: { className?: string }) {
   const letter =
     'absolute z-[1] font-semibold leading-none text-white/95 text-[0.8rem] sm:text-[1.05rem]'
   const outer = `pointer-events-none absolute bottom-0 left-0 z-10 px-3 pb-2 sm:px-4 sm:pb-3 ${className}`
   return (
-    <div className={outer} role="img" aria-label="Compass: north up, south down, east left, west right on frame">
+    <div
+      className={outer}
+      role="img"
+      aria-label="Compass on frame: north up and tilted right, east upper left, south lower left, west lower right"
+    >
       <div className="relative h-[4.5rem] w-[4.5rem] sm:h-[7rem] sm:w-[7rem]">
-        <div
-          className="pointer-events-none absolute left-1/2 top-[22%] bottom-[22%] z-0 w-[2px] -translate-x-1/2 bg-white/95"
+        <svg
+          className="pointer-events-none absolute inset-0 z-0 h-full w-full"
+          viewBox="-50 -50 100 100"
           aria-hidden
-        />
-        <div
-          className="pointer-events-none absolute left-[22%] right-[22%] top-1/2 z-0 h-[2px] -translate-y-1/2 bg-white/95"
-          aria-hidden
-        />
-        <span style={overlayTextShadowStyle} className={`${letter} left-1/2 top-0 -translate-x-1/2`}>
-          N
-        </span>
-        <span style={overlayTextShadowStyle} className={`${letter} left-0 top-1/2 -translate-y-1/2`}>
-          E
-        </span>
-        <span style={overlayTextShadowStyle} className={`${letter} right-0 top-1/2 -translate-y-1/2`}>
-          W
-        </span>
-        <span style={overlayTextShadowStyle} className={`${letter} bottom-0 left-1/2 -translate-x-1/2`}>
-          S
-        </span>
+        >
+          {ASC_COMPASS_ARMS.map((arm) => {
+            const end = ascArmOffset(arm.screenAngleDeg, ASC_ARM_RADIUS)
+            return (
+              <line
+                key={arm.label}
+                x1={0}
+                y1={0}
+                x2={end.x}
+                y2={end.y}
+                stroke="rgba(255,255,255,0.95)"
+                strokeWidth={2}
+                strokeLinecap="round"
+                vectorEffect="non-scaling-stroke"
+              />
+            )
+          })}
+        </svg>
+        {ASC_COMPASS_ARMS.map((arm) => {
+          const anchor = ascArmOffset(arm.screenAngleDeg, ASC_LABEL_RADIUS)
+          return (
+            <span
+              key={arm.label}
+              style={{
+                ...overlayTextShadowStyle,
+                left: `${50 + anchor.x}%`,
+                top: `${50 + anchor.y}%`,
+                transform: 'translate(-50%, -50%)',
+              }}
+              className={letter}
+            >
+              {arm.label}
+            </span>
+          )
+        })}
       </div>
     </div>
   )

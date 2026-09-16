@@ -1,6 +1,6 @@
 # Pomfret Astro — Technical Documentation
 
-**Version:** v8.1.0  
+**Version:** v8.1.1  
 **Production:** https://www.pomfretastro.org  
 **Repository:** https://github.com/QimingTian/Pomfret-Astro-Website
 
@@ -168,6 +168,8 @@ Moon avoidance uses a Lorentzian separation model compatible with ACP and NINA. 
 
 Each site that enables ASC points its camera service URL in site/agent configuration (Pomfret uses `https://cam.pomfretastro.org/camera/stream`). ASC inference (**ASC AI v1**, PyTorch ResNet18 dual-head) returns sky ∈ {clear, cloudy}, a rain detection with confidence and label, a day or night phase tag, and staleness metadata. The **Ready** gate requires `sky === clear` when ASC applies. When a long all-sky sequence is running, the **Ready** and weather-safety paths treat ASC as not applicable so a frozen sky frame cannot falsely gate or arm the observatory. Auto exposure and white balance history may be recorded for administrators through the camera auto-tuning API.
 
+The compass drawn on the ASC View comes from the camera's fisheye astrometric solution rather than an assumed north-up frame. Because the camera looks up, the frame is mirrored (east is to the left, azimuth increases counter-clockwise), and the 1.71° mount tilt leaves the cardinal arms slightly off 90° from each other, so each arm carries its own screen angle: **N 31.2°, E 300.5°, S 211.5°, W 122.1°**, measured from straight up, clockwise. The mobile all-sky web app reuses the same angles and adds a 90° offset in portrait, where it rotates the landscape stream. These pixel angles are fixed for as long as the camera stays bolted down.
+
 ---
 
 ## 15. Mount telemetry and Remote 3D panel
@@ -232,4 +234,4 @@ Relative to one another, the **Ready** gate allows ASC **sky clear**, while the 
 
 ---
 
-*Pomfret Astro Technical Documentation · v8.1.0*
+*Pomfret Astro Technical Documentation · v8.1.1*

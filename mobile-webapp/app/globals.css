@@ -119,56 +119,41 @@ main {
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.95), 0 0 14px rgba(0, 0, 0, 0.55);
 }
 
-.compass-cross-v {
+/*
+ * One arm per cardinal direction, rotated to the angle it really has on the
+ * all-sky frame (see lib/asc-compass.ts). --asc-rotate follows the stream's own
+ * rotation so the arms stay glued to the sky; the letter counter-rotates to stay
+ * upright.
+ */
+.compass-arm {
   position: absolute;
   left: 50%;
-  top: 22%;
-  bottom: 22%;
-  width: 2px;
-  transform: translateX(-50%);
-  background: rgba(255, 255, 255, 0.95);
+  top: 50%;
+  width: 0;
+  height: 0;
+  transform: rotate(calc(var(--asc-angle) + var(--asc-rotate, 0deg)));
 }
 
-.compass-cross-h {
+.compass-arm::before {
+  content: "";
   position: absolute;
-  top: 50%;
-  left: 22%;
-  right: 22%;
-  height: 2px;
-  transform: translateY(-50%);
+  left: -1px;
+  top: -23px;
+  width: 2px;
+  height: 23px;
+  border-radius: 1px;
   background: rgba(255, 255, 255, 0.95);
 }
 
 .compass-letter {
   position: absolute;
+  left: 0;
+  top: -33px;
   color: rgba(255, 255, 255, 0.95);
   font-weight: 700;
   font-size: 14px;
   line-height: 1;
-}
-
-.compass-n {
-  left: 50%;
-  top: 0;
-  transform: translateX(-50%);
-}
-
-.compass-e {
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-}
-
-.compass-w {
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-}
-
-.compass-s {
-  left: 50%;
-  bottom: 0;
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%) rotate(calc((var(--asc-angle) + var(--asc-rotate, 0deg)) * -1));
 }
 
 /* Landscape: keep stage width (94%), stretch full viewport height; cover may crop sides. */
@@ -219,41 +204,10 @@ main {
     text-align: left;
   }
 
+  /* The stream is rotated 90deg clockwise here, so every compass arm follows it. */
   .compass {
     left: 12px;
     right: auto;
-  }
-
-  /* Portrait: 上东 / 下西 / 左北 / 右南（横屏仍为北在上、东在左） */
-  .compass-n {
-    left: 0;
-    top: 50%;
-    right: auto;
-    bottom: auto;
-    transform: translateY(-50%);
-  }
-
-  .compass-e {
-    left: 50%;
-    top: 0;
-    right: auto;
-    bottom: auto;
-    transform: translateX(-50%);
-  }
-
-  .compass-w {
-    left: 50%;
-    top: auto;
-    right: auto;
-    bottom: 0;
-    transform: translateX(-50%);
-  }
-
-  .compass-s {
-    right: 0;
-    top: 50%;
-    left: auto;
-    bottom: auto;
-    transform: translateY(-50%);
+    --asc-rotate: 90deg;
   }
 }

@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, type CSSProperties } from "react"
+import { ASC_COMPASS_ARIA_LABEL, ASC_COMPASS_ARMS } from "../lib/asc-compass"
 import {
   isObservatoryOverlayStatus,
   observatoryOverlayStatusLabel,
@@ -252,13 +253,16 @@ export default function HomePage() {
                 </div>
               ))}
             </div>
-            <div className="compass" role="img" aria-label="Compass: north up, south down, east left, west right">
-              <div className="compass-cross-v" />
-              <div className="compass-cross-h" />
-              <span className="compass-letter compass-n">N</span>
-              <span className="compass-letter compass-e">E</span>
-              <span className="compass-letter compass-w">W</span>
-              <span className="compass-letter compass-s">S</span>
+            <div className="compass" role="img" aria-label={ASC_COMPASS_ARIA_LABEL}>
+              {ASC_COMPASS_ARMS.map((arm) => (
+                <span
+                  key={arm.label}
+                  className="compass-arm"
+                  style={{ "--asc-angle": `${arm.screenAngleDeg}deg` } as CSSProperties}
+                >
+                  <span className="compass-letter">{arm.label}</span>
+                </span>
+              ))}
             </div>
           </div>
         </div>

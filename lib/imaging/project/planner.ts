@@ -9,6 +9,7 @@ import {
   logSessionStatusChange,
   projectNightStatusToAuditStatus,
 } from '@/lib/imaging/session/status-audit'
+import { plannedStartsEquivalent } from '@/lib/imaging/planned-start-stability'
 import { projectNightSubId } from '@/lib/imaging-project-ids'
 import {
   buildNightNinaJson,
@@ -860,6 +861,74 @@ export function planTonightSubSessions(
   weatherPermittedIntervals: TimeInterval[],
   now = new Date()
 ): ProjectTonightPlan[] {
+  return reusePublishedSubStarts(
+    project,
+    planFreshTonightSubSessions(project, freeIntervals, weatherPermittedIntervals, now),
+    now.getTime()
+  )
+}
+
+/**
+ * Placement walks a 5-minute grid, so a target that crosses 30° mid-step can yield a start that
+ * drifts by up to one step between polls. Reuse the start already published for the same frame plan
+ * when the fresh placement only drifted forward within one step: an earlier validated start stays
+ * valid while the target keeps rising, and the sub-session stops churning. A start that has already
+ * come due is never reused — the strip and the frame plan must follow the time actually left.
+ */
+function reusePublishedSubStarts(
+  project: ImagingProject,
+  plans: ProjectTonightPlan[],
+  nowMs: number
+): ProjectTonightPlan[] {
+  const nightKey = plans[0]?.nightKey
+  if (!nightKey) return plans
+  const published = project.nights
+    .filter((n) => n.nightKey === nightKey && (n.status === 'scheduled' || n.status === 'planned'))
+    .sort((a, b) => {
+      const ta = Date.parse(a.plannedStartIso ?? '')
+      const tb = Date.parse(b.plannedStartIso ?? '')
+      if (Number.isFinite(ta) && Number.isFinite(tb)) return ta - tb
+      return a.nightIndex - b.nightIndex
+    })
+
+  return plans.map((plan, i) => {
+    const prior = published[i]
+    if (!prior?.plannedStartIso) return plan
+    const priorStartMs = Date.parse(prior.plannedStartIso)
+    const freshStartMs = Date.parse(plan.plannedStartIso)
+    if (!Number.isFinite(priorStartMs) || !Number.isFinite(freshStartMs)) return plan
+    if (priorStartMs <= nowMs) return plan
+    const drift = freshStartMs - priorStartMs
+    if (drift <= 0 || drift > PLACEMENT_STEP_MS) return plan
+    if (
+      filterPlansFingerprint(prior.filterPlansTonight) !==
+      filterPlansFingerprint(plan.filterPlansTonight)
+    ) {
+      return plan
+    }
+    const coords =
+      plan.mosaicPanelIndex != null
+        ? projectTargetCoordsForPanel(project, plan.mosaicPanelIndex)
+        : projectTargetCoords(project)
+    const durationSeconds = tonightDurationSecondsFromPlans(plan.filterPlansTonight, {
+      startMs: priorStartMs,
+      raHours: coords.raHours,
+    })
+    return {
+      ...plan,
+      plannedStartIso: prior.plannedStartIso,
+      plannedEndIso: new Date(priorStartMs + durationSeconds * 1000).toISOString(),
+      durationSeconds,
+    }
+  })
+}
+
+function planFreshTonightSubSessions(
+  project: ImagingProject,
+  freeIntervals: Array<{ startMs: number; endMs: number }>,
+  weatherPermittedIntervals: TimeInterval[],
+  now = new Date()
+): ProjectTonightPlan[] {
   if (remainingFramesTotal(project) <= 0) return []
 
   if (project.mosaicMode && project.mosaicPanels && project.mosaicPanels.length > 0) {
@@ -1258,7 +1327,7 @@ async function logProjectSubSessionScheduleAudit(
     return
   }
 
-  if (prevFp !== nextFp || previousPlannedStartIso !== plan.plannedStartIso) {
+  if (prevFp !== nextFp || !plannedStartsEquivalent(previousPlannedStartIso, plan.plannedStartIso)) {
     await logSessionImagingPlanChanged({
       subject,
       previousPlannedStartIso,

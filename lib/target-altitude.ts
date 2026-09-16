@@ -176,6 +176,15 @@ export function altitudeSessionCoverageOk(
   )
 }
 
+/**
+ * Sampling grid for altitude boundaries. Anchored to the epoch rather than the query start so the
+ * same crossing always maps to the same instant: reconcile re-runs every poll, and a grid that
+ * moved with `now` made project reservations and planned starts drift by up to one step each time.
+ */
+function altitudeGridFloor(ms: number, stepMs: number): number {
+  return Math.floor(ms / stepMs) * stepMs
+}
+
 /** Contiguous UTC intervals in [startMs, endMs) where target altitude is >= minAltitudeDeg. */
 export function intervalsWhereAltitudeAtOrAbove(
   raHours: number,
@@ -190,21 +199,19 @@ export function intervalsWhereAltitudeAtOrAbove(
   const out: Array<{ startMs: number; endMs: number }> = []
   let runStart: number | null = null
 
-  for (let t = startMs; t < endMs; t += step) {
-    const segEnd = Math.min(t + step, endMs)
-    const mid = t + (segEnd - t) / 2
-    const altitude = currentAltitudeDeg(raHours, decDeg, new Date(mid))
+  for (let bucket = altitudeGridFloor(startMs, step); bucket < endMs; bucket += step) {
+    const altitude = currentAltitudeDeg(raHours, decDeg, new Date(bucket + step / 2))
     const allowed = altitude >= minAltitudeDeg
 
     if (allowed) {
-      if (runStart == null) runStart = t
+      if (runStart == null) runStart = Math.max(bucket, startMs)
     } else if (runStart != null) {
-      out.push({ startMs: runStart, endMs: t })
+      out.push({ startMs: runStart, endMs: Math.min(bucket, endMs) })
       runStart = null
     }
   }
   if (runStart != null) out.push({ startMs: runStart, endMs })
-  return out
+  return out.filter((interval) => interval.endMs > interval.startMs)
 }
 
 /** First time in [startMs, endMs] where altitude is >= MIN_ALTITUDE_DEG. */
@@ -217,7 +224,9 @@ export function firstAltitudeAllowedTimeMs(
 ): number | null {
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return null
   const step = Math.max(60_000, Math.floor(stepMs))
-  for (let t = startMs; t <= endMs; t += step) {
+  if (currentAltitudeDeg(raHours, decDeg, new Date(startMs)) >= MIN_ALTITUDE_DEG) return startMs
+  for (let t = altitudeGridFloor(startMs, step) + step; t <= endMs; t += step) {
+    if (t <= startMs) continue
     if (currentAltitudeDeg(raHours, decDeg, new Date(t)) >= MIN_ALTITUDE_DEG) return t
   }
   return null

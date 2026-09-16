@@ -310,6 +310,63 @@ test('planTonightSubSessions places future subs after in_progress into later cle
   assert.ok(startMs >= windowStart)
 })
 
+test('planTonightSubSessions reuses a published start instead of drifting with the grid', () => {
+  const now = new Date('2026-05-17T22:30:00.000Z')
+  const nightKey = getTonightScheduleStrip(now).nightKey
+  const { windowStart, windowEnd } = tonightSchedulingSpan(now)
+  const weather = [{ startMs: windowStart, endMs: windowEnd }]
+  const free = [{ startMs: windowStart, endMs: windowEnd }]
+
+  const project = mockProject()
+  project.raHours = 12.7
+  project.decDeg = 12
+  project.status = 'in_progress'
+  project.filterPlansTotal = [{ filterName: 'L', exposureSeconds: 300, count: 10 }]
+  project.remainingByFilter = [{ filterName: 'L', exposureSeconds: 300, countRemaining: 10 }]
+
+  const fresh = planTonightSubSessions(project, free, weather, now)
+  assert.equal(fresh.length, 1)
+  const freshStartMs = Date.parse(fresh[0]!.plannedStartIso)
+
+  // Same frame plan already published two minutes earlier: reconcile must not rewrite it.
+  const publishedStartIso = new Date(freshStartMs - 2 * 60_000).toISOString()
+  const withPublished: ImagingProject = {
+    ...project,
+    nights: [
+      {
+        id: 'sub-1',
+        nightIndex: 1,
+        nightKey,
+        status: 'scheduled',
+        plannedStartIso: publishedStartIso,
+        filterPlansTonight: fresh[0]!.filterPlansTonight,
+        ninaSequenceJson: '{"mock":true}',
+      },
+    ],
+  }
+  const reused = planTonightSubSessions(withPublished, free, weather, now)
+  assert.equal(reused.length, 1)
+  assert.equal(reused[0]!.plannedStartIso, publishedStartIso)
+  assert.equal(
+    Date.parse(reused[0]!.plannedEndIso) - Date.parse(reused[0]!.plannedStartIso),
+    reused[0]!.durationSeconds * 1000,
+    'planned end must follow the reused start'
+  )
+
+  // A start that drifted far beyond one search step is stale and gets re-placed.
+  const staleStartIso = new Date(freshStartMs - 90 * 60_000).toISOString()
+  const restaged = planTonightSubSessions(
+    {
+      ...withPublished,
+      nights: [{ ...withPublished.nights[0]!, plannedStartIso: staleStartIso }],
+    },
+    free,
+    weather,
+    now
+  )
+  assert.notEqual(restaged[0]!.plannedStartIso, staleStartIso)
+})
+
 function mosaicShoInterleaveProject(): ImagingProject {
   // Panel 1: only OIII left; moon blocks O at this field on 2026-06-01 night.
   // Panel 2: S still to shoot; field is moon-friendlier for narrowband tonight.

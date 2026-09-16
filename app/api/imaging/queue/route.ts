@@ -45,7 +45,10 @@ import { getSiteAccessControlSettings } from '@/lib/site-policies'
 import { isPomfretAstroAdmin, membershipForSite } from '@/lib/member-roles'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { planAndScheduleProjectTonight } from '@/lib/imaging-project-planner'
-import { getScheduleReservedIntervalsForActiveProject } from '@/lib/imaging-project-altitude-hold'
+import {
+  PROJECT_HOLD_START_MARGIN_MS,
+  getScheduleReservedIntervalsForActiveProject,
+} from '@/lib/imaging-project-altitude-hold'
 import { computeScheduleInsight } from '@/lib/imaging-queue-schedule-insight'
 import { getObservatoryStatus, isObservatoryReady } from '@/lib/observatory-status-store'
 import { currentObservatorySite } from '@/lib/observatory-site-scope'
@@ -425,6 +428,7 @@ export async function POST(request: NextRequest) {
       weatherIntervals.status === 'ok'
         ? computeScheduleInsight(pendingNow, result.id, weatherIntervals.permittedIntervals, {
             reservedIntervals,
+            reservedStartMarginMs: PROJECT_HOLD_START_MARGIN_MS,
             projectSubSessions,
           })
         : {

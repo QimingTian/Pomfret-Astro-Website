@@ -1,4 +1,7 @@
-import { projectAltitudeHoldIntervals } from '@/lib/imaging-project-altitude-hold'
+import {
+  PROJECT_HOLD_START_MARGIN_MS,
+  projectAltitudeHoldIntervals,
+} from '@/lib/imaging-project-altitude-hold'
 import {
   collectActiveAdminForceRunOccupancies,
   collectActiveAdminForceRunSubSessionOccupancy,
@@ -27,6 +30,10 @@ import {
 import { subtractOccupiedFromFree } from '@/lib/imaging-queue-free-intervals'
 import { listPending, patchRequestScheduleInsight, type ImagingRequest } from '@/lib/imaging-queue-store'
 import { logQueueScheduleInsightChange } from '@/lib/imaging/queue/schedule-audit'
+import {
+  plannedStartsBothDue,
+  plannedStartsEquivalent,
+} from '@/lib/imaging/planned-start-stability'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import { isEmergencyStopBlocking } from '@/lib/imaging-emergency-stop'
@@ -247,9 +254,17 @@ export async function reconcilePendingScheduleStatus(options?: ReconcileSchedule
       const slice = working.map((p) =>
         p.id === r.id ? { ...p, status: 'pending' as const, plannedStartIso: null } : p
       )
+      const publishedStartMs =
+        r.status === 'scheduled' &&
+        r.plannedStartIso != null &&
+        Number.isFinite(Date.parse(r.plannedStartIso))
+          ? Date.parse(r.plannedStartIso)
+          : undefined
       const insight = computeScheduleInsight(slice, r.id, permitted, {
         reservedIntervals,
+        reservedStartMarginMs: PROJECT_HOLD_START_MARGIN_MS,
         projectSubSessions,
+        preferredStartMsForTarget: publishedStartMs,
       })
       nextById.set(r.id, insight)
 
@@ -285,8 +300,24 @@ export async function reconcilePendingScheduleStatus(options?: ReconcileSchedule
     const prevQueueStatus = r.status
     const prevPlanned = r.plannedStartIso ?? null
     const nextQueueStatus = next.status === 'scheduled' ? 'scheduled' : 'pending'
-    if (prevQueueStatus === nextQueueStatus && prevPlanned === next.plannedStartIso) continue
+    if (
+      prevQueueStatus === nextQueueStatus &&
+      plannedStartsEquivalent(prevPlanned, next.plannedStartIso)
+    ) {
+      continue
+    }
     await patchRequestScheduleInsight(r.id, next)
+    /*
+     * A row that was already due and is still due has the same plan: its start only tracks the
+     * clock while it waits for the next agent poll. The stored value stays accurate (the schedule
+     * strip draws from it), but the tick is not a plan change worth auditing.
+     */
+    if (
+      prevQueueStatus === nextQueueStatus &&
+      plannedStartsBothDue(prevPlanned, next.plannedStartIso, nowMs)
+    ) {
+      continue
+    }
     await logQueueScheduleInsightChange({
       row: r,
       previousQueueStatus: prevQueueStatus,

@@ -6,6 +6,7 @@ import {
   firstAltitudeAllowedTimeMs,
   isAltitudeAllowed,
 } from '@/lib/target-altitude'
+import { PLANNED_START_EPSILON_MS } from '@/lib/imaging/planned-start-stability'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import { weatherPermittedCoverageMs, weatherCoverageOk, type TimeInterval } from '@/lib/tonight-weather-gate'
 import { moonBlockedFilters } from '@/lib/moon-avoidance'
@@ -236,8 +237,18 @@ export function estimateDurationSeconds(
 export type ComputeScheduleInsightOptions = {
   /** Time reserved for an in-progress project target while it is ≥30° (other sessions may not use). */
   reservedIntervals?: Array<{ startMs: number; endMs: number }>
+  /**
+   * Extra time kept free *before* each reserved interval so a session that overruns its estimate
+   * cannot push the project past its planned start. Delivery applies the same margin.
+   */
+  reservedStartMarginMs?: number
   /** Tonight's project sub-sessions (actual start + duration), not full multi-night queue estimate. */
   projectSubSessions?: ProjectSubSessionOccupancy[]
+  /**
+   * Planned start already published for `targetId`. Kept when it still satisfies every rule, so
+   * reconcile does not rewrite an equivalent start (and append an audit line) on every poll.
+   */
+  preferredStartMsForTarget?: number
 }
 
 export function computeScheduleInsight(
@@ -253,11 +264,21 @@ export function computeScheduleInsight(
   const deadlineMs = window.nauticalDawnUtc.getTime()
   let freeIntervals: FreeInterval[] = [{ startMs: Math.max(nowMs, windowStartMs), endMs: deadlineMs }]
   const reservedIntervals = options?.reservedIntervals ?? []
+  const reservedStartMarginMs = Math.max(0, options?.reservedStartMarginMs ?? 0)
   let reservedMsTonight = 0
   for (const occupied of reservedIntervals) {
+    /* Report the real reservation, but keep the margin free so an overrun cannot delay it. */
     reservedMsTonight += clipIntervalMs(occupied, windowStartMs, deadlineMs)
-    freeIntervals = subtractOccupiedFromFree(freeIntervals, occupied)
+    freeIntervals = subtractOccupiedFromFree(freeIntervals, {
+      startMs: occupied.startMs - reservedStartMarginMs,
+      endMs: occupied.endMs,
+    })
   }
+  const publishedStartMsForTarget =
+    options?.preferredStartMsForTarget != null &&
+    Number.isFinite(options.preferredStartMsForTarget)
+      ? options.preferredStartMsForTarget
+      : null
   const ordered = [...pending].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
   const queueIndex = ordered.findIndex((r) => r.id === targetId)
   const projectSubSessions = options?.projectSubSessions ?? []
@@ -391,6 +412,34 @@ export function computeScheduleInsight(
       return { startMs, endMs, riseAtMs, weatherCoveragePct, baselineStartMs }
     }
 
+    /**
+     * Validate an already-published planned start so a still-valid placement is not rewritten every
+     * poll. Only starts that have not come due yet qualify: the schedule strip and the occupancy of
+     * later rows are both derived from this value, so an overdue start would understate when the
+     * session actually ends and must be re-placed.
+     */
+    const keepPublishedStartMs = (
+      publishedStartMs: number
+    ): { startMs: number; endMs: number; weatherCoveragePct: number } | null => {
+      if (publishedStartMs < nowMs - PLANNED_START_EPSILON_MS) return null
+      const startMs = Math.max(publishedStartMs, nowMs)
+      const endMs = startMs + durationMs
+      if (endMs > deadlineMs) return null
+      const holder = freeIntervals.find((i) => startMs >= i.startMs && endMs <= i.endMs)
+      if (!holder) return null
+      const weatherCoveredMs = weatherPermittedCoverageMs(weatherPermittedIntervals, startMs, endMs)
+      if (!weatherCoverageOk(weatherPermittedIntervals, startMs, endMs, 0.8)) return null
+      if (hasRaDec && !altitudeSessionCoverageOk(req.raHours!, req.decDeg!, startMs, endMs)) {
+        return null
+      }
+      if (moonBlockedForWindow(startMs, endMs).length > 0) return null
+      return {
+        startMs: publishedStartMs,
+        endMs: publishedStartMs + durationMs,
+        weatherCoveragePct: durationMs > 0 ? (weatherCoveredMs / durationMs) * 100 : 0,
+      }
+    }
+
     for (const interval of freeIntervals) {
       const baselineStartMs = Math.max(interval.startMs, createdMs, nowMs, windowStartMs)
       const intervalDeadline = Math.min(interval.endMs, deadlineMs)
@@ -448,6 +497,20 @@ export function computeScheduleInsight(
         if (blocked.length > 0) {
           failedByMoon += 1
           blocked.forEach((f) => moonBlockedFilterNames.add(f))
+        }
+      }
+    }
+
+    if (req.id === targetId && publishedStartMsForTarget != null) {
+      const kept = keepPublishedStartMs(publishedStartMsForTarget)
+      /* Only give up the published start when the fresh search found a materially earlier slot. */
+      if (kept && (placement == null || kept.startMs <= placement.startMs + PLANNED_START_EPSILON_MS)) {
+        placement = { startMs: kept.startMs, endMs: kept.endMs }
+        placementContext = {
+          intervalStartMs: kept.startMs,
+          baselineStartMs: kept.startMs,
+          riseAtMs: null,
+          weatherCoveragePct: kept.weatherCoveragePct,
         }
       }
     }

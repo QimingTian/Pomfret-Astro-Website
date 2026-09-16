@@ -54,6 +54,14 @@ import {
   touchObservatoryPoll,
 } from '@/lib/observatory-status-store'
 import { isAltitudeAllowed } from '@/lib/target-altitude'
+import {
+  PROJECT_HOLD_START_MARGIN_MS,
+  getActiveProjectForAltitudeHold,
+  nextProjectReservationStartMs,
+  projectAltitudeHoldIntervals,
+  sessionFitsBeforeProjectReservation,
+} from '@/lib/imaging-project-altitude-hold'
+import { estimateDurationSeconds } from '@/lib/imaging-queue-schedule-insight'
 import { hasRemainingTonightImagingWork } from '@/lib/imaging-tonight-complete'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
@@ -118,14 +126,27 @@ function shouldDeliverProjectSubSessionDirect(
   return !pending.some((r) => r.id === project.id)
 }
 
-/** Try delivering the next schedulable project sub-session for tonight (on-board projects first). */
+/** Collects why a project sub-session was skipped, so the pass-through still reports a reason. */
+function noteProjectDeferral(deferReasons: string[] | undefined, reason: string): void {
+  if (!deferReasons || deferReasons.includes(reason)) return
+  deferReasons.push(reason)
+}
+
+/**
+ * Try delivering the next schedulable project sub-session for tonight (on-board projects first).
+ *
+ * `null` means "nothing to deliver for this project right now" — the caller keeps evaluating the
+ * normal queue. A project that is merely waiting for its planned start, or whose target is below
+ * 30°, must not end the request: the gap belongs to whichever session can use it.
+ */
 async function tryDeliverProjectSubSessionTonight(
   status: ObservatoryStatus,
   nightKey: string,
   project: ImagingProject,
   activeOnBoard: ImagingProject | undefined,
   allowRedeliverInProgress: boolean,
-  nowMs: number
+  nowMs: number,
+  deferReasons?: string[]
 ): Promise<NextResponse | null> {
   const night = getNightForNinaDelivery(project, nightKey, { allowRedeliverInProgress })
   if (!night?.ninaSequenceJson) {
@@ -134,18 +155,18 @@ async function tryDeliverProjectSubSessionTonight(
         status,
         activeOnBoard.id,
         nightKey,
-        allowRedeliverInProgress
+        allowRedeliverInProgress,
+        deferReasons
       )
     }
     return null
   }
   if (night.status === 'scheduled' && !plannedStartIsDue(night.plannedStartIso, nowMs)) {
-    return NextResponse.json(
-      {
-        error: `Project sub-session is scheduled for ${night.plannedStartIso ?? 'unknown'}; delivery waits until planned start.`,
-      },
-      { status: 409, headers: imagingCorsHeadersResolved() }
+    noteProjectDeferral(
+      deferReasons,
+      `Project sub-session is scheduled for ${night.plannedStartIso ?? 'unknown'}; delivery waits until planned start.`
     )
+    return null
   }
   if (!isObservatoryReady(status)) {
     return NextResponse.json(
@@ -160,16 +181,16 @@ async function tryDeliverProjectSubSessionTonight(
         status,
         project.id,
         nightKey,
-        allowRedeliverInProgress
+        allowRedeliverInProgress,
+        deferReasons
       )
       if (successor) return successor
     }
-    return NextResponse.json(
-      {
-        error: `Target altitude ${altCheck.altitudeDeg.toFixed(2)}° is below ${altCheck.minAltitudeDeg}° (${project.target}).`,
-      },
-      { status: 409, headers: imagingCorsHeadersResolved() }
+    noteProjectDeferral(
+      deferReasons,
+      `Target altitude ${altCheck.altitudeDeg.toFixed(2)}° is below ${altCheck.minAltitudeDeg}° (${project.target}).`
     )
+    return null
   }
   const redeliver = night.status === 'in_progress'
   return deliverProjectSubSessionJson(
@@ -178,7 +199,7 @@ async function tryDeliverProjectSubSessionTonight(
     redeliver
       ? `NINA project sub-session re-delivered: ${project.target} Session ${night.nightIndex} (${night.id}).`
       : `NINA project sub-session delivered: ${project.target} Session ${night.nightIndex} (${night.id}).`,
-    { redeliver }
+    { redeliver, deferReasons }
   )
 }
 
@@ -187,7 +208,8 @@ async function deliverNextEligibleInProgressProjectSubSession(
   status: Awaited<ReturnType<typeof getObservatoryStatus>>,
   skipProjectId: string,
   stripNightKey: string,
-  allowRedeliverInProgress: boolean
+  allowRedeliverInProgress: boolean,
+  deferReasons?: string[]
 ): Promise<NextResponse | null> {
   const projects = (await listProjects())
     .filter((p) => p.status === 'in_progress' && p.id !== skipProjectId && remainingFramesTotal(p) > 0)
@@ -218,7 +240,7 @@ async function deliverNextEligibleInProgressProjectSubSession(
       redeliver
         ? `NINA project sub-session re-delivered: ${project.target} Session ${night.nightIndex} (${night.id}).`
         : `NINA project sub-session delivered: ${project.target} Session ${night.nightIndex} (${night.id}).`,
-      { redeliver }
+      { redeliver, deferReasons }
     )
   }
   return null
@@ -228,19 +250,18 @@ async function deliverProjectSubSessionJson(
   project: ImagingProject,
   night: ProjectNight,
   auditMessage: string,
-  options?: { redeliver?: boolean }
-): Promise<NextResponse> {
+  options?: { redeliver?: boolean; deferReasons?: string[] }
+): Promise<NextResponse | null> {
   const match = await getProjectByNightSubId(night.id)
   const projectRef = match?.project ?? project
   const nightRef = match?.night ?? night
   const redeliver = options?.redeliver === true
   if (nightRef.status === 'scheduled' && !plannedStartIsDue(nightRef.plannedStartIso, Date.now())) {
-    return NextResponse.json(
-      {
-        error: `Project sub-session is scheduled for ${nightRef.plannedStartIso ?? 'unknown'}; delivery waits until planned start.`,
-      },
-      { status: 409, headers: imagingCorsHeadersResolved() }
+    noteProjectDeferral(
+      options?.deferReasons,
+      `Project sub-session is scheduled for ${nightRef.plannedStartIso ?? 'unknown'}; delivery waits until planned start.`
     )
+    return null
   }
   if (nightRef.status !== 'scheduled') {
     if (!(redeliver && nightRef.status === 'in_progress')) {
@@ -425,6 +446,9 @@ export async function GET(request: NextRequest) {
   const activeOnBoardAfterRelease = await getActiveOnBoardProject()
   const projectForSubDeliveryFresh = await getProjectAwaitingSubSessionDelivery(nightKey)
 
+  /** Reasons a project sub-session was passed over; used only if nothing else can be delivered. */
+  const projectDeferReasons: string[] = []
+
   const directProject = projectForSubDeliveryFresh ?? activeOnBoardAfterRelease
   if (directProject && shouldDeliverProjectSubSessionDirect(directProject, pending)) {
     const delivered = await tryDeliverProjectSubSessionTonight(
@@ -433,7 +457,8 @@ export async function GET(request: NextRequest) {
       directProject,
       activeOnBoardAfterRelease,
       allowRedeliverInProgress,
-      nowMs
+      nowMs,
+      projectDeferReasons
     )
     if (delivered) return delivered
   }
@@ -449,6 +474,16 @@ export async function GET(request: NextRequest) {
 
   let selected: ImagingRequest | null = null
   let blockingError: string | null = null
+
+  /**
+   * A session delivered into the gap before a project reservation must finish before it opens —
+   * estimates run long, so keep a fixed margin. Scheduling subtracts the same margin, so a session
+   * reconcile placed in the gap stays deliverable.
+   */
+  const holdProject = await getActiveProjectForAltitudeHold(now)
+  const nextReservedStartMs = holdProject
+    ? nextProjectReservationStartMs(projectAltitudeHoldIntervals(holdProject, now), nowMs)
+    : null
 
   for (const candidate of scheduledTonight) {
     if (!plannedStartIsDue(candidate.plannedStartIso, nowMs)) {
@@ -486,6 +521,22 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    if (nextReservedStartMs != null && candidate.id !== holdProject?.id) {
+      const estimatedDurationSeconds = estimateDurationSeconds(candidate)
+      if (
+        !sessionFitsBeforeProjectReservation({
+          nowMs,
+          estimatedDurationSeconds,
+          reservedStartMs: nextReservedStartMs,
+        })
+      ) {
+        const finishMs =
+          nowMs + estimatedDurationSeconds * 1000 + PROJECT_HOLD_START_MARGIN_MS
+        blockingError = `Session "${candidate.target}" would run until ${new Date(finishMs).toISOString()}, past the ${new Date(nextReservedStartMs).toISOString()} reservation for multi-night project "${holdProject?.target}".`
+        continue
+      }
+    }
+
     selected = candidate
     break
   }
@@ -505,7 +556,8 @@ export async function GET(request: NextRequest) {
         projectForSubDeliveryFresh,
         activeOnBoardAfterRelease,
         allowRedeliverInProgress,
-        nowMs
+        nowMs,
+        projectDeferReasons
       )
       if (delivered) return delivered
     }
@@ -522,7 +574,8 @@ export async function GET(request: NextRequest) {
             activeOnBoardAfterRelease,
             activeOnBoardAfterRelease,
             allowRedeliverInProgress,
-            nowMs
+            nowMs,
+            projectDeferReasons
           )
           if (delivered) return delivered
         }
@@ -531,6 +584,7 @@ export async function GET(request: NextRequest) {
         {
           error:
             blockingError ??
+            projectDeferReasons[0] ??
             'No scheduled pending session available for download. Only sessions with status=scheduled and a valid plannedStartIso are delivered, in planned-start order.',
         },
         { status: 409, headers: imagingCorsHeadersResolved() }
@@ -550,13 +604,15 @@ export async function GET(request: NextRequest) {
           stuckProject,
           activeOnBoardAfterRelease,
           allowRedeliverInProgress,
-          nowMs
+          nowMs,
+          projectDeferReasons
         )
         if (delivered) return delivered
       }
       return NextResponse.json(
         {
           error:
+            projectDeferReasons[0] ??
             'Imaging still scheduled for tonight; end night runs after the last session completes.',
         },
         { status: 409, headers: imagingCorsHeadersResolved() }
@@ -656,10 +712,18 @@ export async function GET(request: NextRequest) {
         { status: 404, headers: imagingCorsHeadersResolved() }
       )
     }
-    return deliverProjectSubSessionJson(
+    const delivered = await deliverProjectSubSessionJson(
       project!,
       night,
       `NINA project sub-session delivered: ${project!.target} Session ${night.nightIndex} (${night.id}).`
+    )
+    if (delivered) return delivered
+    /* The queue row was already consumed, so there is nothing else to fall through to. */
+    return NextResponse.json(
+      {
+        error: `Project sub-session is scheduled for ${night.plannedStartIso ?? 'unknown'}; delivery waits until planned start.`,
+      },
+      { status: 409, headers: imagingCorsHeadersResolved() }
     )
   }
 

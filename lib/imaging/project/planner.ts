@@ -51,6 +51,7 @@ import {
   altitudeSessionCoverageOk,
   currentAltitudeDeg,
   firstAltitudeAllowedTimeMs,
+  intervalsWhereAltitudeAtOrAbove,
 } from '@/lib/target-altitude'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import {
@@ -605,6 +606,209 @@ function placeSubSessionInFreeWindow(
   return null
 }
 
+type PlacedCandidate = {
+  finalPlans: FilterPlanRow[]
+  placedStart: number
+  actualDurationMs: number
+  cursorMs: number
+  planningEndMs: number
+}
+
+/** Exposure time a plan actually captures — the objective when comparing tonight's options. */
+function planExposureSeconds(plans: FilterPlanRow[]): number {
+  return plans.reduce((sum, p) => sum + p.count * p.exposureSeconds, 0)
+}
+
+/**
+ * An extra session costs a full slew, focus and settle cycle, so it has to earn it: at least as
+ * much exposure as the overhead it burns. Without this a 45-minute clear spell would be worth
+ * opening a whole session for one 5-minute frame.
+ */
+function earnsItsOverhead(candidate: PlacedCandidate): boolean {
+  return planExposureSeconds(candidate.finalPlans) * 2000 >= candidate.actualDurationMs
+}
+
+function placeInWindow(
+  virtualProject: ImagingProject,
+  window: { startMs: number; endMs: number },
+  workingRemaining: FilterRemainingRow[],
+  weatherPermittedIntervals: TimeInterval[],
+  nowMs: number,
+  windowStartMs: number,
+  deadlineMs: number,
+  sky?: SkyCoords,
+): PlacedCandidate | null {
+  const placed = placeSubSessionInFreeWindow(
+    virtualProject,
+    [{ startMs: window.startMs, endMs: window.endMs }],
+    window.startMs,
+    window.endMs,
+    workingRemaining,
+    weatherPermittedIntervals,
+    nowMs,
+    windowStartMs,
+    deadlineMs,
+    sky,
+  )
+  if (!placed) return null
+  return { ...placed, cursorMs: window.startMs, planningEndMs: window.endMs }
+}
+
+const altitudeWindowCache = new Map<string, Array<{ startMs: number; endMs: number }>>()
+
+function altitudeWindowsFor(
+  coords: SkyCoords,
+  startMs: number,
+  endMs: number
+): Array<{ startMs: number; endMs: number }> {
+  const key = `${coords.raHours.toFixed(6)},${coords.decDeg.toFixed(6)},${startMs},${endMs}`
+  const hit = altitudeWindowCache.get(key)
+  if (hit) return hit
+  const windows = intervalsWhereAltitudeAtOrAbove(coords.raHours, coords.decDeg, startMs, endMs)
+  if (altitudeWindowCache.size > 64) altitudeWindowCache.clear()
+  altitudeWindowCache.set(key, windows)
+  return windows
+}
+
+/**
+ * Sizing runs before placement: a draft sized against the whole remaining night shrinks one frame
+ * at a time until it fits *somewhere*, and the loop stops at the first size that fits. So a big
+ * block late in the night beats a smaller one that could have started hours earlier, and the
+ * forward cursor then skips that earlier clear spell for the rest of the night.
+ *
+ * Offer each clear spell and altitude window as its own sizing window so the smaller-but-earlier
+ * block is at least on the table. These are hypotheses, not constraints — the full-interval
+ * candidate stays, so a run may still span several clear spells at ≥80% coverage.
+ */
+function earlierSizingWindows(
+  cursorMs: number,
+  limitMs: number,
+  weatherPermittedIntervals: TimeInterval[],
+  altitudeWindows: Array<{ startMs: number; endMs: number }>,
+  minWindowMs: number
+): Array<{ startMs: number; endMs: number }> {
+  const out: Array<{ startMs: number; endMs: number }> = []
+  const push = (rawStartMs: number, rawEndMs: number) => {
+    const startMs = Math.max(rawStartMs, cursorMs)
+    const endMs = Math.min(rawEndMs, limitMs)
+    if (endMs - startMs < minWindowMs) return
+    if (out.some((w) => w.startMs === startMs && w.endMs === endMs)) return
+    out.push({ startMs, endMs })
+  }
+  for (const alt of altitudeWindows) {
+    push(alt.startMs, alt.endMs)
+    for (const spell of weatherPermittedIntervals) {
+      push(Math.max(alt.startMs, spell.startMs), Math.min(alt.endMs, spell.endMs))
+    }
+  }
+  return out.sort((a, b) => a.startMs - b.startMs)
+}
+
+/**
+ * Exposure the rest of the night still yields after committing a block, swept the plain way (one
+ * full-interval candidate per step). Keeping the tail greedy bounds the search: only the next block
+ * branches, everything behind it is evaluated once.
+ */
+function tailExposureSeconds(
+  project: ImagingProject,
+  remaining: FilterRemainingRow[],
+  free: Array<{ startMs: number; endMs: number }>,
+  cursorMs: number,
+  weatherPermittedIntervals: TimeInterval[],
+  nowMs: number,
+  windowStartMs: number,
+  deadlineMs: number,
+  minWindowMs: number,
+  sky?: SkyCoords,
+): number {
+  let workingRemaining = remaining.map((r) => ({ ...r }))
+  let workingFree = [...free]
+  let cursor = cursorMs
+  let exposureSeconds = 0
+
+  while (workingRemaining.reduce((s, r) => s + r.countRemaining, 0) > 0) {
+    let best: PlacedCandidate | null = null
+    for (const interval of workingFree) {
+      const windowStart = Math.max(interval.startMs, cursor)
+      const windowEnd = Math.min(interval.endMs, deadlineMs)
+      if (windowEnd - windowStart < minWindowMs) continue
+      const placed = placeInWindow(
+        { ...project, remainingByFilter: workingRemaining },
+        { startMs: windowStart, endMs: windowEnd },
+        workingRemaining,
+        weatherPermittedIntervals,
+        nowMs,
+        windowStartMs,
+        deadlineMs,
+        sky,
+      )
+      if (!placed) continue
+      if (!best || placed.placedStart < best.placedStart) best = placed
+    }
+    if (!best) break
+    exposureSeconds += planExposureSeconds(best.finalPlans)
+    workingRemaining = subtractRemaining(workingRemaining, best.finalPlans)
+    workingFree = subtractOccupiedFromFree(workingFree, {
+      startMs: best.placedStart,
+      endMs: best.placedStart + best.actualDurationMs,
+    })
+    cursor = Math.max(cursor, best.placedStart + best.actualDurationMs)
+  }
+  return exposureSeconds
+}
+
+/**
+ * Pick between the historical choice (earliest placement of the largest block that fits anywhere)
+ * and any candidate that starts earlier, by the exposure each yields over the whole remaining
+ * night. Ties go to the earlier start, so a night with nothing to gain plans exactly as before.
+ */
+function chooseByNightExposure(
+  project: ImagingProject,
+  baseline: PlacedCandidate,
+  alternatives: PlacedCandidate[],
+  workingRemaining: FilterRemainingRow[],
+  workingFree: Array<{ startMs: number; endMs: number }>,
+  weatherPermittedIntervals: TimeInterval[],
+  nowMs: number,
+  windowStartMs: number,
+  deadlineMs: number,
+  minWindowMs: number,
+  sky?: SkyCoords,
+): PlacedCandidate {
+  const score = (candidate: PlacedCandidate): number => {
+    const endMs = candidate.placedStart + candidate.actualDurationMs
+    return (
+      planExposureSeconds(candidate.finalPlans) +
+      tailExposureSeconds(
+        project,
+        subtractRemaining(workingRemaining, candidate.finalPlans),
+        subtractOccupiedFromFree(workingFree, { startMs: candidate.placedStart, endMs }),
+        endMs,
+        weatherPermittedIntervals,
+        nowMs,
+        windowStartMs,
+        deadlineMs,
+        minWindowMs,
+        sky,
+      )
+    )
+  }
+
+  let best = baseline
+  let bestScore = score(baseline)
+  for (const candidate of alternatives) {
+    const candidateScore = score(candidate)
+    if (
+      candidateScore > bestScore ||
+      (candidateScore === bestScore && candidate.placedStart < best.placedStart)
+    ) {
+      best = candidate
+      bestScore = candidateScore
+    }
+  }
+  return best
+}
+
 function hasSchedulableFreeTonight(
   freeIntervals: Array<{ startMs: number; endMs: number }>,
   weatherPermittedIntervals: TimeInterval[],
@@ -754,15 +958,18 @@ function planMosaicInterleavedSubSessions(
     )
 
   while (totalFramesLeft() > 0) {
-    let best: {
+    type MosaicCandidate = PlacedCandidate & {
       panelIndex: number
-      finalPlans: FilterPlanRow[]
-      placedStart: number
-      actualDurationMs: number
-      cursorMs: number
-      planningEndMs: number
       remainingBefore: FilterRemainingRow[]
-    } | null = null
+    }
+    let best: MosaicCandidate | null = null
+    const panelWindows: Array<{
+      panelIndex: number
+      sky: SkyCoords
+      virtualProject: ImagingProject
+      workingRemaining: FilterRemainingRow[]
+      free: Array<{ startMs: number; endMs: number }>
+    }> = []
 
     for (let pi = 0; pi < panelCount; pi++) {
       const panelIndex = pi + 1
@@ -770,25 +977,25 @@ function planMosaicInterleavedSubSessions(
       const framesLeft = workingRemaining.reduce((s, r) => s + r.countRemaining, 0)
       if (framesLeft <= 0) continue
 
-      const sky = projectTargetCoordsForPanel(project, panelIndex)
+      const panelSky = projectTargetCoordsForPanel(project, panelIndex)
+      const sky: SkyCoords = { raHours: panelSky.raHours, decDeg: panelSky.decDeg }
       const virtualProject: ImagingProject = { ...project, remainingByFilter: workingRemaining }
+      panelWindows.push({ panelIndex, sky, virtualProject, workingRemaining, free: workingFree })
 
       for (const free of workingFree) {
         const cursorMs = Math.max(free.startMs, globalCursorMs)
         const planningEndMs = Math.min(free.endMs, deadlineMs)
         if (planningEndMs - cursorMs < minWindowMs) continue
 
-        const placed = placeSubSessionInFreeWindow(
+        const placed = placeInWindow(
           virtualProject,
-          [{ startMs: cursorMs, endMs: free.endMs }],
-          cursorMs,
-          planningEndMs,
+          { startMs: cursorMs, endMs: planningEndMs },
           workingRemaining,
           weatherPermittedIntervals,
           nowMs,
           windowStartMs,
           deadlineMs,
-          { raHours: sky.raHours, decDeg: sky.decDeg },
+          sky,
         )
         if (!placed) continue
 
@@ -801,8 +1008,6 @@ function planMosaicInterleavedSubSessions(
           best = {
             panelIndex,
             ...placed,
-            cursorMs,
-            planningEndMs,
             remainingBefore: workingRemaining.map((r) => ({ ...r })),
           }
         }
@@ -810,6 +1015,52 @@ function planMosaicInterleavedSubSessions(
     }
 
     if (!best) break
+
+    // Same sizing-before-placement flaw as the single-target sweep, but a mosaic tail would have to
+    // be swept per panel to be scored. Take only blocks that finish before the chosen one starts:
+    // that block stays placeable where it was, so tonight's total can only go up.
+    let prefix: MosaicCandidate | null = null
+    for (const panel of panelWindows) {
+      for (const free of panel.free) {
+        const cursorMs = Math.max(free.startMs, globalCursorMs)
+        const limitMs = Math.min(free.endMs, best.placedStart)
+        if (limitMs - cursorMs < minWindowMs) continue
+        for (const window of earlierSizingWindows(
+          cursorMs,
+          limitMs,
+          weatherPermittedIntervals,
+          altitudeWindowsFor(panel.sky, windowStartMs, deadlineMs),
+          minWindowMs
+        )) {
+          const placed = placeInWindow(
+            panel.virtualProject,
+            window,
+            panel.workingRemaining,
+            weatherPermittedIntervals,
+            nowMs,
+            windowStartMs,
+            deadlineMs,
+            panel.sky,
+          )
+          if (!placed) continue
+          if (placed.placedStart + placed.actualDurationMs > best.placedStart) continue
+          if (!earnsItsOverhead(placed)) continue
+          const better =
+            !prefix ||
+            planExposureSeconds(placed.finalPlans) > planExposureSeconds(prefix.finalPlans) ||
+            (planExposureSeconds(placed.finalPlans) === planExposureSeconds(prefix.finalPlans) &&
+              placed.placedStart < prefix.placedStart)
+          if (better) {
+            prefix = {
+              panelIndex: panel.panelIndex,
+              ...placed,
+              remainingBefore: panel.workingRemaining.map((r) => ({ ...r })),
+            }
+          }
+        }
+      }
+    }
+    if (prefix) best = prefix
 
     const { panelIndex, finalPlans, placedStart, actualDurationMs, cursorMs, planningEndMs, remainingBefore } =
       best
@@ -956,29 +1207,25 @@ function planFreshTonightSubSessions(
   let workingFree = [...freeIntervals].sort((a, b) => a.startMs - b.startMs)
   let globalCursorMs = Math.max(nowMs, windowStartMs)
 
+  const coords = projectTargetCoords(project)
+  const sky: SkyCoords = { raHours: coords.raHours, decDeg: coords.decDeg }
+
   while (true) {
     const framesLeft = workingRemaining.reduce((s, r) => s + r.countRemaining, 0)
     if (framesLeft <= 0) break
 
-    let best: {
-      finalPlans: FilterPlanRow[]
-      placedStart: number
-      actualDurationMs: number
-      cursorMs: number
-      planningEndMs: number
-    } | null = null
+    const virtualProject: ImagingProject = { ...project, remainingByFilter: workingRemaining }
+    let baseline: PlacedCandidate | null = null
+    const alternatives: PlacedCandidate[] = []
 
     for (const free of workingFree) {
       const cursorMs = Math.max(free.startMs, globalCursorMs)
       const planningEndMs = Math.min(free.endMs, deadlineMs)
       if (planningEndMs - cursorMs < minWindowMs) continue
 
-      const virtualProject: ImagingProject = { ...project, remainingByFilter: workingRemaining }
-      const placed = placeSubSessionInFreeWindow(
+      const placed = placeInWindow(
         virtualProject,
-        [{ startMs: cursorMs, endMs: free.endMs }],
-        cursorMs,
-        planningEndMs,
+        { startMs: cursorMs, endMs: planningEndMs },
         workingRemaining,
         weatherPermittedIntervals,
         nowMs,
@@ -986,12 +1233,55 @@ function planFreshTonightSubSessions(
         deadlineMs
       )
       if (!placed) continue
-      if (!best || placed.placedStart < best.placedStart) {
-        best = { ...placed, cursorMs, planningEndMs }
+      if (!baseline || placed.placedStart < baseline.placedStart) baseline = placed
+    }
+
+    if (!baseline) break
+
+    // Only clear spells and altitude windows that beat the baseline start are worth scoring; a
+    // night with nothing earlier on offer costs nothing extra and plans exactly as it always did.
+    for (const free of workingFree) {
+      const cursorMs = Math.max(free.startMs, globalCursorMs)
+      const limitMs = Math.min(free.endMs, deadlineMs)
+      if (limitMs - cursorMs < minWindowMs) continue
+      for (const window of earlierSizingWindows(
+        cursorMs,
+        limitMs,
+        weatherPermittedIntervals,
+        altitudeWindowsFor(sky, windowStartMs, deadlineMs),
+        minWindowMs
+      )) {
+        if (window.startMs >= baseline.placedStart) break
+        const placed = placeInWindow(
+          virtualProject,
+          window,
+          workingRemaining,
+          weatherPermittedIntervals,
+          nowMs,
+          windowStartMs,
+          deadlineMs
+        )
+        if (placed && placed.placedStart < baseline.placedStart && earnsItsOverhead(placed)) {
+          alternatives.push(placed)
+        }
       }
     }
 
-    if (!best) break
+    const best =
+      alternatives.length === 0
+        ? baseline
+        : chooseByNightExposure(
+            project,
+            baseline,
+            alternatives,
+            workingRemaining,
+            workingFree,
+            weatherPermittedIntervals,
+            nowMs,
+            windowStartMs,
+            deadlineMs,
+            minWindowMs
+          )
 
     const { finalPlans, placedStart, actualDurationMs, cursorMs, planningEndMs } = best
     const placedEnd = placedStart + actualDurationMs

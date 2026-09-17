@@ -13,6 +13,7 @@ const DEEP_SKY_IMAGES: GalleryImage[] = [
   { file: 'photo2.webp', description: 'IC1805 | 35h | SHO' },
   { file: 'photo3.webp', description: 'Markarians Chain | 14.16h RGB + 11h Ha | HaRGB' },
   { file: 'photo4.webp', description: 'M101 | 12.5h LRGB + 5h Ha | HaLRGB' },
+  { file: 'photo8.webp', description: 'SN 2026aaiv | 24.8min | L' },
 ]
 
 const PHOTOMETRY_IMAGES: GalleryImage[] = [

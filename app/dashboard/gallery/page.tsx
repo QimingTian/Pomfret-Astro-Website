@@ -35,6 +35,10 @@ export default function DataPage() {
   const entries = category === 'deep_sky' ? DEEP_SKY_IMAGES : PHOTOMETRY_IMAGES
   const images = entries.map((entry) => ({
     src: `/gallery/${entry.file}`,
+    // Tiles load a 1600 px thumbnail (npm run build:gallery-thumbs). Pointing them at the
+    // full-size files decoded the whole gallery at once — enough bitmap to have mobile Safari
+    // kill the tab with "a problem repeatedly occurred".
+    thumb: `/gallery/${entry.file.replace(/\.webp$/, '-thumb.webp')}`,
     alt: entry.description,
     description: entry.description,
     flagship: entry.flagship === true,
@@ -116,8 +120,10 @@ export default function DataPage() {
                       }
                     >
                       <img
-                        src={img.src}
+                        src={img.thumb}
                         alt={img.alt}
+                        loading="lazy"
+                        decoding="async"
                         className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-105 group-hover:z-10"
                       />
                     </div>

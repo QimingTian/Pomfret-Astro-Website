@@ -16,7 +16,8 @@
     "build:variable-star-shortlist": "tsx scripts/build-variable-star-shortlist.ts",
     "deploy": "vercel --prod --yes",
     "sync:stellarium-skydata": "bash scripts/sync-stellarium-skydata.sh",
-    "configure:r2-gallery-cors": "node scripts/configure-r2-gallery-cors.mjs"
+    "configure:r2-gallery-cors": "node scripts/configure-r2-gallery-cors.mjs",
+    "build:gallery-thumbs": "node scripts/build-gallery-thumbs.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1036.0",

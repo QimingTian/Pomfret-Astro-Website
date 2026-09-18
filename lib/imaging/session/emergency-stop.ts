@@ -184,8 +184,17 @@ export {
   emergencyStopTriggeredBySuffix,
 } from '@/lib/imaging/session/emergency-stop-display'
 
+/**
+ * ESTOP queue ids are `estop-<ms>` historically, and `siteId:estop-<ms>` since multi-site
+ * isolation (v7.1.8). Match either form — a prefix-only check misses the site-scoped ids and
+ * leaves STOPPING at 66% forever because session-progress never marks them completed.
+ */
 export function isEmergencyStopQueueId(queueId: string): boolean {
-  return queueId.startsWith('estop-')
+  const id = queueId.trim()
+  if (!id) return false
+  if (id.startsWith('estop-')) return true
+  const colon = id.indexOf(':')
+  return colon > 0 && id.slice(colon + 1).startsWith('estop-')
 }
 
 export function emergencyStopAuditDetail(

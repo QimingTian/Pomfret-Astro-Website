@@ -29,7 +29,12 @@ type GlobalWithEstop = typeof globalThis & {
 
 test('isEmergencyStopQueueId recognizes estop queue ids', () => {
   assert.equal(isEmergencyStopQueueId('estop-123'), true)
+  // Site-prefixed form from v7.1.8 multi-site isolation.
+  assert.equal(isEmergencyStopQueueId('pomfret:estop-1789689426097'), true)
+  assert.equal(isEmergencyStopQueueId('cygnus:estop-1'), true)
   assert.equal(isEmergencyStopQueueId('queue-abc'), false)
+  assert.equal(isEmergencyStopQueueId('pomfret:queue-abc'), false)
+  assert.equal(isEmergencyStopQueueId(''), false)
 })
 
 test('emergencyStopTriggeredBySuffix formats admin name', () => {

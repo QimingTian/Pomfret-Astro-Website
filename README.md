@@ -1,6 +1,6 @@
 # Pomfret Astro — Technical Documentation
 
-**Version:** v8.2.0  
+**Version:** v8.2.1  
 **Production:** https://www.pomfretastro.org  
 **Repository:** https://github.com/QimingTian/Pomfret-Astro-Website
 
@@ -144,7 +144,7 @@ Progress posts from NINA append lines on the session, complete sessions when the
 
 ## 11. Emergency stop and end night
 
-**ESTOP** is a compare-and-swap state machine in KV with phases **stopping** and **stopped**, a queue id, the sessions held at arm time, and timestamps for delivery and dome-closed completion. An undelivered **stopping** state older than **six hours** is treated as stale and cleared.
+**ESTOP** is a compare-and-swap state machine in KV with phases **stopping** and **stopped**, a queue id, the sessions held at arm time, and timestamps for delivery and dome-closed completion. Queue ids are site-prefixed (`pomfret:estop-<ms>`); session-progress recognizes both that form and the legacy `estop-<ms>` form when NINA posts **Dome Closed**. An undelivered **stopping** state older than **six hours** is treated as stale and cleared.
 
 There are three arm paths. An administrator may arm **ESTOP** from the dashboard. **Weather-safety ESTOP** may arm automatically under the storm, precip, or ASC rain rules in Section 7. A genuine session failure may lock the observatory and arm **ESTOP** so the dome still closes, except when the failure reason is already an emergency stop or an intentional delivery handoff. On arm, the site locks immediately to **manual** and **Closed — Maintenance**, end-night due flags are cleared, activity-only end-night is suppressed for that night, and in-progress work is failed.
 
@@ -238,4 +238,4 @@ Relative to one another, the **Ready** gate allows ASC **sky clear**, while the 
 
 ---
 
-*Pomfret Astro Technical Documentation · v8.2.0*
+*Pomfret Astro Technical Documentation · v8.2.1*

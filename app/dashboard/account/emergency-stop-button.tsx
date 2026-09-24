@@ -109,6 +109,16 @@ export function EmergencyStopButton({
     return () => window.clearInterval(id)
   }, [refreshStatus, activeSiteId, status.phase])
 
+  useEffect(() => {
+    const onRefresh = (event: Event) => {
+      const detail = (event as CustomEvent<{ siteId?: string }>).detail
+      if (detail?.siteId && detail.siteId !== activeSiteId) return
+      void refreshStatus(activeSiteId)
+    }
+    window.addEventListener('pomfret:estop-refresh', onRefresh)
+    return () => window.removeEventListener('pomfret:estop-refresh', onRefresh)
+  }, [refreshStatus, activeSiteId])
+
   useSiteStream(
     {
       onEstop: (event) => {
@@ -126,7 +136,8 @@ export function EmergencyStopButton({
         })
       },
     },
-    true
+    true,
+    operatingSiteId
   )
 
   function openEmergencyStopFlow() {

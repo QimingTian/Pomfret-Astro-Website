@@ -282,6 +282,12 @@ export function useAdminTools() {
     }
   }
 
+  function notifyEstopBarRefresh() {
+    window.dispatchEvent(
+      new CustomEvent('pomfret:estop-refresh', { detail: { siteId: adminSiteId } })
+    )
+  }
+
   async function updateStatus(next: ObservatoryStatus) {
     setSaving(true)
     try {
@@ -296,6 +302,8 @@ export function useAdminTools() {
       if (data.mode === 'manual' || data.mode === 'auto') setMode(data.mode)
       await loadLog()
       await loadEmergencyStopStatus()
+      // Unlocking Manual/Maintenance clears ESTOP; wake the bar immediately (site-poll is slow).
+      notifyEstopBarRefresh()
     } catch {
       setScheduleError('Failed to update status.')
     } finally {
@@ -317,6 +325,7 @@ export function useAdminTools() {
       setStatus(data.status as ObservatoryStatus)
       await loadLog()
       await loadEmergencyStopStatus()
+      notifyEstopBarRefresh()
     } catch {
       setScheduleError('Failed to update mode.')
     } finally {

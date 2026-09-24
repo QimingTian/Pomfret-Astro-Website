@@ -448,7 +448,7 @@ async function deliverForceRunQueueRow(row: ImagingRequest): Promise<NextRespons
   return ninaAgentJobResponse(job)
 }
 
-/** Deliver JSON for an active admin force-run session (moon/hold bypass only; altitude rules apply). */
+/** Deliver JSON for an active admin force-run session (moon/hold/cloud bypass; altitude + session precip apply). */
 export async function tryDeliverAdminForceRunSession(
   status: ObservatoryStatus,
   forceRunSessionId: string

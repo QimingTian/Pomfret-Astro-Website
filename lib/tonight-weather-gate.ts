@@ -385,26 +385,14 @@ export async function sessionWindowHourlyPrecipOk(
   }
 }
 
-/** Admin force-run: >=80% weather-permitted coverage and hourly precip < 10% over the session window. */
+/**
+ * Admin force-run weather gate: only precipitation in the session window.
+ * Cloud cover (and the night-wide global hard block that includes cloud runs) are ignored —
+ * operators may force-run under cloudy skies when rain stays below 10% for every overlapping hour.
+ */
 export async function validateAdminRunWeatherWindow(
   startMs: number,
   endMs: number
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
-  const intervals = await getTonightWeatherPermittedIntervals()
-  if (intervals.status !== 'ok') {
-    return { ok: false, reason: intervals.reason ?? 'Weather forecast unavailable.' }
-  }
-  if (intervals.globalHardBlocked === true) {
-    return {
-      ok: false,
-      reason: intervals.globalHardBlockReason ?? 'Tonight blocked by global weather trigger.',
-    }
-  }
-  if (!weatherCoverageOk(intervals.permittedIntervals, startMs, endMs, 0.8)) {
-    return {
-      ok: false,
-      reason: 'Weather-permitted coverage is below 80% for this session window.',
-    }
-  }
   return sessionWindowHourlyPrecipOk(startMs, endMs)
 }

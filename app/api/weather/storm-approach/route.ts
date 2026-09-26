@@ -7,7 +7,7 @@ import {
 
 export const runtime = 'nodejs'
 
-/** ASC overlay + weather-safety ESTOP share this 20 km Open-Meteo thunderstorm ring. */
+/** ASC overlay + weather-safety ESTOP share this: observed storms (METAR / warnings) + 20 km Open-Meteo ring. */
 export async function GET(request: NextRequest) {
   return runWithRequestSite(request, async () => {
     try {

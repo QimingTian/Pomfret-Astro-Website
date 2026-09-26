@@ -172,7 +172,7 @@ export default function AllSkyCameraView() {
   const [usAqi, setUsAqi] = useState<number | null>(null)
   const [transparency, setTransparency] = useState<AstroConditionScale | null>(null)
   const [seeing, setSeeing] = useState<AstroConditionScale | null>(null)
-  /** null = unknown / fetch failed; true = Safe; false = Unsafe (20 km ring). */
+  /** null = unknown / fetch failed; true = Safe; false = Unsafe (observed nearby or 20 km forecast ring). */
   const [stormSafe, setStormSafe] = useState<boolean | null>(null)
   const [sequenceActive, setSequenceActive] = useState(false)
 

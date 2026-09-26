@@ -31,6 +31,12 @@ import {
   currentObservatorySiteId,
   scopedKvKey,
 } from '@/lib/observatory-site-scope'
+import {
+  describeStormObservation,
+  fetchStormObservations,
+  STORM_OBSERVATION_RADIUS_KM,
+  type StormObservation,
+} from '@/lib/imaging/storm-observations'
 
 /** Lead-time ring for thunderstorm approach (≈30–60 min at typical summer storm speeds). */
 export const STORM_APPROACH_RADIUS_KM = 20
@@ -51,7 +57,7 @@ function weatherSafetyClearSinceKey(): string {
 const EARTH_RADIUS_KM = 6371
 const THUNDERSTORM_CODES = new Set([95, 96, 99])
 
-export type WeatherSafetyThreatKind = 'storm_approach' | 'site_precip' | 'asc_rain'
+export type WeatherSafetyThreatKind = 'storm_observed' | 'storm_approach' | 'site_precip' | 'asc_rain'
 
 export type WeatherSafetyThreat = {
   kind: WeatherSafetyThreatKind
@@ -209,17 +215,22 @@ function currentAndNextHourSamples(
 
 /**
  * Night auto-ESTOP threats (any one fires):
- * 1) 20 km thunderstorm approach (Unsafe)
- * 2) Open-Meteo site current-hour precip probability > 20%
- * 3) ASC rain detected=true AND confidence >= 99%
+ * 1) Observed thunderstorm: nearby METAR thunder/lightning or official regional warning
+ * 2) 20 km Open-Meteo thunderstorm forecast ring (Unsafe)
+ * 3) Open-Meteo site current-hour precip probability > 20%
+ * 4) ASC rain detected=true AND confidence >= 99%
  */
 export function pickWeatherSafetyThreat(input: {
   ascRainDetected?: boolean
   ascRainConfidence?: number | null
   ringLocations: LocationForecast[]
+  observedStorms?: StormObservation[]
   nowSec?: number
 }): WeatherSafetyThreat | null {
   const nowSec = input.nowSec ?? Math.floor(Date.now() / 1000)
+
+  const observed = pickObservedStormThreat(input.observedStorms ?? [])
+  if (observed) return observed
 
   const storm = pickStormApproachThreat({
     ringLocations: input.ringLocations,
@@ -273,6 +284,21 @@ export function pickSitePrecipThreat(input: {
       weatherCode: current.weatherCode,
       lat: site.lat,
       lon: site.lon,
+    },
+  }
+}
+
+/** Station-reported thunder/lightning or an official thunderstorm warning near the site. */
+export function pickObservedStormThreat(observations: StormObservation[]): WeatherSafetyThreat | null {
+  if (observations.length === 0) return null
+  const first = observations[0]!
+  return {
+    kind: 'storm_observed',
+    reason: `Observed thunderstorm near the observatory: ${observations.map(describeStormObservation).join('; ')}.`,
+    detail: {
+      radiusKm: STORM_OBSERVATION_RADIUS_KM,
+      source: first.source,
+      observations,
     },
   }
 }
@@ -382,9 +408,10 @@ async function fetchRingForecasts(): Promise<LocationForecast[] | null> {
 
 export async function evaluateWeatherSafetySensors(): Promise<WeatherSafetySensorSnapshot> {
   const useAsc = siteHasAllSkyCamera(currentObservatorySiteId())
-  const [gate, ringLocations] = await Promise.all([
+  const [gate, ringLocations, observed] = await Promise.all([
     useAsc ? fetchAllSkyCamGateState() : Promise.resolve(null),
     fetchRingForecasts(),
+    fetchStormObservations(currentObservatorySite()),
   ])
   const ascGateApplicable =
     gate != null && isAscCloudGateApplicable(gate.ascCloud, gate.sequenceActive)
@@ -392,6 +419,10 @@ export async function evaluateWeatherSafetySensors(): Promise<WeatherSafetySenso
     ascGateApplicable && gate?.ascCloud?.rain?.detected === true
   const ascRainConfidence = ascGateApplicable ? gate?.ascCloud?.rain?.confidence : undefined
   if (!ringLocations) {
+    const observedThreat = pickObservedStormThreat(observed.observations)
+    if (observedThreat) {
+      return { threat: observedThreat, openMeteoAvailable: false, ascGateApplicable }
+    }
     const threat = ascRainThreat({ detected: ascRainDetected, confidence: ascRainConfidence })
       ? ({
           kind: 'asc_rain' as const,
@@ -411,6 +442,7 @@ export async function evaluateWeatherSafetySensors(): Promise<WeatherSafetySenso
       ascRainDetected: useAsc ? ascRainDetected : undefined,
       ascRainConfidence: useAsc ? ascRainConfidence : undefined,
       ringLocations,
+      observedStorms: observed.observations,
     }),
     openMeteoAvailable: true,
     ascGateApplicable,
@@ -445,17 +477,21 @@ export function weatherSafetyClearHoldElapsed(
 }
 
 export type StormApproachStatus = {
-  /** false when a thunderstorm code is on the approach ring (current/next hour). */
+  /** false when a thunderstorm is observed nearby or forecast on the approach ring (current/next hour). */
   safe: boolean
   radiusKm: number
   threat: WeatherSafetyThreat | null
 }
 
-/** UI + ESTOP share this: Open-Meteo ring at {@link STORM_APPROACH_RADIUS_KM}. */
+/** UI + ESTOP share this: observed storms, then the Open-Meteo ring at {@link STORM_APPROACH_RADIUS_KM}. */
 export async function evaluateStormApproachStatus(): Promise<StormApproachStatus | null> {
-  const ringLocations = await fetchRingForecasts()
-  if (!ringLocations) return null
-  const threat = pickStormApproachThreat({ ringLocations })
+  const [ringLocations, observed] = await Promise.all([
+    fetchRingForecasts(),
+    fetchStormObservations(currentObservatorySite()),
+  ])
+  const observedThreat = pickObservedStormThreat(observed.observations)
+  if (!ringLocations && !observedThreat) return null
+  const threat = observedThreat ?? pickStormApproachThreat({ ringLocations: ringLocations ?? [] })
   return {
     safe: threat == null,
     radiusKm: STORM_APPROACH_RADIUS_KM,
@@ -637,7 +673,7 @@ async function maybeClearWeatherSafetyEmergencyStop(
 
 /**
  * Weather-safety ESTOP loop:
- * - Arm during nautical night on thunderstorm / site precip >20% / (Pomfret) ASC rain ≥99%.
+ * - Arm during nautical night on observed or forecast thunderstorm / site precip >20% / (Pomfret) ASC rain ≥99%.
  * - Auto-clear weather-safety ESTOP once STOPPED and sensors stay continuously clear for 20 min
  *   (Pomfret: Open-Meteo + ASC; other sites: Open-Meteo only).
  * Manual / session-failure ESTOP is never auto-cleared.

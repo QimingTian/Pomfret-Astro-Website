@@ -9,6 +9,11 @@ export const DEFAULT_OBSERVATORY_SITE_ID = 'pomfret' as const
 
 export type ObservatorySiteId = 'pomfret' | 'cygnus'
 
+/** Official thunderstorm warnings for the site's region (US: NWS; EU: MeteoAlarm national feed). */
+export type ObservatoryStormAlertSource =
+  | { provider: 'nws' }
+  | { provider: 'meteoalarm'; feed: string; areaCodes: string[] }
+
 export type ObservatorySite = {
   id: ObservatorySiteId
   name: string
@@ -27,6 +32,7 @@ export type ObservatorySite = {
    */
   scheduleStripStartHour: number
   scheduleStripEndHour: number
+  stormAlerts: ObservatoryStormAlertSource
 }
 
 export const POMFRET_SITE: ObservatorySite = {
@@ -40,6 +46,7 @@ export const POMFRET_SITE: ObservatorySite = {
   observerLonDeg: -(71 + 57 / 60 + 54 / 3600),
   scheduleStripStartHour: 16,
   scheduleStripEndHour: 8,
+  stormAlerts: { provider: 'nws' },
 }
 
 /** Placeholder roof pin until Cygnus provides DMS; weather + observer share coords. */
@@ -55,6 +62,8 @@ export const CYGNUS_SITE: ObservatorySite = {
   // NL winter sunrise often ~08:45–09:00; winter sunset ~16:30 — widen vs Pomfret 16→08.
   scheduleStripStartHour: 15,
   scheduleStripEndHour: 10,
+  // KNMI via MeteoAlarm; NL011 = Noord-Holland (Amsterdam).
+  stormAlerts: { provider: 'meteoalarm', feed: 'feeds-netherlands', areaCodes: ['NL011'] },
 }
 
 const SITES: Record<ObservatorySiteId, ObservatorySite> = {

@@ -22,16 +22,16 @@ export default function ContactPage() {
       <h1 className="text-2xl font-semibold text-apple-dark dark:text-white">Team</h1>
       <div className="flex flex-wrap gap-x-16 gap-y-8">
         <article className="boxed-fields w-[240px] shrink-0 space-y-3">
+          <img src="/james.jpg" alt="James Tian" className="h-64 w-full rounded-lg object-cover" />
+          <ContactCard name="James Tian" role="Pomfret Astro Admin" email="qtian.28@pomfret.org" />
+        </article>
+        <article className="boxed-fields w-[240px] shrink-0 space-y-3">
           <img src="/E_Lake_Joshua.jpg" alt="Joshua Lake" className="h-64 w-full rounded-lg object-cover" />
           <ContactCard
             name="Joshua Lake"
             role="Pomfret Olmsted Observatory Admin"
             email="jlake@pomfret.org"
           />
-        </article>
-        <article className="boxed-fields w-[240px] shrink-0 space-y-3">
-          <img src="/james.jpg" alt="James Tian" className="h-64 w-full rounded-lg object-cover" />
-          <ContactCard name="James Tian" role="Pomfret Astro Admin" email="qtian.28@pomfret.org" />
         </article>
         <article className="boxed-fields w-[240px] shrink-0 space-y-3">
           <img src="/jua.jpg" alt="Jua Op ’t Einde" className="h-64 w-full rounded-lg object-cover" />

@@ -3,6 +3,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
 import { postgresReadsEnabled } from '@/lib/db'
 import { kvGetJson, kvSetJson } from '@/lib/kv-rest'
+import { OBSERVATORY_SITES } from '@/lib/observatory-sites'
 import { scopedKvKey } from '@/lib/observatory-site-scope'
 
 const KEY_BASE = 'imaging-r2-object-map'
@@ -88,8 +89,21 @@ export function imagingAgentObjectPrefix(): string {
   return raw || 'imaging'
 }
 
-function imagingAgentKeyPrefix(queueId: string): string {
-  return `${imagingAgentObjectPrefix()}/${sanitizeForR2RunId(queueId)}/`
+/**
+ * Folders an agent may upload into. Each site sets `R2_PREFIX` to its
+ * `r2UploadPrefix` (Pomfret `imaging`, Cygnus `imaging_cygnus`). The website
+ * env is a single value, so the allowlist is the union of site prefixes.
+ */
+export function sessionUploadPrefixes(): string[] {
+  const prefixes = new Set<string>()
+  for (const site of OBSERVATORY_SITES) {
+    const prefix = site.r2UploadPrefix.trim().replace(/\/+$/, '')
+    if (prefix && !prefix.includes('..') && !prefix.includes('/')) prefixes.add(prefix)
+  }
+  const fromEnv = imagingAgentObjectPrefix()
+  if (fromEnv && !fromEnv.includes('..') && !fromEnv.includes('/')) prefixes.add(fromEnv)
+  if (prefixes.size === 0) prefixes.add('imaging')
+  return Array.from(prefixes)
 }
 
 /** Reject path traversal and keys outside the session namespace. */
@@ -99,8 +113,10 @@ export function isAllowedSessionObjectKey(queueId: string, objectKey: string): b
   if (key.startsWith(GALLERY_PREFIX)) return false
   const prefix = sessionKeyPrefix(queueId)
   if (key.startsWith(prefix)) return true
-  const agentPrefix = imagingAgentKeyPrefix(queueId)
-  if (key.startsWith(agentPrefix)) return true
+  const runFolder = sanitizeForR2RunId(queueId)
+  for (const uploadPrefix of sessionUploadPrefixes()) {
+    if (key.startsWith(`${uploadPrefix}/${runFolder}/`)) return true
+  }
   // Legacy flat keys: queueId or queueId + suffix only.
   const suffix = (process.env.R2_SESSION_OBJECT_SUFFIX ?? '').trim()
   const legacy = suffix ? `${queueId}${suffix}` : queueId

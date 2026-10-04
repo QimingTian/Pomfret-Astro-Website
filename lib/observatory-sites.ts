@@ -33,6 +33,12 @@ export type ObservatorySite = {
   scheduleStripStartHour: number
   scheduleStripEndHour: number
   stormAlerts: ObservatoryStormAlertSource
+  /**
+   * R2 folder for nina_agent session zips (`R2_PREFIX` on that site's Windows agent).
+   * Pomfret stays `imaging`. Other sites use `imaging_<id>` so they share one bucket
+   * without colliding.
+   */
+  r2UploadPrefix: string
 }
 
 export const POMFRET_SITE: ObservatorySite = {
@@ -47,6 +53,7 @@ export const POMFRET_SITE: ObservatorySite = {
   scheduleStripStartHour: 16,
   scheduleStripEndHour: 8,
   stormAlerts: { provider: 'nws' },
+  r2UploadPrefix: 'imaging',
 }
 
 /** Placeholder roof pin until Cygnus provides DMS; weather + observer share coords. */
@@ -64,6 +71,7 @@ export const CYGNUS_SITE: ObservatorySite = {
   scheduleStripEndHour: 10,
   // KNMI via MeteoAlarm; NL011 = Noord-Holland (Amsterdam).
   stormAlerts: { provider: 'meteoalarm', feed: 'feeds-netherlands', areaCodes: ['NL011'] },
+  r2UploadPrefix: 'imaging_cygnus',
 }
 
 const SITES: Record<ObservatorySiteId, ObservatorySite> = {

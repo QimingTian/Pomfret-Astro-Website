@@ -22,3 +22,12 @@ test('isAllowedSessionObjectKey accepts nina_agent imaging prefix', () => {
     true
   )
 })
+
+test('isAllowedSessionObjectKey accepts Cygnus imaging_cygnus prefix', () => {
+  const id = '55b66d19-3608-436c-aa1e-79eefe8dc536'
+  assert.equal(
+    isAllowedSessionObjectKey(id, `imaging_cygnus/${id}/${id}.zip`),
+    true
+  )
+  assert.equal(isAllowedSessionObjectKey(id, `imaging_other/${id}/${id}.zip`), false)
+})

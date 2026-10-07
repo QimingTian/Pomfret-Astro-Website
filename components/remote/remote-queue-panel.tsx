@@ -3,8 +3,9 @@
 import { queueStatusBadgeClass } from '@/lib/remote/ui-status'
 import { queueStatusLabel } from '@/lib/remote/queue-status'
 
-const POMFRET_CALIBRATION_LIBRARY_DRIVE_URL =
-  'https://drive.google.com/drive/folders/1nWZly4-op0yazXUoyr8sAAB9Rm8Jl2D4'
+// Hidden with the Current Sessions note below. Restore both together.
+// const POMFRET_CALIBRATION_LIBRARY_DRIVE_URL =
+//   'https://drive.google.com/drive/folders/1nWZly4-op0yazXUoyr8sAAB9Rm8Jl2D4'
 
 export type RemoteQueuePanelItem = {
   id: string
@@ -47,6 +48,7 @@ export function RemoteQueuePanel<T extends RemoteQueuePanelItem>({
     <section className="max-w-3xl min-w-0">
       <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-4">Current Sessions</h1>
       <div className="flex flex-col gap-4">
+        {/*
         <p className="text-sm text-gray-600 dark:text-gray-400">
           This list includes every session that is pending, scheduled, in progress, or completed. Single-night
           sessions are kept for{' '}
@@ -57,7 +59,7 @@ export function RemoteQueuePanel<T extends RemoteQueuePanelItem>({
           email—please download your data while it is still available. For the observatory master calibration library
           (bias, darks, flats),{' '}
           <a
-            href={POMFRET_CALIBRATION_LIBRARY_DRIVE_URL}
+            href="https://drive.google.com/drive/folders/1nWZly4-op0yazXUoyr8sAAB9Rm8Jl2D4"
             target="_blank"
             rel="noopener noreferrer"
             className="font-medium text-green-600 underline decoration-green-600/70 underline-offset-2 hover:text-green-500 dark:text-green-400 dark:hover:text-green-300"
@@ -66,6 +68,7 @@ export function RemoteQueuePanel<T extends RemoteQueuePanelItem>({
           </a>
           .
         </p>
+        */}
         {queueItems.length === 0 ? (
           <p className="text-sm text-gray-500 dark:text-gray-500">No sessions.</p>
         ) : (

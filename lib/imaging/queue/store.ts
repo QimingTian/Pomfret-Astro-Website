@@ -73,7 +73,7 @@ export interface ImagingRequest {
   plannedStartIso?: string | null
   scheduleReasons?: string[]
   sequenceTemplate?: ImagingSequenceTemplate
-  /** Predicted occultation instant. Planned start is locked 30 minutes before this. */
+  /** Predicted occultation instant. Planned start is locked 22 minutes before this. */
   occultationEventIso?: string | null
   occultationDurationSeconds?: number | null
   occultationEventId?: string | null
@@ -712,7 +712,7 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
       return {
         error:
           sequenceTemplate === 'asteroid_occultation'
-            ? 'Exposure must be between 0.2 and 2 seconds'
+            ? `Exposure must be between ${OCCULTATION_EXPOSURE_MIN_SEC} and ${OCCULTATION_EXPOSURE_MAX_SEC} seconds`
             : 'Exposure must be between 1 and 3600 seconds',
       }
     }
@@ -989,7 +989,7 @@ export async function updatePendingRequestById(
       return {
         error:
           sequenceTemplate === 'asteroid_occultation'
-            ? 'Exposure must be between 0.2 and 2 seconds'
+            ? `Exposure must be between ${OCCULTATION_EXPOSURE_MIN_SEC} and ${OCCULTATION_EXPOSURE_MAX_SEC} seconds`
             : 'Exposure must be between 1 and 3600 seconds',
       }
     }

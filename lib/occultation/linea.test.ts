@@ -26,8 +26,8 @@ test('linea row becomes an event pointed at the star', () => {
   assert.equal(event.magnitudeDrop, 1.4)
   assert.equal(event.moonSeparationDeg, 90)
   assert.equal(event.exposureSeconds, 0.5)
-  assert.ok(event.exposureCount > 30 * 60)
-  assert.equal(event.plannedStartIso, '2026-10-08T02:30:00.000Z')
+  assert.equal(event.exposureCount, 360)
+  assert.equal(event.plannedStartIso, '2026-10-08T02:38:00.000Z')
 })
 
 test('stars fainter than magnitude 14 are dropped', () => {

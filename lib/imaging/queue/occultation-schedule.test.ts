@@ -23,7 +23,7 @@ function openWeatherTonight(): TimeInterval[] {
   return [{ startMs: window.nauticalDuskUtc.getTime(), endMs: window.nauticalDawnUtc.getTime() }]
 }
 
-test('occultation is scheduled only at event minus 30 minutes', () => {
+test('occultation is scheduled only at event minus 22 minutes', () => {
   withMockedNow(() => {
     const eventMs = NOW_MS + 2 * 60 * 60 * 1000
     const plan = occultationExposurePlan(eventMs, 10)

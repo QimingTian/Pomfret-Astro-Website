@@ -37,7 +37,7 @@ export type SchedulePendingRow = {
   plannedStartIso?: string | null
   /** Variable-star and occultation sessions are exempt from moon avoidance. */
   sequenceTemplate?: ImagingSequenceTemplate
-  /** Predicted occultation instant. The only legal start is 30 minutes before this. */
+  /** Predicted occultation instant. The only legal start is 22 minutes before this. */
   occultationEventIso?: string | null
   occultationDurationSeconds?: number | null
 }
@@ -326,7 +326,7 @@ function fixedOccultationInsight(
   return {
     status: 'scheduled',
     plannedStartIso: new Date(startMs).toISOString(),
-    reasons: ['Scheduled at the fixed occultation start, 30 minutes before the event.'],
+    reasons: ['Scheduled at the fixed occultation start, 22 minutes before the event.'],
   }
 }
 
@@ -458,7 +458,7 @@ export function computeScheduleInsight(
       occultationInsight.set(row.id, {
         status: 'scheduled',
         plannedStartIso: row.plannedStartIso ?? null,
-        reasons: ['Scheduled at the fixed occultation start, 30 minutes before the event.'],
+        reasons: ['Scheduled at the fixed occultation start, 22 minutes before the event.'],
       })
       continue
     }

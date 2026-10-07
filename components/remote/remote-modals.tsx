@@ -52,7 +52,7 @@ export type RemoteModalQueueItem = {
   downloadPath?: string
   hasPreview?: boolean
   previewPath?: string
-  sessionType?: 'dso' | 'variable_star'
+  sessionType?: 'dso' | 'variable_star' | 'asteroid_occultation'
   variableStarAmplitudeMag?: number | null
   failedAt?: string | null
   scheduleStripNightKey?: string | null

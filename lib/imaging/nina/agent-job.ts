@@ -8,6 +8,8 @@ import {
   type ObservatoryHms,
 } from '@/lib/imaging/nina/sequence-json'
 import { variableStarTargetAduFromAmplitude } from '@/lib/imaging/nina/variable-star-target-adu'
+import { imagingSequenceTemplate } from '@/lib/imaging/sequence-template'
+import { OCCULTATION_FILTER } from '@/lib/occultation/plan'
 import {
   estopDiscordMessageForState,
   isWeatherSafetyEmergencyStopActor,
@@ -129,11 +131,11 @@ export function queueSessionScheduledEndMs(r: ImagingRequest, nowMs = Date.now()
 
 export function sequenceParamsFromQueueRequest(r: ImagingRequest): NinaAgentRunParams | null {
   if (r.raHours == null || r.decDeg == null || !r.filter) return null
-  const templateKind = r.sequenceTemplate === 'variable_star' ? 'variable_star' : 'dso'
+  const templateKind = imagingSequenceTemplate(r.sequenceTemplate)
   const params: NinaAgentRunParams = {
     raHoursDecimal: r.raHours,
     decDegDecimal: r.decDeg,
-    filterName: templateKind === 'variable_star' ? 'G' : r.filter,
+    filterName: templateKind === 'variable_star' ? 'G' : templateKind === 'asteroid_occultation' ? OCCULTATION_FILTER : r.filter,
     exposureSeconds: r.exposureSeconds,
     exposureCount: r.count,
     pomfretQueueId: r.id,

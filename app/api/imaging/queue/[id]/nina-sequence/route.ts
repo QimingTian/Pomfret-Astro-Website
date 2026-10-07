@@ -10,6 +10,7 @@ import { getRequestById } from '@/lib/imaging-queue-store'
 import { buildNinaSequenceJson } from '@/lib/build-nina-sequence-json'
 import { scheduledSessionEndMs } from '@/lib/imaging/nina/sequence-json'
 import { variableStarTargetAduFromAmplitude } from '@/lib/imaging/nina/variable-star-target-adu'
+import { imagingSequenceTemplate } from '@/lib/imaging/sequence-template'
 
 export const runtime = 'nodejs'
 
@@ -48,7 +49,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
         exposureSeconds: row.exposureSeconds,
         exposureCount: row.count,
         pomfretQueueId: row.id,
-        templateKind: row.sequenceTemplate === 'variable_star' ? 'variable_star' : 'dso',
+        templateKind: imagingSequenceTemplate(row.sequenceTemplate),
         outputMode: row.outputMode,
         cameraCoolingTempC: row.cameraCoolingTempC,
         targetName: row.target ?? undefined,

@@ -9,6 +9,7 @@ import { useMember } from '@/hooks/use-member'
 import { useAdaptivePoll } from '@/hooks/use-adaptive-poll'
 import { useSiteStream } from '@/lib/use-site-stream'
 import type { VariableStarRow } from '@/lib/variable-star-catalog'
+import type { OccultationEvent } from '@/lib/occultation/types'
 import {
   filterVariableStarCatalog,
   type VariableStarFilterId,
@@ -131,7 +132,7 @@ type ResolvedCatalogObject = {
   dec: { sign: '+' | '-'; degree: number; minute: number; second: number }
 }
 
-type ImagingSessionTypeUi = 'dso' | 'variable_star'
+type ImagingSessionTypeUi = 'dso' | 'variable_star' | 'asteroid_occultation'
 type ProjectModeTri = 'off' | 'on' | 'mosaic'
 type VariableStarLookupSource = 'catalog' | 'simbad'
 type VariableStarFilterUi = VariableStarFilterId
@@ -354,7 +355,10 @@ export default function RemotePage() {
       downloadPath?: string
       hasPreview?: boolean
       previewPath?: string
-      sessionType?: 'dso' | 'variable_star'
+      sessionType?: ImagingSessionTypeUi
+      occultationEventIso?: string | null
+      occultationDurationSeconds?: number | null
+      occultationEventId?: string | null
       variableStarAmplitudeMag?: number | null
       failedAt?: string | null
       scheduleStripNightKey?: string | null
@@ -595,6 +599,10 @@ export default function RemotePage() {
   const [variableStarBlockHours, setVariableStarBlockHours] = useState(1)
   /** Until user taps a session duration pill, show `--` for estimated duration (not the clamped default). */
   const [variableStarDurationUserSelected, setVariableStarDurationUserSelected] = useState(false)
+  const [occultationEvents, setOccultationEvents] = useState<OccultationEvent[]>([])
+  const [occultationEventsLoading, setOccultationEventsLoading] = useState(false)
+  const [occultationEventsError, setOccultationEventsError] = useState<string | null>(null)
+  const [selectedOccultationId, setSelectedOccultationId] = useState('')
 
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [terminalSessionId, setTerminalSessionId] = useState<string | null>(null)
@@ -992,6 +1000,38 @@ export default function RemotePage() {
   }, [sessionType, siteId])
 
   useEffect(() => {
+    if (sessionType !== 'asteroid_occultation') return
+    let cancelled = false
+    setOccultationEventsLoading(true)
+    setOccultationEventsError(null)
+    void (async () => {
+      try {
+        const res = await observatorySiteFetch('/api/imaging/occultations', siteId)
+        const data = await res.json().catch(() => ({}))
+        if (cancelled) return
+        if (!res.ok || data?.ok !== true || !Array.isArray(data.events)) {
+          setOccultationEvents([])
+          setOccultationEventsError(
+            typeof data.error === 'string' ? data.error : 'Failed to load occultations.'
+          )
+          return
+        }
+        setOccultationEvents(data.events as OccultationEvent[])
+      } catch {
+        if (!cancelled) {
+          setOccultationEvents([])
+          setOccultationEventsError('Failed to load occultations.')
+        }
+      } finally {
+        if (!cancelled) setOccultationEventsLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [sessionType, siteId])
+
+  useEffect(() => {
     let mounted = true
     const loadPrediction = async () => {
       const now = new Date()
@@ -1104,6 +1144,9 @@ export default function RemotePage() {
         decDeg?: unknown
         outputMode?: unknown
         sessionType?: unknown
+        occultationEventIso?: unknown
+        occultationDurationSeconds?: unknown
+        occultationEventId?: unknown
         estimatedDurationSeconds?: unknown
         filterPlans?: unknown
         plannedStartIso?: unknown
@@ -1128,7 +1171,8 @@ export default function RemotePage() {
       const normalized = items
         .filter((x) => typeof x.id === 'string')
         .map((x) => {
-          const sessionType: 'dso' | 'variable_star' = x.sessionType === 'variable_star' ? 'variable_star' : 'dso'
+          const sessionType: ImagingSessionTypeUi =
+            x.sessionType === 'variable_star' || x.sessionType === 'asteroid_occultation' ? x.sessionType : 'dso'
           const mosaicPanels = Array.isArray(x.mosaicPanels)
             ? x.mosaicPanels
                 .map((p) => {
@@ -1209,6 +1253,12 @@ export default function RemotePage() {
                 ? ((x as Record<string, unknown>).cameraCoolingTempC as -10 | 0)
                 : undefined,
             sessionType,
+            occultationEventIso: typeof x.occultationEventIso === 'string' ? x.occultationEventIso : null,
+            occultationDurationSeconds:
+              typeof x.occultationDurationSeconds === 'number' && Number.isFinite(x.occultationDurationSeconds)
+                ? x.occultationDurationSeconds
+                : null,
+            occultationEventId: typeof x.occultationEventId === 'string' ? x.occultationEventId : null,
             variableStarAmplitudeMag:
               typeof (x as Record<string, unknown>).variableStarAmplitudeMag === 'number' &&
               Number.isFinite((x as Record<string, unknown>).variableStarAmplitudeMag as number)
@@ -1728,6 +1778,10 @@ export default function RemotePage() {
       if (!allOptions.includes(variableStarBlockHours) || variableStarBlockHours > maxEnabled + 1e-9) return false
       return true
     }
+    if (sessionType === 'asteroid_occultation') {
+      const selected = occultationEvents.find((event) => event.id === selectedOccultationId)
+      return Boolean(selected?.altitudeOk)
+    }
     if (filterPlans.length === 0) return false
     for (const plan of filterPlans) {
       const filterName = plan.filterName.trim()
@@ -1753,11 +1807,15 @@ export default function RemotePage() {
     variableStarDurationPick,
     variableStarBlockHours,
     filterPlans,
+    occultationEvents,
+    selectedOccultationId,
   ])
 
   const captureRemoteSavedForm = useCallback((): RemoteSavedSessionFormV1 => {
     return {
-      sessionType: sessionType === 'variable_star' ? 'variable_star' : 'dso',
+      sessionType:
+        sessionType === 'variable_star' || sessionType === 'asteroid_occultation' ? sessionType : 'dso',
+      occultationEventId: selectedOccultationId || undefined,
       requestName,
       raHourPart,
       raMinutePart,
@@ -1793,13 +1851,19 @@ export default function RemotePage() {
     variableStarListSelection,
     variableStarFilterSelection,
     catalogQuery,
+    selectedOccultationId,
   ])
 
   const applyRemoteSavedForm = useCallback(
     (form: RemoteSavedSessionFormV1) => {
       setEditingSessionId(null)
       setSubmitError(null)
-      setSessionType(form.sessionType === 'variable_star' ? 'variable_star' : 'dso')
+      setSessionType(
+        form.sessionType === 'variable_star' || form.sessionType === 'asteroid_occultation'
+          ? form.sessionType
+          : 'dso'
+      )
+      setSelectedOccultationId(form.occultationEventId ?? '')
       setRequestName(form.requestName)
       setRaHourPart(form.raHourPart)
       setRaMinutePart(form.raMinutePart)
@@ -2635,7 +2699,23 @@ export default function RemotePage() {
       | Array<Array<{ filterName: string; count: number; exposureSeconds: number }>>
       | undefined
 
-    if (sessionType === 'variable_star') {
+    const selectedOccultation =
+      sessionType === 'asteroid_occultation'
+        ? occultationEvents.find((event) => event.id === selectedOccultationId) ?? null
+        : null
+    if (sessionType === 'asteroid_occultation') {
+      if (!selectedOccultation) {
+        setSubmitError('Select an occultation.')
+        return
+      }
+      normalizedPlans = [
+        {
+          filterName: 'L',
+          count: selectedOccultation.exposureCount,
+          exposureSeconds: selectedOccultation.exposureSeconds,
+        },
+      ]
+    } else if (sessionType === 'variable_star') {
       normalizedPlans = [{ filterName: 'G', count: 1, exposureSeconds: 30 }]
     } else if (mosaicMode && mosaicDraft?.panels?.length) {
       const flushed = {
@@ -2714,7 +2794,9 @@ export default function RemotePage() {
     const { nauticalDuskUtc } = getTonightSchedulingWindow(new Date(scheduleNowMs))
     const vsPick = variableStarDurationPick
     const estimatedDurationSeconds =
-      sessionType === 'variable_star' && vsPick?.coordsOk
+      sessionType === 'asteroid_occultation' && selectedOccultation
+        ? selectedOccultation.estimatedDurationSeconds
+        : sessionType === 'variable_star' && vsPick?.coordsOk
         ? Math.round(
             variableStarSessionDurationSeconds({
               blockHours: variableStarBlockHours,
@@ -2761,6 +2843,14 @@ export default function RemotePage() {
         cameraCoolingTempC,
         estimatedDurationSeconds,
         sessionType,
+        ...(sessionType === 'asteroid_occultation' && selectedOccultation
+          ? {
+              occultationEventIso: selectedOccultation.eventIso,
+              occultationDurationSeconds: selectedOccultation.durationSeconds,
+              occultationEventId: selectedOccultation.id,
+              occultationStarMagnitude: selectedOccultation.magnitude,
+            }
+          : {}),
         ...(variableStarAmplitudeMag != null && variableStarAmplitudeMag > 0
           ? { variableStarAmplitudeMag }
           : {}),
@@ -2958,7 +3048,12 @@ export default function RemotePage() {
     const isMosaic =
       item.mosaicMode === true || (Array.isArray(item.mosaicPanels) && item.mosaicPanels.length > 0)
     setProjectModeTri(isMosaic ? 'mosaic' : item.projectMode === true ? 'on' : 'off')
-    setSessionType(item.sessionType === 'variable_star' ? 'variable_star' : 'dso')
+    setSessionType(
+      item.sessionType === 'variable_star' || item.sessionType === 'asteroid_occultation'
+        ? item.sessionType
+        : 'dso'
+    )
+    setSelectedOccultationId(item.sessionType === 'asteroid_occultation' ? item.occultationEventId ?? '' : '')
     setVariableStarPreviewStar(null)
     setVariableStarLastFoundName(null)
     setVariableStarListSelection('')
@@ -3067,6 +3162,25 @@ export default function RemotePage() {
     setSubmitError(null)
     setSubmitSuccess('Editing pending session. Update fields then click Finish Editing.')
     window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  function applyOccultationEvent(event: OccultationEvent) {
+    applySexagesimalPartsFromRadec(
+      event.raHours,
+      event.decDeg,
+      setRaHourPart,
+      setRaMinutePart,
+      setRaSecondPart,
+      setDecSign,
+      setDecDegreePart,
+      setDecMinutePart,
+      setDecSecondPart
+    )
+    setRequestName(`${event.asteroid} occultation`)
+    setSelectedOccultationId(event.id)
+    setOutputMode('raw_zip')
+    setCatalogLookupError(null)
+    setCatalogLookupResult(null)
   }
 
   function applyVariableStarCatalogRow(row: VariableStarRow, source: VariableStarLookupSource) {
@@ -3329,6 +3443,12 @@ export default function RemotePage() {
           setShowSaveRemoteSessionModal={setShowSaveRemoteSessionModal}
           dsoEstimatedDurationPreviewSeconds={dsoEstimatedDurationPreviewSeconds}
           variableStarEstimatedDurationPreviewSeconds={variableStarEstimatedDurationPreviewSeconds}
+          occultationEvents={occultationEvents}
+          occultationEventsLoading={occultationEventsLoading}
+          occultationEventsError={occultationEventsError}
+          selectedOccultationId={selectedOccultationId}
+          setSelectedOccultationId={setSelectedOccultationId}
+          applyOccultationEvent={applyOccultationEvent}
         />
         <div className="hidden lg:block h-full min-h-[16rem] w-px bg-black/10 dark:bg-white/10" />
         <RemoteScheduleStrip

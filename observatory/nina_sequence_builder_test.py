@@ -188,11 +188,55 @@ class NinaSequenceBuilderTests(unittest.TestCase):
         self.assertEqual(moon_coords.get("$id"), "45")
         self.assertEqual(moon_coords.get("RA"), 0.0)
 
+    def test_asteroid_occultation_uses_server_exposure(self):
+        root = build_run_sequence(
+            {
+                "raHoursDecimal": 2.5,
+                "decDegDecimal": 20.0,
+                "filterName": "Ha",
+                "exposureSeconds": 0.5,
+                "exposureCount": 3728,
+                "pomfretQueueId": "occ-1",
+                "templateKind": "asteroid_occultation",
+                "targetName": "(704) Interamnia",
+            }
+        )
+        self.assertEqual(root["Name"], "Asteroid Occultation Sequence")
+        self.assertEqual(root["PomfretAstro"]["SequenceTemplate"], "asteroid_occultation")
+        self.assertEqual(root["PomfretAstro"]["FilterName"], "L")
+        take = None
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            if isinstance(node, dict):
+                if "TakeExposure" in str(node.get("$type") or "") and "ExposureTime" in node:
+                    take = node
+                    break
+                stack.extend(node.values())
+            elif isinstance(node, list):
+                stack.extend(node)
+        self.assertIsNotNone(take)
+        self.assertEqual(take["ExposureTime"], 0.5)
+        loop = None
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            if isinstance(node, dict):
+                if "LoopCondition" in str(node.get("$type") or ""):
+                    loop = node
+                    break
+                stack.extend(node.values())
+            elif isinstance(node, list):
+                stack.extend(node)
+        self.assertIsNotNone(loop)
+        self.assertEqual(loop["Iterations"], 3728)
+
     def test_templates_exist(self):
         folder = ROOT / "nina_templates"
         for name in (
             "Classic DSO Imaging Sequence.json",
             "Classic DSO Imaging Sequence Multi Filter.json",
+            "Asteroid Occultation Sequence.json",
             "Variable Star Sequence.json",
             "EStop.json",
             "End Night Session.json",

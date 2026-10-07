@@ -1,4 +1,4 @@
-export type RemoteSessionTypeV1 = 'dso' | 'variable_star'
+export type RemoteSessionTypeV1 = 'dso' | 'variable_star' | 'asteroid_occultation'
 
 export type RemoteSavedSessionFormV1 = {
   sessionType: RemoteSessionTypeV1
@@ -18,6 +18,7 @@ export type RemoteSavedSessionFormV1 = {
   variableStarListSelection: string
   variableStarFilterSelection: string[]
   catalogQuery: string
+  occultationEventId?: string
 }
 
 export type MemberSavedSessionApiEntry = {

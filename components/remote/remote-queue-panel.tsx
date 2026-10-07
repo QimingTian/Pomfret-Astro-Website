@@ -14,7 +14,7 @@ export type RemoteQueuePanelItem = {
   createdAt: string
   userId?: string | null
   email?: string | null
-  sessionType?: 'dso' | 'variable_star'
+  sessionType?: 'dso' | 'variable_star' | 'asteroid_occultation'
   projectMode?: boolean
   mosaicMode?: boolean
   adminApprovalPending?: boolean
@@ -79,7 +79,12 @@ export function RemoteQueuePanel<T extends RemoteQueuePanelItem>({
                 item.adminApprovalPending === true && displayStatus === 'pending'
                   ? 'Awaiting admin approval'
                   : queueStatusLabel(displayStatus)
-              const sessionTypeLabel = item.sessionType === 'variable_star' ? 'Variable Star' : 'Deep Sky Object'
+              const sessionTypeLabel =
+                item.sessionType === 'variable_star'
+                  ? 'Variable Star'
+                  : item.sessionType === 'asteroid_occultation'
+                    ? 'Asteroid Occultation'
+                    : 'Deep Sky Object'
               const projectLabel = item.mosaicMode
                 ? ' · Mosaic Project Mode'
                 : item.projectMode

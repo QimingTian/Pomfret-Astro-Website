@@ -23,6 +23,15 @@ import type { ObservatorySiteId } from '@/lib/observatory-sites'
 import { getTonightAstronomicalNightWindow, getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import { altitudeCoverageMsAtMinAltitude, pomfretTargetObservabilityError } from '@/lib/target-altitude'
 import { formatRaDecTargetLabel } from '@/lib/format-radec'
+import type { ImagingSequenceTemplate } from '@/lib/imaging/sequence-template'
+import { imagingSequenceTemplate } from '@/lib/imaging/sequence-template'
+import {
+  OCCULTATION_EXPOSURE_MAX_SEC,
+  OCCULTATION_EXPOSURE_MIN_SEC,
+  OCCULTATION_FILTER,
+  occultationExposurePlan,
+  occultationSubExposureSeconds,
+} from '@/lib/occultation/plan'
 
 /** Queue lifecycle: mutually exclusive (no separate scheduleStatus flag). */
 export type ImagingRequestStatus =
@@ -63,7 +72,11 @@ export interface ImagingRequest {
   scheduleStatus?: 'scheduled' | 'unscheduled'
   plannedStartIso?: string | null
   scheduleReasons?: string[]
-  sequenceTemplate?: 'dso' | 'variable_star'
+  sequenceTemplate?: ImagingSequenceTemplate
+  /** Predicted occultation instant. Planned start is locked 30 minutes before this. */
+  occultationEventIso?: string | null
+  occultationDurationSeconds?: number | null
+  occultationEventId?: string | null
   /** Peak-to-peak amplitude (mag) from catalog; used to size CalculateExposureTime TargetADU. */
   variableStarAmplitudeMag?: number | null
   /** Multi-night DSO project; queue row is consumed on first NINA delivery only. */
@@ -540,7 +553,13 @@ export interface CreateImagingInput {
   firstName?: string | null
   lastName?: string | null
   email?: string | null
-  sequenceTemplate?: 'dso' | 'variable_star'
+  sequenceTemplate?: ImagingSequenceTemplate
+  /** Predicted occultation instant. The server recomputes start, frame count, and duration from this. */
+  occultationEventIso?: string | null
+  occultationDurationSeconds?: number | null
+  occultationEventId?: string | null
+  /** Gaia G of the occulted star. The server sets the sub-frame exposure from this. */
+  occultationStarMagnitude?: number | null
   /** Variable star: total seconds = (N×0.5 h block) + variable-star session overhead; validated when `sequenceTemplate` is `variable_star`. */
   estimatedDurationSeconds?: number
   /** Peak-to-peak amplitude (mag); sizes CalculateExposureTime TargetADU. */
@@ -563,6 +582,42 @@ function targetLabelFromCoords(raHours: number, decDeg: number): string {
   return formatRaDecTargetLabel(raHours, decDeg)
 }
 
+type OccultationSubmission = {
+  exposureSeconds: number
+  count: number
+  estimatedDurationSeconds: number
+  occultationEventIso: string
+  occultationDurationSeconds: number | null
+  occultationEventId?: string
+}
+
+function readOccultationSubmission(
+  input: CreateImagingInput
+): OccultationSubmission | { error: string } | null {
+  if (imagingSequenceTemplate(input.sequenceTemplate) !== 'asteroid_occultation') return null
+  const eventIso = typeof input.occultationEventIso === 'string' ? input.occultationEventIso.trim() : ''
+  const eventMs = Date.parse(eventIso)
+  if (!eventIso || !Number.isFinite(eventMs)) return { error: 'Occultation event time is required' }
+  const durationRaw = input.occultationDurationSeconds
+  const durationSeconds =
+    typeof durationRaw === 'number' && Number.isFinite(durationRaw) && durationRaw > 0 ? durationRaw : null
+  const magnitudeRaw = input.occultationStarMagnitude
+  const magnitude =
+    typeof magnitudeRaw === 'number' && Number.isFinite(magnitudeRaw) ? magnitudeRaw : null
+  const exposureSeconds = occultationSubExposureSeconds(magnitude)
+  const plan = occultationExposurePlan(eventMs, durationSeconds, exposureSeconds)
+  const eventId =
+    typeof input.occultationEventId === 'string' ? input.occultationEventId.trim().slice(0, 80) : ''
+  return {
+    exposureSeconds: plan.exposureSeconds,
+    count: plan.exposureCount,
+    estimatedDurationSeconds: plan.estimatedDurationSeconds,
+    occultationEventIso: new Date(eventMs).toISOString(),
+    occultationDurationSeconds: durationSeconds,
+    ...(eventId ? { occultationEventId: eventId } : {}),
+  }
+}
+
 export async function createRequest(input: CreateImagingInput): Promise<ImagingRequest | { error: string }> {
   await ensureLoadedFromDisk()
   const mem = getMemory()
@@ -583,7 +638,10 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
     return { error: 'Dec (degrees) must be between -90 and 90' }
   }
 
-  const mosaicModeEarly = input.sequenceTemplate !== 'variable_star' && input.mosaicMode === true
+  const mosaicModeEarly =
+    input.sequenceTemplate !== 'variable_star' &&
+    input.sequenceTemplate !== 'asteroid_occultation' &&
+    input.mosaicMode === true
   if (mosaicModeEarly && Array.isArray(input.mosaicPanels) && input.mosaicPanels.length > 0) {
     for (const panel of input.mosaicPanels) {
       const panelDec = Number(panel.decDeg)
@@ -599,22 +657,27 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
     if (obsErr) return { error: obsErr }
   }
 
-  const exposureSeconds = Math.round(Number(input.exposureSeconds))
-  const count = Math.round(Number(input.count))
+  const sequenceTemplate = imagingSequenceTemplate(input.sequenceTemplate)
+  const occultationSubmission = readOccultationSubmission(input)
+  if (occultationSubmission && 'error' in occultationSubmission) return occultationSubmission
+  const exposureSeconds = occultationSubmission
+    ? occultationSubmission.exposureSeconds
+    : Math.round(Number(input.exposureSeconds))
+  const count = occultationSubmission ? occultationSubmission.count : Math.round(Number(input.count))
 
-  const sequenceTemplate: 'dso' | 'variable_star' =
-    input.sequenceTemplate === 'variable_star' ? 'variable_star' : 'dso'
   const mosaicMode = sequenceTemplate === 'dso' && input.mosaicMode === true
   const projectMode =
     sequenceTemplate === 'dso' && (input.projectMode === true || mosaicMode)
   const filterRaw =
     sequenceTemplate === 'variable_star'
       ? 'G'
-      : input.filter == null
-        ? ''
-        : input.filter === ''
+      : sequenceTemplate === 'asteroid_occultation'
+        ? OCCULTATION_FILTER
+        : input.filter == null
           ? ''
-          : String(input.filter).trim().slice(0, MAX_FILTER)
+          : input.filter === ''
+            ? ''
+            : String(input.filter).trim().slice(0, MAX_FILTER)
   if (!filterRaw) {
     return { error: 'Filter is required' }
   }
@@ -622,23 +685,36 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
   const normalizedFilterPlans =
     sequenceTemplate === 'variable_star'
       ? [{ filterName: 'G', exposureSeconds, count }]
-      : Array.isArray(input.filterPlans) && input.filterPlans.length > 0
-      ? input.filterPlans
-          .map((p) => {
-            const filterName = typeof p.filterName === 'string' ? p.filterName.trim().slice(0, MAX_FILTER) : ''
-            const exposure = Math.round(Number(p.exposureSeconds))
-            const frames = Math.round(Number(p.count))
-            return { filterName, exposureSeconds: exposure, count: frames }
-          })
-          .filter((p) => p.filterName !== '')
-      : [{ filterName: filter, exposureSeconds, count }]
+      : sequenceTemplate === 'asteroid_occultation'
+        ? [{ filterName: OCCULTATION_FILTER, exposureSeconds, count }]
+        : Array.isArray(input.filterPlans) && input.filterPlans.length > 0
+          ? input.filterPlans
+              .map((p) => {
+                const filterName = typeof p.filterName === 'string' ? p.filterName.trim().slice(0, MAX_FILTER) : ''
+                const exposure = Math.round(Number(p.exposureSeconds))
+                const frames = Math.round(Number(p.count))
+                return { filterName, exposureSeconds: exposure, count: frames }
+              })
+              .filter((p) => p.filterName !== '')
+          : [{ filterName: filter, exposureSeconds, count }]
 
   if (normalizedFilterPlans.length === 0) {
     return { error: 'At least one filter plan is required' }
   }
   for (const plan of normalizedFilterPlans) {
-    if (!Number.isFinite(plan.exposureSeconds) || plan.exposureSeconds < 1 || plan.exposureSeconds > 3600) {
-      return { error: 'Exposure must be between 1 and 3600 seconds' }
+    if (
+      !Number.isFinite(plan.exposureSeconds) ||
+      plan.exposureSeconds <
+        (sequenceTemplate === 'asteroid_occultation' ? OCCULTATION_EXPOSURE_MIN_SEC : 1) ||
+      plan.exposureSeconds >
+        (sequenceTemplate === 'asteroid_occultation' ? OCCULTATION_EXPOSURE_MAX_SEC : 3600)
+    ) {
+      return {
+        error:
+          sequenceTemplate === 'asteroid_occultation'
+            ? 'Exposure must be between 0.2 and 2 seconds'
+            : 'Exposure must be between 1 and 3600 seconds',
+      }
     }
     if (!Number.isFinite(plan.count) || plan.count < 1) {
       return { error: 'Count must be at least 1' }
@@ -671,11 +747,15 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
 
   const notes: string | null = null
   const outputMode: 'raw_zip' | 'stacked_master' | 'none' =
-    input.outputMode === 'stacked_master'
-      ? 'stacked_master'
-      : input.outputMode === 'none'
+    sequenceTemplate === 'asteroid_occultation'
+      ? input.outputMode === 'none'
         ? 'none'
         : 'raw_zip'
+      : input.outputMode === 'stacked_master'
+        ? 'stacked_master'
+        : input.outputMode === 'none'
+          ? 'none'
+          : 'raw_zip'
   if (
     outputMode === 'stacked_master' &&
     normalizedFilterPlans.some((p) => p.exposureSeconds !== STACKED_MASTER_REQUIRED_EXPOSURE_SECONDS)
@@ -691,7 +771,9 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
         }
       : undefined
   const estimatedDurationSeconds =
-    sequenceTemplate === 'variable_star'
+    occultationSubmission
+      ? occultationSubmission.estimatedDurationSeconds
+      : sequenceTemplate === 'variable_star'
       ? (() => {
           const custom = variableStarDurationFromClientEstimate(
             input.estimatedDurationSeconds,
@@ -788,6 +870,15 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
     ninaSequenceJson,
     ...(sessionPasswordHash ? { sessionPasswordHash } : {}),
     sequenceTemplate,
+    ...(occultationSubmission
+      ? {
+          occultationEventIso: occultationSubmission.occultationEventIso,
+          occultationDurationSeconds: occultationSubmission.occultationDurationSeconds,
+          ...(occultationSubmission.occultationEventId
+            ? { occultationEventId: occultationSubmission.occultationEventId }
+            : {}),
+        }
+      : {}),
     ...(variableStarAmplitudeMag != null ? { variableStarAmplitudeMag } : {}),
     ...(projectMode ? { projectMode: true as const } : {}),
     ...(mosaicMode && Array.isArray(input.mosaicPanels) && input.mosaicPanels.length > 0
@@ -833,7 +924,9 @@ export async function updatePendingRequestById(
   if (!Number.isFinite(decDeg) || decDeg < -90 || decDeg > 90) return { error: 'Dec (degrees) must be between -90 and 90' }
 
   const mosaicModeEarly =
-    input.sequenceTemplate !== 'variable_star' && input.mosaicMode === true
+    input.sequenceTemplate !== 'variable_star' &&
+    input.sequenceTemplate !== 'asteroid_occultation' &&
+    input.mosaicMode === true
   if (mosaicModeEarly && Array.isArray(input.mosaicPanels) && input.mosaicPanels.length > 0) {
     for (const panel of input.mosaicPanels) {
       const panelDec = Number(panel.decDeg)
@@ -849,38 +942,56 @@ export async function updatePendingRequestById(
     if (obsErr) return { error: obsErr }
   }
 
-  const exposureSeconds = Math.round(Number(input.exposureSeconds))
-  const count = Math.round(Number(input.count))
-  const sequenceTemplate: 'dso' | 'variable_star' =
-    input.sequenceTemplate === 'variable_star' ? 'variable_star' : 'dso'
+  const sequenceTemplate = imagingSequenceTemplate(input.sequenceTemplate)
+  const occultationSubmission = readOccultationSubmission(input)
+  if (occultationSubmission && 'error' in occultationSubmission) return occultationSubmission
+  const exposureSeconds = occultationSubmission
+    ? occultationSubmission.exposureSeconds
+    : Math.round(Number(input.exposureSeconds))
+  const count = occultationSubmission ? occultationSubmission.count : Math.round(Number(input.count))
   const filterRaw =
     sequenceTemplate === 'variable_star'
       ? 'G'
-      : input.filter == null
-        ? ''
-        : input.filter === ''
+      : sequenceTemplate === 'asteroid_occultation'
+        ? OCCULTATION_FILTER
+        : input.filter == null
           ? ''
-          : String(input.filter).trim().slice(0, MAX_FILTER)
+          : input.filter === ''
+            ? ''
+            : String(input.filter).trim().slice(0, MAX_FILTER)
   if (!filterRaw) return { error: 'Filter is required' }
   const filter = filterRaw
 
   const normalizedFilterPlans =
     sequenceTemplate === 'variable_star'
       ? [{ filterName: 'G', exposureSeconds, count }]
-      : Array.isArray(input.filterPlans) && input.filterPlans.length > 0
-      ? input.filterPlans
-          .map((p) => {
-            const filterName = typeof p.filterName === 'string' ? p.filterName.trim().slice(0, MAX_FILTER) : ''
-            const exposure = Math.round(Number(p.exposureSeconds))
-            const frames = Math.round(Number(p.count))
-            return { filterName, exposureSeconds: exposure, count: frames }
-          })
-          .filter((p) => p.filterName !== '')
-      : [{ filterName: filter, exposureSeconds, count }]
+      : sequenceTemplate === 'asteroid_occultation'
+        ? [{ filterName: OCCULTATION_FILTER, exposureSeconds, count }]
+        : Array.isArray(input.filterPlans) && input.filterPlans.length > 0
+          ? input.filterPlans
+              .map((p) => {
+                const filterName = typeof p.filterName === 'string' ? p.filterName.trim().slice(0, MAX_FILTER) : ''
+                const exposure = Math.round(Number(p.exposureSeconds))
+                const frames = Math.round(Number(p.count))
+                return { filterName, exposureSeconds: exposure, count: frames }
+              })
+              .filter((p) => p.filterName !== '')
+          : [{ filterName: filter, exposureSeconds, count }]
   if (normalizedFilterPlans.length === 0) return { error: 'At least one filter plan is required' }
   for (const plan of normalizedFilterPlans) {
-    if (!Number.isFinite(plan.exposureSeconds) || plan.exposureSeconds < 1 || plan.exposureSeconds > 3600) {
-      return { error: 'Exposure must be between 1 and 3600 seconds' }
+    if (
+      !Number.isFinite(plan.exposureSeconds) ||
+      plan.exposureSeconds <
+        (sequenceTemplate === 'asteroid_occultation' ? OCCULTATION_EXPOSURE_MIN_SEC : 1) ||
+      plan.exposureSeconds >
+        (sequenceTemplate === 'asteroid_occultation' ? OCCULTATION_EXPOSURE_MAX_SEC : 3600)
+    ) {
+      return {
+        error:
+          sequenceTemplate === 'asteroid_occultation'
+            ? 'Exposure must be between 0.2 and 2 seconds'
+            : 'Exposure must be between 1 and 3600 seconds',
+      }
     }
     if (!Number.isFinite(plan.count) || plan.count < 1) {
       return { error: 'Count must be at least 1' }
@@ -897,7 +1008,15 @@ export async function updatePendingRequestById(
   if (!EMAIL_REGEX.test(email)) return { error: 'Invalid email format' }
 
   const outputMode: 'raw_zip' | 'stacked_master' | 'none' =
-    input.outputMode === 'stacked_master' ? 'stacked_master' : input.outputMode === 'none' ? 'none' : 'raw_zip'
+    sequenceTemplate === 'asteroid_occultation'
+      ? input.outputMode === 'none'
+        ? 'none'
+        : 'raw_zip'
+      : input.outputMode === 'stacked_master'
+        ? 'stacked_master'
+        : input.outputMode === 'none'
+          ? 'none'
+          : 'raw_zip'
   if (
     outputMode === 'stacked_master' &&
     normalizedFilterPlans.some((p) => p.exposureSeconds !== STACKED_MASTER_REQUIRED_EXPOSURE_SECONDS)
@@ -913,28 +1032,33 @@ export async function updatePendingRequestById(
         }
       : undefined
   const estimatedDurationSeconds =
-    sequenceTemplate === 'variable_star'
-      ? (() => {
-          const custom = variableStarDurationFromClientEstimate(
-            input.estimatedDurationSeconds,
-            variableStarDurationOpts
-          )
-          if (custom.ok) return custom.seconds
-          return Math.max(
-            0,
-            Math.round(
-              altitudeCoverageMsAtMinAltitude(
-                raHours,
-                decDeg,
-                getTonightAstronomicalNightWindow(new Date()).astronomicalDuskUtc.getTime(),
-                getTonightAstronomicalNightWindow(new Date()).astronomicalDawnUtc.getTime(),
-                VARIABLE_STAR_ESTIMATE_ALTITUDE_DEG
-              ) / 1000
+    occultationSubmission
+      ? occultationSubmission.estimatedDurationSeconds
+      : sequenceTemplate === 'variable_star'
+        ? (() => {
+            const custom = variableStarDurationFromClientEstimate(
+              input.estimatedDurationSeconds,
+              variableStarDurationOpts
             )
-          )
-        })()
-      : dsoSessionDurationSeconds({ filterPlans: normalizedFilterPlans })
-  const projectMode = current.projectMode === true || input.mosaicMode === true || input.projectMode === true
+            if (custom.ok) return custom.seconds
+            return Math.max(
+              0,
+              Math.round(
+                altitudeCoverageMsAtMinAltitude(
+                  raHours,
+                  decDeg,
+                  getTonightAstronomicalNightWindow(new Date()).astronomicalDuskUtc.getTime(),
+                  getTonightAstronomicalNightWindow(new Date()).astronomicalDawnUtc.getTime(),
+                  VARIABLE_STAR_ESTIMATE_ALTITUDE_DEG
+                ) / 1000
+              )
+            )
+          })()
+        : dsoSessionDurationSeconds({ filterPlans: normalizedFilterPlans })
+  const projectMode =
+    sequenceTemplate === 'asteroid_occultation'
+      ? false
+      : current.projectMode === true || input.mosaicMode === true || input.projectMode === true
   if (!projectMode) {
     const tonightWindow = getTonightAstronomicalNightWindow(new Date())
     if (estimatedDurationSeconds > tonightWindow.durationSeconds) {
@@ -1012,6 +1136,9 @@ export async function updatePendingRequestById(
     ninaSequenceJson,
     sessionPasswordHash,
     sequenceTemplate,
+    occultationEventIso: occultationSubmission ? occultationSubmission.occultationEventIso : undefined,
+    occultationDurationSeconds: occultationSubmission ? occultationSubmission.occultationDurationSeconds : undefined,
+    occultationEventId: occultationSubmission?.occultationEventId,
     variableStarAmplitudeMag: sequenceTemplate === 'variable_star' ? variableStarAmplitudeMag ?? null : undefined,
     ...(projectMode ? { projectMode: true as const } : {}),
     ...(input.mosaicMode === true &&
@@ -1026,6 +1153,7 @@ export async function updatePendingRequestById(
             : {}),
         }
       : { mosaicMode: false, mosaicPanels: undefined, mosaicFilterPlansByPanel: undefined }),
+    ...(sequenceTemplate === 'asteroid_occultation' ? { projectMode: undefined } : {}),
   }
   delete (next as { scheduleStatus?: unknown }).scheduleStatus
   mem[idx] = next

@@ -12,6 +12,7 @@ import {
   imagingUnauthorized,
   withImagingCors,
 } from '@/lib/imaging-queue-auth'
+import { imagingSequenceTemplate } from '@/lib/imaging/sequence-template'
 import { boardRemove, getBoardEntry } from '@/lib/imaging-session-board'
 import { removePreviewImage } from '@/lib/imaging-preview-store'
 import {
@@ -171,7 +172,19 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
         : b.email == null
           ? null
           : String(b.email),
-    sequenceTemplate: b.sessionType === 'variable_star' ? 'variable_star' : 'dso',
+    sequenceTemplate: imagingSequenceTemplate(b.sessionType),
+    occultationEventIso: typeof b.occultationEventIso === 'string' ? b.occultationEventIso : undefined,
+    occultationDurationSeconds:
+      typeof b.occultationDurationSeconds === 'number' && Number.isFinite(b.occultationDurationSeconds)
+        ? b.occultationDurationSeconds
+        : b.occultationDurationSeconds === null
+          ? null
+          : undefined,
+    occultationEventId: typeof b.occultationEventId === 'string' ? b.occultationEventId : undefined,
+    occultationStarMagnitude:
+      typeof b.occultationStarMagnitude === 'number' && Number.isFinite(b.occultationStarMagnitude)
+        ? b.occultationStarMagnitude
+        : undefined,
     estimatedDurationSeconds:
       typeof b.estimatedDurationSeconds === 'number' && Number.isFinite(b.estimatedDurationSeconds)
         ? b.estimatedDurationSeconds

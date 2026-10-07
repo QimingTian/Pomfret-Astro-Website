@@ -4,6 +4,7 @@ import type { Ref, FormEvent, Dispatch, SetStateAction } from 'react'
 import { MemberAuthPanel } from '@/components/member-auth-panel'
 import type { MemberProfile } from '@/components/member-provider'
 import type { VariableStarRow } from '@/lib/variable-star-catalog'
+import type { OccultationEvent } from '@/lib/occultation/types'
 import {
   VARIABLE_STAR_FILTER_OPTIONS,
   type VariableStarFilterId,
@@ -42,7 +43,13 @@ function formatTonightXAxisHour(ms: number): string {
   return `${h12}${ampm}`
 }
 
-type ImagingSessionTypeUi = 'dso' | 'variable_star'
+type ImagingSessionTypeUi = 'dso' | 'variable_star' | 'asteroid_occultation'
+
+function occultationOptionLabel(event: OccultationEvent): string {
+  const utc = Number.isFinite(Date.parse(event.eventIso)) ? new Date(event.eventIso).toISOString().slice(11, 16) : event.eventIso
+  const mag = event.magnitude != null ? ` · mag ${event.magnitude.toFixed(1)}` : ''
+  return `${utc} UTC · ${event.asteroid}${mag}`
+}
 type ProjectModeTri = 'off' | 'on' | 'mosaic'
 type VariableStarLookupSource = 'catalog' | 'simbad'
 type VariableStarFilterUi = VariableStarFilterId
@@ -195,6 +202,12 @@ export type RemoteSessionFormProps = {
   setShowSaveRemoteSessionModal: Dispatch<SetStateAction<boolean>>
   dsoEstimatedDurationPreviewSeconds: number | null
   variableStarEstimatedDurationPreviewSeconds: number | null
+  occultationEvents: OccultationEvent[]
+  occultationEventsLoading: boolean
+  occultationEventsError: string | null
+  selectedOccultationId: string
+  setSelectedOccultationId: Dispatch<SetStateAction<string>>
+  applyOccultationEvent: (event: OccultationEvent) => void
 }
 
 export function RemoteSessionForm({
@@ -295,6 +308,12 @@ export function RemoteSessionForm({
   setShowSaveRemoteSessionModal,
   dsoEstimatedDurationPreviewSeconds,
   variableStarEstimatedDurationPreviewSeconds,
+  occultationEvents,
+  occultationEventsLoading,
+  occultationEventsError,
+  selectedOccultationId,
+  setSelectedOccultationId,
+  applyOccultationEvent,
 }: RemoteSessionFormProps) {
   return (
         <section className="max-w-3xl min-w-0">
@@ -416,7 +435,7 @@ export function RemoteSessionForm({
                 }}
                 className={sessionType === 'dso' ? glassPillToggleActiveMd : glassPillToggleIdleMd}
               >
-                Deep Sky Object Imaging
+                Deep Sky Object
               </button>
               <button
                 type="button"
@@ -447,7 +466,38 @@ export function RemoteSessionForm({
                 }}
                 className={sessionType === 'variable_star' ? glassPillToggleActiveMd : glassPillToggleIdleMd}
               >
-                Variable Star Imaging
+                Variable Star
+              </button>
+              <button
+                type="button"
+                aria-pressed={sessionType === 'asteroid_occultation'}
+                onClick={() => {
+                  setEditingSessionId(null)
+                  setRequestName('')
+                  setRaHourPart('')
+                  setRaMinutePart('')
+                  setRaSecondPart('')
+                  setDecSign('+')
+                  setDecDegreePart('')
+                  setDecMinutePart('')
+                  setDecSecondPart('')
+                  setSessionPassword('')
+                  setCatalogQuery('')
+                  setCatalogLookupResult(null)
+                  setCatalogLookupError(null)
+                  setVariableStarPreviewStar(null)
+                  setVariableStarLastFoundName(null)
+                  setVariableStarLastFoundSource(null)
+                  setVariableStarListSelection('')
+                  setVariableStarFilterSelection([])
+                  setSelectedOccultationId('')
+                  setSessionType('asteroid_occultation')
+                  setOutputMode('raw_zip')
+                  setFilterPlans([{ filterName: 'L', count: '1', exposureSeconds: '1' }])
+                }}
+                className={sessionType === 'asteroid_occultation' ? glassPillToggleActiveMd : glassPillToggleIdleMd}
+              >
+                Asteroid Occultation
               </button>
             </div>
             </div>
@@ -499,13 +549,50 @@ export function RemoteSessionForm({
               placeholder={
                 sessionType === 'variable_star'
                   ? 'e.g. AW UMa Session 1'
-                  : 'e.g. M31 LRGB Session 1'
+                  : sessionType === 'asteroid_occultation'
+                    ? 'e.g. (704) Interamnia occultation'
+                    : 'e.g. M31 LRGB Session 1'
               }
               className="w-full rounded-full border border-gray-300 dark:border-gray-600 bg-transparent dark:bg-transparent px-3 py-2 text-sm"
             />
           </label>
           <div className="sm:col-span-2 space-y-3">
-            {sessionType === 'variable_star' ? (
+            {sessionType === 'asteroid_occultation' ? (
+              <div className="space-y-3">
+                {occultationEventsLoading && (
+                  <p className="text-xs text-gray-400">Loading tonight&apos;s occultations…</p>
+                )}
+                {occultationEventsError && !occultationEventsLoading && (
+                  <p className="text-xs text-red-400">{occultationEventsError}</p>
+                )}
+                {!occultationEventsLoading && !occultationEventsError && occultationEvents.length === 0 && (
+                  <p className="text-xs text-gray-400">No asteroid occultations near this observatory tonight.</p>
+                )}
+                <label className="block w-full space-y-1">
+                  <span className="text-sm font-medium text-white">Event list</span>
+                  <select
+                    value={selectedOccultationId}
+                    disabled={occultationEventsLoading || occultationEvents.length === 0}
+                    onChange={(e) => {
+                      const id = e.target.value
+                      setSelectedOccultationId(id)
+                      const event = occultationEvents.find((row) => row.id === id)
+                      if (event) applyOccultationEvent(event)
+                    }}
+                    className={`box-border h-10 w-full appearance-none rounded-full border border-gray-300 dark:border-gray-600 bg-[#151616] px-3 py-2 text-sm leading-normal ${
+                      selectedOccultationId ? 'text-white' : 'text-gray-400'
+                    }`}
+                  >
+                    <option value="">-- Select an event --</option>
+                    {occultationEvents.map((event) => (
+                      <option key={event.id} value={event.id}>
+                        {occultationOptionLabel(event)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            ) : sessionType === 'variable_star' ? (
               <div className="space-y-4">
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <label className="block w-full space-y-1">
@@ -1019,9 +1106,14 @@ export function RemoteSessionForm({
               ? variableStarEstimatedDurationPreviewSeconds == null
                 ? '--'
                 : formatDurationShort(variableStarEstimatedDurationPreviewSeconds)
-              : dsoEstimatedDurationPreviewSeconds == null
-                ? '--'
-                : formatDurationShort(dsoEstimatedDurationPreviewSeconds)}
+              : sessionType === 'asteroid_occultation'
+                ? (() => {
+                    const selected = occultationEvents.find((event) => event.id === selectedOccultationId)
+                    return selected ? formatDurationShort(selected.estimatedDurationSeconds) : '--'
+                  })()
+                : dsoEstimatedDurationPreviewSeconds == null
+                  ? '--'
+                  : formatDurationShort(dsoEstimatedDurationPreviewSeconds)}
           </p>
             </fieldset>
             </form>

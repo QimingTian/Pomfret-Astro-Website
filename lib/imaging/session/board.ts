@@ -46,7 +46,7 @@ export type SessionBoardEntry = {
   scheduleBarEndMs?: number | null
   /** Multi-night DSO project (board id = project id). */
   projectMode?: boolean
-  sequenceTemplate?: 'dso' | 'variable_star'
+  sequenceTemplate?: 'dso' | 'variable_star' | 'asteroid_occultation'
   variableStarAmplitudeMag?: number | null
 }
 
@@ -289,7 +289,7 @@ export async function boardUpsertInProgress(input: {
   sessionPasswordHash?: string
   userId?: string
   projectMode?: boolean
-  sequenceTemplate?: 'dso' | 'variable_star'
+  sequenceTemplate?: 'dso' | 'variable_star' | 'asteroid_occultation'
   variableStarAmplitudeMag?: number | null
 }): Promise<void> {
   const ts = new Date().toISOString()
@@ -323,7 +323,9 @@ export async function boardUpsertInProgress(input: {
     sessionPasswordHash: input.sessionPasswordHash,
     ...(input.userId ? { userId: input.userId } : {}),
     ...(input.projectMode ? { projectMode: true as const } : {}),
-    ...(input.sequenceTemplate === 'variable_star' || input.sequenceTemplate === 'dso'
+    ...(input.sequenceTemplate === 'variable_star' ||
+    input.sequenceTemplate === 'dso' ||
+    input.sequenceTemplate === 'asteroid_occultation'
       ? { sequenceTemplate: input.sequenceTemplate }
       : {}),
     ...(input.sequenceTemplate === 'variable_star' &&

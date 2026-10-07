@@ -4,10 +4,17 @@ import { firstAltitudeAllowedTimeMs, currentAltitudeDeg, MIN_ALTITUDE_DEG } from
 import { getTonightAstronomicalNightWindow } from '@/lib/sunrise-window'
 import classicSingleTemplate from '@/Classic DSO Imaging Sequence.json'
 import classicMultiTemplate from '@/Classic DSO Imaging Sequence Multi Filter.json'
+import asteroidOccultationTemplate from '@/Asteroid Occultation Sequence.json'
 import variableStarTemplate from '@/Variable Star Sequence.json'
+import {
+  OCCULTATION_FILTER,
+  occultationSubExposureSeconds,
+} from '@/lib/occultation/plan'
+import type { ImagingSequenceTemplate } from '@/lib/imaging/sequence-template'
 
 const TEMPLATE_SINGLE_JSON = classicSingleTemplate as Record<string, unknown>
 const TEMPLATE_MULTI_JSON = classicMultiTemplate as Record<string, unknown>
+const TEMPLATE_ASTEROID_JSON = asteroidOccultationTemplate as Record<string, unknown>
 const TEMPLATE_VARIABLE_STAR_JSON = variableStarTemplate as Record<string, unknown>
 
 export interface NinaSequenceParams {
@@ -24,7 +31,7 @@ export interface NinaSequenceParams {
     exposureSeconds: number
     exposureCount: number
   }>
-  templateKind?: 'dso' | 'variable_star'
+  templateKind?: ImagingSequenceTemplate
   targetName?: string
   variableStarObservingSeconds?: number
   /** UTC ms: Loop-until Time clock (scheduled session end). */
@@ -418,24 +425,42 @@ function applyVariableStarTargetAdu(dso: Record<string, unknown>, targetAdu: num
  * Throws if the template structure or $ids drift from the shipped file.
  */
 export function buildNinaSequenceJson(params: NinaSequenceParams): string {
-  const templateKind = params.templateKind === 'variable_star' ? 'variable_star' : 'dso'
+  const templateKind: ImagingSequenceTemplate =
+    params.templateKind === 'variable_star'
+      ? 'variable_star'
+      : params.templateKind === 'asteroid_occultation'
+        ? 'asteroid_occultation'
+        : 'dso'
   const normalizedPlans =
-    Array.isArray(params.filterPlans) && params.filterPlans.length > 0
-      ? params.filterPlans
-      : [
+    templateKind === 'asteroid_occultation'
+      ? [
           {
-            filterName: params.filterName,
-            exposureSeconds: params.exposureSeconds,
-            exposureCount: params.exposureCount,
+            filterName: OCCULTATION_FILTER,
+            exposureSeconds:
+              Number.isFinite(params.exposureSeconds) && params.exposureSeconds > 0
+                ? params.exposureSeconds
+                : occultationSubExposureSeconds(null),
+            exposureCount: Math.max(1, Math.round(params.exposureCount)),
           },
         ]
+      : Array.isArray(params.filterPlans) && params.filterPlans.length > 0
+        ? params.filterPlans
+        : [
+            {
+              filterName: params.filterName,
+              exposureSeconds: params.exposureSeconds,
+              exposureCount: params.exposureCount,
+            },
+          ]
 
   const templateRoot =
     templateKind === 'variable_star'
       ? TEMPLATE_VARIABLE_STAR_JSON
-      : normalizedPlans.length > 1
-        ? TEMPLATE_MULTI_JSON
-        : TEMPLATE_SINGLE_JSON
+      : templateKind === 'asteroid_occultation'
+        ? TEMPLATE_ASTEROID_JSON
+        : normalizedPlans.length > 1
+          ? TEMPLATE_MULTI_JSON
+          : TEMPLATE_SINGLE_JSON
   const root = structuredClone(templateRoot) as Record<string, unknown>
   const usedIds = new Set<number>()
 
@@ -595,7 +620,12 @@ export function buildNinaSequenceJson(params: NinaSequenceParams): string {
       SiteId: siteId,
       OutputMode: params.outputMode ?? 'raw_zip',
       SequenceTemplate: templateKind,
-      FilterName: templateKind === 'variable_star' ? 'G' : (normalizedPlans[0]?.filterName ?? params.filterName),
+      FilterName:
+        templateKind === 'variable_star'
+          ? 'G'
+          : templateKind === 'asteroid_occultation'
+            ? OCCULTATION_FILTER
+            : (normalizedPlans[0]?.filterName ?? params.filterName),
       FilterPlans: normalizedPlans,
       SessionProgressHint:
         'POST JSON to /api/imaging/session-progress?site=<SiteId> with { "queueId": "<QueueId>", ... }',

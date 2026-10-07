@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { buildNinaSequenceJson } from '@/lib/build-nina-sequence-json'
 import { scheduledSessionEndMs } from '@/lib/imaging/nina/sequence-json'
 import { variableStarTargetAduFromAmplitude } from '@/lib/imaging/nina/variable-star-target-adu'
+import { imagingSequenceTemplate } from '@/lib/imaging/sequence-template'
 import {
   ninaAgentJobResponse,
   runJobFromProjectNight,
@@ -236,7 +237,7 @@ function sequenceJsonFor(r: ImagingRequest): string | null {
       exposureSeconds: r.exposureSeconds,
       exposureCount: r.count,
       pomfretQueueId: r.id,
-      templateKind: r.sequenceTemplate === 'variable_star' ? 'variable_star' : 'dso',
+      templateKind: imagingSequenceTemplate(r.sequenceTemplate),
       outputMode: r.outputMode,
       cameraCoolingTempC: r.cameraCoolingTempC,
       targetName: r.target ?? undefined,
@@ -422,7 +423,7 @@ async function deliverForceRunQueueRow(row: ImagingRequest): Promise<NextRespons
     sessionPasswordHash: consumed.sessionPasswordHash,
     userId: consumed.userId,
     projectMode: consumed.projectMode,
-    sequenceTemplate: consumed.sequenceTemplate === 'variable_star' ? 'variable_star' : 'dso',
+    sequenceTemplate: imagingSequenceTemplate(consumed.sequenceTemplate),
     ...(consumed.sequenceTemplate === 'variable_star' &&
     typeof consumed.variableStarAmplitudeMag === 'number' &&
     Number.isFinite(consumed.variableStarAmplitudeMag)

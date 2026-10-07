@@ -50,6 +50,7 @@ import {
   getScheduleReservedIntervalsForActiveProject,
 } from '@/lib/imaging-project-altitude-hold'
 import { computeScheduleInsight } from '@/lib/imaging-queue-schedule-insight'
+import { imagingSequenceTemplate } from '@/lib/imaging/sequence-template'
 import { getObservatoryStatus, isObservatoryReady } from '@/lib/observatory-status-store'
 import { currentObservatorySite } from '@/lib/observatory-site-scope'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
@@ -222,7 +223,19 @@ export async function POST(request: NextRequest) {
     firstName: auth.user.firstName.trim() || null,
     lastName: auth.user.lastName.trim() || null,
     email: auth.user.email,
-    sequenceTemplate: b.sessionType === 'variable_star' ? 'variable_star' : 'dso',
+    sequenceTemplate: imagingSequenceTemplate(b.sessionType),
+    occultationEventIso: typeof b.occultationEventIso === 'string' ? b.occultationEventIso : undefined,
+    occultationDurationSeconds:
+      typeof b.occultationDurationSeconds === 'number' && Number.isFinite(b.occultationDurationSeconds)
+        ? b.occultationDurationSeconds
+        : b.occultationDurationSeconds === null
+          ? null
+          : undefined,
+    occultationEventId: typeof b.occultationEventId === 'string' ? b.occultationEventId : undefined,
+    occultationStarMagnitude:
+      typeof b.occultationStarMagnitude === 'number' && Number.isFinite(b.occultationStarMagnitude)
+        ? b.occultationStarMagnitude
+        : undefined,
     estimatedDurationSeconds:
       typeof b.estimatedDurationSeconds === 'number' && Number.isFinite(b.estimatedDurationSeconds)
         ? b.estimatedDurationSeconds

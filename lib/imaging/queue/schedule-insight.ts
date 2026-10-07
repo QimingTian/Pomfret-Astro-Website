@@ -10,6 +10,8 @@ import { PLANNED_START_EPSILON_MS } from '@/lib/imaging/planned-start-stability'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import { weatherPermittedCoverageMs, weatherCoverageOk, type TimeInterval } from '@/lib/tonight-weather-gate'
 import { moonBlockedFilters } from '@/lib/moon-avoidance'
+import { occultationExposurePlan } from '@/lib/occultation/plan'
+import type { ImagingSequenceTemplate } from '@/lib/imaging/sequence-template'
 
 export type { ProjectSubSessionOccupancy }
 
@@ -33,8 +35,11 @@ export type SchedulePendingRow = {
   estimatedDurationSeconds?: number
   status?: string
   plannedStartIso?: string | null
-  /** Variable-star sessions are exempt from moon avoidance. */
-  sequenceTemplate?: 'dso' | 'variable_star'
+  /** Variable-star and occultation sessions are exempt from moon avoidance. */
+  sequenceTemplate?: ImagingSequenceTemplate
+  /** Predicted occultation instant. The only legal start is 30 minutes before this. */
+  occultationEventIso?: string | null
+  occultationDurationSeconds?: number | null
 }
 
 type FreeInterval = { startMs: number; endMs: number }
@@ -199,8 +204,24 @@ export function estimateDurationSeconds(
     | 'estimatedDurationSeconds'
     | 'raHours'
     | 'plannedStartIso'
+    | 'sequenceTemplate'
+    | 'occultationEventIso'
+    | 'occultationDurationSeconds'
   >
 ): number {
+  if (req.sequenceTemplate === 'asteroid_occultation') {
+    if (typeof req.estimatedDurationSeconds === 'number' && Number.isFinite(req.estimatedDurationSeconds)) {
+      return Math.max(60, req.estimatedDurationSeconds)
+    }
+    const eventMs = Date.parse(req.occultationEventIso ?? '')
+    if (Number.isFinite(eventMs)) {
+      return occultationExposurePlan(
+        eventMs,
+        req.occultationDurationSeconds ?? null,
+        req.exposureSeconds
+      ).estimatedDurationSeconds
+    }
+  }
   if (typeof req.estimatedDurationSeconds === 'number' && Number.isFinite(req.estimatedDurationSeconds)) {
     return Math.max(60, req.estimatedDurationSeconds)
   }
@@ -228,6 +249,85 @@ export function estimateDurationSeconds(
     startMs,
   })
   return Math.max(60, Math.round(fromPlans))
+}
+
+function fixedOccultationInsight(
+  req: SchedulePendingRow,
+  freeIntervals: FreeInterval[],
+  weatherPermittedIntervals: TimeInterval[],
+  nowMs: number,
+  windowStartMs: number,
+  deadlineMs: number
+): ScheduleInsight {
+  const eventMs = Date.parse(req.occultationEventIso ?? '')
+  if (!Number.isFinite(eventMs)) {
+    return {
+      status: 'unscheduled',
+      plannedStartIso: null,
+      reasons: ['Occultation event time is missing.'],
+    }
+  }
+  const startMs = occultationExposurePlan(eventMs, req.occultationDurationSeconds ?? null).plannedStartMs
+  const endMs = startMs + estimateDurationSeconds(req) * 1000
+  if (endMs <= nowMs) {
+    return {
+      status: 'unscheduled',
+      plannedStartIso: null,
+      reasons: ['The occultation window has already ended.'],
+    }
+  }
+  if (endMs > deadlineMs) {
+    return {
+      status: 'unscheduled',
+      plannedStartIso: null,
+      reasons: ['The occultation window ends after nautical dawn.'],
+    }
+  }
+  if (startMs < windowStartMs && nowMs < windowStartMs) {
+    return {
+      status: 'unscheduled',
+      plannedStartIso: null,
+      reasons: ["The 30-minute lead starts before tonight's scheduling window."],
+    }
+  }
+  const hasRaDec =
+    typeof req.raHours === 'number' &&
+    Number.isFinite(req.raHours) &&
+    typeof req.decDeg === 'number' &&
+    Number.isFinite(req.decDeg)
+  if (hasRaDec && !altitudeSessionCoverageOk(req.raHours!, req.decDeg!, startMs, endMs)) {
+    return {
+      status: 'unscheduled',
+      plannedStartIso: null,
+      reasons: ['Star altitude stays below 30° for part of the fixed occultation window.'],
+    }
+  }
+  const weatherCoveredMs = weatherPermittedCoverageMs(weatherPermittedIntervals, startMs, endMs)
+  const durationMs = endMs - startMs
+  if (!weatherCoverageOk(weatherPermittedIntervals, startMs, endMs, 0.8)) {
+    const pct = durationMs > 0 ? (weatherCoveredMs / durationMs) * 100 : 0
+    return {
+      status: 'unscheduled',
+      plannedStartIso: null,
+      reasons: [
+        `Weather-permitted coverage over the fixed occultation window is ${pct.toFixed(0)}% (required >= 80%).`,
+      ],
+    }
+  }
+  const occupyStart = Math.max(startMs, nowMs, windowStartMs)
+  const holder = freeIntervals.find((interval) => occupyStart >= interval.startMs && endMs <= interval.endMs)
+  if (!holder) {
+    return {
+      status: 'unscheduled',
+      plannedStartIso: null,
+      reasons: ['The fixed occultation window is blocked by another session.'],
+    }
+  }
+  return {
+    status: 'scheduled',
+    plannedStartIso: new Date(startMs).toISOString(),
+    reasons: ['Scheduled at the fixed occultation start, 30 minutes before the event.'],
+  }
 }
 
 /**
@@ -338,11 +438,65 @@ export function computeScheduleInsight(
     freeIntervals = subtractOccupiedFromFree(freeIntervals, { startMs: overlapStart, endMs: overlapEnd })
   }
 
+  const occultationRows = ordered
+    .filter((row) => row.sequenceTemplate === 'asteroid_occultation')
+    .sort((a, b) => {
+      const aMs = Date.parse(a.occultationEventIso ?? '')
+      const bMs = Date.parse(b.occultationEventIso ?? '')
+      if (Number.isFinite(aMs) && Number.isFinite(bMs) && aMs !== bMs) return aMs - bMs
+      return a.createdAt.localeCompare(b.createdAt)
+    })
+  const occultationInsight = new Map<string, ScheduleInsight>()
+  for (const row of occultationRows) {
+    const committed =
+      row.id !== targetId &&
+      row.status === 'scheduled' &&
+      row.plannedStartIso != null &&
+      Number.isFinite(Date.parse(row.plannedStartIso)) &&
+      Date.parse(row.plannedStartIso) + estimateDurationSeconds(row) * 1000 > nowMs
+    if (committed) {
+      occultationInsight.set(row.id, {
+        status: 'scheduled',
+        plannedStartIso: row.plannedStartIso ?? null,
+        reasons: ['Scheduled at the fixed occultation start, 30 minutes before the event.'],
+      })
+      continue
+    }
+    const decision = fixedOccultationInsight(
+      row,
+      freeIntervals,
+      weatherPermittedIntervals,
+      nowMs,
+      windowStartMs,
+      deadlineMs
+    )
+    occultationInsight.set(row.id, decision)
+    if (decision.status === 'scheduled' && decision.plannedStartIso) {
+      const startMs = Date.parse(decision.plannedStartIso)
+      freeIntervals = subtractOccupiedFromFree(freeIntervals, {
+        startMs,
+        endMs: startMs + estimateDurationSeconds(row) * 1000,
+      })
+    }
+  }
+
+  const targetRow = ordered.find((row) => row.id === targetId)
+  if (targetRow?.sequenceTemplate === 'asteroid_occultation') {
+    return (
+      occultationInsight.get(targetId) ?? {
+        status: 'unscheduled',
+        plannedStartIso: null,
+        reasons: ['Occultation event time is missing.'],
+      }
+    )
+  }
+
   const simulatedPlacements: SimulatedPlacement[] = []
 
   for (let reqIndex = 0; reqIndex < ordered.length; reqIndex += 1) {
     const req = ordered[reqIndex]!
     if (req.projectMode === true) continue
+    if (req.sequenceTemplate === 'asteroid_occultation') continue
     if (
       req.status === 'scheduled' &&
       req.plannedStartIso != null &&

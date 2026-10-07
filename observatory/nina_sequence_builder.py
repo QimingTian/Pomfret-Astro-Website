@@ -415,9 +415,31 @@ def build_run_sequence(params: dict[str, Any]) -> dict[str, Any]:
                 "exposureCount": params["exposureCount"],
             }
         ]
-    kind = params.get("templateKind") if params.get("templateKind") == "variable_star" else "dso"
+    raw_kind = params.get("templateKind")
+    if raw_kind == "variable_star":
+        kind = "variable_star"
+    elif raw_kind == "asteroid_occultation":
+        kind = "asteroid_occultation"
+    else:
+        kind = "dso"
+    if kind == "asteroid_occultation":
+        try:
+            exposure_seconds = float(plans[0]["exposureSeconds"])
+        except (TypeError, ValueError, KeyError):
+            exposure_seconds = 1.0
+        if exposure_seconds <= 0:
+            exposure_seconds = 1.0
+        plans = [
+            {
+                "filterName": "L",
+                "exposureSeconds": exposure_seconds,
+                "exposureCount": max(1, int(round(float(plans[0]["exposureCount"])))),
+            }
+        ]
     if kind == "variable_star":
         root = _load_template("Variable Star Sequence.json")
+    elif kind == "asteroid_occultation":
+        root = _load_template("Asteroid Occultation Sequence.json")
     elif len(plans) > 1:
         root = _load_template("Classic DSO Imaging Sequence Multi Filter.json")
     else:
@@ -529,7 +551,7 @@ def build_run_sequence(params: dict[str, Any]) -> dict[str, Any]:
             "SiteId": site_id,
             "OutputMode": params.get("outputMode") or "raw_zip",
             "SequenceTemplate": kind,
-            "FilterName": "G" if kind == "variable_star" else plans[0]["filterName"],
+            "FilterName": "G" if kind == "variable_star" else ("L" if kind == "asteroid_occultation" else plans[0]["filterName"]),
             "FilterPlans": plans,
             "SessionProgressHint": 'POST JSON to /api/imaging/session-progress?site=<SiteId> with { "queueId": "<QueueId>", ... }',
         }

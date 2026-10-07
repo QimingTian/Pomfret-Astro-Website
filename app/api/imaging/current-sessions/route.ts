@@ -14,6 +14,7 @@ import {
 } from '@/lib/imaging-project-store'
 import { projectFilterFrameProgress, projectFrameCounts } from '@/lib/imaging-total-frames'
 import { isOpenEndedVariableStarSession } from '@/lib/imaging/core/total-frames'
+import { imagingSequenceTemplate } from '@/lib/imaging/sequence-template'
 import { listBoardEntries } from '@/lib/imaging-session-board'
 import { listAll, toPublicImagingRequest } from '@/lib/imaging-queue-store'
 import { hasR2ObjectForQueueId } from '@/lib/r2-session-download'
@@ -72,7 +73,10 @@ export async function GET(request: NextRequest) {
     downloadPath?: string
     hasPreview?: boolean
     previewPath?: string
-    sessionType?: 'dso' | 'variable_star'
+    sessionType?: 'dso' | 'variable_star' | 'asteroid_occultation'
+    occultationEventIso?: string | null
+    occultationDurationSeconds?: number | null
+    occultationEventId?: string | null
     variableStarAmplitudeMag?: number | null
     projectMode?: boolean
     mosaicMode?: boolean
@@ -234,7 +238,14 @@ export async function GET(request: NextRequest) {
       filterPlans: Array.isArray(p.filterPlans) ? p.filterPlans : undefined,
       plannedStartIso: p.plannedStartIso ?? null,
       scheduleReasons: Array.isArray(p.scheduleReasons) ? p.scheduleReasons : undefined,
-      sessionType: p.sequenceTemplate === 'variable_star' ? 'variable_star' : 'dso',
+      sessionType: imagingSequenceTemplate(p.sequenceTemplate),
+      ...(p.sequenceTemplate === 'asteroid_occultation'
+        ? {
+            occultationEventIso: p.occultationEventIso ?? null,
+            occultationDurationSeconds: p.occultationDurationSeconds ?? null,
+            occultationEventId: p.occultationEventId ?? null,
+          }
+        : {}),
       ...(p.sequenceTemplate === 'variable_star' &&
       typeof p.variableStarAmplitudeMag === 'number' &&
       Number.isFinite(p.variableStarAmplitudeMag)
@@ -303,12 +314,15 @@ export async function GET(request: NextRequest) {
           typeof b.scheduleBarEndMs === 'number' && Number.isFinite(b.scheduleBarEndMs)
             ? b.scheduleBarEndMs
             : null,
-        sessionType: isOpenEndedVariableStarSession({
-          sequenceTemplate: b.sequenceTemplate,
-          filterPlans: b.filterPlans,
-        })
-          ? 'variable_star'
-          : 'dso',
+        sessionType:
+          b.sequenceTemplate === 'asteroid_occultation'
+            ? 'asteroid_occultation'
+            : isOpenEndedVariableStarSession({
+                sequenceTemplate: b.sequenceTemplate,
+                filterPlans: b.filterPlans,
+              })
+              ? 'variable_star'
+              : 'dso',
         ...(typeof b.variableStarAmplitudeMag === 'number' && Number.isFinite(b.variableStarAmplitudeMag)
           ? { variableStarAmplitudeMag: b.variableStarAmplitudeMag }
           : {}),

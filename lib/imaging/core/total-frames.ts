@@ -101,11 +101,11 @@ export function projectFrameCounts(project: {
  * Legacy board rows may lack `sequenceTemplate`; G×1 is the var-star placeholder plan.
  */
 export function isOpenEndedVariableStarSession(opts: {
-  sequenceTemplate?: 'dso' | 'variable_star' | null
+  sequenceTemplate?: 'dso' | 'variable_star' | 'asteroid_occultation' | null
   filterPlans?: FilterPlanLike[] | null
 }): boolean {
   if (opts.sequenceTemplate === 'variable_star') return true
-  if (opts.sequenceTemplate === 'dso') return false
+  if (opts.sequenceTemplate === 'dso' || opts.sequenceTemplate === 'asteroid_occultation') return false
   const plans = opts.filterPlans
   if (!plans || plans.length !== 1) return false
   const p = plans[0]!

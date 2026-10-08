@@ -894,6 +894,7 @@ export async function patchProject(
       | 'updatedAt'
       | 'completedAt'
       | 'activePanelIndex'
+      | 'mosaicRemainingByPanel'
     >
   >
 ): Promise<ImagingProject | undefined> {

@@ -2922,6 +2922,24 @@ export default function RemotePage() {
     await refreshQueue()
   }
 
+  const saveProjectProgress = useCallback(async (projectId: string, capturedByRow: number[]) => {
+    try {
+      const password = sessionPasswords[projectId] ?? ''
+      const res = await observatorySiteFetch(`/api/imaging/queue/${encodeURIComponent(projectId)}/progress`, siteId, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...(password ? { 'x-session-password': password } : {}) },
+        body: JSON.stringify({ capturedByRow }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || data?.ok !== true) return typeof data.error === 'string' ? data.error : 'Could not save project progress.'
+      await refreshQueue()
+      return null
+    } catch {
+      return 'Could not save project progress. Check your connection and try again.'
+    }
+  }, [refreshQueue, sessionPasswords, siteId])
+
   const openProjectPickerAfterAccess = useCallback(
     async (projectId: string, purpose: 'progress' | 'download') => {
       const res = await observatorySiteFetch(`/api/imaging/queue/${encodeURIComponent(projectId)}/progress`, siteId, {
@@ -3497,6 +3515,7 @@ export default function RemotePage() {
         isAdmin={isAdmin}
         downloadSessionFile={downloadSessionFile}
         setDeleteError={setDeleteError}
+        saveProjectProgress={saveProjectProgress}
         setNightPickerProjectId={setNightPickerProjectId}
         setNightPickerPurpose={setNightPickerPurpose}
         setAuthModalSessionId={setAuthModalSessionId}

@@ -1,6 +1,6 @@
 'use client'
 
-import type { RefObject, Dispatch, SetStateAction } from 'react'
+import { useEffect, useState, type RefObject, type Dispatch, type SetStateAction } from 'react'
 import type { MosaicPanel } from '@/lib/mosaic/framing-rectangle'
 import { formatRaDecPair } from '@/lib/format-radec'
 import { formatDurationShort } from '@/lib/remote/format'
@@ -106,6 +106,7 @@ export type RemoteModalsProps = {
   isAdmin: boolean
   downloadSessionFile: (queueId: string, password: string) => Promise<string | null>
   setDeleteError: Dispatch<SetStateAction<string | null>>
+  saveProjectProgress: (projectId: string, capturedByRow: number[]) => Promise<string | null>
   setNightPickerProjectId: Dispatch<SetStateAction<string | null>>
   setNightPickerPurpose: Dispatch<SetStateAction<'progress' | 'download' | null>>
   setAuthModalSessionId: Dispatch<SetStateAction<string | null>>
@@ -171,6 +172,7 @@ export function RemoteModals({
   isAdmin,
   downloadSessionFile,
   setDeleteError,
+  saveProjectProgress,
   setNightPickerProjectId,
   setNightPickerPurpose,
   setAuthModalSessionId,
@@ -215,6 +217,18 @@ export function RemoteModals({
   setShowRunRemoteSessionModal,
   applyRemoteSavedForm,
 }: RemoteModalsProps) {
+  const [editingProjectProgress, setEditingProjectProgress] = useState(false)
+  const [projectProgressDraft, setProjectProgressDraft] = useState<number[]>([])
+  const [projectProgressSaving, setProjectProgressSaving] = useState(false)
+  const [projectProgressError, setProjectProgressError] = useState<string | null>(null)
+  const activeProjectProgress = queueItems.find((item) => item.id === nightPickerProjectId)?.projectFilterProgress ?? []
+  useEffect(() => {
+    if (nightPickerPurpose === 'progress' && nightPickerProjectId) {
+      setEditingProjectProgress(false)
+      setProjectProgressDraft(activeProjectProgress.map((row) => row.captured))
+      setProjectProgressError(null)
+    }
+  }, [nightPickerProjectId, nightPickerPurpose])
   return (
     <>
       {terminalSessionId && (
@@ -463,18 +477,35 @@ export function RemoteModals({
                   <>
                     <h2 className="text-lg font-semibold text-white">Project progress</h2>
                     <div className="space-y-3">
-                      {projectFilterProgress.map((filter) => {
+                      {projectFilterProgress.map((filter, filterIndex) => {
+                        const captured = editingProjectProgress
+                          ? projectProgressDraft[filterIndex] ?? filter.captured
+                          : filter.captured
                         const pct =
                           filter.total > 0
-                            ? Math.min(100, Math.round((filter.captured / filter.total) * 100))
+                            ? Math.min(100, Math.round((captured / filter.total) * 100))
                             : 0
-                        const complete = filter.captured >= filter.total
+                        const complete = captured >= filter.total
                         return (
                           <div key={filter.filterName} className="space-y-1">
                             <div className="flex items-baseline justify-between gap-2 text-xs">
                               <span className="font-medium text-white">{filter.filterName}</span>
                               <span className="text-gray-400">
-                                {filter.captured} / {filter.total}
+                                {editingProjectProgress ? (
+                                  <input
+                                    aria-label={`${filter.filterName} completed frames`}
+                                    type="number"
+                                    min={0}
+                                    max={filter.total}
+                                    step={1}
+                                    value={projectProgressDraft[filterIndex] ?? filter.captured}
+                                    onChange={(event) => {
+                                      const value = event.currentTarget.value === '' ? 0 : Number(event.currentTarget.value)
+                                      setProjectProgressDraft((draft) => draft.map((current, i) => i === filterIndex ? value : current))
+                                    }}
+                                    className="w-20 rounded border border-gray-600 bg-gray-900 px-2 py-1 text-right text-white"
+                                  />
+                                ) : captured}{' '}/ {filter.total}
                                 {complete ? ' · complete' : ''}
                               </span>
                             </div>
@@ -496,21 +527,44 @@ export function RemoteModals({
                         )
                       })}
                     </div>
+                    {projectProgressError && <p role="alert" className="text-sm text-red-300">{projectProgressError}</p>}
                   </>
                 )}
                 </>
               )
             })()}
-            <button
-              type="button"
-              onClick={() => {
-                setNightPickerProjectId(null)
-                setNightPickerPurpose(null)
-              }}
-              className={glassPillMuted}
-            >
-              Cancel
-            </button>
+            <div className="flex justify-start gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setNightPickerProjectId(null)
+                  setNightPickerPurpose(null)
+                }}
+                className={glassPillMuted}
+              >
+                Cancel
+              </button>
+              {nightPickerPurpose === 'progress' && activeProjectProgress.length > 0 && (
+                editingProjectProgress ? (
+                  <button
+                    type="button"
+                    disabled={projectProgressSaving || projectProgressDraft.some((value, index) => !Number.isInteger(value) || value < 0 || value > activeProjectProgress[index]!.total)}
+                    onClick={async () => {
+                      if (!nightPickerProjectId) return
+                      setProjectProgressSaving(true)
+                      setProjectProgressError(null)
+                      const error = await saveProjectProgress(nightPickerProjectId, projectProgressDraft)
+                      setProjectProgressSaving(false)
+                      if (error) setProjectProgressError(error)
+                      else setEditingProjectProgress(false)
+                    }}
+                    className={`${glassPillMuted} disabled:opacity-50`}
+                  >{projectProgressSaving ? 'Saving…' : 'Save'}</button>
+                ) : (
+                  <button type="button" onClick={() => setEditingProjectProgress(true)} className={glassPillMuted}>Edit</button>
+                )
+              )}
+            </div>
           </div>
         </div>
       )}

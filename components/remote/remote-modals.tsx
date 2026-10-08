@@ -218,14 +218,14 @@ export function RemoteModals({
   applyRemoteSavedForm,
 }: RemoteModalsProps) {
   const [editingProjectProgress, setEditingProjectProgress] = useState(false)
-  const [projectProgressDraft, setProjectProgressDraft] = useState<number[]>([])
+  const [projectProgressDraft, setProjectProgressDraft] = useState<string[]>([])
   const [projectProgressSaving, setProjectProgressSaving] = useState(false)
   const [projectProgressError, setProjectProgressError] = useState<string | null>(null)
   const activeProjectProgress = queueItems.find((item) => item.id === nightPickerProjectId)?.projectFilterProgress ?? []
   useEffect(() => {
     if (nightPickerPurpose === 'progress' && nightPickerProjectId) {
       setEditingProjectProgress(false)
-      setProjectProgressDraft(activeProjectProgress.map((row) => row.captured))
+      setProjectProgressDraft(activeProjectProgress.map((row) => String(row.captured)))
       setProjectProgressError(null)
     }
   }, [nightPickerProjectId, nightPickerPurpose])
@@ -479,7 +479,7 @@ export function RemoteModals({
                     <div className="space-y-3">
                       {projectFilterProgress.map((filter, filterIndex) => {
                         const captured = editingProjectProgress
-                          ? projectProgressDraft[filterIndex] ?? filter.captured
+                          ? Number(projectProgressDraft[filterIndex] ?? filter.captured) || 0
                           : filter.captured
                         const pct =
                           filter.total > 0
@@ -498,9 +498,9 @@ export function RemoteModals({
                                     min={0}
                                     max={filter.total}
                                     step={1}
-                                    value={projectProgressDraft[filterIndex] ?? filter.captured}
+                                    value={projectProgressDraft[filterIndex] ?? String(filter.captured)}
                                     onChange={(event) => {
-                                      const value = event.currentTarget.value === '' ? 0 : Number(event.currentTarget.value)
+                                      const value = event.currentTarget.value
                                       setProjectProgressDraft((draft) => draft.map((current, i) => i === filterIndex ? value : current))
                                     }}
                                     className="w-20 rounded border border-gray-600 bg-gray-900 px-2 py-1 text-right text-white"
@@ -548,12 +548,12 @@ export function RemoteModals({
                 editingProjectProgress ? (
                   <button
                     type="button"
-                    disabled={projectProgressSaving || projectProgressDraft.some((value, index) => !Number.isInteger(value) || value < 0 || value > activeProjectProgress[index]!.total)}
+                    disabled={projectProgressSaving || projectProgressDraft.some((value, index) => !/^\d+$/.test(value) || Number(value) > activeProjectProgress[index]!.total)}
                     onClick={async () => {
                       if (!nightPickerProjectId) return
                       setProjectProgressSaving(true)
                       setProjectProgressError(null)
-                      const error = await saveProjectProgress(nightPickerProjectId, projectProgressDraft)
+                      const error = await saveProjectProgress(nightPickerProjectId, projectProgressDraft.map(Number))
                       setProjectProgressSaving(false)
                       if (error) setProjectProgressError(error)
                       else setEditingProjectProgress(false)

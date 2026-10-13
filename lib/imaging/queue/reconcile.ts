@@ -37,7 +37,11 @@ import {
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import { isEmergencyStopBlocking } from '@/lib/imaging-emergency-stop'
-import { getTonightWeatherPermittedIntervals, type TimeInterval } from '@/lib/tonight-weather-gate'
+import {
+  getTonightWeatherPermittedIntervals,
+  type TimeInterval,
+  type TonightWeatherIntervalsResult,
+} from '@/lib/tonight-weather-gate'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 import { currentObservatorySiteId, scopedKvKey } from '@/lib/observatory-site-scope'
 
@@ -87,6 +91,8 @@ async function markReconcileRan(): Promise<void> {
 export type ReconcileScheduleOptions = {
   /** Admin / explicit schedule mutations bypass the debounce window. */
   force?: boolean
+  /** Reuse the exact forecast snapshot that triggered a weather-column reconciliation. */
+  weatherIntervals?: TonightWeatherIntervalsResult
 }
 
 /**
@@ -98,7 +104,7 @@ export async function reconcilePendingScheduleStatus(options?: ReconcileSchedule
   if (await reconcileRecentlyRan(options?.force)) return
   if (await isEmergencyStopBlocking()) return
   const pending = await listPending()
-  const weatherIntervals = await getTonightWeatherPermittedIntervals()
+  const weatherIntervals = options?.weatherIntervals ?? await getTonightWeatherPermittedIntervals()
   const now = new Date()
   const window = getTonightSchedulingWindow(now)
   const nowMs = now.getTime()

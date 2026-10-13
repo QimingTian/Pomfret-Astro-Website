@@ -8,6 +8,7 @@ import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import {
   evaluateGlobalTonightWeatherPermitted,
+  getTonightWeatherPermittedIntervalsFromSamples,
   MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS,
   pickOpenMeteoImagingNightBounds,
   type HourlyForecastSample,
@@ -178,6 +179,26 @@ export async function GET(request: Request) {
     const hasAnyPrecipitationTonight = precipitationHits.length > 0
     const precipitationHitHourStartsSec = precipitationHits.map((hit) => hit.hourStartSec)
 
+    const hourlySamples: HourlyForecastSample[] = times.map((hourStartSec, i) => {
+      const windRaw = Number(windSpeed[i])
+      return {
+        hourStartSec,
+        cloudCover: Number(clouds[i]),
+        precipProbability: Number(precipProb[i]),
+        windSpeedMs: Number.isFinite(windRaw) ? windRaw * KMH_TO_MS : Number.NaN,
+      }
+    })
+    const imagingNightBounds = pickOpenMeteoImagingNightBounds(dailySunset, dailySunrise)
+    const weatherIntervals = imagingNightBounds
+      ? await getTonightWeatherPermittedIntervalsFromSamples(
+          hourlySamples,
+          imagingNightBounds.sunsetSec,
+          imagingNightBounds.sunriseSec,
+          site.timezone,
+          nowSec * 1000
+        )
+      : undefined
+
     // Headline / global prediction is only meaningful before nautical dusk — same cutoff as
     // `isBeforeTonightWeatherHeadline`. Do not use Open-Meteo is_day (civil night): that flips
     // ~30–40 min earlier and made the UI show "Not permitted" while the dusk headline still showed.
@@ -197,6 +218,7 @@ export async function GET(request: Request) {
         nightHourStartsSec,
         notPermittedHourReasons,
         precipitationHitHourStartsSec,
+        weatherIntervals,
       })
       return NextResponse.json({
         ok: true as const,
@@ -210,15 +232,6 @@ export async function GET(request: Request) {
       })
     }
 
-    const hourlySamples: HourlyForecastSample[] = times.map((hourStartSec, i) => {
-      const windRaw = Number(windSpeed[i])
-      return {
-        hourStartSec,
-        cloudCover: Number(clouds[i]),
-        precipProbability: Number(precipProb[i]),
-        windSpeedMs: Number.isFinite(windRaw) ? windRaw * KMH_TO_MS : Number.NaN,
-      }
-    })
     const permitted = evaluateGlobalTonightWeatherPermitted({
       hours: hourlySamples,
       gateStartSec: globalGateStartSec,
@@ -234,6 +247,7 @@ export async function GET(request: Request) {
       nightHourStartsSec,
       notPermittedHourReasons,
       precipitationHitHourStartsSec,
+      weatherIntervals,
     })
 
     return NextResponse.json({

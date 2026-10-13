@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   evaluateGlobalTonightWeatherPermitted,
+  getTonightWeatherPermittedIntervalsFromSamples,
   isHourWeatherPermitted,
   weatherNotPermittedReasons,
 } from '@/lib/tonight-weather-gate'
@@ -99,4 +100,50 @@ test('global permitted ignores fully ended gate hours after nautical dusk', () =
     ],
   })
   assert.equal(permitted, true)
+})
+
+test('scheduler keeps a consecutive clear run from the same forecast snapshot', async () => {
+  const sunsetSec = 1_800_000
+  const result = await getTonightWeatherPermittedIntervalsFromSamples(
+    [hour(sunsetSec, 5), hour(sunsetSec + 3600, 5), hour(sunsetSec + 7200, 5)],
+    sunsetSec,
+    sunsetSec + 10_800,
+    'UTC',
+    0
+  )
+  assert.equal(result.globalHardBlocked, false)
+  assert.equal(result.permittedIntervals.length, 3)
+})
+
+test('global precipitation block names the hour and probability even when another clear run exists', async () => {
+  const sunsetSec = 1_800_000
+  const result = await getTonightWeatherPermittedIntervalsFromSamples(
+    [
+      { ...hour(sunsetSec, 5), precipProbability: 12 },
+      hour(sunsetSec + 3600, 5),
+      hour(sunsetSec + 7200, 5),
+    ],
+    sunsetSec,
+    sunsetSec + 10_800,
+    'UTC',
+    0
+  )
+  assert.equal(result.globalHardBlocked, true)
+  assert.match(result.globalHardBlockReason ?? '', /precipitation ≥10%/)
+  assert.match(result.globalHardBlockReason ?? '', /12%/)
+})
+
+test('missing clear run reason includes the closest window and failed weather values', async () => {
+  const sunsetSec = 1_800_000
+  const result = await getTonightWeatherPermittedIntervalsFromSamples(
+    [hour(sunsetSec, 22), hour(sunsetSec + 3600, 5), hour(sunsetSec + 7200, 18)],
+    sunsetSec,
+    sunsetSec + 10_800,
+    'UTC',
+    0
+  )
+  assert.equal(result.globalHardBlocked, true)
+  assert.match(result.globalHardBlockReason ?? '', /no 2-hour clear run/)
+  assert.match(result.globalHardBlockReason ?? '', /cloud 22%/)
+  assert.match(result.globalHardBlockReason ?? '', /Closest window/)
 })

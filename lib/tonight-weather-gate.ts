@@ -131,6 +131,113 @@ export type TonightWeatherIntervalsResult = {
   reason?: string
 }
 
+function localHourLabel(hourStartSec: number, timeZone: string): string {
+  return new Date(hourStartSec * 1000).toLocaleTimeString('en-US', {
+    timeZone,
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
+function globalWeatherBlockReason(
+  checkedHours: HourlyForecastSample[],
+  timeZone: string,
+  evaluatedAtMs: number
+): string {
+  const failures = (hour: HourlyForecastSample) => {
+    const parts: string[] = []
+    if (!Number.isFinite(hour.cloudCover) || hour.cloudCover >= TONIGHT_WEATHER_MAX_CLOUD_PERCENT) {
+      parts.push(`cloud ${Number.isFinite(hour.cloudCover) ? `${hour.cloudCover}%` : 'unavailable'} (limit <${TONIGHT_WEATHER_MAX_CLOUD_PERCENT}%)`)
+    }
+    if (!Number.isFinite(hour.precipProbability) || hour.precipProbability >= TONIGHT_WEATHER_MAX_PRECIP_PROBABILITY) {
+      parts.push(`precipitation ${Number.isFinite(hour.precipProbability) ? `${hour.precipProbability}%` : 'unavailable'} (limit <${TONIGHT_WEATHER_MAX_PRECIP_PROBABILITY}%)`)
+    }
+    if (!Number.isFinite(hour.windSpeedMs) || hour.windSpeedMs > TONIGHT_WEATHER_MAX_WIND_MS) {
+      parts.push(`wind ${Number.isFinite(hour.windSpeedMs) ? `${hour.windSpeedMs.toFixed(1)} m/s` : 'unavailable'} (limit ≤${TONIGHT_WEATHER_MAX_WIND_MS} m/s)`)
+    }
+    return parts
+  }
+  const stamp = new Date(evaluatedAtMs).toLocaleString('en-US', { timeZone, dateStyle: 'short', timeStyle: 'short' })
+  const precipHits = checkedHours.filter((h) => !Number.isFinite(h.precipProbability) || h.precipProbability >= TONIGHT_WEATHER_MAX_PRECIP_PROBABILITY)
+  if (precipHits.length > 0) {
+    return `Global weather trigger: precipitation ≥${TONIGHT_WEATHER_MAX_PRECIP_PROBABILITY}% at ${precipHits.map((h) => `${localHourLabel(h.hourStartSec, timeZone)} (${Number.isFinite(h.precipProbability) ? `${h.precipProbability}%` : 'unavailable'})`).join(', ')}. Forecast checked ${stamp}.`
+  }
+  const highWind = checkedHours.filter((h) => !Number.isFinite(h.windSpeedMs) || h.windSpeedMs > TONIGHT_WEATHER_MAX_WIND_MS)
+  if (highWind.length > 3) {
+    return `Global weather trigger: wind >${TONIGHT_WEATHER_MAX_WIND_MS} m/s in ${highWind.length} night hours (${highWind.map((h) => `${localHourLabel(h.hourStartSec, timeZone)}: ${Number.isFinite(h.windSpeedMs) ? `${h.windSpeedMs.toFixed(1)} m/s` : 'unavailable'}`).join(', ')}). Forecast checked ${stamp}.`
+  }
+  const sorted = [...checkedHours].sort((a, b) => a.hourStartSec - b.hourStartSec)
+  let best: { start: HourlyForecastSample; failures: string[]; score: number } | null = null
+  for (let i = 0; i + 1 < sorted.length; i += 1) {
+    const first = sorted[i]!
+    const second = sorted[i + 1]!
+    if (second.hourStartSec - first.hourStartSec !== 3600) continue
+    const failed = [
+      ...failures(first).map((reason) => `${localHourLabel(first.hourStartSec, timeZone)}: ${reason}`),
+      ...failures(second).map((reason) => `${localHourLabel(second.hourStartSec, timeZone)}: ${reason}`),
+    ]
+    if (failed.length > 0 && (!best || failed.length < best.score)) best = { start: first, failures: failed, score: failed.length }
+  }
+  if (!best) return `Global weather trigger: no consecutive forecast hours available to evaluate. Forecast checked ${stamp}.`
+  const endLabel = localHourLabel(best.start.hourStartSec + 7200, timeZone)
+  return `Global weather trigger: no ${MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS}-hour clear run. Closest window ${localHourLabel(best.start.hourStartSec, timeZone)}–${endLabel} failed: ${best.failures.join('; ')}. Forecast checked ${stamp}.`
+}
+
+/** Build the scheduler's weather decision from the exact forecast snapshot used by the schedule UI. */
+export async function getTonightWeatherPermittedIntervalsFromSamples(
+  samples: HourlyForecastSample[],
+  sunsetSec: number,
+  sunriseSec: number,
+  timeZone: string,
+  nowMs = Date.now()
+): Promise<TonightWeatherIntervalsResult> {
+  if (!Number.isFinite(sunsetSec) || !Number.isFinite(sunriseSec) || sunriseSec <= sunsetSec) {
+    return { status: 'unknown', permittedIntervals: [], reason: 'Invalid forecast night bounds' }
+  }
+  const nightSamples = samples
+    .filter((sample) => sample.hourStartSec >= sunsetSec && sample.hourStartSec < sunriseSec)
+    .sort((a, b) => a.hourStartSec - b.hourStartSec)
+  if (nightSamples.length === 0) {
+    return { status: 'unknown', permittedIntervals: [], reason: 'No forecast samples for tonight window' }
+  }
+  const nightStartMs = sunsetSec * 1000
+  const nightEndMs = sunriseSec * 1000
+  const beforeNight = nowMs < nightStartMs
+  const checkedHours = nightSamples.filter((h) => beforeNight || (h.hourStartSec + 3600) * 1000 > nowMs)
+  const permittedIntervals = nightSamples
+    .filter(isHourWeatherPermitted)
+    .map((h) => ({
+      startMs: Math.max(h.hourStartSec * 1000, nightStartMs),
+      endMs: Math.min((h.hourStartSec + 3600) * 1000, nightEndMs),
+    }))
+    .filter((interval) => interval.endMs > interval.startMs)
+  const hasClearRun = checkedHours.some((first, index) => {
+    const second = checkedHours[index + 1]
+    return second != null && second.hourStartSec - first.hourStartSec === 3600 &&
+      isHourWeatherPermitted(first) && isHourWeatherPermitted(second)
+  })
+  const hasPrecipHit = checkedHours.some((h) => !Number.isFinite(h.precipProbability) || h.precipProbability >= TONIGHT_WEATHER_MAX_PRECIP_PROBABILITY)
+  const highWindHours = checkedHours.filter((h) => !Number.isFinite(h.windSpeedMs) || h.windSpeedMs > TONIGHT_WEATHER_MAX_WIND_MS).length
+  const globalHardBlocked = hasPrecipHit || highWindHours > 3 || !hasClearRun
+
+  let effectivePermittedIntervals = permittedIntervals
+  try {
+    for (const closed of await getAdminClosedWindowsInRange(nightStartMs, nightEndMs)) {
+      effectivePermittedIntervals = subtractOccupiedFromFree(effectivePermittedIntervals, closed)
+    }
+  } catch {
+    // Fall back to weather-only intervals if admin-window storage is unavailable.
+  }
+  return {
+    status: 'ok',
+    permittedIntervals: effectivePermittedIntervals,
+    nightStartMs,
+    nightEndMs,
+    globalHardBlocked,
+    globalHardBlockReason: globalHardBlocked ? globalWeatherBlockReason(checkedHours, timeZone, nowMs) : '',
+  }
+}
+
 /**
  * Rule (Pomfret tonight, sunset -> next sunrise):
  * 1) some run of MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS consecutive hours passing hourly weather checks
@@ -254,87 +361,21 @@ export async function getTonightWeatherPermittedIntervals(): Promise<TonightWeat
       return { status: 'unknown', permittedIntervals: [], reason: 'Weather forecast data incomplete' }
     }
 
-    const sunset = nightBounds.sunsetSec
-    const sunrise = nightBounds.sunriseSec
-    const nightStartMs = sunset * 1000
-    const nightEndMs = sunrise * 1000
-    const nightIndices: number[] = []
-    for (let i = 0; i < times.length; i += 1) {
-      if (times[i] >= sunset && times[i] < sunrise) nightIndices.push(i)
-    }
-    if (nightIndices.length === 0) {
-      return { status: 'unknown', permittedIntervals: [], reason: 'No forecast samples for tonight window' }
-    }
-
-    const nowMs = Date.now()
-    const beforeAstroNight = nowMs < nightStartMs
-
-    const permittedIntervals: TimeInterval[] = []
-    let anyPrecipOver10 = false
-    let windOver10Count = 0
-    let consecutiveCloudUnder10 = 0
-    let hasMinConsecutiveCloudClearRun = false
-    for (const i of nightIndices) {
-      const hourStartMs = times[i] * 1000
-      const hourEndMs = hourStartMs + 60 * 60 * 1000
-      const hourFullyEnded = hourEndMs <= nowMs
-      const countsTowardGlobalHard = beforeAstroNight || !hourFullyEnded
-
-      const c = Number(clouds[i])
-      const p = Number(precip[i])
-      const wKmh = Number(wind[i])
-      const wMs = Number.isFinite(wKmh) ? wKmh * KMH_TO_MS : Number.NaN
-      const hourSample: HourWeatherSample = {
-        cloudCover: c,
-        precipProbability: p,
-        windSpeedMs: wMs,
+    const samples: HourlyForecastSample[] = times.map((hourStartSec, i) => {
+      const windKmh = Number(wind[i])
+      return {
+        hourStartSec,
+        cloudCover: Number(clouds[i]),
+        precipProbability: Number(precip[i]),
+        windSpeedMs: Number.isFinite(windKmh) ? windKmh * KMH_TO_MS : Number.NaN,
       }
-      if (countsTowardGlobalHard) {
-        if (!Number.isFinite(p) || p >= TONIGHT_WEATHER_MAX_PRECIP_PROBABILITY) anyPrecipOver10 = true
-        if (!Number.isFinite(wMs) || wMs > TONIGHT_WEATHER_MAX_WIND_MS) windOver10Count += 1
-        if (isHourWeatherPermitted(hourSample)) {
-          consecutiveCloudUnder10 += 1
-          if (consecutiveCloudUnder10 >= MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS) {
-            hasMinConsecutiveCloudClearRun = true
-          }
-        } else {
-          consecutiveCloudUnder10 = 0
-        }
-      }
-      if (!isHourWeatherPermitted(hourSample)) continue
-      const startMs = Math.max(hourStartMs, nightStartMs)
-      const endMs = Math.min(hourEndMs, nightEndMs)
-      if (endMs > startMs) permittedIntervals.push({ startMs, endMs })
-    }
-    const windTooMuch = windOver10Count > 3
-    const cloudRunMissing = !hasMinConsecutiveCloudClearRun
-    const globalHardBlocked = anyPrecipOver10 || windTooMuch || cloudRunMissing
-    const globalHardBlockReason = anyPrecipOver10
-      ? 'Global weather trigger: at least one night hour has precipitation probability >= 10%.'
-      : windTooMuch
-        ? 'Global weather trigger: more than 3 night hours have wind speed > 10 m/s.'
-        : cloudRunMissing
-          ? `Global weather trigger: no ${MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS}-hour consecutive run passing hourly weather checks (cloud, precip, wind).`
-          : ''
-
-    let effectivePermittedIntervals: TimeInterval[] = [...permittedIntervals]
-    try {
-      const adminClosedWindows = await getAdminClosedWindowsInRange(nightStartMs, nightEndMs)
-      for (const w of adminClosedWindows) {
-        effectivePermittedIntervals = subtractOccupiedFromFree(effectivePermittedIntervals, w)
-      }
-    } catch {
-      // If admin window store read fails, fall back to weather-only intervals.
-    }
-
-    return {
-      status: 'ok',
-      permittedIntervals: effectivePermittedIntervals,
-      nightStartMs,
-      nightEndMs,
-      globalHardBlocked,
-      globalHardBlockReason,
-    }
+    })
+    return getTonightWeatherPermittedIntervalsFromSamples(
+      samples,
+      nightBounds.sunsetSec,
+      nightBounds.sunriseSec,
+      site.timezone
+    )
   } catch {
     return { status: 'unknown', permittedIntervals: [], reason: 'Weather forecast evaluation failed' }
   }

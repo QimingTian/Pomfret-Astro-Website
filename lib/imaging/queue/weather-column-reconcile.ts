@@ -5,7 +5,10 @@ import {
 } from '@/lib/imaging/site-events'
 import { kvEnabled, kvGetJson, kvSetJson } from '@/lib/kv-rest'
 import { currentObservatorySiteId, scopedKvKey } from '@/lib/observatory-site-scope'
-import type { WeatherNotPermittedReason } from '@/lib/tonight-weather-gate'
+import type {
+  TonightWeatherIntervalsResult,
+  WeatherNotPermittedReason,
+} from '@/lib/tonight-weather-gate'
 
 const KV_KEY_BASE = 'imaging-queue-schedule-weather-fingerprint'
 
@@ -17,6 +20,8 @@ export type ScheduleWeatherColumnPayload = {
   notPermittedHourReasons: Array<{ hourStartSec: number; reasons: WeatherNotPermittedReason[] }>
   /** Same hours as `precipitationHits` in tonight-weather-prediction — drives precip overlay. */
   precipitationHitHourStartsSec: number[]
+  /** Evaluated from the same Open-Meteo response as the visible hour blocks. */
+  weatherIntervals?: TonightWeatherIntervalsResult
 }
 
 type Stored = {
@@ -84,7 +89,7 @@ export async function maybeReconcileQueueWhenScheduleWeatherColumnChanged(
     return
   }
 
-  await reconcilePendingScheduleStatus()
+  await reconcilePendingScheduleStatus({ weatherIntervals: payload.weatherIntervals })
   emitSiteSessionsChanged('weather')
   emitAgentWakePollSequenceDebounced()
 

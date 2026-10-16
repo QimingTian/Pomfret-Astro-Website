@@ -46,6 +46,9 @@ function fingerprintForScheduleWeatherColumn(payload: ScheduleWeatherColumnPaylo
     .sort((a, b) => a.t - b.t)
   return JSON.stringify({
     prediction: payload.prediction,
+    globalHardBlocked: payload.weatherIntervals?.globalHardBlocked ?? null,
+    severePrecipitationHourStartMs: payload.weatherIntervals?.severePrecipitationHourStartMs ?? null,
+    severePrecipitationProbability: payload.weatherIntervals?.severePrecipitationProbability ?? null,
     precipNight: payload.hasAnyPrecipitationTonight,
     precipHits,
     ready,

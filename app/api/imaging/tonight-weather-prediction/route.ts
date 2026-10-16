@@ -224,6 +224,8 @@ export async function GET(request: Request) {
         ok: true as const,
         prediction: 'unavailable',
         message: 'after nautical dusk, prediction not available',
+        globalHardBlocked: weatherIntervals?.globalHardBlocked === true,
+        globalHardBlockReason: weatherIntervals?.globalHardBlockReason ?? null,
         readyHourStartsSec,
         nightHourStartsSec,
         notPermittedHourReasons,
@@ -249,13 +251,15 @@ export async function GET(request: Request) {
       ok: true as const,
       prediction,
       permitted,
+      globalHardBlocked: weatherIntervals?.globalHardBlocked === true,
+      globalHardBlockReason: weatherIntervals?.globalHardBlockReason ?? null,
       readyHourStartsSec,
       nightHourStartsSec,
       notPermittedHourReasons,
       hasAnyPrecipitationTonight,
       precipitationHits,
       rule:
-        `Tonight (nautical dusk → nautical dawn, ${site.name}): a ${MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS}-hour weather-permitted run must remain; ` +
+        `Tonight (${site.name}): precipitation probability >80% from sunset to sunrise blocks the entire night. Otherwise, from nautical dusk to nautical dawn a ${MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS}-hour weather-permitted run must remain; ` +
         'sessions must finish at least 2 hours before a forecast hour with precipitation probability ≥10%; ' +
         'hours with wind speed >10 m/s must be ≤3. Fully past hours are ignored.',
     })

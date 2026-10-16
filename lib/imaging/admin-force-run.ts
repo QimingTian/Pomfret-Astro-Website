@@ -299,6 +299,11 @@ async function deliverForceRunProjectSub(
   )
   if (!altitude.ok) return altitudeErrorResponse(altitude.reason)
 
+  const weather = await validateAdminRunWeatherWindow(Math.max(Date.now(), startMs), endMs)
+  if (!weather.ok) {
+    return NextResponse.json({ error: weather.reason }, { status: 409, headers: imagingCorsHeadersResolved() })
+  }
+
   if (!project.onBoard) {
     await markProjectOnBoard(project.id)
   }
@@ -385,6 +390,11 @@ async function deliverForceRunQueueRow(row: ImagingRequest): Promise<NextRespons
   }
   const altitude = validateAdminForceRunAltitude(row.raHours, row.decDeg, startMs, endMs, row.target)
   if (!altitude.ok) return altitudeErrorResponse(altitude.reason)
+
+  const weather = await validateAdminRunWeatherWindow(Math.max(Date.now(), startMs), endMs)
+  if (!weather.ok) {
+    return NextResponse.json({ error: weather.reason }, { status: 409, headers: imagingCorsHeadersResolved() })
+  }
 
   const job = runJobFromQueueRequest(row)
   if (!job) {

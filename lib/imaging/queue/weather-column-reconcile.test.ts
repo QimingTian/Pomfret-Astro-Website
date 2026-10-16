@@ -31,6 +31,24 @@ test('scheduleWeatherColumnFingerprint changes when ready hours change', () => {
   assert.notEqual(a, b)
 })
 
+test('scheduleWeatherColumnFingerprint changes for severe rain outside nautical hours', () => {
+  const weatherIntervals = {
+    status: 'ok' as const,
+    permittedIntervals: [{ startMs: 1_700_001_000_000, endMs: 1_700_005_000_000 }],
+    globalHardBlocked: false,
+  }
+  const normal = scheduleWeatherColumnFingerprint(samplePayload({ weatherIntervals }))
+  const severe = scheduleWeatherColumnFingerprint(samplePayload({
+    weatherIntervals: {
+      ...weatherIntervals,
+      globalHardBlocked: true,
+      severePrecipitationHourStartMs: 1_700_000_000_000,
+      severePrecipitationProbability: 81,
+    },
+  }))
+  assert.notEqual(normal, severe)
+})
+
 test('maybeReconcileQueueWhenScheduleWeatherColumnChanged skips duplicate fingerprint', async () => {
   const payload = samplePayload()
   await maybeReconcileQueueWhenScheduleWeatherColumnChanged(

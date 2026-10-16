@@ -319,7 +319,7 @@ export default function RemotePage() {
     Record<string, WeatherNotPermittedReason[]>
   >({})
   const [scheduleNowMs, setScheduleNowMs] = useState(() => Date.now())
-  const [hasAnyPrecipitationTonight, setHasAnyPrecipitationTonight] = useState(false)
+  const [tonightGlobalWeatherBlocked, setTonightGlobalWeatherBlocked] = useState(false)
   const [adminClosedWindows, setAdminClosedWindows] = useState<
     Array<{ id: string; startIso: string; endIso: string; description?: string }>
   >([])
@@ -1055,7 +1055,7 @@ export default function RemotePage() {
             data.prediction === 'unavailable')
         ) {
           setTonightWeatherPrediction(data.prediction)
-          setHasAnyPrecipitationTonight(data.hasAnyPrecipitationTonight === true)
+          setTonightGlobalWeatherBlocked(data.globalHardBlocked === true)
           if (Array.isArray(data.readyHourStartsSec)) {
             const keys = data.readyHourStartsSec
               .filter((v: unknown) => typeof v === 'number' && Number.isFinite(v))
@@ -1100,7 +1100,7 @@ export default function RemotePage() {
           return
         }
         setTonightWeatherPrediction('not_permitted')
-        setHasAnyPrecipitationTonight(false)
+        setTonightGlobalWeatherBlocked(false)
         setNotPermittedReasonByHourKey({})
         const nowForMerge = new Date()
         setReadyWeatherHourKeys((prev) => mergeWithFrozenPastHours(prev, [], nowForMerge, site))
@@ -1108,7 +1108,7 @@ export default function RemotePage() {
       } catch {
         if (!mounted) return
         setTonightWeatherPrediction('not_permitted')
-        setHasAnyPrecipitationTonight(false)
+        setTonightGlobalWeatherBlocked(false)
         setNotPermittedReasonByHourKey({})
         const nowForMerge = new Date()
         setReadyWeatherHourKeys((prev) => mergeWithFrozenPastHours(prev, [], nowForMerge, site))
@@ -2034,7 +2034,7 @@ export default function RemotePage() {
 
     // Bad weather must not wipe in_progress / completed bars: those stay on the tonight strip using
     // saved locks or a stable fallback (planned start → created → now for in_progress).
-    if (tonightWeatherPrediction === 'not_permitted' || hasAnyPrecipitationTonight) {
+    if (tonightWeatherPrediction === 'not_permitted' || tonightGlobalWeatherBlocked) {
       const nowMs = Date.now()
       const blocks: Array<{ id: string; startMs: number; endMs: number; topPct: number; heightPct: number; label: string }> =
         []
@@ -2326,7 +2326,7 @@ export default function RemotePage() {
     tonightNightKey,
     lockedSessionSchedule,
     tonightWeatherPrediction,
-    hasAnyPrecipitationTonight,
+    tonightGlobalWeatherBlocked,
     adminClosedWindows,
   ])
 

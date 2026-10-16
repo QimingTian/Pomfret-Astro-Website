@@ -9,6 +9,7 @@ const KMH_TO_MS = 1 / 3.6
 export const MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS = 2
 export const TONIGHT_WEATHER_MAX_CLOUD_PERCENT = 10
 export const TONIGHT_WEATHER_MAX_PRECIP_PROBABILITY = 10
+export const NIGHTWIDE_PRECIPITATION_BLOCK_PROBABILITY = 80
 export const TONIGHT_WEATHER_MAX_WIND_MS = 10
 export const FORECAST_PRECIPITATION_FINISH_BUFFER_MS = 2 * 60 * 60 * 1000
 
@@ -22,6 +23,21 @@ export type HourWeatherSample = {
 
 export type HourlyForecastSample = HourWeatherSample & {
   hourStartSec: number
+}
+
+export type PrecipitationForecastHour = Pick<HourlyForecastSample, 'hourStartSec' | 'precipProbability'>
+
+/** A severe forecast anywhere in the civil sunset-to-sunrise night vetoes the entire night. */
+export function findNightwideSeverePrecipitationHour<T extends PrecipitationForecastHour>(
+  samples: T[],
+  sunsetSec: number,
+  sunriseSec: number
+): T | undefined {
+  if (!Number.isFinite(sunsetSec) || !Number.isFinite(sunriseSec) || sunriseSec <= sunsetSec) return undefined
+  return [...samples]
+    .filter((h) => h.hourStartSec < sunriseSec && h.hourStartSec + 3600 > sunsetSec)
+    .sort((a, b) => a.hourStartSec - b.hourStartSec)
+    .find((h) => Number.isFinite(h.precipProbability) && h.precipProbability > NIGHTWIDE_PRECIPITATION_BLOCK_PROBABILITY)
 }
 
 export function weatherNotPermittedReasons(sample: HourWeatherSample): WeatherNotPermittedReason[] {
@@ -125,6 +141,8 @@ export type TonightWeatherIntervalsResult = {
   /** Latest permitted session finish, including all estimated sequence overhead. */
   schedulingEndMs?: number
   precipitationHourStartMs?: number
+  severePrecipitationHourStartMs?: number
+  severePrecipitationProbability?: number
   globalHardBlocked?: boolean
   globalHardBlockReason?: string
   reason?: string
@@ -224,6 +242,7 @@ export async function getTonightWeatherPermittedIntervalsFromSamples(
   }
   const beforeNight = nowMs < nightStartMs
   const checkedHours = nightSamples.filter((h) => beforeNight || (h.hourStartSec + 3600) * 1000 > nowMs)
+  const severePrecipitationHour = findNightwideSeverePrecipitationHour(samples, sunsetSec, sunriseSec)
   const precipitationHour = checkedHours.find((h) =>
     !Number.isFinite(h.precipProbability) || h.precipProbability >= TONIGHT_WEATHER_MAX_PRECIP_PROBABILITY
   )
@@ -258,7 +277,7 @@ export async function getTonightWeatherPermittedIntervalsFromSamples(
     h.hourStartSec * 1000 < schedulingEndMs && (h.hourStartSec + 3600) * 1000 > Math.max(nowMs, nightStartMs)
   )
   const highWindHours = usableHours.filter((h) => !Number.isFinite(h.windSpeedMs) || h.windSpeedMs > TONIGHT_WEATHER_MAX_WIND_MS).length
-  const globalHardBlocked = highWindHours > 3 || !hasClearRun
+  const globalHardBlocked = severePrecipitationHour != null || highWindHours > 3 || !hasClearRun
 
   let effectivePermittedIntervals = permittedIntervals
   try {
@@ -275,9 +294,13 @@ export async function getTonightWeatherPermittedIntervalsFromSamples(
     nightEndMs,
     schedulingEndMs,
     precipitationHourStartMs,
+    severePrecipitationHourStartMs: severePrecipitationHour == null ? undefined : severePrecipitationHour.hourStartSec * 1000,
+    severePrecipitationProbability: severePrecipitationHour?.precipProbability,
     globalHardBlocked,
     globalHardBlockReason: globalHardBlocked
-      ? highWindHours > 3
+      ? severePrecipitationHour
+        ? `Global weather trigger: precipitation probability ${severePrecipitationHour.precipProbability}% at ${localHourLabel(severePrecipitationHour.hourStartSec, timeZone)} exceeds 80% during the sunset-to-sunrise night. Entire night blocked.`
+        : highWindHours > 3
         ? globalWeatherBlockReason(usableHours, timeZone, nowMs)
         : precipitationHour
           ? `Global weather trigger: no 2-hour clear run ends at least 2 hours before precipitation ≥${TONIGHT_WEATHER_MAX_PRECIP_PROBABILITY}% at ${localHourLabel(precipitationHour.hourStartSec, timeZone)}.`
@@ -287,10 +310,10 @@ export async function getTonightWeatherPermittedIntervalsFromSamples(
 }
 
 /**
- * Rule (current site's nautical dusk -> nautical dawn):
- * 1) some continuous MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS passing hourly weather checks
- * 2) sessions finish two hours before the first forecast precipitation hour >= 10%
- * 3) usable hours with wind_speed_10m > 10 m/s must be <= 3
+ * Rule: precipitation probability >80% in any sunset-to-sunrise forecast hour blocks the night.
+ * Otherwise, current site's nautical dusk -> nautical dawn schedule needs a continuous
+ * MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS passing hourly weather checks, a two-hour finish buffer
+ * before precipitation >=10%, and no more than three usable high-wind hours.
  *
  * Forward-looking global gate: before sunset, all forecast night hours count. After sunset (already
  * in night), hours that have fully ended (hour end <= now) do not count toward (1)-(3) — only
@@ -444,7 +467,8 @@ export async function sessionWindowHourlyPrecipOk(
     'https://api.open-meteo.com/v1/forecast' +
     `?latitude=${site.weatherLat}&longitude=${site.weatherLon}` +
     '&hourly=precipitation_probability' +
-    `&forecast_days=2&timezone=${site.timezone}&timeformat=unixtime`
+    '&daily=sunrise,sunset' +
+    `&past_days=1&forecast_days=2&timezone=${site.timezone}&timeformat=unixtime`
   try {
     const res = await fetch(url, { cache: 'no-store' })
     if (!res.ok) {
@@ -455,6 +479,19 @@ export async function sessionWindowHourlyPrecipOk(
     const precip = data.hourly?.precipitation_probability ?? []
     if (times.length === 0 || precip.length !== times.length) {
       return { ok: false, reason: 'Weather forecast data incomplete.' }
+    }
+    const nightBounds = pickOpenMeteoImagingNightBounds(data.daily?.sunset ?? [], data.daily?.sunrise ?? [])
+    if (!nightBounds) return { ok: false, reason: 'Sunset-to-sunrise forecast bounds unavailable.' }
+    const severePrecipitationHour = findNightwideSeverePrecipitationHour(
+      times.map((hourStartSec, i) => ({ hourStartSec, precipProbability: Number(precip[i]) })),
+      nightBounds.sunsetSec,
+      nightBounds.sunriseSec
+    )
+    if (severePrecipitationHour) {
+      return {
+        ok: false,
+        reason: `Global weather trigger: precipitation probability ${severePrecipitationHour.precipProbability}% at ${localHourLabel(severePrecipitationHour.hourStartSec, site.timezone)} exceeds 80% during the sunset-to-sunrise night. Entire night blocked.`,
+      }
     }
     for (let i = 0; i < times.length; i += 1) {
       const hourStartMs = times[i]! * 1000
@@ -477,7 +514,7 @@ export async function sessionWindowHourlyPrecipOk(
 }
 
 /**
- * Admin force-run weather gate: only precipitation in the session window.
+ * Admin force-run weather gate: nightwide severe precipitation plus precipitation in the session window.
  * Cloud cover (and the night-wide global hard block that includes cloud runs) are ignored —
  * operators may force-run under cloudy skies when rain stays below 10% for every overlapping hour.
  */

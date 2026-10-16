@@ -3,8 +3,10 @@ import test from 'node:test'
 import {
   deliveryWeatherBlockReason,
   evaluateGlobalTonightWeatherPermitted,
+  findNightwideSeverePrecipitationHour,
   getTonightWeatherPermittedIntervalsFromSamples,
   isHourWeatherPermitted,
+  sessionWindowHourlyPrecipOk,
   weatherNotPermittedReasons,
 } from '@/lib/tonight-weather-gate'
 
@@ -170,6 +172,93 @@ test('weather beyond a site nautical dawn cannot block the site imaging night', 
   assert.equal(pomfret.precipitationHourStartMs, undefined)
   assert.equal(cygnus.globalHardBlocked, true)
   assert.equal(cygnus.precipitationHourStartMs, (sunsetSec + 10_800) * 1000)
+})
+
+test('precipitation above 80% anywhere from sunset to sunrise blocks the entire night', async () => {
+  const sunsetSec = 1_800_000
+  const samples = [
+    { ...hour(sunsetSec - 3600, 5), precipProbability: 99 }, // before sunset
+    { ...hour(sunsetSec, 5), precipProbability: 81 }, // before nautical dusk
+    hour(sunsetSec + 3600, 5),
+    hour(sunsetSec + 7200, 5),
+    hour(sunsetSec + 10_800, 5),
+  ]
+  const result = await getTonightWeatherPermittedIntervalsFromSamples(
+    samples, sunsetSec, sunsetSec + 14_400, 'UTC', 0,
+    { startMs: (sunsetSec + 3600) * 1000, endMs: (sunsetSec + 14_400) * 1000 }
+  )
+  assert.equal(result.globalHardBlocked, true)
+  assert.equal(result.severePrecipitationHourStartMs, sunsetSec * 1000)
+  assert.equal(result.severePrecipitationProbability, 81)
+  assert.match(result.globalHardBlockReason ?? '', /81%.*sunset-to-sunrise.*Entire night blocked/)
+  assert.match(deliveryWeatherBlockReason(result, (sunsetSec + 3600) * 1000, 3600) ?? '', /81%/)
+})
+
+test('severe rain after nautical dawn or already past still vetoes the civil night', async () => {
+  const sunsetSec = 1_800_000
+  const samples = [
+    { ...hour(sunsetSec, 5), precipProbability: 85 },
+    hour(sunsetSec + 3600, 5),
+    hour(sunsetSec + 7200, 5),
+    { ...hour(sunsetSec + 10_800, 5), precipProbability: 95 },
+  ]
+  const result = await getTonightWeatherPermittedIntervalsFromSamples(
+    samples, sunsetSec, sunsetSec + 14_400, 'UTC', (sunsetSec + 3600) * 1000,
+    { startMs: sunsetSec * 1000, endMs: (sunsetSec + 10_800) * 1000 }
+  )
+  assert.equal(result.globalHardBlocked, true)
+  assert.equal(result.severePrecipitationHourStartMs, sunsetSec * 1000)
+  assert.equal(findNightwideSeverePrecipitationHour(samples.slice(1), sunsetSec, sunsetSec + 14_400)?.precipProbability, 95)
+})
+
+test('80% exactly and forecast hours outside sunset-to-sunrise do not trigger the nightwide veto', async () => {
+  const sunsetSec = 1_800_000
+  const samples = [
+    { ...hour(sunsetSec - 3600, 5), precipProbability: 99 },
+    hour(sunsetSec, 5),
+    hour(sunsetSec + 3600, 5),
+    hour(sunsetSec + 7200, 5),
+    hour(sunsetSec + 10_800, 5),
+    { ...hour(sunsetSec + 14_400, 5), precipProbability: 80 },
+    { ...hour(sunsetSec + 18_000, 5), precipProbability: 99 },
+  ]
+  const result = await getTonightWeatherPermittedIntervalsFromSamples(
+    samples, sunsetSec, sunsetSec + 18_000, 'UTC', 0,
+    { startMs: sunsetSec * 1000, endMs: (sunsetSec + 14_400) * 1000 }
+  )
+  assert.equal(result.globalHardBlocked, false)
+  assert.equal(result.severePrecipitationHourStartMs, undefined)
+  assert.equal(findNightwideSeverePrecipitationHour(samples, sunsetSec, sunsetSec + 18_000), undefined)
+})
+
+test('admin force-run precipitation check catches severe rain outside its session window', async () => {
+  const nowSec = Math.floor(Date.now() / 3600_000) * 3600
+  const sunsetSec = nowSec - 3600
+  const sunriseSec = nowSec + 8 * 3600
+  const originalFetch = globalThis.fetch
+  let severeProbability = 81
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    daily: {
+      sunset: [sunsetSec, sunriseSec + 10 * 3600],
+      sunrise: [sunsetSec - 10 * 3600, sunriseSec, sunriseSec + 24 * 3600],
+    },
+    hourly: {
+      time: [nowSec, nowSec + 3600, nowSec + 5 * 3600],
+      precipitation_probability: [0, 0, severeProbability],
+    },
+  }))
+  try {
+    const startMs = nowSec * 1000
+    const endMs = (nowSec + 3600) * 1000
+    const blocked = await sessionWindowHourlyPrecipOk(startMs, endMs)
+    assert.equal(blocked.ok, false)
+    if (!blocked.ok) assert.match(blocked.reason, /81%.*Entire night blocked/)
+    severeProbability = 80
+    const permitted = await sessionWindowHourlyPrecipOk(startMs, endMs)
+    assert.deepEqual(permitted, { ok: true })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })
 
 test('NINA delivery uses the latest site forecast and two-hour cutoff', () => {

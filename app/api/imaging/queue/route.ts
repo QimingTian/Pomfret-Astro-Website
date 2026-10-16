@@ -487,6 +487,10 @@ export async function POST(request: NextRequest) {
       forecastPrecipitationHourIso: weatherIntervals.precipitationHourStartMs == null
         ? null
         : new Date(weatherIntervals.precipitationHourStartMs).toISOString(),
+      nightwideSeverePrecipitationHourIso: weatherIntervals.severePrecipitationHourStartMs == null
+        ? null
+        : new Date(weatherIntervals.severePrecipitationHourStartMs).toISOString(),
+      nightwideSeverePrecipitationProbability: weatherIntervals.severePrecipitationProbability ?? null,
       latestSafeFinishIso: weatherIntervals.schedulingEndMs == null
         ? null
         : new Date(weatherIntervals.schedulingEndMs).toISOString(),

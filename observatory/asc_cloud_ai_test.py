@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke tests for ASC all-sky AI v1 (skip inference when torch is unavailable)."""
+"""Smoke tests for ASC all-sky AI v2 (skip inference when torch is unavailable)."""
 
 from __future__ import annotations
 
@@ -30,18 +30,27 @@ class TestAscSolar(unittest.TestCase):
         self.assertFalse(obs_solar.is_asc_model_daytime(now))
 
 
-class TestAscV1CheckpointPresent(unittest.TestCase):
-    def test_checkpoint_and_manifest(self):
+class TestAscV2BundlePresent(unittest.TestCase):
+    def test_ensemble_checkpoints_and_manifest(self):
         models_dir = os.path.join(_HERE, 'models')
-        ckpt = os.path.join(models_dir, 'ASC_AI_v1', 'best.pt')
+        model_dir = os.path.join(models_dir, 'ASC_AI_v2')
+        crop_ckpt = os.path.join(model_dir, 'candidate_v1_2', 'best.pt')
+        full_ckpt = os.path.join(model_dir, 'full_frame_imagenet', 'best.pt')
+        config = os.path.join(model_dir, 'ensemble_config_multiview.json')
         version = os.path.join(models_dir, 'ASC_AI_MODEL_VERSION.json')
-        self.assertTrue(os.path.isfile(ckpt), ckpt)
+        self.assertTrue(os.path.isfile(crop_ckpt), crop_ckpt)
+        self.assertTrue(os.path.isfile(full_ckpt), full_ckpt)
+        self.assertTrue(os.path.isfile(config), config)
         self.assertTrue(os.path.isfile(version), version)
         import json
 
         with open(version, encoding='utf-8') as f:
             data = json.load(f)
-        self.assertEqual(data.get('version'), 'v1')
+        self.assertEqual(data.get('version'), 'v2')
+        with open(config, encoding='utf-8') as f:
+            ensemble = json.load(f)
+        self.assertEqual([member['weight'] for member in ensemble['members']], [0.25, 0.75])
+        self.assertEqual([member['preprocess'] for member in ensemble['members']], ['center_crop', 'full_frame'])
 
 
 class TestAscStatusPayloadShape(unittest.TestCase):
@@ -65,9 +74,9 @@ class TestAscInferenceOptional(unittest.TestCase):
         except ImportError:
             self.skipTest('torch or Pillow not installed')
 
-        ckpt = os.path.join(_HERE, 'models', 'ASC_AI_v1', 'best.pt')
+        ckpt = os.path.join(_HERE, 'models', 'ASC_AI_v2', 'ensemble_config_multiview.json')
         if not os.path.isfile(ckpt):
-            self.skipTest('checkpoint missing')
+            self.skipTest('V2 ensemble config missing')
 
         img = Image.new('RGB', (640, 480), color=(20, 20, 40))
         result = asc_cloud_ai.analyze_frame(img, datetime(2026, 6, 15, 6, 0, tzinfo=timezone.utc))
@@ -78,7 +87,7 @@ class TestAscInferenceOptional(unittest.TestCase):
         rain = result.get('rain') or {}
         self.assertIn('detected', rain)
         self.assertIn(rain.get('label'), ('Rain', 'No Rain'))
-        self.assertEqual(result.get('modelVersion', {}).get('version'), 'v1')
+        self.assertEqual(result.get('modelVersion', {}).get('version'), 'v2')
 
 
 if __name__ == '__main__':

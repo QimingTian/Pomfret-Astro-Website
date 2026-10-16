@@ -174,11 +174,11 @@ test('weather beyond a site nautical dawn cannot block the site imaging night', 
   assert.equal(cygnus.precipitationHourStartMs, (sunsetSec + 10_800) * 1000)
 })
 
-test('precipitation above 80% anywhere from sunset to sunrise blocks the entire night', async () => {
+test('precipitation at least 80% anywhere from sunset to sunrise blocks the entire night', async () => {
   const sunsetSec = 1_800_000
   const samples = [
     { ...hour(sunsetSec - 3600, 5), precipProbability: 99 }, // before sunset
-    { ...hour(sunsetSec, 5), precipProbability: 81 }, // before nautical dusk
+    { ...hour(sunsetSec, 5), precipProbability: 80 }, // before nautical dusk
     hour(sunsetSec + 3600, 5),
     hour(sunsetSec + 7200, 5),
     hour(sunsetSec + 10_800, 5),
@@ -189,9 +189,9 @@ test('precipitation above 80% anywhere from sunset to sunrise blocks the entire 
   )
   assert.equal(result.globalHardBlocked, true)
   assert.equal(result.severePrecipitationHourStartMs, sunsetSec * 1000)
-  assert.equal(result.severePrecipitationProbability, 81)
-  assert.match(result.globalHardBlockReason ?? '', /81%.*sunset-to-sunrise.*Entire night blocked/)
-  assert.match(deliveryWeatherBlockReason(result, (sunsetSec + 3600) * 1000, 3600) ?? '', /81%/)
+  assert.equal(result.severePrecipitationProbability, 80)
+  assert.match(result.globalHardBlockReason ?? '', /80%.*sunset-to-sunrise.*Entire night blocked/)
+  assert.match(deliveryWeatherBlockReason(result, (sunsetSec + 3600) * 1000, 3600) ?? '', /80%/)
 })
 
 test('severe rain after nautical dawn or already past still vetoes the civil night', async () => {
@@ -211,7 +211,7 @@ test('severe rain after nautical dawn or already past still vetoes the civil nig
   assert.equal(findNightwideSeverePrecipitationHour(samples.slice(1), sunsetSec, sunsetSec + 14_400)?.precipProbability, 95)
 })
 
-test('80% exactly and forecast hours outside sunset-to-sunrise do not trigger the nightwide veto', async () => {
+test('below 80% and forecast hours outside sunset-to-sunrise do not trigger the nightwide veto', async () => {
   const sunsetSec = 1_800_000
   const samples = [
     { ...hour(sunsetSec - 3600, 5), precipProbability: 99 },
@@ -219,7 +219,7 @@ test('80% exactly and forecast hours outside sunset-to-sunrise do not trigger th
     hour(sunsetSec + 3600, 5),
     hour(sunsetSec + 7200, 5),
     hour(sunsetSec + 10_800, 5),
-    { ...hour(sunsetSec + 14_400, 5), precipProbability: 80 },
+    { ...hour(sunsetSec + 14_400, 5), precipProbability: 79 },
     { ...hour(sunsetSec + 18_000, 5), precipProbability: 99 },
   ]
   const result = await getTonightWeatherPermittedIntervalsFromSamples(
@@ -254,6 +254,10 @@ test('admin force-run precipitation check catches severe rain outside its sessio
     assert.equal(blocked.ok, false)
     if (!blocked.ok) assert.match(blocked.reason, /81%.*Entire night blocked/)
     severeProbability = 80
+    const boundaryBlocked = await sessionWindowHourlyPrecipOk(startMs, endMs)
+    assert.equal(boundaryBlocked.ok, false)
+    if (!boundaryBlocked.ok) assert.match(boundaryBlocked.reason, /80%.*Entire night blocked/)
+    severeProbability = 79
     const permitted = await sessionWindowHourlyPrecipOk(startMs, endMs)
     assert.deepEqual(permitted, { ok: true })
   } finally {

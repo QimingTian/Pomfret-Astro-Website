@@ -1,5 +1,5 @@
 """
-ASC all-sky camera sky + rain inference (ASC AI v1, PyTorch ResNet18).
+ASC all-sky camera sky + rain inference (ASC AI v2, PyTorch ResNet18 ensemble).
 
 Outputs clear/cloudy + rain for /camera/status → allSkyCam.ascCloud.
 Ready gate (cloud): sky == clear. Rain gate unchanged (detected → block).
@@ -17,11 +17,14 @@ import observatory_solar as obs_solar
 
 _MODELS_DIR = os.path.join(os.path.dirname(__file__), 'models')
 _VERSION_MANIFEST = os.path.join(_MODELS_DIR, 'ASC_AI_MODEL_VERSION.json')
-_CHECKPOINT = os.path.join(_MODELS_DIR, 'ASC_AI_v1', 'best.pt')
-_IMAGE_SIZE = 224
+_V2_DIR = os.path.join(_MODELS_DIR, 'ASC_AI_v2')
+_ENSEMBLE_CONFIG = os.path.join(_V2_DIR, 'ensemble_config_multiview.json')
+_NORMALIZE_MEAN = [0.485, 0.456, 0.406]
+_NORMALIZE_STD = [0.229, 0.224, 0.225]
 
 _lock = threading.Lock()
-_model: Any = None
+_models: list[tuple[float, Any, str]] = []
+_transforms: Dict[str, Any] = {}
 _device: Any = None
 _load_error: Optional[str] = None
 _last_result: Optional[Dict[str, Any]] = None
@@ -100,11 +103,11 @@ def _build_model():  # type: ignore[no-untyped-def]
 
 
 def ensure_models_loaded() -> None:
-    """Lazy-load ASC AI v1 checkpoint; records _load_error on failure."""
-    global _model, _device, _load_error
+    """Lazy-load the V2 ensemble; records _load_error on failure."""
+    global _models, _transforms, _device, _load_error
 
     with _lock:
-        if _model is not None or _load_error:
+        if _models or _load_error:
             return
 
         try:
@@ -114,43 +117,59 @@ def ensure_models_loaded() -> None:
             print(f'[ASC-AI] {_load_error}')
             return
 
-        if not os.path.isfile(_CHECKPOINT):
-            _load_error = f'missing checkpoint: {_CHECKPOINT}'
+        if not os.path.isfile(_ENSEMBLE_CONFIG):
+            _load_error = f'missing ensemble config: {_ENSEMBLE_CONFIG}'
             print(f'[ASC-AI] {_load_error}')
             return
 
         try:
+            from torchvision import transforms
+
             device = torch.device('cpu')
-            net = _build_model()
-            ckpt = torch.load(_CHECKPOINT, map_location=device, weights_only=False)
-            state = ckpt['model'] if isinstance(ckpt, dict) and 'model' in ckpt else ckpt
-            net.load_state_dict(state)
-            net.eval()
-            _model = net
+            with open(_ENSEMBLE_CONFIG, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+
+            loaded_models: list[tuple[float, Any, str]] = []
+            for member in config['members']:
+                preprocess = member.get('preprocess', 'center_crop')
+                if preprocess not in {'center_crop', 'full_frame'}:
+                    raise ValueError(f'unsupported preprocess: {preprocess}')
+                checkpoint_path = os.path.join(_V2_DIR, member['checkpoint'])
+                if not os.path.isfile(checkpoint_path):
+                    raise FileNotFoundError(f'missing checkpoint: {checkpoint_path}')
+                net = _build_model()
+                ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
+                state = ckpt['model'] if isinstance(ckpt, dict) and 'model' in ckpt else ckpt
+                net.load_state_dict(state)
+                net.eval()
+                loaded_models.append((float(member['weight']), net, preprocess))
+
+            if not loaded_models or abs(sum(weight for weight, _, _ in loaded_models) - 1.0) > 1e-6:
+                raise ValueError('ensemble must contain models whose weights sum to 1')
+
+            normalize = transforms.Normalize(mean=_NORMALIZE_MEAN, std=_NORMALIZE_STD)
+            loaded_transforms = {
+                'center_crop': transforms.Compose(
+                    [transforms.Resize(256), transforms.CenterCrop(224), transforms.ToTensor(), normalize]
+                ),
+                'full_frame': transforms.Compose(
+                    [
+                        transforms.Resize((216, 384), interpolation=transforms.InterpolationMode.BICUBIC),
+                        transforms.ToTensor(),
+                        normalize,
+                    ]
+                ),
+            }
+            _models = loaded_models
+            _transforms = loaded_transforms
             _device = device
-            print(f'[ASC-AI] Loaded ASC AI v1 from {_CHECKPOINT}')
+            print(f'[ASC-AI] Loaded ASC AI v2 ensemble with {len(_models)} models')
         except Exception as e:
-            _load_error = f'failed to load ASC AI v1: {e}'
-            _model = None
+            _load_error = f'failed to load ASC AI v2: {e}'
+            _models = []
+            _transforms = {}
             _device = None
             print(f'[ASC-AI] {_load_error}')
-
-
-def _preprocess(img):  # type: ignore[no-untyped-def]
-    """PIL Image → ImageNet-normalized tensor (1, 3, 224, 224)."""
-    import torch
-    from torchvision import transforms
-
-    tf = transforms.Compose(
-        [
-            transforms.Resize(256),
-            transforms.CenterCrop(_IMAGE_SIZE),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ]
-    )
-    rgb = img.convert('RGB')
-    return tf(rgb).unsqueeze(0)
 
 
 def analyze_frame(img, now: datetime | None = None) -> Dict[str, Any]:
@@ -168,20 +187,25 @@ def analyze_frame(img, now: datetime | None = None) -> Dict[str, Any]:
     frame_iso = now.isoformat()
 
     ensure_models_loaded()
-    if _load_error or _model is None or _device is None:
+    if _load_error or not _models or _device is None:
         return _empty_payload(phase=phase, frame_iso=frame_iso, last_error=_load_error)
 
     try:
-        x = _preprocess(img).to(_device)
-        with torch.no_grad():
-            sky_logits, rain_logits = _model(x)
-            sky_p = torch.softmax(sky_logits, 1)[0]
-            rain_p = torch.softmax(rain_logits, 1)[0]
+        rgb = img.convert('RGB')
+        inputs = {
+            preprocess: _transforms[preprocess](rgb).unsqueeze(0).to(_device)
+            for _, _, preprocess in _models
+        }
+        cloudy_p = 0.0
+        rain_true_p = 0.0
+        with torch.inference_mode():
+            for weight, model, preprocess in _models:
+                sky_logits, rain_logits = model(inputs[preprocess])
+                cloudy_p += weight * float(torch.softmax(sky_logits, 1)[0, 1])
+                rain_true_p += weight * float(torch.softmax(rain_logits, 1)[0, 1])
 
-        clear_p = float(sky_p[0])
-        cloudy_p = float(sky_p[1])
-        no_rain_p = float(rain_p[0])
-        rain_true_p = float(rain_p[1])
+        clear_p = 1.0 - cloudy_p
+        no_rain_p = 1.0 - rain_true_p
 
         sky = 'clear' if clear_p >= cloudy_p else 'cloudy'
         sky_conf = clear_p if sky == 'clear' else cloudy_p

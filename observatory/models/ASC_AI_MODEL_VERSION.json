@@ -1,14 +1,14 @@
 {
-  "version": "v1",
-  "label": "ASC AI v1 — Clear/Cloudy + Rain (PyTorch ResNet18)",
-  "released": "2026-09-09",
-  "summary": "Next-gen ASC: one ResNet18 dual-head (sky ∈ {clear, cloudy}, rain ∈ {true, false}). More MFT data, tighter labels, stronger training than the Teachable Machine four-model stack. Ready cloud gate: sky == clear. Trained on 2135 MFT frames; frozen Test n=178 (sky ~93.8%, gate ~92.1%).",
-  "framework": "PyTorch (torchvision ResNet18)",
-  "checkpoint": "ASC_AI_v1/best.pt",
+  "version": "v2",
+  "label": "ASC AI v2 — Full-frame mixed-view ensemble (PyTorch ResNet18)",
+  "released": "2026-10-15",
+  "summary": "Validation-selected 25% cropped + 75% full-frame ensemble. Full-frame model resizes the complete 16:9 image to 384x216 without cropping. Expanded 269-frame benchmark: 96.7% gate accuracy, 96.6% rain F1, 7 false-OK, 2 false-NO-GO.",
+  "framework": "PyTorch (torchvision ResNet18 ensemble)",
+  "checkpoint": "ASC_AI_v2/ensemble_config_multiview.json",
   "outputs": {
     "sky": ["clear", "cloudy"],
     "rain": ["false", "true"]
   },
   "deployPathPi": "observatory/models/",
-  "notes": "Removes Teachable Machine Day/Night Cloud+Rain models and ASC AI v0.6 from the repo. Frozen Test metrics in ASC_AI_v1/MANIFEST.json."
+  "notes": "Inference blends cloudy and rain probabilities at 25% center-crop / 75% full-frame before applying 0.5 thresholds. Member checksums and benchmark provenance are in ASC_AI_v2/MANIFEST.json."
 }

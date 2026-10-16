@@ -1,0 +1,24 @@
+{
+  "version": "V2 multiview",
+  "description": "Validation-selected soft-probability ensemble: 25% cropped transfer model and 75% full-frame ResNet18.",
+  "selection": "Selected on 541 date-held-out validation frames; the frozen test set was not used to select weights.",
+  "validation_report": "full_frame_validation_comparison.json",
+  "thresholds": {
+    "cloudy_probability": 0.5,
+    "rain_probability": 0.5
+  },
+  "members": [
+    {
+      "checkpoint": "candidate_v1_2/best.pt",
+      "weight": 0.25,
+      "preprocess": "center_crop",
+      "source": "V1.2 transfer fine-tune, cropped input"
+    },
+    {
+      "checkpoint": "full_frame_imagenet/best.pt",
+      "weight": 0.75,
+      "preprocess": "full_frame",
+      "source": "ImageNet-pretrained ResNet18 trained on the complete 384x216 all-sky frame"
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "version": "v2",
+  "recipe": "Validation-selected 25% center-crop + 75% full-frame soft-probability ensemble",
+  "source": "/Volumes/James' SSD/ASC Label Tool/runs/v2/ensemble_config_multiview.json",
+  "training": {
+    "fullFrameSamples": 4240,
+    "validationSamples": 541,
+    "frozenTestUsedForSelection": false,
+    "fullFrameInput": "384x216 resize of complete 16:9 camera image, no crop",
+    "decisionThresholds": {
+      "cloudyProbability": 0.5,
+      "rainProbability": 0.5
+    }
+  },
+  "benchmark": {
+    "source": "ASC Data/ASC_Benchmark/v2/test_eval_expanded_269_relabel1_20261015",
+    "testSamples": 269,
+    "gateAccuracy": 0.966542750929368,
+    "skyAccuracy": 0.9776951672862454,
+    "rainAccuracy": 0.9776951672862454,
+    "rainF1": 0.9662921348314607,
+    "falseOkCount": 7,
+    "falseNoGoCount": 2,
+    "note": "Expanded and relabeled benchmark; the approved test data was not used for training or ensemble selection."
+  },
+  "members": [
+    {
+      "path": "candidate_v1_2/best.pt",
+      "weight": 0.25,
+      "preprocess": "center_crop",
+      "sha256": "4e9860846b86265c8c5e3a2670c592fdfd223500ac1fb989c96674b84c4b6554"
+    },
+    {
+      "path": "full_frame_imagenet/best.pt",
+      "weight": 0.75,
+      "preprocess": "full_frame",
+      "sha256": "682e36558928d22084919896728d753509bcf703e8b3ae0965b8e45c6bd49f62"
+    }
+  ]
+}

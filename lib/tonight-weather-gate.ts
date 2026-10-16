@@ -37,7 +37,7 @@ export function findNightwideSeverePrecipitationHour<T extends PrecipitationFore
   return [...samples]
     .filter((h) => h.hourStartSec < sunriseSec && h.hourStartSec + 3600 > sunsetSec)
     .sort((a, b) => a.hourStartSec - b.hourStartSec)
-    .find((h) => Number.isFinite(h.precipProbability) && h.precipProbability > NIGHTWIDE_PRECIPITATION_BLOCK_PROBABILITY)
+    .find((h) => Number.isFinite(h.precipProbability) && h.precipProbability >= NIGHTWIDE_PRECIPITATION_BLOCK_PROBABILITY)
 }
 
 export function weatherNotPermittedReasons(sample: HourWeatherSample): WeatherNotPermittedReason[] {
@@ -299,7 +299,7 @@ export async function getTonightWeatherPermittedIntervalsFromSamples(
     globalHardBlocked,
     globalHardBlockReason: globalHardBlocked
       ? severePrecipitationHour
-        ? `Global weather trigger: precipitation probability ${severePrecipitationHour.precipProbability}% at ${localHourLabel(severePrecipitationHour.hourStartSec, timeZone)} exceeds 80% during the sunset-to-sunrise night. Entire night blocked.`
+        ? `Global weather trigger: precipitation probability ${severePrecipitationHour.precipProbability}% at ${localHourLabel(severePrecipitationHour.hourStartSec, timeZone)} is at least 80% during the sunset-to-sunrise night. Entire night blocked.`
         : highWindHours > 3
         ? globalWeatherBlockReason(usableHours, timeZone, nowMs)
         : precipitationHour
@@ -310,7 +310,7 @@ export async function getTonightWeatherPermittedIntervalsFromSamples(
 }
 
 /**
- * Rule: precipitation probability >80% in any sunset-to-sunrise forecast hour blocks the night.
+ * Rule: precipitation probability >=80% in any sunset-to-sunrise forecast hour blocks the night.
  * Otherwise, current site's nautical dusk -> nautical dawn schedule needs a continuous
  * MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS passing hourly weather checks, a two-hour finish buffer
  * before precipitation >=10%, and no more than three usable high-wind hours.
@@ -490,7 +490,7 @@ export async function sessionWindowHourlyPrecipOk(
     if (severePrecipitationHour) {
       return {
         ok: false,
-        reason: `Global weather trigger: precipitation probability ${severePrecipitationHour.precipProbability}% at ${localHourLabel(severePrecipitationHour.hourStartSec, site.timezone)} exceeds 80% during the sunset-to-sunrise night. Entire night blocked.`,
+        reason: `Global weather trigger: precipitation probability ${severePrecipitationHour.precipProbability}% at ${localHourLabel(severePrecipitationHour.hourStartSec, site.timezone)} is at least 80% during the sunset-to-sunrise night. Entire night blocked.`,
       }
     }
     for (let i = 0; i < times.length; i += 1) {

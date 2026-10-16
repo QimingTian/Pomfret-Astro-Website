@@ -116,7 +116,7 @@ export async function fetchAscCloud(statusUrl?: string | null): Promise<AscCloud
 export const OBSERVATORY_READY_MAX_OPEN_METEO_CLOUD_PERCENT = 10
 export const OBSERVATORY_READY_MAX_WIND_MS = 10
 export const OBSERVATORY_READY_MAX_PRECIP_PROBABILITY = 20
-/** @deprecated ASC AI v1 uses clear/cloudy; kept for overlay/docs compatibility. */
+/** @deprecated ASC AI uses clear/cloudy; kept for overlay/docs compatibility. */
 export const OBSERVATORY_READY_MAX_ASC_CLOUD_PERCENT = 20
 export const OBSERVATORY_READY_GATE_RULE =
   'ASC AI sky clear and no rain (when ASC gate applies) OR Open-Meteo cloud_cover < 10% (when ASC unavailable); wind_speed_10m < 10 m/s; precipitation_probability <= 20%'

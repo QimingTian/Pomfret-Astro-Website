@@ -1,4 +1,4 @@
-# ASC all-sky sky/rain inference (Pi) — ASC AI v1
+# ASC all-sky sky/rain inference (Pi) — ASC AI v2 ensemble
 # On Raspberry Pi (aarch64), prefer CPU wheels:
 #   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 torch

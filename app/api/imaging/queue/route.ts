@@ -52,12 +52,8 @@ import {
 import { computeScheduleInsight } from '@/lib/imaging-queue-schedule-insight'
 import { imagingSequenceTemplate } from '@/lib/imaging/sequence-template'
 import { getObservatoryStatus, isObservatoryReady } from '@/lib/observatory-status-store'
-import { currentObservatorySite } from '@/lib/observatory-site-scope'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
-import {
-  getTonightWeatherPermittedIntervals,
-  pickOpenMeteoImagingNightBounds,
-} from '@/lib/tonight-weather-gate'
+import { getTonightWeatherPermittedIntervals } from '@/lib/tonight-weather-gate'
 
 export const runtime = 'nodejs'
 
@@ -79,38 +75,6 @@ function queueCreatedAuditDetail(result: ImagingRequest): Record<string, unknown
     ...base,
     exposureSeconds: result.exposureSeconds,
     count: result.count,
-  }
-}
-
-async function detectSunsetSunrisePrecipGate(): Promise<{ active: boolean | null; hitHours: number[] }> {
-  const site = currentObservatorySite()
-  const url =
-    'https://api.open-meteo.com/v1/forecast' +
-    `?latitude=${site.weatherLat}&longitude=${site.weatherLon}` +
-    '&hourly=precipitation_probability' +
-    '&daily=sunrise,sunset' +
-    `&past_days=1&forecast_days=2&timezone=${site.timezone}&timeformat=unixtime`
-  try {
-    const res = await fetch(url, { cache: 'no-store' })
-    if (!res.ok) return { active: null, hitHours: [] }
-    const data = (await res.json()) as {
-      hourly?: { time?: number[]; precipitation_probability?: number[] }
-      daily?: { sunrise?: number[]; sunset?: number[] }
-    }
-    const times = data.hourly?.time ?? []
-    const precip = data.hourly?.precipitation_probability ?? []
-    const nightBounds = pickOpenMeteoImagingNightBounds(
-      data.daily?.sunset ?? [],
-      data.daily?.sunrise ?? []
-    )
-    if (!nightBounds || times.length === 0 || precip.length !== times.length) {
-      return { active: null, hitHours: [] }
-    }
-    const { sunsetSec, sunriseSec } = nightBounds
-    const hitHours = times.filter((t, i) => t >= sunsetSec && t < sunriseSec && Number(precip[i]) >= 10)
-    return { active: hitHours.length > 0, hitHours }
-  } catch {
-    return { active: null, hitHours: [] }
   }
 }
 
@@ -389,9 +353,8 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const [pendingNow, precipGate, weatherIntervals] = await Promise.all([
+  const [pendingNow, weatherIntervals] = await Promise.all([
     listPending(),
-    detectSunsetSunrisePrecipGate(),
     getTonightWeatherPermittedIntervals(),
   ])
 
@@ -399,7 +362,7 @@ export async function POST(request: NextRequest) {
     | { status: 'scheduled' | 'unscheduled'; plannedStartIso: string | null; reasons: string[] }
     | undefined
 
-  if (weatherIntervals.status === 'ok' && result.projectMode) {
+  if (weatherIntervals.status === 'ok' && !weatherIntervals.globalHardBlocked && result.projectMode) {
     const project = await getProjectById(result.id)
     if (project) {
       const now = new Date()
@@ -408,7 +371,7 @@ export async function POST(request: NextRequest) {
       const freeIntervals = [
         {
           startMs: Math.max(nowMs, window.nauticalDuskUtc.getTime()),
-          endMs: window.nauticalDawnUtc.getTime(),
+          endMs: Math.min(window.nauticalDawnUtc.getTime(), weatherIntervals.schedulingEndMs ?? Infinity),
         },
       ]
       insight = await planAndScheduleProjectTonight(
@@ -438,8 +401,9 @@ export async function POST(request: NextRequest) {
           )
         : []
     insight =
-      weatherIntervals.status === 'ok'
+      weatherIntervals.status === 'ok' && !weatherIntervals.globalHardBlocked
         ? computeScheduleInsight(pendingNow, result.id, weatherIntervals.permittedIntervals, {
+            schedulingEndMs: weatherIntervals.schedulingEndMs,
             reservedIntervals,
             reservedStartMarginMs: PROJECT_HOLD_START_MARGIN_MS,
             projectSubSessions,
@@ -447,7 +411,11 @@ export async function POST(request: NextRequest) {
         : {
             status: 'unscheduled' as const,
             plannedStartIso: null,
-            reasons: [weatherIntervals.reason ?? 'Unable to evaluate tonight weather.'],
+            reasons: [
+              weatherIntervals.status === 'ok'
+                ? weatherIntervals.globalHardBlockReason ?? 'Tonight blocked by global weather trigger.'
+                : weatherIntervals.reason ?? 'Unable to evaluate tonight weather.',
+            ],
           }
   }
 
@@ -516,13 +484,12 @@ export async function POST(request: NextRequest) {
       weatherPermittedHoursApprox: Math.round(
         weatherIntervals.permittedIntervals.reduce((sum, x) => sum + (x.endMs - x.startMs), 0) / 3600000
       ),
-      precipGateSunsetToSunrise:
-        precipGate.active == null
-          ? 'unknown'
-          : precipGate.active
-            ? 'active'
-            : 'inactive',
-      precipGateHitHourCount: precipGate.hitHours.length,
+      forecastPrecipitationHourIso: weatherIntervals.precipitationHourStartMs == null
+        ? null
+        : new Date(weatherIntervals.precipitationHourStartMs).toISOString(),
+      latestSafeFinishIso: weatherIntervals.schedulingEndMs == null
+        ? null
+        : new Date(weatherIntervals.schedulingEndMs).toISOString(),
     },
   })
 

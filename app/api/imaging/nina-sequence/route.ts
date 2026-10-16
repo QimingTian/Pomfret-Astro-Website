@@ -66,6 +66,7 @@ import { estimateDurationSeconds } from '@/lib/imaging-queue-schedule-insight'
 import { hasRemainingTonightImagingWork } from '@/lib/imaging-tonight-complete'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
+import { deliveryWeatherBlockReason, getTonightWeatherPermittedIntervals } from '@/lib/tonight-weather-gate'
 import { logEndNightDelivered, logEndNightDue } from '@/lib/imaging-end-night-audit'
 import {
   isEndNightDue,
@@ -88,6 +89,28 @@ import {
 import endNightTemplate from '@/End Night Session.json'
 
 export const runtime = 'nodejs'
+
+/** Recheck the site forecast before a fresh NINA handoff; submission and reconcile can race a poll. */
+async function latestDeliveryWeatherBlockReason(startMs: number, durationSeconds: number): Promise<string | null> {
+  const weather = await getTonightWeatherPermittedIntervals()
+  return deliveryWeatherBlockReason(weather, startMs, durationSeconds)
+}
+
+async function latestProjectNightWeatherBlockReason(
+  project: ImagingProject,
+  night: ProjectNight
+): Promise<string | null> {
+  const startMs = Math.max(Date.now(), Date.parse(night.plannedStartIso ?? ''))
+  if (!Number.isFinite(startMs)) return 'Project sub-session has no valid planned start.'
+  const sky = night.mosaicPanelIndex != null
+    ? projectTargetCoordsForPanel(project, night.mosaicPanelIndex)
+    : projectTargetCoords(project)
+  const durationSeconds = tonightDurationSecondsFromPlans(night.filterPlansTonight, {
+    startMs,
+    raHours: sky.raHours,
+  })
+  return latestDeliveryWeatherBlockReason(startMs, durationSeconds)
+}
 const END_NIGHT_TEMPLATE = endNightTemplate as Record<string, unknown>
 
 export function OPTIONS() {
@@ -271,6 +294,12 @@ async function deliverProjectSubSessionJson(
         { status: 409, headers: imagingCorsHeadersResolved() }
       )
     }
+  }
+
+  const weatherBlock = await latestProjectNightWeatherBlockReason(projectRef, nightRef)
+  if (weatherBlock) {
+    noteProjectDeferral(options?.deferReasons, weatherBlock)
+    return NextResponse.json({ error: weatherBlock }, { status: 409, headers: imagingCorsHeadersResolved() })
   }
 
   if (!projectRef.onBoard) {
@@ -667,6 +696,19 @@ export async function GET(request: NextRequest) {
   }
 
   const exceptBoardId = selected.projectMode ? selected.id : undefined
+  let weatherBlock: string | null
+  if (selected.projectMode) {
+    const project = await getProjectById(selected.id)
+    const night = project ? getDeliverableNight(project, nightKey) : undefined
+    weatherBlock = project && night
+      ? await latestProjectNightWeatherBlockReason(project, night)
+      : 'Project sub-session sequence not available for download.'
+  } else {
+    weatherBlock = await latestDeliveryWeatherBlockReason(nowMs, estimateDurationSeconds(selected))
+  }
+  if (weatherBlock) {
+    return NextResponse.json({ error: weatherBlock }, { status: 409, headers: imagingCorsHeadersResolved() })
+  }
   await failInProgressBoardSessions(exceptBoardId, 'interrupted_before_new_nina_delivery')
 
   const consumed = await consumeRequestById(selected.id)

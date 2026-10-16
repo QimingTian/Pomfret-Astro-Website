@@ -93,6 +93,7 @@ function buildUnscheduledReasons(input: {
   durationMs: number
   createdMs: number
   deadlineMs: number
+  forecastCutoff: boolean
   queueIndex: number
   committedEarlierBeforeTarget: number
   freeIntervals: FreeInterval[]
@@ -155,7 +156,9 @@ function buildUnscheduledReasons(input: {
   }
 
   if (input.createdMs >= input.deadlineMs) {
-    reasons.push('Submitted after nautical-dawn scheduling cutoff.')
+    reasons.push(input.forecastCutoff
+      ? 'Submitted after the two-hour forecast precipitation safety cutoff.'
+      : 'Submitted after nautical-dawn scheduling cutoff.')
   }
   if (input.failedByAltitudeRise > 0) {
     reasons.push('Target does not rise above 30° in any remaining free interval.')
@@ -164,7 +167,9 @@ function buildUnscheduledReasons(input: {
     reasons.push('Target altitude coverage is below 100% for required duration in remaining free intervals.')
   }
   if (input.failedByIntervalLength > 0 && input.freeIntervals.length > 0) {
-    reasons.push('Every remaining free interval is shorter than session duration before nautical dawn.')
+    reasons.push(input.forecastCutoff
+      ? 'Every remaining free interval is shorter than the session duration before the two-hour forecast precipitation safety cutoff.'
+      : 'Every remaining free interval is shorter than session duration before nautical dawn.')
   }
   if (input.failedByWeatherCoverage > 0) {
     reasons.push('No remaining slot has weather-permitted coverage >= 80% of session duration.')
@@ -280,7 +285,7 @@ function fixedOccultationInsight(
     return {
       status: 'unscheduled',
       plannedStartIso: null,
-      reasons: ['The occultation window ends after nautical dawn.'],
+      reasons: ['The occultation window ends after the safe scheduling cutoff (nautical dawn or two hours before forecast precipitation).'],
     }
   }
   if (startMs < windowStartMs && nowMs < windowStartMs) {
@@ -335,6 +340,8 @@ function fixedOccultationInsight(
  * `targetId` — which row to return insight for. Other pending rows are simulated in submission order.
  */
 export type ComputeScheduleInsightOptions = {
+  /** Forecast precipitation cutoff, already reduced by the two-hour finish buffer. */
+  schedulingEndMs?: number
   /** Time reserved for an in-progress project target while it is ≥30° (other sessions may not use). */
   reservedIntervals?: Array<{ startMs: number; endMs: number }>
   /**
@@ -361,7 +368,7 @@ export function computeScheduleInsight(
   const nowMs = now.getTime()
   const window = getTonightSchedulingWindow(now)
   const windowStartMs = window.nauticalDuskUtc.getTime()
-  const deadlineMs = window.nauticalDawnUtc.getTime()
+  const deadlineMs = Math.min(window.nauticalDawnUtc.getTime(), options?.schedulingEndMs ?? Infinity)
   let freeIntervals: FreeInterval[] = [{ startMs: Math.max(nowMs, windowStartMs), endMs: deadlineMs }]
   const reservedIntervals = options?.reservedIntervals ?? []
   const reservedStartMarginMs = Math.max(0, options?.reservedStartMarginMs ?? 0)
@@ -678,6 +685,7 @@ export function computeScheduleInsight(
             durationMs,
             createdMs,
             deadlineMs,
+            forecastCutoff: deadlineMs < window.nauticalDawnUtc.getTime(),
             queueIndex,
             committedEarlierBeforeTarget,
             freeIntervals,

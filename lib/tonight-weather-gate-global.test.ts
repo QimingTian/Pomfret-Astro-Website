@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  deliveryWeatherBlockReason,
   evaluateGlobalTonightWeatherPermitted,
   getTonightWeatherPermittedIntervalsFromSamples,
   isHourWeatherPermitted,
@@ -97,6 +98,7 @@ test('global permitted ignores fully ended gate hours after nautical dusk', () =
       hour(21 * 3600, 50),
       hour(22 * 3600, 5),
       hour(23 * 3600, 5),
+      hour(24 * 3600, 5),
     ],
   })
   assert.equal(permitted, true)
@@ -115,22 +117,79 @@ test('scheduler keeps a consecutive clear run from the same forecast snapshot', 
   assert.equal(result.permittedIntervals.length, 3)
 })
 
-test('global precipitation block names the hour and probability even when another clear run exists', async () => {
+test('forecast precipitation permits an earlier run that finishes two hours before the hit', async () => {
   const sunsetSec = 1_800_000
   const result = await getTonightWeatherPermittedIntervalsFromSamples(
     [
-      { ...hour(sunsetSec, 5), precipProbability: 12 },
+      hour(sunsetSec, 5),
       hour(sunsetSec + 3600, 5),
       hour(sunsetSec + 7200, 5),
+      hour(sunsetSec + 10_800, 5),
+      { ...hour(sunsetSec + 14_400, 5), precipProbability: 12 },
     ],
+    sunsetSec,
+    sunsetSec + 18_000,
+    'UTC',
+    0
+  )
+  assert.equal(result.globalHardBlocked, false)
+  assert.equal(result.schedulingEndMs, (sunsetSec + 7200) * 1000)
+  assert.equal(result.permittedIntervals.length, 2)
+})
+
+test('precipitation blocks when the two-hour buffer leaves no clear run', async () => {
+  const sunsetSec = 1_800_000
+  const result = await getTonightWeatherPermittedIntervalsFromSamples(
+    [hour(sunsetSec, 5), hour(sunsetSec + 3600, 5), { ...hour(sunsetSec + 7200, 5), precipProbability: 12 }],
     sunsetSec,
     sunsetSec + 10_800,
     'UTC',
     0
   )
   assert.equal(result.globalHardBlocked, true)
-  assert.match(result.globalHardBlockReason ?? '', /precipitation ≥10%/)
-  assert.match(result.globalHardBlockReason ?? '', /12%/)
+  assert.match(result.globalHardBlockReason ?? '', /2 hours before precipitation/)
+})
+
+test('weather beyond a site nautical dawn cannot block the site imaging night', async () => {
+  const sunsetSec = 1_800_000
+  const samples = [
+    hour(sunsetSec, 5),
+    hour(sunsetSec + 3600, 5),
+    hour(sunsetSec + 7200, 5),
+    { ...hour(sunsetSec + 10_800, 5), precipProbability: 12 },
+  ]
+  const pomfret = await getTonightWeatherPermittedIntervalsFromSamples(
+    samples, sunsetSec, sunsetSec + 14_400, 'UTC', 0,
+    { startMs: sunsetSec * 1000, endMs: (sunsetSec + 10_800) * 1000 }
+  )
+  const cygnus = await getTonightWeatherPermittedIntervalsFromSamples(
+    samples, sunsetSec, sunsetSec + 14_400, 'UTC', 0,
+    { startMs: sunsetSec * 1000, endMs: (sunsetSec + 14_400) * 1000 }
+  )
+  assert.equal(pomfret.globalHardBlocked, false)
+  assert.equal(pomfret.precipitationHourStartMs, undefined)
+  assert.equal(cygnus.globalHardBlocked, true)
+  assert.equal(cygnus.precipitationHourStartMs, (sunsetSec + 10_800) * 1000)
+})
+
+test('NINA delivery uses the latest site forecast and two-hour cutoff', () => {
+  const startMs = 1_800_000_000
+  const weather = {
+    status: 'ok' as const,
+    globalHardBlocked: false,
+    schedulingEndMs: startMs + 3 * 3600_000,
+    permittedIntervals: [{ startMs, endMs: startMs + 3 * 3600_000 }],
+  }
+  assert.equal(deliveryWeatherBlockReason(weather, startMs, 2 * 3600), null)
+  assert.match(deliveryWeatherBlockReason(weather, startMs, 4 * 3600) ?? '', /2 hours before/)
+  assert.match(
+    deliveryWeatherBlockReason({ ...weather, globalHardBlocked: true, globalHardBlockReason: 'site blocked' }, startMs, 3600) ?? '',
+    /site blocked/
+  )
+  assert.match(
+    deliveryWeatherBlockReason({ ...weather, permittedIntervals: [] }, startMs, 3600) ?? '',
+    /below 80%/
+  )
 })
 
 test('missing clear run reason includes the closest window and failed weather values', async () => {

@@ -136,6 +136,25 @@ test('a session that would overrun into a project reservation is placed behind i
   })
 })
 
+test('a single-night session must finish by the forecast precipitation cutoff', () => {
+  withMockedNow((nowMs) => {
+    const latestFinish = nowMs + 3 * 3600_000
+    const long = computeScheduleInsight(
+      [row({ estimatedDurationSeconds: 4 * 3600 })], 'row-1', openWeatherTonight(),
+      { schedulingEndMs: latestFinish }
+    )
+    assert.equal(long.status, 'unscheduled')
+    assert.match(long.reasons.join(' '), /forecast precipitation safety cutoff/)
+
+    const short = computeScheduleInsight(
+      [row({ estimatedDurationSeconds: 2 * 3600 })], 'row-1', openWeatherTonight(),
+      { schedulingEndMs: latestFinish }
+    )
+    assert.equal(short.status, 'scheduled', short.reasons.join(' | '))
+    assert.ok(Date.parse(short.plannedStartIso!) + 2 * 3600_000 <= latestFinish)
+  })
+})
+
 test('tonight regression: short session takes the gap, long session waits out the trimmed hold', () => {
   withMockedNow((nowMs) => {
     // M33 Session 5 is the project's final sub, so the reservation ends with it instead of dawn.

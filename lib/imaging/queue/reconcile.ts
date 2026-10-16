@@ -109,7 +109,7 @@ export async function reconcilePendingScheduleStatus(options?: ReconcileSchedule
   const window = getTonightSchedulingWindow(now)
   const nowMs = now.getTime()
   const windowStartMs = window.nauticalDuskUtc.getTime()
-  const deadlineMs = window.nauticalDawnUtc.getTime()
+  const deadlineMs = Math.min(window.nauticalDawnUtc.getTime(), weatherIntervals.schedulingEndMs ?? Infinity)
   const fullNightFree: Array<{ startMs: number; endMs: number }> = [
     {
       startMs: Math.max(nowMs, windowStartMs),
@@ -267,6 +267,7 @@ export async function reconcilePendingScheduleStatus(options?: ReconcileSchedule
           ? Date.parse(r.plannedStartIso)
           : undefined
       const insight = computeScheduleInsight(slice, r.id, permitted, {
+        schedulingEndMs: deadlineMs,
         reservedIntervals,
         reservedStartMarginMs: PROJECT_HOLD_START_MARGIN_MS,
         projectSubSessions,

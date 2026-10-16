@@ -109,3 +109,26 @@ test('occultation does not slide when the fixed window has no weather', () => {
     assert.match(insight.reasons.join(' '), /fixed occultation window/i)
   })
 })
+
+test('occultation is withheld when its fixed run crosses the precipitation cutoff', () => {
+  withMockedNow(() => {
+    const eventMs = NOW_MS + 2 * 3600_000
+    const plan = occultationExposurePlan(eventMs, 10)
+    const row: SchedulePendingRow = {
+      id: 'occ-cutoff',
+      createdAt: new Date(NOW_MS - 60_000).toISOString(),
+      target: 'Occultation',
+      exposureSeconds: 1,
+      count: plan.exposureCount,
+      estimatedDurationSeconds: plan.estimatedDurationSeconds,
+      sequenceTemplate: 'asteroid_occultation',
+      occultationEventIso: new Date(eventMs).toISOString(),
+      occultationDurationSeconds: 10,
+      status: 'pending',
+    }
+    const insight = computeScheduleInsight([row], row.id, openWeatherTonight(), {
+      schedulingEndMs: plan.plannedStartMs + plan.estimatedDurationSeconds * 1000 - 1000,
+    })
+    assert.equal(insight.status, 'unscheduled')
+  })
+})

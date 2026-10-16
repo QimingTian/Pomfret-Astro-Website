@@ -7,7 +7,6 @@ import {
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import {
-  evaluateGlobalTonightWeatherPermitted,
   getTonightWeatherPermittedIntervalsFromSamples,
   MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS,
   pickOpenMeteoImagingNightBounds,
@@ -148,7 +147,7 @@ export async function GET(request: Request) {
     const precipCheckIndices: number[] = []
     if (Number.isFinite(globalGateStartSec) && Number.isFinite(globalGateEndSec) && globalGateEndSec > globalGateStartSec) {
       for (let i = 0; i < times.length; i += 1) {
-        if (times[i] >= globalGateStartSec && times[i] < globalGateEndSec) {
+        if (times[i] < globalGateEndSec && times[i] + 3600 > globalGateStartSec) {
           precipCheckIndices.push(i)
         }
       }
@@ -157,7 +156,7 @@ export async function GET(request: Request) {
     const beforeGlobalGate = nowSec < globalGateStartSec
     const countsTowardGlobalNight = (i: number): boolean => {
       const t = times[i]
-      const inGate = t >= globalGateStartSec && t < globalGateEndSec
+      const inGate = t < globalGateEndSec && t + 3600 > globalGateStartSec
       if (!inGate) return false
       const hourFullyEnded = t + 3600 <= nowSec
       return beforeGlobalGate || !hourFullyEnded
@@ -195,7 +194,8 @@ export async function GET(request: Request) {
           imagingNightBounds.sunsetSec,
           imagingNightBounds.sunriseSec,
           site.timezone,
-          nowSec * 1000
+          nowSec * 1000,
+          { startMs: nauticalDuskUtc.getTime(), endMs: nauticalDawnUtc.getTime() }
         )
       : undefined
 
@@ -232,12 +232,7 @@ export async function GET(request: Request) {
       })
     }
 
-    const permitted = evaluateGlobalTonightWeatherPermitted({
-      hours: hourlySamples,
-      gateStartSec: globalGateStartSec,
-      gateEndSec: globalGateEndSec,
-      nowSec,
-    })
+    const permitted = weatherIntervals?.status === 'ok' && weatherIntervals.globalHardBlocked !== true
 
     const prediction = permitted ? 'permitted' : 'not_permitted'
     await reconcileIfScheduleWeatherColumnChanged(windowStartSec, windowEndSec, {
@@ -260,9 +255,9 @@ export async function GET(request: Request) {
       hasAnyPrecipitationTonight,
       precipitationHits,
       rule:
-        `Tonight (nautical dusk → nautical dawn, Pomfret): (1) some run of ${MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS} consecutive hours passing hourly weather checks (cloud, precip, wind); ` +
-        '(2) every hour precipitation_probability < 10%; (3) hours with wind_speed_10m > 10 m/s must be <= 3. ' +
-        'After nautical dusk, only remaining imaging-night hours count for (1)–(3) (fully past hours are ignored). Pre-dusk schedule-strip hours do not count.',
+        `Tonight (nautical dusk → nautical dawn, ${site.name}): a ${MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS}-hour weather-permitted run must remain; ` +
+        'sessions must finish at least 2 hours before a forecast hour with precipitation probability ≥10%; ' +
+        'hours with wind speed >10 m/s must be ≤3. Fully past hours are ignored.',
     })
   } catch (error) {
     console.error('[tonight-weather-prediction] failed', error)

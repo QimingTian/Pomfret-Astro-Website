@@ -11,6 +11,9 @@ import {
 import type { ImagingProject, ProjectNight } from './store'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
+import { collectInProgressBoardOccupancy } from '@/lib/imaging/queue/in-progress-board-occupancy'
+import { subtractOccupiedFromFree } from '@/lib/imaging-queue-free-intervals'
+import type { SessionBoardEntry } from '@/lib/imaging-session-board'
 
 function mockProject(): ImagingProject {
   return {
@@ -74,6 +77,33 @@ test('planTonightSubSessions assigns increasing session indices', () => {
   for (let i = 1; i < plans.length; i++) {
     assert.ok(plans[i]!.nightIndex > plans[i - 1]!.nightIndex)
   }
+})
+
+test('project subs schedule after an in-progress single-night session', () => {
+  const project = mockProject()
+  const now = new Date('2026-05-19T01:30:00.000Z')
+  const { windowStart, windowEnd } = tonightSchedulingSpan(now)
+  const singleStartMs = now.getTime() - 30 * 60_000
+  const board = [{
+    id: 'single', target: 'Other target', status: 'in_progress',
+    createdAt: new Date(singleStartMs).toISOString(),
+    updatedAt: now.toISOString(),
+    plannedStartIso: new Date(singleStartMs).toISOString(),
+    estimatedDurationSeconds: 4 * 3600,
+  }] as SessionBoardEntry[]
+  const occupancy = collectInProgressBoardOccupancy(
+    board, getTonightScheduleStrip(now).nightKey, windowStart, windowEnd, now.getTime()
+  )
+  assert.equal(occupancy.length, 1)
+  const free = occupancy.reduce(
+    (intervals, occupied) => subtractOccupiedFromFree(intervals, occupied),
+    [{ startMs: now.getTime(), endMs: windowEnd }]
+  )
+  const plans = planTonightSubSessions(
+    project, free, [{ startMs: windowStart, endMs: windowEnd }], now
+  )
+  assert.ok(plans.length > 0)
+  assert.ok(plans.every((plan) => Date.parse(plan.plannedStartIso) >= occupancy[0]!.endMs))
 })
 
 test('planTonightSubSessions can start after predecessor when weather spans a short gap', () => {

@@ -54,6 +54,9 @@ import { imagingSequenceTemplate } from '@/lib/imaging/sequence-template'
 import { getObservatoryStatus, isObservatoryReady } from '@/lib/observatory-status-store'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import { getTonightWeatherPermittedIntervals } from '@/lib/tonight-weather-gate'
+import { listBoardEntries } from '@/lib/imaging-session-board'
+import { subtractOccupiedFromFree } from '@/lib/imaging-queue-free-intervals'
+import { collectInProgressBoardOccupancy } from '@/lib/imaging/queue/in-progress-board-occupancy'
 
 export const runtime = 'nodejs'
 
@@ -353,10 +356,20 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const [pendingNow, weatherIntervals] = await Promise.all([
+  const [pendingNow, weatherIntervals, board] = await Promise.all([
     listPending(),
     getTonightWeatherPermittedIntervals(),
+    listBoardEntries(),
   ])
+  const occupancyNow = new Date()
+  const occupancyWindow = getTonightSchedulingWindow(occupancyNow)
+  const boardOccupancy = collectInProgressBoardOccupancy(
+    board,
+    getTonightScheduleStrip(occupancyNow).nightKey,
+    occupancyWindow.nauticalDuskUtc.getTime(),
+    Math.min(occupancyWindow.nauticalDawnUtc.getTime(), weatherIntervals.schedulingEndMs ?? Infinity),
+    occupancyNow.getTime()
+  )
 
   let insight:
     | { status: 'scheduled' | 'unscheduled'; plannedStartIso: string | null; reasons: string[] }
@@ -368,12 +381,15 @@ export async function POST(request: NextRequest) {
       const now = new Date()
       const window = getTonightSchedulingWindow(now)
       const nowMs = now.getTime()
-      const freeIntervals = [
+      let freeIntervals = [
         {
           startMs: Math.max(nowMs, window.nauticalDuskUtc.getTime()),
           endMs: Math.min(window.nauticalDawnUtc.getTime(), weatherIntervals.schedulingEndMs ?? Infinity),
         },
       ]
+      for (const occupied of boardOccupancy) {
+        freeIntervals = subtractOccupiedFromFree(freeIntervals, occupied)
+      }
       insight = await planAndScheduleProjectTonight(
         project.id,
         freeIntervals,
@@ -404,7 +420,7 @@ export async function POST(request: NextRequest) {
       weatherIntervals.status === 'ok' && !weatherIntervals.globalHardBlocked
         ? computeScheduleInsight(pendingNow, result.id, weatherIntervals.permittedIntervals, {
             schedulingEndMs: weatherIntervals.schedulingEndMs,
-            reservedIntervals,
+            reservedIntervals: [...reservedIntervals, ...boardOccupancy],
             reservedStartMarginMs: PROJECT_HOLD_START_MARGIN_MS,
             projectSubSessions,
           })

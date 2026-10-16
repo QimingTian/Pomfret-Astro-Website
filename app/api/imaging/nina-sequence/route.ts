@@ -66,6 +66,7 @@ import { estimateDurationSeconds } from '@/lib/imaging-queue-schedule-insight'
 import { hasRemainingTonightImagingWork } from '@/lib/imaging-tonight-complete'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
+import { collectInProgressBoardOccupancy } from '@/lib/imaging/queue/in-progress-board-occupancy'
 import { deliveryWeatherBlockReason, getTonightWeatherPermittedIntervals } from '@/lib/tonight-weather-gate'
 import { logEndNightDelivered, logEndNightDue } from '@/lib/imaging-end-night-audit'
 import {
@@ -468,6 +469,16 @@ export async function GET(request: NextRequest) {
   const nightStartMs = schedulingWindow.nauticalDuskUtc.getTime()
   /** Match project planner + Remote strip (4pm-local day), not UTC calendar day of nautical dusk. */
   const nightKey = strip.nightKey
+
+  const occupyingSingleNight = collectInProgressBoardOccupancy(
+    await listBoardEntries(), nightKey, nightStartMs, deadlineMs, nowMs
+  ).find((occupied) => occupied.endMs > nowMs)
+  if (occupyingSingleNight) {
+    return NextResponse.json(
+      { error: `Session "${occupyingSingleNight.target}" is still in progress; new NINA delivery waits for completion.` },
+      { status: 409, headers: imagingCorsHeadersResolved() }
+    )
+  }
 
   const activeOnBoard = await getActiveOnBoardProject()
   if (activeOnBoard) {

@@ -28,6 +28,8 @@ import {
   estimateDurationSeconds,
 } from '@/lib/imaging-queue-schedule-insight'
 import { subtractOccupiedFromFree } from '@/lib/imaging-queue-free-intervals'
+import { listBoardEntries } from '@/lib/imaging-session-board'
+import { collectInProgressBoardOccupancy } from '@/lib/imaging/queue/in-progress-board-occupancy'
 import { listPending, patchRequestScheduleInsight, type ImagingRequest } from '@/lib/imaging-queue-store'
 import { logQueueScheduleInsightChange } from '@/lib/imaging/queue/schedule-audit'
 import {
@@ -110,12 +112,22 @@ export async function reconcilePendingScheduleStatus(options?: ReconcileSchedule
   const nowMs = now.getTime()
   const windowStartMs = window.nauticalDuskUtc.getTime()
   const deadlineMs = Math.min(window.nauticalDawnUtc.getTime(), weatherIntervals.schedulingEndMs ?? Infinity)
-  const fullNightFree: Array<{ startMs: number; endMs: number }> = [
+  const inProgressBoardOccupancy = collectInProgressBoardOccupancy(
+    await listBoardEntries(),
+    getTonightScheduleStrip(now).nightKey,
+    windowStartMs,
+    deadlineMs,
+    nowMs
+  )
+  let fullNightFree: Array<{ startMs: number; endMs: number }> = [
     {
       startMs: Math.max(nowMs, windowStartMs),
       endMs: deadlineMs,
     },
   ]
+  for (const occupied of inProgressBoardOccupancy) {
+    fullNightFree = subtractOccupiedFromFree(fullNightFree, occupied)
+  }
 
   const strip = getTonightScheduleStrip(now)
   const nightKey = strip.nightKey
@@ -268,7 +280,7 @@ export async function reconcilePendingScheduleStatus(options?: ReconcileSchedule
           : undefined
       const insight = computeScheduleInsight(slice, r.id, permitted, {
         schedulingEndMs: deadlineMs,
-        reservedIntervals,
+        reservedIntervals: [...reservedIntervals, ...inProgressBoardOccupancy],
         reservedStartMarginMs: PROJECT_HOLD_START_MARGIN_MS,
         projectSubSessions,
         preferredStartMsForTarget: publishedStartMs,

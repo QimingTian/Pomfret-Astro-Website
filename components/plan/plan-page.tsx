@@ -26,7 +26,7 @@ import { PlanTimelineSlot } from './plan-timeline-slot'
 import { PlanSkyLayers, LAYER_ORDER, type LayerKey } from './plan-sky-layers'
 import { PlanFramingToolbar, PlanFrameOverlays } from './plan-framing-toolbar'
 import { PlanSelectionOverlay, type LiveSkyInfo } from './plan-selection-overlay'
-import { formatDecDegDms, formatRaHoursHms } from '@/lib/format-radec'
+import { planSessionNameForRemote } from '@/lib/plan-target-name'
 
 type WeatherPrediction = {
   ok: boolean
@@ -1117,7 +1117,10 @@ export default function PlanPage() {
     if (planMode === 'framing' && equipment) {
       const livePanels = getLiveFramingPanelsForSend()
       if (livePanels.length === 0) return
-      const targetName = trackingTarget?.name ?? 'Mosaic target'
+      const targetName = planSessionNameForRemote({
+        trackingName: trackingTarget?.name,
+        selectionId: selectionInfo?.id,
+      })
       const isMosaicSend = customMosaic ? livePanels.length > 1 : livePanels.length > 1 || mosaicResult.isMosaic
       sessionStorage.setItem(
         planMosaicDraftKey(siteId),
@@ -1133,7 +1136,7 @@ export default function PlanPage() {
       if (isMosaicSend) {
         remoteParams.set('mosaic', '1')
       } else {
-        remoteParams.set('prefillTarget', targetName)
+        if (targetName) remoteParams.set('prefillTarget', targetName)
         remoteParams.set('prefillRa', String(livePanels[0]!.raHours))
         remoteParams.set('prefillDec', String(livePanels[0]!.decDeg))
       }
@@ -1142,10 +1145,9 @@ export default function PlanPage() {
     }
     let raHours: number
     let decDeg: number
-    let name: string
     const useViewportCenter = planMode === 'framing' && cameraFrameProfile !== null
     if (!useViewportCenter && trackingTarget) {
-      ;({ raHours, decDeg, name } = trackingTarget)
+      ;({ raHours, decDeg } = trackingTarget)
     } else {
       const obs = stel.core?.observer
       if (!obs || !stel.convertFrame || !stel.c2s) return
@@ -1158,16 +1160,19 @@ export default function PlanPage() {
       } catch {
         return
       }
-      name = `Plan view ${formatRaHoursHms(raHours)} ${formatDecDegDms(decDeg)}`
     }
+    const name = planSessionNameForRemote({
+      trackingName: trackingTarget?.name,
+      selectionId: selectionInfo?.id,
+    })
     const params = new URLSearchParams({
       site: siteId,
-      prefillTarget: name,
       prefillRa: raHours.toFixed(6),
       prefillDec: decDeg.toFixed(6),
-    }).toString()
+    })
+    if (name) params.set('prefillTarget', name)
     window.location.href = `/dashboard/remote?${params}`
-  }, [getStel, trackingTarget, cameraFrameProfile, planMode, equipment, getLiveFramingPanelsForSend, customMosaic, mosaicResult.isMosaic, siteId])
+  }, [getStel, trackingTarget, selectionInfo, cameraFrameProfile, planMode, equipment, getLiveFramingPanelsForSend, customMosaic, mosaicResult.isMosaic, siteId])
 
   const canSendToRemote =
     planMode === 'framing' &&

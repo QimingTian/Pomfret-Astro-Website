@@ -3,6 +3,7 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { formatDecDegDms, formatRaHoursHms } from '@/lib/format-radec'
 import { glassSurface } from '@/lib/glass-ui'
+import { formatPlanObjectName } from '@/lib/plan-target-name'
 
 export type SkyCoord = { raHours: number; decDeg: number }
 
@@ -21,14 +22,8 @@ type Props = {
   live: LiveSkyInfo
 }
 
-/**
- * Stellarium Web object ids often include a catalog token, e.g. `NAME Sun`
- * for common names. Strip that prefix for the HUD title only.
- */
 function formatSelectionTitle(id: string): string {
-  const t = id.trim()
-  if (!t) return '—'
-  return t.replace(/^NAME\s+/i, '')
+  return formatPlanObjectName(id) || '—'
 }
 
 function formatSky(sky: SkyCoord | null): string {

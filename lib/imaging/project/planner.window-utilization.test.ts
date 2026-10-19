@@ -89,7 +89,7 @@ test('planTonightSubSessions still plans one continuous run when the whole night
 
 test('planTonightSubSessions leaves a clear spell alone when it cannot earn its overhead', () => {
   const { windowStart, windowEnd } = tonight()
-  // 50 minutes of clear sky above 30°: room for a single 5-minute frame after 40 min of overhead.
+  // 50 minutes of clear sky above 30°: not enough for 60 min of session overhead plus a frame.
   const spellStart = Date.parse('2026-09-17T01:40:00.000Z')
   const weather = [
     { startMs: spellStart, endMs: spellStart + 50 * 60_000 },

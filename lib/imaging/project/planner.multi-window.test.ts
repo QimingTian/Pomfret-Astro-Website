@@ -184,21 +184,19 @@ test('planTonightFilterFrames does not backfill leftover window with moon-blocke
 
 test('planTonightSubSessions fills multiple clear spells and leftover time in a spell', () => {
   const project = mockProject()
-  project.raHours = 12.7
-  project.decDeg = 12
   project.filterPlansTotal = [
-    { filterName: 'L', exposureSeconds: 300, count: 40 },
-    { filterName: 'R', exposureSeconds: 300, count: 40 },
+    { filterName: 'L', exposureSeconds: 300, count: 80 },
+    { filterName: 'R', exposureSeconds: 300, count: 80 },
   ]
   project.remainingByFilter = [
-    { filterName: 'L', exposureSeconds: 300, countRemaining: 40 },
-    { filterName: 'R', exposureSeconds: 300, countRemaining: 40 },
+    { filterName: 'L', exposureSeconds: 300, countRemaining: 80 },
+    { filterName: 'R', exposureSeconds: 300, countRemaining: 80 },
   ]
   const now = new Date('2026-05-17T22:30:00.000Z')
   const { windowStart, windowEnd } = tonightSchedulingSpan(now)
   const weather = [
-    { startMs: Date.parse('2026-05-17T23:00:00.000Z'), endMs: Date.parse('2026-05-18T04:00:00.000Z') },
-    { startMs: Date.parse('2026-05-18T05:00:00.000Z'), endMs: Date.parse('2026-05-18T09:00:00.000Z') },
+    { startMs: Date.parse('2026-05-18T01:15:00.000Z'), endMs: Date.parse('2026-05-18T04:00:00.000Z') },
+    { startMs: Date.parse('2026-05-18T06:00:00.000Z'), endMs: Date.parse('2026-05-18T08:10:00.000Z') },
   ]
   const free = [{ startMs: windowStart, endMs: windowEnd }]
   const plans = planTonightSubSessions(project, free, weather, now)

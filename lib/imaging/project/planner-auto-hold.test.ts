@@ -34,8 +34,8 @@ function samplePlan(): ProjectTonightPlan {
     nightIndex: 6,
     filterPlansTonight: [{ filterName: 'R', exposureSeconds: 600, count: 2 }],
     plannedStartIso: '2026-06-05T05:50:10.265Z',
-    plannedEndIso: '2026-06-05T07:00:10.265Z',
-    durationSeconds: 2 * 600 + 40 * 60, // 1 filter, no start/ra → base overhead only
+    plannedEndIso: '2026-06-05T07:20:10.265Z',
+    durationSeconds: 2 * 600 + 60 * 60, // 1 filter, no start/ra → base overhead only
     scheduleReasons: ['test'],
   }
 }

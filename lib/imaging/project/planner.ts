@@ -621,7 +621,7 @@ function planExposureSeconds(plans: FilterPlanRow[]): number {
 
 /**
  * An extra session costs a full slew, focus and settle cycle, so it has to earn it: at least as
- * much exposure as the overhead it burns. Without this a 45-minute clear spell would be worth
+ * much exposure as the overhead it burns. Without this a short clear spell would be worth
  * opening a whole session for one 5-minute frame.
  */
 function earnsItsOverhead(candidate: PlacedCandidate): boolean {

@@ -1,16 +1,11 @@
 'use client'
 
-import { useEffect, useState, type RefObject, type Dispatch, type SetStateAction } from 'react'
+import { useEffect, useState, type Dispatch, type SetStateAction } from 'react'
 import type { MosaicPanel } from '@/lib/mosaic/framing-rectangle'
-import { formatRaDecPair } from '@/lib/format-radec'
-import { formatDurationShort } from '@/lib/remote/format'
-import { queueStatusLabel, isSessionFailedTerminalLine } from '@/lib/remote/queue-status'
+import { queueStatusLabel } from '@/lib/remote/queue-status'
+import { rememberSessionPassword } from '@/lib/remote/session-password-store'
 import { nightDisplayLabel } from '@/lib/remote/night-label'
 import { queueStatusBadgeClass } from '@/lib/remote/ui-status'
-import {
-  formatVariableStarImagingPlan,
-  variableStarMonitorUntilMs,
-} from '@/lib/imaging/nina/variable-star-plan-label'
 import {
   loadMemberSavedSessionByName,
   saveMemberSavedSession,
@@ -87,17 +82,7 @@ export type RemoteModalQueueItem = {
 }
 
 export type RemoteModalsProps = {
-  terminalSessionId: string | null
-  setTerminalSessionId: Dispatch<SetStateAction<string | null>>
-  terminalQueueStatus: string | null
-  terminalLoading: boolean
-  terminalError: string | null
-  terminalLines: SessionProgressLine[]
-  terminalEndRef: RefObject<HTMLDivElement>
-  terminalPreviewUrl: string | null
-  terminalPreviewUpdatedAt: string | null
-  terminalPreviewError: string | null
-  terminalSessionDetail: RemoteModalQueueItem | null
+  onOpenProgress: (sessionId: string) => void
   nightPickerProjectId: string | null
   nightPickerPurpose: 'progress' | 'download' | null
   queueItems: RemoteModalQueueItem[]
@@ -153,17 +138,7 @@ export type RemoteModalsProps = {
 }
 
 export function RemoteModals({
-  terminalSessionId,
-  setTerminalSessionId,
-  terminalQueueStatus,
-  terminalLoading,
-  terminalError,
-  terminalLines,
-  terminalEndRef,
-  terminalPreviewUrl,
-  terminalPreviewUpdatedAt,
-  terminalPreviewError,
-  terminalSessionDetail,
+  onOpenProgress,
   nightPickerProjectId,
   nightPickerPurpose,
   queueItems,
@@ -231,139 +206,6 @@ export function RemoteModals({
   }, [nightPickerProjectId, nightPickerPurpose])
   return (
     <>
-      {terminalSessionId && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="w-full max-w-5xl rounded-xl border border-gray-700 bg-[#08090a] text-gray-100 shadow-xl flex flex-col max-h-[85vh]">
-            <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-800">
-              <div>
-                <h2 className="text-sm font-semibold text-white">Session progress</h2>
-                <p className="text-xs text-gray-500 font-mono truncate max-w-[20rem] sm:max-w-md">{terminalSessionId}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                {terminalQueueStatus && (
-                  <span className={`text-xs font-semibold uppercase ${queueStatusBadgeClass(terminalQueueStatus)}`}>
-                    {queueStatusLabel(terminalQueueStatus)}
-                  </span>
-                )}
-                {terminalLoading && <span className="text-xs text-gray-500">Updating…</span>}
-                <button
-                  type="button"
-                  onClick={() => setTerminalSessionId(null)}
-                  className="rounded-lg border border-gray-600 px-3 py-1.5 text-xs text-gray-200 hover:bg-gray-800"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-            {terminalError && (
-              <p className="px-4 py-2 text-xs text-red-400 border-b border-gray-800">{terminalError}</p>
-            )}
-            <div className="flex flex-1 min-h-[20rem] flex-col">
-              <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[1.25fr_1fr]">
-                <div className="flex h-full min-h-0 flex-col border-b border-gray-800 md:border-b-0 md:border-r md:border-r-gray-800">
-                  <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-white">Terminal</div>
-                  {terminalLines.length === 0 && !terminalError ? (
-                    <div className="flex flex-1 min-h-0 flex-col items-center justify-center p-3 pt-0">
-                      <p className="text-center text-sm text-gray-500">
-                        {terminalQueueStatus === 'pending' || terminalQueueStatus == null
-                          ? 'Waiting For Observatory Signal.'
-                          : terminalQueueStatus === 'completed'
-                            ? 'Session completed. No further live updates.'
-                            : terminalQueueStatus === 'failed'
-                              ? 'Session marked failed. Waiting for observatory POSTs…'
-                              : 'Waiting for observatory POSTs…'}
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="min-h-0 flex-1 overflow-auto p-3 font-mono text-xs leading-relaxed">
-                      {terminalLines.map((line, i) => {
-                        const failedLine = isSessionFailedTerminalLine(line.text)
-                        return (
-                          <div
-                            key={`${line.at}-${i}-${line.text.slice(0, 24)}`}
-                            className={`whitespace-pre-wrap break-words border-l-2 pl-2 mb-2 ${
-                              failedLine ? 'border-red-600/60' : 'border-green-700/40'
-                            }`}
-                          >
-                            <span className="text-gray-500">[{new Date(line.at).toLocaleTimeString()}]</span>{' '}
-                            <span className={failedLine ? 'text-red-400 font-semibold' : 'text-green-400'}>
-                              {line.text}
-                            </span>
-                          </div>
-                        )
-                      })}
-                      <div ref={terminalEndRef} />
-                    </div>
-                  )}
-                </div>
-                <div className="flex h-full min-h-0 flex-col">
-                  <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-white">Latest Image</div>
-                  <div className="flex-1 p-3 pt-0 flex flex-col items-center justify-center">
-                    {terminalPreviewUrl ? (
-                      <>
-                        <img
-                          src={terminalPreviewUrl}
-                          alt="Latest session preview"
-                          className="w-full max-h-[55vh] object-contain"
-                        />
-                        <p className="mt-2 w-full text-center text-xs">
-                          <span className="text-gray-500">Updated on </span>
-                          {terminalPreviewUpdatedAt
-                            ? new Date(terminalPreviewUpdatedAt).toLocaleString()
-                            : '—'}
-                        </p>
-                      </>
-                    ) : (
-                      <p className="text-sm text-gray-500">No Image.</p>
-                    )}
-                    {terminalPreviewError && <p className="mt-2 text-xs text-gray-500">{terminalPreviewError}</p>}
-                  </div>
-                </div>
-              </div>
-              <div className="border-t border-gray-800">
-                <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-white">Session Detail</div>
-                <div className="grid gap-x-4 gap-y-2 p-3 text-xs md:grid-cols-3">
-                  <p><span className="text-gray-500">Session Name: </span>{terminalSessionDetail?.target ?? '--'}</p>
-                  <p><span className="text-gray-500">First Name: </span>{terminalSessionDetail?.firstName?.trim() ? terminalSessionDetail.firstName : '--'}</p>
-                  <p><span className="text-gray-500">Last Name: </span>{terminalSessionDetail?.lastName?.trim() ? terminalSessionDetail.lastName : '--'}</p>
-                  <p><span className="text-gray-500">Email: </span>{terminalSessionDetail?.email?.trim() ? terminalSessionDetail.email : '--'}</p>
-                  <p><span className="text-gray-500">Output Mode: </span>{terminalSessionDetail?.outputMode ?? '--'}</p>
-                  <p><span className="text-gray-500">Submitted At: </span>{terminalSessionDetail ? new Date(terminalSessionDetail.createdAt).toLocaleString() : '--'}</p>
-                  <p>
-                    <span className="text-gray-500">RA / Dec: </span>
-                    {typeof terminalSessionDetail?.raHours === 'number' &&
-                    typeof terminalSessionDetail?.decDeg === 'number'
-                      ? formatRaDecPair(terminalSessionDetail.raHours, terminalSessionDetail.decDeg)
-                      : '--'}
-                  </p>
-                  <p><span className="text-gray-500">Estimated Duration: </span>{formatDurationShort(terminalSessionDetail?.estimatedDurationSeconds)}</p>
-                  <p className="md:col-span-3">
-                    <span className="text-gray-500">Imaging Plan: </span>
-                    {terminalSessionDetail?.sessionType === 'variable_star'
-                      ? formatVariableStarImagingPlan({
-                          untilMs: variableStarMonitorUntilMs({
-                            scheduleBarEndMs: terminalSessionDetail.scheduleBarEndMs,
-                            scheduleBarStartMs: terminalSessionDetail.scheduleBarStartMs,
-                            plannedStartIso: terminalSessionDetail.plannedStartIso,
-                            estimatedDurationSeconds: terminalSessionDetail.estimatedDurationSeconds,
-                          }),
-                          amplitudeMag: terminalSessionDetail.variableStarAmplitudeMag,
-                          filterName: terminalSessionDetail.filter ?? terminalSessionDetail.filterPlans?.[0]?.filterName,
-                        })
-                      : Array.isArray(terminalSessionDetail?.filterPlans) &&
-                          terminalSessionDetail.filterPlans.length > 0
-                        ? terminalSessionDetail.filterPlans
-                            .map((p) => `${p.filterName} (${p.count} × ${p.exposureSeconds}s)`)
-                            .join(' | ')
-                        : '--'}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {nightPickerProjectId && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
           <div
@@ -453,8 +295,10 @@ export function RemoteModals({
                                 [night.id]: password,
                                 ...(projectId ? { [projectId]: password } : {}),
                               }))
+                              rememberSessionPassword(night.id, password)
+                              if (projectId) rememberSessionPassword(projectId, password)
                             }
-                            setTerminalSessionId(night.id)
+                            onOpenProgress(night.id)
                           }}
                           className="w-full rounded-lg border border-gray-600 px-3 py-2 text-left text-sm text-white hover:bg-[#151616]"
                         >
@@ -595,6 +439,7 @@ export function RemoteModals({
                     setAuthError(typeof data.error === 'string' ? data.error : 'Invalid session password.')
                     return
                   }
+                  rememberSessionPassword(authModalSessionId, password)
                   setNightPickerProjectId(authModalSessionId)
                   setNightPickerPurpose('progress')
                   setAuthModalSessionId(null)
@@ -620,7 +465,8 @@ export function RemoteModals({
                   return
                 }
                 if (authModalAction === 'progress') {
-                  setTerminalSessionId(authModalSessionId)
+                  rememberSessionPassword(authModalSessionId, password)
+                  onOpenProgress(authModalSessionId)
                   setAuthModalSessionId(null)
                   setAuthModalAction(null)
                   setAuthPassword('')

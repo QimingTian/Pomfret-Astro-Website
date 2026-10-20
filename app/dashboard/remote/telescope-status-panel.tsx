@@ -239,7 +239,7 @@ function ncpRestTarget(): GemTarget {
   return { raDeltaDeg: 0, decDeltaDeg: 0 }
 }
 
-export function TelescopeStatusPanel() {
+export function TelescopeStatusPanel({ fill = false }: { fill?: boolean }) {
   const { siteId, site } = useObservatorySite()
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const gemTargetRef = useRef<GemTarget>(ncpRestTarget())
@@ -492,19 +492,40 @@ export function TelescopeStatusPanel() {
     }
   }, [siteId])
 
+  const statusLine = (
+    <p
+      className={`pointer-events-none text-[0.8rem] leading-tight sm:text-[0.9375rem] ${
+        fill ? 'absolute left-2.5 top-2.5 z-10' : 'mt-2 text-center text-sm'
+      }`}
+      style={
+        fill
+          ? { textShadow: '0 1px 4px rgba(0,0,0,0.95), 0 0 14px rgba(0,0,0,0.55)' }
+          : undefined
+      }
+    >
+      <span className="text-white">Telescope: </span>
+      <span className={connected ? 'text-emerald-400' : 'text-red-400'}>
+        {connected ? 'Connected' : 'Disconnected'}
+      </span>
+      <span className="text-white"> | Tracking: </span>
+      <span className={trackingEnabled ? 'text-emerald-400' : 'text-red-400'}>
+        {trackingEnabled == null ? 'Unknown' : trackingEnabled ? 'Enabled' : 'Stopped'}
+      </span>
+    </p>
+  )
+
   return (
-    <div className="bg-transparent p-3">
-      <div ref={viewportRef} className="h-[32rem] w-full overflow-hidden rounded-md lg:h-[36rem]" />
-      <p className="mt-2 text-center text-sm">
-        <span className="text-white">Telescope: </span>
-        <span className={connected ? 'text-green-400' : 'text-red-400'}>
-          {connected ? 'Connected' : 'Disconnected'}
-        </span>
-        <span className="text-white"> | Tracking: </span>
-        <span className={trackingEnabled ? 'text-green-400' : 'text-red-400'}>
-          {trackingEnabled == null ? 'Unknown' : trackingEnabled ? 'Enabled' : 'Stopped'}
-        </span>
-      </p>
+    <div className={fill ? 'relative h-full min-h-0' : 'bg-transparent p-3'}>
+      <div
+        ref={viewportRef}
+        className={
+          fill
+            ? 'absolute inset-0 overflow-hidden rounded-lg'
+            : 'h-[32rem] w-full overflow-hidden rounded-lg lg:h-[36rem]'
+        }
+      />
+      {fill ? statusLine : null}
+      {fill ? null : statusLine}
     </div>
   )
 }

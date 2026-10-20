@@ -48,7 +48,6 @@ import {
 } from '@/lib/remote-saved-session'
 import { sexagesimalPartsFromRadec, parseCoordsFromFormParts } from '@/lib/remote/coords'
 import { formatDurationShort } from '@/lib/remote/format'
-import { queueStatusLabel, isSessionFailedTerminalLine } from '@/lib/remote/queue-status'
 import { rowToVariableChartStar, pickVariableStarRow } from '@/lib/remote/variable-star'
 import { estimateDurationSecondsFromPlans } from '@/lib/remote/duration'
 import {
@@ -59,6 +58,7 @@ import {
   toMosaicDraftPanel,
 } from '@/lib/remote/mosaic-form'
 import { nightDisplayLabel } from '@/lib/remote/night-label'
+import { progressMonitorHref, rememberSessionPassword } from '@/lib/remote/session-password-store'
 import {
   completedSessionOverlapsTonightStripWindow,
   fallbackPlacementForTerminalSession,
@@ -71,8 +71,7 @@ import {
   type ScheduledStripItem,
   type TerminalSessionLike,
 } from '@/lib/remote/schedule-placements'
-import { queueStatusBadgeClass, statusLabel, type ObservatoryStatus } from '@/lib/remote/ui-status'
-import { skyCoordsForMosaicPanel } from '@/lib/imaging/project/panel-coords'
+import { statusLabel, type ObservatoryStatus } from '@/lib/remote/ui-status'
 import {
   variableStarBlockHoursFromTotalSeconds,
   variableStarSessionDurationSeconds,
@@ -100,17 +99,6 @@ const jsonHeaders: HeadersInit = { 'Content-Type': 'application/json' }
 /** Pomfret Astro calibration library (Google Drive). */
 const POMFRET_CALIBRATION_LIBRARY_DRIVE_URL =
   'https://drive.google.com/drive/folders/1nWZly4-op0yazXUoyr8sAAB9Rm8Jl2D4'
-
-type SessionProgressLine = { at: string; text: string }
-type ProgressStreamEvent =
-  | { type: 'snapshot'; queueStatus: string; lines: SessionProgressLine[] }
-  | { type: 'line'; at: string; text: string }
-  | { type: 'status'; queueStatus: string }
-  | { type: 'ping' }
-type PreviewStreamEvent =
-  | { type: 'snapshot'; updatedAt: string | null }
-  | { type: 'updated'; updatedAt: string }
-  | { type: 'ping' }
 
 const FILTER_OPTIONS = [
   { value: 'L', label: 'Luminance' },
@@ -531,21 +519,6 @@ export default function RemotePage() {
     [isAdmin, isLoggedIn, sessionOwnedByMe]
   )
 
-  const canAccessSessionId = useCallback(
-    (sessionId: string): boolean => {
-      if (isAdmin) return true
-      const direct = queueItems.find((i) => i.id === sessionId)
-      if (direct && sessionOwnedByMe(direct)) return true
-      const nightSub = parseProjectNightSubId(sessionId)
-      if (nightSub) {
-        const project = queueItems.find((i) => i.id === nightSub.projectId)
-        if (project && sessionOwnedByMe(project)) return true
-      }
-      return false
-    },
-    [isAdmin, queueItems, sessionOwnedByMe]
-  )
-
   const sessionActionButtonClass = useCallback((enabled: boolean, variant: 'default' | 'danger' = 'default') => {
     if (!enabled) {
       return `${glassPillDisabled} px-3 py-1.5 text-xs`
@@ -605,18 +578,6 @@ export default function RemotePage() {
   const [selectedOccultationId, setSelectedOccultationId] = useState('')
 
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
-  const [terminalSessionId, setTerminalSessionId] = useState<string | null>(null)
-  const [terminalLines, setTerminalLines] = useState<SessionProgressLine[]>([])
-  const [terminalQueueStatus, setTerminalQueueStatus] = useState<string | null>(null)
-  const [terminalLoading, setTerminalLoading] = useState(false)
-  const [terminalError, setTerminalError] = useState<string | null>(null)
-  const [terminalPreviewUrl, setTerminalPreviewUrl] = useState<string | null>(null)
-  const [terminalPreviewError, setTerminalPreviewError] = useState<string | null>(null)
-  const [terminalPreviewUpdatedAt, setTerminalPreviewUpdatedAt] = useState<string | null>(null)
-  /** Dedupe preview refetches: same server `updatedAt` can repeat across uploads; include payload slice so new frames still count. */
-  const terminalPreviewLastFingerprintRef = useRef<string | null>(null)
-  const terminalEndRef = useRef<HTMLDivElement>(null)
-  const terminalOpenedSessionRef = useRef<string | null>(null)
   const [authModalSessionId, setAuthModalSessionId] = useState<string | null>(null)
   const [authModalAction, setAuthModalAction] = useState<
     'progress' | 'project_progress' | 'project_download' | 'download' | 'edit' | null
@@ -1452,10 +1413,6 @@ export default function RemotePage() {
       imagingActive: siteImagingActive || queueImagingActive,
     }
   )
-
-  const terminalImagingActive =
-    Boolean(terminalSessionId) &&
-    (terminalQueueStatus === 'in_progress' || terminalQueueStatus === 'scheduled')
 
   const showTonightWeatherHeadline = useMemo(
     () => isBeforeTonightWeatherHeadline(new Date(scheduleNowMs), site),
@@ -2434,50 +2391,15 @@ export default function RemotePage() {
 
     return baseBlocks
   }, [sessionSchedulePlan.blocks, tonightSchedule])
-  const terminalSessionDetail = useMemo(() => {
-    if (!terminalSessionId) return null
-    const direct = queueItems.find((item) => item.id === terminalSessionId)
-    if (direct) return direct
-    for (const item of queueItems) {
-      if (!item.nights) continue
-      const night = item.nights.find((n) => n.id === terminalSessionId)
-      if (!night) continue
-      const sky =
-        typeof item.raHours === 'number' &&
-        Number.isFinite(item.raHours) &&
-        typeof item.decDeg === 'number' &&
-        Number.isFinite(item.decDeg)
-          ? skyCoordsForMosaicPanel(
-              {
-                raHours: item.raHours,
-                decDeg: item.decDeg,
-                mosaicMode: item.mosaicMode === true,
-                mosaicPanels: item.mosaicPanels,
-              },
-              night.mosaicPanelIndex,
-            )
-          : null
-      return {
-        ...item,
-        id: night.id,
-        target: `${item.target} — ${nightDisplayLabel(night)}`,
-        status:
-          night.status === 'in_progress'
-            ? 'in_progress'
-            : night.status === 'completed'
-              ? 'completed'
-              : night.status === 'failed'
-                ? 'failed'
-                : night.status,
-        filterPlans: night.filterPlans ?? item.filterPlans,
-        estimatedDurationSeconds: night.estimatedDurationSeconds ?? item.estimatedDurationSeconds,
-        ...(sky
-          ? { raHours: sky.raHours, decDeg: sky.decDeg }
-          : {}),
-      }
-    }
-    return null
-  }, [queueItems, terminalSessionId])
+
+  const openProgressMonitor = useCallback(
+    (sessionId: string) => {
+      const pwd = sessionPasswords[sessionId] ?? ''
+      if (pwd) rememberSessionPassword(sessionId, pwd)
+      router.push(progressMonitorHref(sessionId))
+    },
+    [router, sessionPasswords]
+  )
 
   const resolveSessionPassword = useCallback(
     (sessionId: string): string => {
@@ -2489,27 +2411,6 @@ export default function RemotePage() {
     },
     [sessionPasswords]
   )
-
-  useEffect(() => {
-    if (!terminalSessionId) {
-      terminalOpenedSessionRef.current = null
-      return
-    }
-    const isNewSession = terminalOpenedSessionRef.current !== terminalSessionId
-    terminalOpenedSessionRef.current = terminalSessionId
-    if (isNewSession) {
-      setTerminalLines([])
-      setTerminalQueueStatus(null)
-      setTerminalError(null)
-      setTerminalLoading(true)
-      setTerminalPreviewUrl(null)
-      setTerminalPreviewError(null)
-      setTerminalPreviewUpdatedAt(null)
-      terminalPreviewLastFingerprintRef.current = null
-    }
-    const password = resolveSessionPasswordRef.current(terminalSessionId)
-    if (isNewSession) void loadTerminalPreviewRef.current(terminalSessionId, password)
-  }, [terminalSessionId])
 
   const downloadSessionFile = useCallback(
     async (queueId: string, password: string): Promise<string | null> => {
@@ -2531,123 +2432,6 @@ export default function RemotePage() {
     },
     [refreshQueue, siteId]
   )
-
-  const loadTerminalPreview = useCallback(
-    async (id: string, passwordOverride?: string) => {
-      const password = passwordOverride ?? resolveSessionPassword(id)
-      if (!password && !isAdmin && !canAccessSessionId(id)) return
-      try {
-        const res = await observatorySiteFetch(
-          `/api/imaging/preview?queueId=${encodeURIComponent(id)}&mode=json&_=${Date.now()}`,
-          siteId,
-          {
-            credentials: 'include',
-            headers: password ? { 'x-session-password': password } : {},
-            cache: 'no-store',
-          }
-        )
-        const data = await res.json().catch(() => ({}))
-        if (!res.ok || data?.ok !== true || typeof data.dataBase64 !== 'string') {
-          if (res.status === 404) {
-            setTerminalPreviewUrl(null)
-            setTerminalPreviewError(null)
-            setTerminalPreviewUpdatedAt(null)
-            terminalPreviewLastFingerprintRef.current = null
-            return
-          }
-          setTerminalPreviewError(typeof data.error === 'string' ? data.error : 'Preview unavailable.')
-          return
-        }
-        const updatedAt = typeof data.updatedAt === 'string' ? data.updatedAt : null
-        const dataBase64 = data.dataBase64 as string
-        const fingerprint = `${updatedAt ?? ''}|${dataBase64.length}|${dataBase64.slice(0, 240)}|${dataBase64.slice(-240)}`
-        if (fingerprint === terminalPreviewLastFingerprintRef.current) {
-          setTerminalPreviewError(null)
-          return
-        }
-        terminalPreviewLastFingerprintRef.current = fingerprint
-        const contentType = typeof data.contentType === 'string' ? data.contentType : 'image/jpeg'
-        const nextPreviewUrl = `data:${contentType};base64,${dataBase64}`
-        await new Promise<void>((resolve) => {
-          const image = new window.Image()
-          image.onload = () => resolve()
-          image.onerror = () => resolve()
-          image.src = nextPreviewUrl
-        })
-        setTerminalPreviewError(null)
-        setTerminalPreviewUpdatedAt(updatedAt)
-        setTerminalPreviewUrl(nextPreviewUrl)
-      } catch {
-        setTerminalPreviewError('Preview unavailable.')
-      }
-    },
-    [resolveSessionPassword, isAdmin, canAccessSessionId, siteId]
-  )
-
-  const loadTerminalPreviewRef = useRef(loadTerminalPreview)
-  loadTerminalPreviewRef.current = loadTerminalPreview
-
-  const resolveSessionPasswordRef = useRef(resolveSessionPassword)
-  resolveSessionPasswordRef.current = resolveSessionPassword
-
-  const canAccessSessionIdRef = useRef(canAccessSessionId)
-  canAccessSessionIdRef.current = canAccessSessionId
-
-  useAdaptivePoll(
-    'preview',
-    () => {
-      if (!terminalSessionId) return
-      const sessionId = terminalSessionId
-      const password = resolveSessionPasswordRef.current(sessionId)
-      if (!password && !isAdmin && !canAccessSessionIdRef.current(sessionId)) return
-      void loadTerminalPreviewRef.current(sessionId, password)
-    },
-    { enabled: Boolean(terminalSessionId), imagingActive: terminalImagingActive }
-  )
-
-  useAdaptivePoll(
-    'progress',
-    async () => {
-      if (!terminalSessionId) return
-      const sessionId = terminalSessionId
-      const password = resolveSessionPasswordRef.current(sessionId)
-      if (!password && !isAdmin && !canAccessSessionIdRef.current(sessionId)) {
-        setTerminalError('Session password required.')
-        setTerminalLoading(false)
-        return
-      }
-      const headers: HeadersInit = password ? { 'x-session-password': password } : {}
-      try {
-        const res = await observatorySiteFetch(`/api/imaging/queue/${encodeURIComponent(sessionId)}/progress`, siteId, {
-          cache: 'no-store',
-          headers,
-        })
-        const data = (await res.json().catch(() => ({}))) as {
-          ok?: boolean
-          lines?: SessionProgressLine[]
-          queueStatus?: string
-          error?: string
-        }
-        if (!res.ok || data.ok !== true) {
-          setTerminalLoading(false)
-          if (typeof data.error === 'string') setTerminalError(data.error)
-          return
-        }
-        setTerminalError(null)
-        setTerminalLines(Array.isArray(data.lines) ? data.lines : [])
-        setTerminalQueueStatus(typeof data.queueStatus === 'string' ? data.queueStatus : null)
-        setTerminalLoading(false)
-        if (data.queueStatus === 'completed') void refreshQueueRef.current()
-      } catch {
-        setTerminalLoading(false)
-      }
-    },
-    { enabled: Boolean(terminalSessionId), imagingActive: terminalImagingActive }
-  )
-
-  useEffect(() => {
-    terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [terminalLines, terminalSessionId])
 
   async function parseCoordinates(): Promise<{ raHours: number; decDeg: number } | null> {
     const r = parseCoordsFromFormParts(
@@ -2973,7 +2757,7 @@ export default function RemotePage() {
         return
       }
       if (isAdmin || sessionOwnedByMe(item)) {
-        setTerminalSessionId(item.id)
+        openProgressMonitor(item.id)
         return
       }
       setAuthModalSessionId(item.id)
@@ -2984,6 +2768,7 @@ export default function RemotePage() {
     [
       canInteractWithSession,
       isAdmin,
+      openProgressMonitor,
       openProjectPickerAfterAccess,
       sessionOwnedByMe,
       sessionPasswords,
@@ -3496,17 +3281,7 @@ export default function RemotePage() {
         </section>
       </div>
       <RemoteModals
-        terminalSessionId={terminalSessionId}
-        setTerminalSessionId={setTerminalSessionId}
-        terminalQueueStatus={terminalQueueStatus}
-        terminalLoading={terminalLoading}
-        terminalError={terminalError}
-        terminalLines={terminalLines}
-        terminalEndRef={terminalEndRef}
-        terminalPreviewUrl={terminalPreviewUrl}
-        terminalPreviewUpdatedAt={terminalPreviewUpdatedAt}
-        terminalPreviewError={terminalPreviewError}
-        terminalSessionDetail={terminalSessionDetail}
+        onOpenProgress={openProgressMonitor}
         nightPickerProjectId={nightPickerProjectId}
         nightPickerPurpose={nightPickerPurpose}
         queueItems={queueItems}

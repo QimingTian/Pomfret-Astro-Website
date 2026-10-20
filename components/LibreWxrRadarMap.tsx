@@ -27,9 +27,11 @@ const FRAME_MS = 1100
 type LibreWxrRadarMapProps = {
   /** Cygnus / EU dashboard: wide strip. Pomfret grid next to cloud map: match 4:3. */
   compact?: boolean
+  /** Fill the parent instead of a fixed aspect ratio. */
+  fill?: boolean
 }
 
-export default function LibreWxrRadarMap({ compact = false }: LibreWxrRadarMapProps) {
+export default function LibreWxrRadarMap({ compact = false, fill = false }: LibreWxrRadarMapProps) {
   const { site } = useObservatorySite()
   const mapLat = site.weatherLat
   const mapLon = site.weatherLon
@@ -173,12 +175,14 @@ export default function LibreWxrRadarMap({ compact = false }: LibreWxrRadarMapPr
   return (
     <div
       className={
-        compact
-          ? 'relative w-full overflow-hidden rounded-lg bg-[#1a1a1a] librewxr-radar-map aspect-[21/9] max-h-[22rem]'
-          : 'relative w-full overflow-hidden rounded-lg bg-[#1a1a1a] librewxr-radar-map aspect-[4/3]'
+        fill
+          ? 'relative h-full min-h-0 w-full overflow-hidden rounded-lg bg-[#1a1a1a] librewxr-radar-map'
+          : compact
+            ? 'relative w-full overflow-hidden rounded-lg bg-[#1a1a1a] librewxr-radar-map aspect-[21/9] max-h-[22rem]'
+            : 'relative w-full overflow-hidden rounded-lg bg-[#1a1a1a] librewxr-radar-map aspect-[4/3]'
       }
     >
-      <MapFrameTimeOverlay title="Precipitation Radar" timeLabel={frameTimeLabel} />
+      <MapFrameTimeOverlay timeLabel={frameTimeLabel} />
       <div ref={containerRef} className="absolute inset-0 z-0 h-full w-full" />
       {(loading || error) && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/50 text-sm text-white px-4 text-center">

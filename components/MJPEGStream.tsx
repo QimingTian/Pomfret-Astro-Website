@@ -14,6 +14,8 @@ interface MJPEGStreamProps {
   natural?: boolean
   /** Only when natural=false: fill parent with object-cover instead of letterboxing */
   fill?: boolean
+  /** Size the img element to the frame; leftover space stays on the parent, not inside the image. */
+  hug?: boolean
 }
 
 export default function MJPEGStream({
@@ -22,6 +24,7 @@ export default function MJPEGStream({
   minimal = false,
   natural = true,
   fill = false,
+  hug = false,
 }: MJPEGStreamProps) {
   const imgRef = useRef<HTMLImageElement>(null)
   const [fps, setFps] = useState(0)
@@ -60,13 +63,17 @@ export default function MJPEGStream({
     }
   }, [url])
 
-  const imgClass = natural
-    ? 'block h-auto w-full'
-    : `block h-full w-full min-h-0 min-w-0 ${fill ? 'object-cover' : 'object-contain'}`
+  const imgClass = hug
+    ? 'block h-auto w-auto max-h-full max-w-full'
+    : natural
+      ? 'block h-auto w-full'
+      : `block h-full w-full min-h-0 min-w-0 ${fill ? 'object-cover' : 'object-contain'}`
 
   return (
     <div
-      className={`relative bg-black ${natural ? 'w-full' : 'h-full min-h-0 min-w-0 w-full'} ${className || ''}`}
+      className={`relative ${hug ? 'inline-flex max-h-full max-w-full' : 'bg-black'} ${
+        hug ? '' : natural ? 'w-full' : 'h-full min-h-0 min-w-0 w-full'
+      } ${className || ''}`}
     >
       <img ref={imgRef} alt="" className={imgClass} onError={() => setLoading(true)} />
       {!minimal && loading && (

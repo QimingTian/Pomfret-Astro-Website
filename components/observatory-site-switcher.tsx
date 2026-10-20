@@ -71,7 +71,13 @@ export function ObservatorySiteMenuProvider({ children }: { children: ReactNode 
   const aboutActive =
     pathname === '/dashboard' ||
     DASHBOARD_ABOUT_LINKS.some((item) => pathname === item.href)
-  const toolsActive = hasSite && DASHBOARD_TOOL_LINKS.some((item) => pathname === item.href)
+  const toolsActive =
+    hasSite &&
+    DASHBOARD_TOOL_LINKS.some((item) =>
+      item.href === '/dashboard/remote'
+        ? pathname.startsWith('/dashboard/remote')
+        : pathname === item.href
+    )
 
   const cancelClose = useCallback(() => {
     if (closeTimer.current) {
@@ -355,7 +361,10 @@ export function DashboardToolsTrigger() {
         {hasSite ? (
           <HeaderFlyoutList>
             {DASHBOARD_TOOL_LINKS.map((item) => {
-              const selected = pathname === item.href
+              const selected =
+                item.href === '/dashboard/remote'
+                  ? pathname.startsWith('/dashboard/remote')
+                  : pathname === item.href
               return (
                 <li key={item.href}>
                   <Link

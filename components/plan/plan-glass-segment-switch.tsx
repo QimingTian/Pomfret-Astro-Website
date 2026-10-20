@@ -19,6 +19,7 @@ type Props<T extends string> = {
   /** Min width per segment — identical on every option (matches Atlas / Framing). */
   minWidthRem?: number
   className?: string
+  compact?: boolean
 }
 
 export function PlanGlassSegmentSwitch<T extends string>({
@@ -29,11 +30,12 @@ export function PlanGlassSegmentSwitch<T extends string>({
   ariaLabel,
   minWidthRem = 5.5,
   className = '',
+  compact = false,
 }: Props<T>) {
   const index = Math.max(0, options.findIndex((o) => o.value === value))
   return (
     <div
-      className={`glass-pill relative inline-flex shrink-0 items-center p-0.5 ${disabled ? 'opacity-60' : ''} ${className}`}
+      className={`glass-pill relative inline-flex shrink-0 items-stretch p-0.5 ${disabled ? 'opacity-60' : ''} ${className}`}
       role="group"
       aria-label={ariaLabel}
     >
@@ -56,7 +58,9 @@ export function PlanGlassSegmentSwitch<T extends string>({
             aria-label={o.label ?? o.title}
             title={o.title ?? o.label}
             onClick={() => onChange(o.value)}
-            className={`relative z-[1] flex items-center justify-center rounded-full px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed ${
+            className={`relative z-[1] flex items-center justify-center rounded-full font-medium transition-colors disabled:cursor-not-allowed ${
+              compact ? 'h-full px-2.5 py-0 text-xs' : 'px-3 py-1.5 text-sm'
+            } ${
               active ? 'text-white' : 'glass-pill-idle border-transparent bg-transparent text-white/70 hover:text-white'
             }`}
             style={{ minWidth: `${minWidthRem}rem` }}

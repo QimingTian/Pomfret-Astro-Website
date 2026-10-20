@@ -149,7 +149,13 @@ function AscCompassRose({ className = '' }: { className?: string }) {
 
 const streamAreaClass = 'relative w-full overflow-hidden rounded-lg bg-black'
 
-export default function AllSkyCameraView() {
+export default function AllSkyCameraView({
+  fill = false,
+  overlayMode = 'full',
+}: {
+  fill?: boolean
+  overlayMode?: 'full' | 'compact' | 'none' | 'timestamp'
+}) {
   const member = useMember()
   const { siteId } = useObservatorySite()
   const controller = useAppStore((s) => s.controllers.find((c) => c.roles.includes('cameras')))
@@ -439,12 +445,26 @@ export default function AllSkyCameraView() {
     const lastFrameText =
       ascUnavailable || !lastFrameAt ? '—' : formatOverlayDateTime(lastFrameAt)
 
+    if (overlayMode === 'timestamp' || overlayMode === 'none') {
+      if (overlayMode === 'none') return null
+      return (
+        <div
+          className="pointer-events-none absolute left-0 top-0 z-10 px-2.5 py-1.5 text-left text-[0.8rem] leading-tight sm:px-3 sm:py-2 sm:text-[0.9375rem]"
+          style={overlayTextShadowStyle}
+        >
+          <p className="break-words text-emerald-400">{lastFrameText}</p>
+        </div>
+      )
+    }
+
     return (
       <div
         className="pointer-events-none absolute left-0 top-0 z-10 max-w-[min(100%,min(92vw,28rem))] space-y-0.5 px-2.5 py-1.5 text-left text-[0.8rem] leading-tight sm:space-y-1 sm:px-3 sm:py-2 sm:text-[0.9375rem] sm:leading-snug"
         style={overlayTextShadowStyle}
       >
-        <p className="break-words font-semibold text-white">All Sky Camera</p>
+        {overlayMode === 'full' ? (
+          <p className="break-words font-semibold text-white">All Sky Camera</p>
+        ) : null}
         <p className="break-words">
           <span className={overlayTitleClass}>Current Time: </span>
           <span className={overlayValueClass(false)}>{now ? formatOverlayDateTime(now) : '—'}</span>
@@ -455,72 +475,80 @@ export default function AllSkyCameraView() {
             {lastFrameText}
           </span>
         </p>
-        <p className="break-words">
-          <span className={overlayTitleClass}>ASC Exposure &amp; Gain: </span>
-          <span className={exposureGainText === '—' ? dashClass : overlayValueGreen}>
-            {exposureGainText}
-          </span>
-        </p>
-        <p className="break-words">
-          <span className={overlayTitleClass}>Observatory Status: </span>
-          <span
-            className={
-              obsText === '—' ? dashClass : obsValueRed ? overlayValueRed : overlayValueGreen
-            }
-          >
-            {obsText}
-          </span>
-        </p>
+        {overlayMode === 'full' ? (
+          <>
+            <p className="break-words">
+              <span className={overlayTitleClass}>ASC Exposure &amp; Gain: </span>
+              <span className={exposureGainText === '—' ? dashClass : overlayValueGreen}>
+                {exposureGainText}
+              </span>
+            </p>
+            <p className="break-words">
+              <span className={overlayTitleClass}>Observatory Status: </span>
+              <span
+                className={
+                  obsText === '—' ? dashClass : obsValueRed ? overlayValueRed : overlayValueGreen
+                }
+              >
+                {obsText}
+              </span>
+            </p>
+          </>
+        ) : null}
         <p className="break-words">
           <span className={overlayTitleClass}>Cloud: </span>
           <span className={cloudText === '—' ? dashClass : overlayValueClass(cloudValueRed)}>
             {cloudText}
           </span>
         </p>
-        <p className="break-words">
-          <span className={overlayTitleClass}>Transparency: </span>
-          <span
-            className={
-              transparencyText === '—' ? dashClass : overlayValueClass(transparencyValueRed)
-            }
-          >
-            {transparencyText}
-          </span>
-        </p>
-        <p className="break-words">
-          <span className={overlayTitleClass}>Seeing: </span>
-          <span className={seeingText === '—' ? dashClass : overlayValueClass(seeingValueRed)}>
-            {seeingText}
-          </span>
-        </p>
-        <p className="break-words">
-          <span className={overlayTitleClass}>AQI: </span>
-          <span className={aqiText === '—' ? dashClass : overlayValueClass(aqiValueRed)}>
-            {aqiText}
-          </span>
-        </p>
-        <p className="break-words">
-          <span className={overlayTitleClass}>Wind: </span>
-          <span className={windText === '—' ? dashClass : overlayValueClass(windValueRed)}>
-            {windText}
-          </span>
-        </p>
-        <p className="break-words">
-          <span className={overlayTitleClass}>Wind Gust: </span>
-          <span className={windGustText === '—' ? dashClass : overlayValueClass(windGustValueRed)}>
-            {windGustText}
-          </span>
-        </p>
-        <p className="break-words">
-          <span className={overlayTitleClass}>Temperature: </span>
-          <span className={tempText === '—' ? dashClass : overlayValueGreen}>{tempText}</span>
-        </p>
-        <p className="break-words">
-          <span className={overlayTitleClass}>Humidity: </span>
-          <span className={humText === '—' ? dashClass : overlayValueClass(humValueRed)}>
-            {humText}
-          </span>
-        </p>
+        {overlayMode === 'full' ? (
+          <>
+            <p className="break-words">
+              <span className={overlayTitleClass}>Transparency: </span>
+              <span
+                className={
+                  transparencyText === '—' ? dashClass : overlayValueClass(transparencyValueRed)
+                }
+              >
+                {transparencyText}
+              </span>
+            </p>
+            <p className="break-words">
+              <span className={overlayTitleClass}>Seeing: </span>
+              <span className={seeingText === '—' ? dashClass : overlayValueClass(seeingValueRed)}>
+                {seeingText}
+              </span>
+            </p>
+            <p className="break-words">
+              <span className={overlayTitleClass}>AQI: </span>
+              <span className={aqiText === '—' ? dashClass : overlayValueClass(aqiValueRed)}>
+                {aqiText}
+              </span>
+            </p>
+            <p className="break-words">
+              <span className={overlayTitleClass}>Wind: </span>
+              <span className={windText === '—' ? dashClass : overlayValueClass(windValueRed)}>
+                {windText}
+              </span>
+            </p>
+            <p className="break-words">
+              <span className={overlayTitleClass}>Wind Gust: </span>
+              <span className={windGustText === '—' ? dashClass : overlayValueClass(windGustValueRed)}>
+                {windGustText}
+              </span>
+            </p>
+            <p className="break-words">
+              <span className={overlayTitleClass}>Temperature: </span>
+              <span className={tempText === '—' ? dashClass : overlayValueGreen}>{tempText}</span>
+            </p>
+            <p className="break-words">
+              <span className={overlayTitleClass}>Humidity: </span>
+              <span className={humText === '—' ? dashClass : overlayValueClass(humValueRed)}>
+                {humText}
+              </span>
+            </p>
+          </>
+        ) : null}
         <p className="break-words">
           <span className={overlayTitleClass}>Raining: </span>
           <span
@@ -535,24 +563,28 @@ export default function AllSkyCameraView() {
             {rainingText}
           </span>
         </p>
-        <p className="break-words">
-          <span className={overlayTitleClass}>Moon Illumination: </span>
-          <span className={moonIllumText === '—' ? dashClass : overlayValueGreen}>{moonIllumText}</span>
-        </p>
-        <p className="break-words">
-          <span className={overlayTitleClass}>Thunderstorm Detection: </span>
-          <span
-            className={
-              stormSafe == null
-                ? dashClass
-                : stormSafe
-                  ? overlayValueGreen
-                  : overlayValueRed
-            }
-          >
-            {stormSafe == null ? '—' : stormSafe ? 'Safe' : 'Unsafe'}
-          </span>
-        </p>
+        {overlayMode === 'full' ? (
+          <>
+            <p className="break-words">
+              <span className={overlayTitleClass}>Moon Illumination: </span>
+              <span className={moonIllumText === '—' ? dashClass : overlayValueGreen}>{moonIllumText}</span>
+            </p>
+            <p className="break-words">
+              <span className={overlayTitleClass}>Thunderstorm Detection: </span>
+              <span
+                className={
+                  stormSafe == null
+                    ? dashClass
+                    : stormSafe
+                      ? overlayValueGreen
+                      : overlayValueRed
+                }
+              >
+                {stormSafe == null ? '—' : stormSafe ? 'Safe' : 'Unsafe'}
+              </span>
+            </p>
+          </>
+        ) : null}
       </div>
     )
   }, [
@@ -572,6 +604,7 @@ export default function AllSkyCameraView() {
     humidityPct,
     raining,
     stormSafe,
+    overlayMode,
   ])
 
   const sequenceMessage = (
@@ -589,13 +622,31 @@ export default function AllSkyCameraView() {
     </div>
   )
 
-  return (
-    <div className="flex h-full flex-col">
-      <div className="min-h-0 flex-1">
-        <div className={`${streamAreaClass} min-h-[400px]`}>
-          {sequenceActive ? sequenceMessage : <MJPEGStream url={streamURL} minimal />}
+  if (overlayMode === 'timestamp') {
+    return (
+      <div className="flex h-full min-h-0 w-full items-center justify-center [container-type:size]">
+        <div
+          className={streamAreaClass}
+          style={{
+            aspectRatio: '16 / 9',
+            width: 'min(100%, calc(100cqh * 16 / 9))',
+            height: 'min(100%, calc(100cqw * 9 / 16))',
+          }}
+        >
+          {sequenceActive ? sequenceMessage : <MJPEGStream url={streamURL} minimal natural={false} fill />}
           {overlay}
-          {!sequenceActive ? <AscCompassRose /> : null}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className={fill ? 'flex h-full min-h-0 w-full flex-col' : 'flex h-full flex-col'}>
+      <div className="min-h-0 flex-1">
+        <div className={`${streamAreaClass} ${fill ? 'h-full min-h-0' : 'min-h-[400px]'}`}>
+          {sequenceActive ? sequenceMessage : <MJPEGStream url={streamURL} minimal natural={!fill} fill={false} />}
+          {overlay}
+          {sequenceActive ? null : <AscCompassRose />}
         </div>
       </div>
     </div>

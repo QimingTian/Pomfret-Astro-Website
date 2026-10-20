@@ -41,6 +41,8 @@ export default function DashboardLayout({
 function DashboardChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const isHomePage = pathname === '/dashboard' || pathname === '/dashboard/about'
+  const isProgressMonitor = pathname.startsWith('/dashboard/remote/progress')
+  const fullBleed = isHomePage
   const [menuOpen, setMenuOpen] = useState(false)
   const member = useMember()
   const { hasSite } = useObservatorySite()
@@ -60,6 +62,14 @@ function DashboardChrome({ children }: { children: React.ReactNode }) {
   const navItemActive = (href: string) => {
     if (href === '/dashboard/about') return isHomePage
     return pathname === href
+  }
+
+  if (isProgressMonitor) {
+    return (
+      <div className="dashboard-surface h-dvh overflow-hidden bg-[#08090a] text-apple-dark dark:text-[#eee9dc]">
+        <main className="h-full min-h-0">{children}</main>
+      </div>
+    )
   }
 
   return (
@@ -132,15 +142,15 @@ function DashboardChrome({ children }: { children: React.ReactNode }) {
 
       <main
         className={
-          isHomePage
-            ? 'flex-1'
+          fullBleed
+            ? 'min-h-0 flex-1'
             : 'mx-auto w-full max-w-[1400px] flex-1 px-4 py-8 sm:px-6 lg:px-10'
         }
       >
         {children}
       </main>
       {/* About embeds its own copyright above the fixed video layer. */}
-      {!isHomePage ? <SiteCopyrightFooter /> : null}
+      {!fullBleed ? <SiteCopyrightFooter /> : null}
     </div>
   )
 }

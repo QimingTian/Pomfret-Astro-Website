@@ -191,7 +191,6 @@ export function SessionProgressMonitor() {
   const [queueItems, setQueueItems] = useState<QueueRow[]>([])
   const [lines, setLines] = useState<SessionProgressLine[]>([])
   const [queueStatus, setQueueStatus] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [previewUpdatedAt, setPreviewUpdatedAt] = useState<string | null>(null)
@@ -293,7 +292,6 @@ export function SessionProgressMonitor() {
     'progress',
     async () => {
       if (!sessionId) return
-      setLoading(true)
       try {
         const headers: HeadersInit = password ? { 'x-session-password': password } : {}
         const res = await observatorySiteFetch(`/api/imaging/queue/${encodeURIComponent(sessionId)}/progress`, siteId, {
@@ -315,8 +313,6 @@ export function SessionProgressMonitor() {
         setQueueStatus(typeof data.queueStatus === 'string' ? data.queueStatus : null)
       } catch {
         /* keep last */
-      } finally {
-        setLoading(false)
       }
     },
     { enabled: Boolean(sessionId) && !isDemo, imagingActive, resetKey: `${siteId}:${sessionId}` }
@@ -351,7 +347,6 @@ export function SessionProgressMonitor() {
               {queueStatusLabel(status)}
             </span>
           ) : null}
-          {loading ? <span className="text-[11px] text-white/45">Updating</span> : null}
           <Link href="/dashboard/remote" className={`${glassPillSm} box-border h-8`}>
             Back to Remote
           </Link>

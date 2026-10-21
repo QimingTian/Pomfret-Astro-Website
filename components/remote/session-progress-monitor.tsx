@@ -33,6 +33,15 @@ import type { RemoteModalQueueItem, SessionProgressLine } from '@/components/rem
 
 type QueueRow = RemoteModalQueueItem
 
+function progressLinesEqual(a: SessionProgressLine[], b: SessionProgressLine[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].at !== b[i].at || a[i].text !== b[i].text) return false
+  }
+  return true
+}
+
 const DEMO_SESSION_ID = 'demo-ngc7000'
 const DEMO_PREVIEW_SVG = encodeURIComponent(
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 480">
@@ -197,7 +206,6 @@ export function SessionProgressMonitor() {
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [passwordDraft, setPasswordDraft] = useState('')
   const [password, setPassword] = useState(() => (sessionId ? recalledSessionPassword(sessionId) : ''))
-  const terminalEndRef = useRef<HTMLDivElement>(null)
   const previewFingerprintRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -309,7 +317,8 @@ export function SessionProgressMonitor() {
           return
         }
         setError(null)
-        setLines(Array.isArray(data.lines) ? data.lines : [])
+        const nextLines = Array.isArray(data.lines) ? data.lines : []
+        setLines((prev) => (progressLinesEqual(prev, nextLines) ? prev : nextLines))
         setQueueStatus(typeof data.queueStatus === 'string' ? data.queueStatus : null)
       } catch {
         /* keep last */
@@ -326,10 +335,6 @@ export function SessionProgressMonitor() {
     },
     { enabled: Boolean(sessionId) && !isDemo, imagingActive, resetKey: `${siteId}:${sessionId}:${password}` }
   )
-
-  useEffect(() => {
-    terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [lines, sessionId])
 
   const status = queueStatus ?? detail?.status ?? null
 
@@ -519,7 +524,6 @@ export function SessionProgressMonitor() {
                   </div>
                 )
               })}
-              <div ref={terminalEndRef} />
             </div>
           )}
         </section>

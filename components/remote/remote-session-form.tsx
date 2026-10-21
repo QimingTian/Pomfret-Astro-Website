@@ -888,17 +888,17 @@ export function RemoteSessionForm({
           {sessionType === 'variable_star' && variableStarDurationPick && (
             <div className="sm:col-span-2 grid gap-2">
               <span className="text-sm font-medium text-white">Session duration</span>
-              <div
-                className="grid w-full gap-2"
-                style={{
-                  gridTemplateColumns: `repeat(${Math.max(1, Math.ceil(variableStarDurationPick.allOptions.length / 2))}, minmax(0, 1fr))`,
-                }}
-              >
+              <div className="grid w-full grid-cols-[repeat(auto-fill,minmax(5.5rem,1fr))] items-center gap-2">
                 {variableStarDurationPick.allOptions.map((h) => {
                   const halfStepsForH = Math.round(h * 2)
                   const enabled =
                     variableStarDurationPick.coordsOk && halfStepsForH <= variableStarDurationPick.starHalfSteps
                   const selected = enabled && variableStarBlockHours === h
+                  const pill = selected
+                    ? glassPillToggleActive
+                    : enabled
+                      ? glassPillToggleIdle
+                      : glassPillToggleDisabledMd
                   return (
                     <button
                       key={h}
@@ -911,7 +911,7 @@ export function RemoteSessionForm({
                           setVariableStarDurationUserSelected(true)
                         }
                       }}
-                      className={selected ? `${glassPillToggleActive} w-full` : enabled ? `${glassPillToggleIdle} w-full` : glassPillToggleDisabledMd}
+                      className={`${pill} h-9 w-full whitespace-nowrap`}
                     >
                       {`${h} h`}
                     </button>

@@ -59,22 +59,24 @@ jobs:
 
       - name: Validate catalog
         run: |
-          ROWS=$(grep -c '^"' Variables/index.csv || true)
-          echo "catalog_rows=${ROWS}"
-          if [ "${ROWS}" -lt 100 ]; then
-            echo "Shortlist too small: ${ROWS}"
-            exit 1
-          fi
+          for f in Variables/index.csv Variables/index.cygnus.csv; do
+            ROWS=$(grep -c '^"' "$f" || true)
+            echo "${f} catalog_rows=${ROWS}"
+            if [ "${ROWS}" -lt 100 ]; then
+              echo "Shortlist too small: ${f} ${ROWS}"
+              exit 1
+            fi
+          done
 
       - name: Commit shortlist
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Variables/index.csv
+          git add Variables/index.csv Variables/index.cygnus.csv
           if git diff --staged --quiet; then
             echo "Shortlist unchanged — skipping commit"
             exit 0
           fi
-          git commit -m "chore(variable-stars): refresh Pomfret shortlist"
-          git pull --rebase origin main
+          git commit -m "chore(variable-stars): refresh Pomfret and Cygnus shortlists"
+          git pull --rebase --autostash origin main
           git push

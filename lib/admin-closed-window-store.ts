@@ -1,5 +1,6 @@
 import { postgresReadsEnabled } from '@/lib/db'
 import { REDIS_LIVE_KEYS } from '@/lib/db/data-plane'
+import { subtractOccupiedFromFree } from '@/lib/imaging-queue-free-intervals'
 import { kvEnabled, kvGetString, kvSetJson } from '@/lib/kv-rest'
 import { currentObservatorySiteId, scopedKvKey } from '@/lib/observatory-site-scope'
 
@@ -149,6 +150,19 @@ export async function getAdminClosedWindowsInRange(startMs: number, endMs: numbe
     if (overlapEnd > overlapStart) out.push({ startMs: overlapStart, endMs: overlapEnd })
   }
   return out.sort((a, b) => a.startMs - b.startMs)
+}
+
+/** Treat admin closed windows as occupied session time (not a weather hole). */
+export async function applyAdminClosedWindowsToFree(
+  freeIntervals: Array<{ startMs: number; endMs: number }>,
+  rangeStartMs: number,
+  rangeEndMs: number
+): Promise<Array<{ startMs: number; endMs: number }>> {
+  let next = freeIntervals
+  for (const closed of await getAdminClosedWindowsInRange(rangeStartMs, rangeEndMs)) {
+    next = subtractOccupiedFromFree(next, closed)
+  }
+  return next
 }
 
 export async function isWithinAdminClosedWindow(atMs: number): Promise<boolean> {

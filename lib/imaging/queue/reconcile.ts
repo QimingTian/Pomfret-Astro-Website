@@ -27,6 +27,7 @@ import {
   computeScheduleInsight,
   estimateDurationSeconds,
 } from '@/lib/imaging-queue-schedule-insight'
+import { applyAdminClosedWindowsToFree, getAdminClosedWindowsInRange } from '@/lib/admin-closed-window-store'
 import { subtractOccupiedFromFree } from '@/lib/imaging-queue-free-intervals'
 import { listBoardEntries } from '@/lib/imaging-session-board'
 import { collectInProgressBoardOccupancy } from '@/lib/imaging/queue/in-progress-board-occupancy'
@@ -99,8 +100,8 @@ export type ReconcileScheduleOptions = {
 
 /**
  * Recompute schedule for all pending queue rows (normal + project) in strict submission order.
- * Active admin force-run windows are subtracted from free time before any replanning so all
- * sessions (including in-progress project subs) schedule around them.
+ * Admin closed windows and active force-run windows are subtracted from free time like
+ * sessions, so later work starts after them instead of overlapping.
  */
 export async function reconcilePendingScheduleStatus(options?: ReconcileScheduleOptions): Promise<void> {
   if (await reconcileRecentlyRan(options?.force)) return
@@ -128,6 +129,7 @@ export async function reconcilePendingScheduleStatus(options?: ReconcileSchedule
   for (const occupied of inProgressBoardOccupancy) {
     fullNightFree = subtractOccupiedFromFree(fullNightFree, occupied)
   }
+  fullNightFree = await applyAdminClosedWindowsToFree(fullNightFree, windowStartMs, deadlineMs)
 
   const strip = getTonightScheduleStrip(now)
   const nightKey = strip.nightKey
@@ -191,6 +193,7 @@ export async function reconcilePendingScheduleStatus(options?: ReconcileSchedule
     )
 
     const reservedIntervals = activeProject ? projectAltitudeHoldIntervals(activeProject, now) : []
+    const adminClosedOccupancy = await getAdminClosedWindowsInRange(windowStartMs, deadlineMs)
 
     let fifoFree = fullNightFree
     if (activeProject && projectHasOpenSessionsForNightKey(activeProject, nightKey)) {
@@ -280,7 +283,7 @@ export async function reconcilePendingScheduleStatus(options?: ReconcileSchedule
           : undefined
       const insight = computeScheduleInsight(slice, r.id, permitted, {
         schedulingEndMs: deadlineMs,
-        reservedIntervals: [...reservedIntervals, ...inProgressBoardOccupancy],
+        reservedIntervals: [...reservedIntervals, ...inProgressBoardOccupancy, ...adminClosedOccupancy],
         reservedStartMarginMs: PROJECT_HOLD_START_MARGIN_MS,
         projectSubSessions,
         preferredStartMsForTarget: publishedStartMs,

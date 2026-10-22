@@ -70,6 +70,22 @@ export function listScheduledPendingPlacements(
     .sort((a, b) => a.startMs - b.startMs)
 }
 
+/** Move a bar to after occupied slots (admin closed windows treated like sessions). */
+export function clipPlacementAroundOccupied(
+  startMs: number,
+  endMs: number,
+  occupied: Array<{ startMs: number; endMs: number }>
+): { startMs: number; endMs: number } | null {
+  let s = startMs
+  const e = endMs
+  for (const o of occupied) {
+    if (e <= o.startMs || s >= o.endMs) continue
+    if (s < o.endMs) s = o.endMs
+  }
+  if (e <= s) return null
+  return { startMs: s, endMs: e }
+}
+
 export function placementToTimelineBlock(
   scheduled: { item: { id: string; target: string }; startMs: number; endMs: number },
   windowStartMs: number,

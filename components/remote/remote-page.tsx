@@ -60,6 +60,7 @@ import {
 import { nightDisplayLabel } from '@/lib/remote/night-label'
 import { progressMonitorHref, rememberSessionPassword } from '@/lib/remote/session-password-store'
 import {
+  clipPlacementAroundOccupied,
   completedSessionOverlapsTonightStripWindow,
   fallbackPlacementForTerminalSession,
   imagingWindowStartMs,
@@ -1989,6 +1990,18 @@ export default function RemotePage() {
       if (bar) effectiveLocks[item.id] = bar
     }
 
+    const adminClosedIntervals = adminClosedWindows
+      .map((w) => {
+        const startMs = Date.parse(w.startIso)
+        const endMs = Date.parse(w.endIso)
+        if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return null
+        const overlapStart = Math.max(startMs, windowStartMs)
+        const overlapEnd = Math.min(endMs, schedulingDeadlineMs)
+        if (overlapEnd <= overlapStart) return null
+        return { startMs: overlapStart, endMs: overlapEnd }
+      })
+      .filter((x): x is { startMs: number; endMs: number } => x != null)
+
     // Bad weather must not wipe in_progress / completed bars: those stay on the tonight strip using
     // saved locks or a stable fallback (planned start → created → now for in_progress).
     if (tonightWeatherPrediction === 'not_permitted' || tonightGlobalWeatherBlocked) {
@@ -2058,7 +2071,19 @@ export default function RemotePage() {
         schedulingDeadlineMs,
         tonightNightKey
       )) {
-        blocks.push(placementToTimelineBlock(scheduled, windowStartMs, windowEndMs))
+        const clipped = clipPlacementAroundOccupied(
+          scheduled.startMs,
+          scheduled.endMs,
+          adminClosedIntervals
+        )
+        if (!clipped) continue
+        blocks.push(
+          placementToTimelineBlock(
+            { item: scheduled.item, startMs: clipped.startMs, endMs: clipped.endMs },
+            windowStartMs,
+            windowEndMs
+          )
+        )
       }
       blocks.sort((a, b) => a.startMs - b.startMs)
       return { blocks, newlyLocked }
@@ -2073,17 +2098,6 @@ export default function RemotePage() {
     const blocks: Array<{ id: string; startMs: number; endMs: number; topPct: number; heightPct: number; label: string }> = []
     type Interval = { startMs: number; endMs: number }
     let freeIntervals: Interval[] = [{ startMs: imagingStartMs, endMs: schedulingDeadlineMs }]
-    const adminClosedIntervals = adminClosedWindows
-      .map((w) => {
-        const startMs = Date.parse(w.startIso)
-        const endMs = Date.parse(w.endIso)
-        if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return null
-        const overlapStart = Math.max(startMs, windowStartMs)
-        const overlapEnd = Math.min(endMs, schedulingDeadlineMs)
-        if (overlapEnd <= overlapStart) return null
-        return { startMs: overlapStart, endMs: overlapEnd }
-      })
-      .filter((x): x is { startMs: number; endMs: number } => x != null)
     const isPermittedAtMs = (ms: number): boolean => {
       if (readyHourKeySet.size === 0) return true
       return readyHourKeySet.has(buildHourKey(new Date(ms)))
@@ -2267,11 +2281,20 @@ export default function RemotePage() {
     )
 
     for (const scheduled of scheduledPending) {
-      freeIntervals = subtractInterval(freeIntervals, {
-        startMs: scheduled.startMs,
-        endMs: scheduled.endMs,
-      })
-      blocks.push(placementToTimelineBlock(scheduled, windowStartMs, windowEndMs))
+      const clipped = clipPlacementAroundOccupied(
+        scheduled.startMs,
+        scheduled.endMs,
+        adminClosedIntervals
+      )
+      if (!clipped) continue
+      freeIntervals = subtractInterval(freeIntervals, clipped)
+      blocks.push(
+        placementToTimelineBlock(
+          { item: scheduled.item, startMs: clipped.startMs, endMs: clipped.endMs },
+          windowStartMs,
+          windowEndMs
+        )
+      )
     }
 
     blocks.sort((a, b) => a.startMs - b.startMs)

@@ -1,5 +1,3 @@
-import { getAdminClosedWindowsInRange } from '@/lib/admin-closed-window-store'
-import { subtractOccupiedFromFree } from '@/lib/imaging-queue-free-intervals'
 import { currentObservatorySite } from '@/lib/observatory-site-scope'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 
@@ -279,17 +277,9 @@ export async function getTonightWeatherPermittedIntervalsFromSamples(
   const highWindHours = usableHours.filter((h) => !Number.isFinite(h.windSpeedMs) || h.windSpeedMs > TONIGHT_WEATHER_MAX_WIND_MS).length
   const globalHardBlocked = severePrecipitationHour != null || highWindHours > 3 || !hasClearRun
 
-  let effectivePermittedIntervals = permittedIntervals
-  try {
-    for (const closed of await getAdminClosedWindowsInRange(nightStartMs, nightEndMs)) {
-      effectivePermittedIntervals = subtractOccupiedFromFree(effectivePermittedIntervals, closed)
-    }
-  } catch {
-    // Fall back to weather-only intervals if admin-window storage is unavailable.
-  }
   return {
     status: 'ok',
-    permittedIntervals: effectivePermittedIntervals,
+    permittedIntervals,
     nightStartMs,
     nightEndMs,
     schedulingEndMs,

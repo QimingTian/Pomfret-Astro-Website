@@ -55,6 +55,7 @@ import { getObservatoryStatus, isObservatoryReady } from '@/lib/observatory-stat
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import { getTonightWeatherPermittedIntervals } from '@/lib/tonight-weather-gate'
 import { listBoardEntries } from '@/lib/imaging-session-board'
+import { applyAdminClosedWindowsToFree, getAdminClosedWindowsInRange } from '@/lib/admin-closed-window-store'
 import { subtractOccupiedFromFree } from '@/lib/imaging-queue-free-intervals'
 import { collectInProgressBoardOccupancy } from '@/lib/imaging/queue/in-progress-board-occupancy'
 
@@ -390,6 +391,11 @@ export async function POST(request: NextRequest) {
       for (const occupied of boardOccupancy) {
         freeIntervals = subtractOccupiedFromFree(freeIntervals, occupied)
       }
+      freeIntervals = await applyAdminClosedWindowsToFree(
+        freeIntervals,
+        window.nauticalDuskUtc.getTime(),
+        Math.min(window.nauticalDawnUtc.getTime(), weatherIntervals.schedulingEndMs ?? Infinity)
+      )
       insight = await planAndScheduleProjectTonight(
         project.id,
         freeIntervals,
@@ -420,7 +426,14 @@ export async function POST(request: NextRequest) {
       weatherIntervals.status === 'ok' && !weatherIntervals.globalHardBlocked
         ? computeScheduleInsight(pendingNow, result.id, weatherIntervals.permittedIntervals, {
             schedulingEndMs: weatherIntervals.schedulingEndMs,
-            reservedIntervals: [...reservedIntervals, ...boardOccupancy],
+            reservedIntervals: [
+              ...reservedIntervals,
+              ...boardOccupancy,
+              ...(await getAdminClosedWindowsInRange(
+                window.nauticalDuskUtc.getTime(),
+                window.nauticalDawnUtc.getTime()
+              )),
+            ],
             reservedStartMarginMs: PROJECT_HOLD_START_MARGIN_MS,
             projectSubSessions,
           })

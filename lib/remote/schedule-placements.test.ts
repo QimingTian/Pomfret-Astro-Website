@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  clipPlacementAroundOccupied,
   completedSessionOverlapsTonightStripWindow,
   fallbackPlacementForTerminalSession,
   imagingWindowStartMs,
@@ -41,6 +42,13 @@ test('serverScheduleBarForNight rejects wrong nightKey and invalid bar', () => {
     ),
     { startMs: 100, endMs: 500 }
   )
+})
+
+test('clipPlacementAroundOccupied treats a closed window like an earlier session', () => {
+  const closed = { startMs: 7_000, endMs: 10_000 }
+  assert.deepEqual(clipPlacementAroundOccupied(7_000, 16_000, [closed]), { startMs: 10_000, endMs: 16_000 })
+  assert.equal(clipPlacementAroundOccupied(7_500, 9_000, [closed]), null)
+  assert.deepEqual(clipPlacementAroundOccupied(10_000, 16_000, [closed]), { startMs: 10_000, endMs: 16_000 })
 })
 
 test('sessionDurationMsFromItem uses explicit estimate or plans', () => {

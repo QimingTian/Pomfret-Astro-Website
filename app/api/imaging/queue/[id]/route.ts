@@ -26,6 +26,7 @@ import {
 } from '@/lib/imaging-queue-store'
 import { applyPendingProjectQueueEdit, deleteProjectById, getProjectById } from '@/lib/imaging-project-store'
 import { planAndScheduleProjectTonight } from '@/lib/imaging-project-planner'
+import { applyAdminClosedWindowsToFree } from '@/lib/admin-closed-window-store'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import { getTonightWeatherPermittedIntervals } from '@/lib/tonight-weather-gate'
 import { deleteR2ObjectForQueueId } from '@/lib/r2-session-download'
@@ -242,14 +243,20 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       const now = new Date()
       const window = getTonightSchedulingWindow(now)
       const nowMs = now.getTime()
+      const duskMs = window.nauticalDuskUtc.getTime()
+      const dawnMs = window.nauticalDawnUtc.getTime()
       await planAndScheduleProjectTonight(
         id,
-        [
-          {
-            startMs: Math.max(nowMs, window.nauticalDuskUtc.getTime()),
-            endMs: window.nauticalDawnUtc.getTime(),
-          },
-        ],
+        await applyAdminClosedWindowsToFree(
+          [
+            {
+              startMs: Math.max(nowMs, duskMs),
+              endMs: dawnMs,
+            },
+          ],
+          duskMs,
+          dawnMs
+        ),
         weatherIntervals.permittedIntervals,
         now
       )

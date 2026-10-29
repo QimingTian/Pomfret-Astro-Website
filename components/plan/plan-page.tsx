@@ -27,6 +27,7 @@ import { PlanSkyLayers, LAYER_ORDER, type LayerKey } from './plan-sky-layers'
 import { PlanFramingToolbar, PlanFrameOverlays } from './plan-framing-toolbar'
 import { PlanSelectionOverlay, type LiveSkyInfo } from './plan-selection-overlay'
 import { planSessionNameForRemote } from '@/lib/plan-target-name'
+import { buildEngineResolveCandidates } from '@/lib/plan-engine-search'
 
 type WeatherPrediction = {
   ok: boolean
@@ -190,34 +191,6 @@ function tryEngineGetObj(stel: StelLike | null, candidates: string[]): NonNullab
     }
   }
   return null
-}
-
-/** Extra designation shapes so Sesame-resolved names more often match the engine catalog (getObj). */
-function buildEngineResolveCandidates(resolved: ResolvedCatalogObject, rawQuery: string): string[] {
-  const out = new Set<string>()
-  const add = (s: string) => {
-    const t = s.trim()
-    if (t) out.add(t)
-  }
-  add(rawQuery)
-  add(resolved.canonicalName)
-  for (const a of resolved.aliases ?? []) add(a)
-  for (const s of Array.from(out)) {
-    const ngc = s.match(/\b(NGC|IC)\s*(\d{1,5})\b/i)
-    if (ngc) {
-      const abbr = ngc[1]!.toUpperCase()
-      const num = ngc[2]!
-      add(`${abbr} ${num}`)
-      add(`${abbr}${num}`)
-    }
-    const mess = s.match(/\bM\s*(\d{1,3})\b/i) ?? s.match(/\bMessier\s+(\d{1,3})\b/i)
-    if (mess) {
-      const n = mess[1]!
-      add(`M ${n}`)
-      add(`M${n}`)
-    }
-  }
-  return Array.from(out)
 }
 
 export default function PlanPage() {
@@ -1305,7 +1278,7 @@ export default function PlanPage() {
                   setSearchQuery(e.target.value)
                   if (searchError) setSearchError(null)
                 }}
-                placeholder="Vega, M31, NGC 7000, Jupiter..."
+                placeholder="NGC 7000, IC 1396, LDN 1622, M31..."
                 title="Press Enter to search the sky"
                 disabled={!stelReady}
                 className="plan-glass-field glass-pill w-full min-w-0 flex-1 rounded-full px-3 py-2 text-left text-sm font-normal text-white placeholder:text-white/50 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto sm:min-w-[min(100%,30rem)]"

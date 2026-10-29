@@ -4,8 +4,9 @@
 #
 # Requires a local clone at ../third-party/stellarium-web-engine (Atlas upstream reference).
 # test-skydata is the small subset shipped with stellarium-web-engine (~4.5MB).
-# For full Gaia depth, replace public/skydata with the full skydata tree from an
-# official stellarium-web dist build (much larger).
+# Plan/Atlas DSO labels do NOT use public/skydata/dso — engine.html loads the
+# full survey from https://data.stellarium.org/surveys/dso (orders 0–3).
+# For full Gaia depth, replace public/skydata/stars with an official dist tree.
 
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

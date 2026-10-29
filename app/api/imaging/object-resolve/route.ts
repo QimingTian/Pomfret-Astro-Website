@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
+import { resolveSharplessTarget } from '@/lib/sharpless-catalog'
 
 export const runtime = 'nodejs'
 
@@ -86,6 +87,19 @@ export async function GET(request: NextRequest) {
   }
   if (query.length > 120) {
     return withImagingCors({ ok: false as const, error: 'query is too long' }, 400)
+  }
+
+  const localSharpless = resolveSharplessTarget(query)
+  if (localSharpless) {
+    return withImagingCors({
+      ok: true as const,
+      object: {
+        query,
+        ...localSharpless,
+        ra: degreesToRaParts(localSharpless.raHours * 15),
+        dec: degreesToDecParts(localSharpless.decDeg),
+      },
+    })
   }
 
   let lastError = 'Catalog lookup unavailable right now.'

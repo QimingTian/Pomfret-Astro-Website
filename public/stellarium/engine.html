@@ -67,8 +67,10 @@
     window.stel = stel
 
     try {
-      stel.setFont('regular', '/fonts/Roboto-Regular.ttf')
-      stel.setFont('bold', '/fonts/Roboto-Bold.ttf')
+      /* Third arg is the official Stellarium Web font scale (see App.vue). Two-arg
+       * setFont leaves labels undersized against DSS. */
+      stel.setFont('regular', '/fonts/Roboto-Regular.ttf', 1.38)
+      stel.setFont('bold', '/fonts/Roboto-Bold.ttf', 1.38)
     } catch (err) { console.warn('[pomfret-stellarium] setFont failed', err) }
 
     var core = stel.core
@@ -79,7 +81,10 @@
     }
     addSrc(core.stars, { url: '/skydata/stars' }, 'stars')
     addSrc(core.skycultures, { url: '/skydata/skycultures/western', key: 'western' }, 'skycultures/western')
-    addSrc(core.dsos, { url: '/skydata/dso' }, 'dso')
+    /* Full Stellarium Web DSO HiPS (NGC/IC/Messier/LDN/LBN/Barnard/Sharpless, orders 0–3).
+     * Local /skydata/dso is the engine test subset (order 0 only, ~500 KB) — too sparse
+     * to hunt targets. CDN sends Access-Control-Allow-Origin: *. */
+    addSrc(core.dsos, { url: 'https://data.stellarium.org/surveys/dso' }, 'dso')
     addSrc(core.landscapes, { url: '/skydata/landscapes/guereins', key: 'guereins' }, 'landscapes/guereins')
     addSrc(core.milkyway, { url: '/skydata/surveys/milkyway' }, 'milkyway')
     /* DSS colored HiPS photographic sky survey (deep-sky imagery). Same host the official
@@ -130,6 +135,17 @@
       core.atmosphere.visible = false
       core.landscapes.visible = true
       core.dsos.visible = true
+      core.dsos.hints_visible = true
+      /* Default 0 only labels the brightest Messiers at ~90° FOV. The engine
+       * draws a DSO name when vmag ≤ hints_limit_mag − 1, and dark nebulae
+       * without Vmag use display mag 16 — offset 12 is what makes NGC/IC/LDN
+       * usable for target hunting without waiting for a deep zoom. */
+      core.dsos.hints_mag_offset = 12
+      if (core.stars) {
+        core.stars.hints_visible = true
+        core.stars.hints_mag_offset = -1
+      }
+      core.center_hints_mag_offset = 0
       core.dss.visible = true
     } catch (err) { console.warn('[pomfret-stellarium] toggle defaults failed', err) }
 

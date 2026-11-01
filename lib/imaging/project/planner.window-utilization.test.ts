@@ -6,7 +6,7 @@ import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 
 /**
  * The night of 2026-09-16 at Pomfret: M33 crosses 30° around 9:40 PM ET and the forecast held a
- * cloudy gap from midnight to 2 AM. Sizing a block against the whole night and shrinking it until
+ * cloudy gap from 12:20 to 2 AM. Sizing a block against the whole night and shrinking it until
  * it fit anywhere produced one 40-frame run at 1:13 AM straddling the tail of that gap, and the
  * forward cursor then wrote off the clear evening entirely.
  */
@@ -49,7 +49,7 @@ function totalFrames(plans: Array<{ filterPlansTonight: Array<{ count: number }>
 
 test('planTonightSubSessions uses a clear evening the big late block would have skipped', () => {
   const { windowStart, windowEnd } = tonight()
-  const gapStart = Date.parse('2026-09-17T04:00:00.000Z') // midnight ET
+  const gapStart = Date.parse('2026-09-17T04:20:00.000Z') // 12:20 AM ET
   const gapEnd = Date.parse('2026-09-17T06:00:00.000Z') // 2 AM ET
   const weather = [
     { startMs: windowStart, endMs: gapStart },

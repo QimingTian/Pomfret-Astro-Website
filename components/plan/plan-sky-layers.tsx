@@ -5,18 +5,17 @@ import type { ImagingRigEntry } from '@/lib/imaging/equipment/use-imaging-rigs'
 
 const layerBtnClass = (active: boolean) => (active ? planLayerLinkActive : planLayerLink)
 
-export type LayerKey = 'landscapes' | 'atmosphere' | 'dsos' | 'dss' | 'azimuthal' | 'equatorial'
+export type LayerKey = 'landscapes' | 'atmosphere' | 'dsos' | 'azimuthal' | 'equatorial'
 
 export const LAYER_LABELS: Record<LayerKey, string> = {
   landscapes: 'Ground',
   atmosphere: 'Atmosphere',
   dsos: 'Deep sky',
-  dss: 'DSS imagery',
   azimuthal: 'Azimuthal grid',
   equatorial: 'Equatorial grid',
 }
 
-export const LAYER_ORDER: LayerKey[] = ['landscapes', 'atmosphere', 'dsos', 'dss', 'azimuthal', 'equatorial']
+export const LAYER_ORDER: LayerKey[] = ['landscapes', 'atmosphere', 'dsos', 'azimuthal', 'equatorial']
 
 type Props = {
   layers: Record<LayerKey, boolean>

@@ -24,7 +24,7 @@ import {
 } from '@/lib/target-altitude'
 import { currentObservatorySite } from '@/lib/observatory-site-scope'
 import { getTonightScheduleStrip, isBeforeTonightWeatherHeadline } from '@/lib/schedule-strip'
-import type { WeatherNotPermittedReason } from '@/lib/tonight-weather-gate'
+import { MIN_SESSION_WEATHER_COVERAGE_FRACTION, type WeatherNotPermittedReason } from '@/lib/tonight-weather-gate'
 import {
   getTonightAstronomicalNightWindow,
   getTonightScheduleEveningAstronomyUtc,
@@ -536,7 +536,7 @@ export default function RemotePage() {
       return
     }
     const list = await fetchMemberSavedSessions()
-    setCloudSavedSessions(list)
+    setCloudSavedSessions(list.filter((saved) => saved.form.sessionType !== 'asteroid_occultation'))
   }, [isLoggedIn])
 
   useEffect(() => {
@@ -1715,6 +1715,7 @@ export default function RemotePage() {
   }, [sessionType, filterPlans, mosaicMode, mosaicDraft, panelFilterPlansById, selectedMosaicPanelId])
 
   const canSaveRemoteSessionSpec = useMemo(() => {
+    if (sessionType === 'asteroid_occultation') return false
     if (!imagingAccess.ok) return false
     if (!requestName.trim()) return false
     if (!loggedInContact?.email) return false
@@ -1735,10 +1736,6 @@ export default function RemotePage() {
       const maxEnabled = starHalfSteps * 0.5
       if (!allOptions.includes(variableStarBlockHours) || variableStarBlockHours > maxEnabled + 1e-9) return false
       return true
-    }
-    if (sessionType === 'asteroid_occultation') {
-      const selected = occultationEvents.find((event) => event.id === selectedOccultationId)
-      return Boolean(selected?.altitudeOk)
     }
     if (filterPlans.length === 0) return false
     for (const plan of filterPlans) {
@@ -1814,14 +1811,14 @@ export default function RemotePage() {
 
   const applyRemoteSavedForm = useCallback(
     (form: RemoteSavedSessionFormV1) => {
+      if (form.sessionType === 'asteroid_occultation') {
+        setSubmitError('Asteroid occultation sessions are unavailable.')
+        return
+      }
       setEditingSessionId(null)
       setSubmitError(null)
-      setSessionType(
-        form.sessionType === 'variable_star' || form.sessionType === 'asteroid_occultation'
-          ? form.sessionType
-          : 'dso'
-      )
-      setSelectedOccultationId(form.occultationEventId ?? '')
+      setSessionType(form.sessionType === 'variable_star' ? 'variable_star' : 'dso')
+      setSelectedOccultationId('')
       setRequestName(form.requestName)
       setRaHourPart(form.raHourPart)
       setRaMinutePart(form.raMinutePart)
@@ -1887,6 +1884,10 @@ export default function RemotePage() {
       router.replace('/dashboard/remote')
       if (!found) {
         setSubmitError('Saved session not found.')
+        return
+      }
+      if (found.form.sessionType === 'asteroid_occultation') {
+        setSubmitError('Asteroid occultation sessions are unavailable.')
         return
       }
       applyRemoteSavedForm(found.form)
@@ -2190,7 +2191,7 @@ export default function RemotePage() {
         const endMs = startMs + durationMs
         if (endMs > interval.endMs || endMs > schedulingDeadlineMs) continue
 
-        if (permittedCoverageMs(startMs, endMs) < durationMs * 0.8) continue
+        if (permittedCoverageMs(startMs, endMs) < durationMs * MIN_SESSION_WEATHER_COVERAGE_FRACTION) continue
         if (
           typeof item.raHours === 'number' &&
           Number.isFinite(item.raHours) &&
@@ -2857,6 +2858,10 @@ export default function RemotePage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (sessionType === 'asteroid_occultation') {
+      setSubmitError('Asteroid occultation sessions are unavailable.')
+      return
+    }
     setSubmitError(null)
     setSubmitSuccess(null)
     setSubmitting(true)
@@ -2870,16 +2875,16 @@ export default function RemotePage() {
   }
 
   function beginEditSession(item: (typeof queueItems)[number]) {
+    if (item.sessionType === 'asteroid_occultation') {
+      setSubmitError('Asteroid occultation sessions are unavailable.')
+      return
+    }
     setEditingSessionId(item.id)
     const isMosaic =
       item.mosaicMode === true || (Array.isArray(item.mosaicPanels) && item.mosaicPanels.length > 0)
     setProjectModeTri(isMosaic ? 'mosaic' : item.projectMode === true ? 'on' : 'off')
-    setSessionType(
-      item.sessionType === 'variable_star' || item.sessionType === 'asteroid_occultation'
-        ? item.sessionType
-        : 'dso'
-    )
-    setSelectedOccultationId(item.sessionType === 'asteroid_occultation' ? item.occultationEventId ?? '' : '')
+    setSessionType(item.sessionType === 'variable_star' ? 'variable_star' : 'dso')
+    setSelectedOccultationId('')
     setVariableStarPreviewStar(null)
     setVariableStarLastFoundName(null)
     setVariableStarListSelection('')

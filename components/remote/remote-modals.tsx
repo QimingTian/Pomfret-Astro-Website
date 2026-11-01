@@ -740,6 +740,10 @@ export function RemoteModals({
                       setRunModalError('No saved session with that name.')
                       return
                     }
+                    if (found.form.sessionType === 'asteroid_occultation') {
+                      setRunModalError('Asteroid occultation sessions are unavailable.')
+                      return
+                    }
                     applyRemoteSavedForm(found.form)
                     setShowRunRemoteSessionModal(false)
                     setRunModalError(null)

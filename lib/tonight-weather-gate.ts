@@ -8,6 +8,7 @@ export const MIN_CONSECUTIVE_CLEAR_CLOUD_HOURS = 2
 export const TONIGHT_WEATHER_MAX_CLOUD_PERCENT = 10
 export const TONIGHT_WEATHER_MAX_PRECIP_PROBABILITY = 10
 export const NIGHTWIDE_PRECIPITATION_BLOCK_PROBABILITY = 80
+export const MIN_SESSION_WEATHER_COVERAGE_FRACTION = 0.9
 export const TONIGHT_WEATHER_MAX_WIND_MS = 10
 export const FORECAST_PRECIPITATION_FINISH_BUFFER_MS = 2 * 60 * 60 * 1000
 
@@ -161,8 +162,8 @@ export function deliveryWeatherBlockReason(
   if (endMs > (weather.schedulingEndMs ?? weather.nightEndMs ?? 0)) {
     return 'Session cannot finish at least 2 hours before forecast precipitation or before nautical dawn.'
   }
-  if (!weatherCoverageOk(weather.permittedIntervals, startMs, endMs, 0.8)) {
-    return 'Weather-permitted coverage is below 80% for the session after the latest forecast.'
+  if (!weatherCoverageOk(weather.permittedIntervals, startMs, endMs)) {
+    return 'Weather-permitted coverage is below 90% for the session after the latest forecast.'
   }
   return null
 }
@@ -341,7 +342,7 @@ export function weatherCoverageOk(
   permittedIntervals: TimeInterval[],
   startMs: number,
   endMs: number,
-  requiredFraction = 0.8
+  requiredFraction = MIN_SESSION_WEATHER_COVERAGE_FRACTION
 ): boolean {
   const duration = endMs - startMs
   if (!Number.isFinite(duration) || duration <= 0) return false

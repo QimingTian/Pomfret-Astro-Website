@@ -27,6 +27,16 @@
 (function () {
   var DD2R = Math.PI / 180
   var params = new URLSearchParams(location.search)
+  var viewEpoch = parseInt(params.get('epoch') || '0', 10)
+  var survey = params.get('survey')
+  var surveyUrls = {
+    dss: 'https://stpubdata.s3.us-east-1.amazonaws.com/mast/skybackgrounds/DSSColor',
+    halpha: 'https://dc.g-vo.org/nsns/q/halpha8/hips',
+    hbr: 'https://dc.g-vo.org/nsns/q/hbr8/hips',
+    ohs: 'https://dc.g-vo.org/nsns/q/ohs8/hips'
+  }
+  if (survey !== 'none' && !Object.prototype.hasOwnProperty.call(surveyUrls, survey)) survey = 'dss'
+  var surveyUrl = surveyUrls[survey === 'none' ? 'dss' : survey]
   var canvas = document.getElementById('stel-canvas')
 
   function sizeCanvas () {
@@ -45,6 +55,11 @@
   function parseNum (v, fallback) {
     var n = parseFloat(v)
     return Number.isFinite(n) ? n : fallback
+  }
+
+  function layerVisible (name, fallback) {
+    var value = params.get('layer_' + name)
+    return value === null ? fallback : value === '1'
   }
 
   /* Convert JS Date to MJD (Modified Julian Date) used by stel.core.observer.utc. */
@@ -86,10 +101,11 @@
      * to hunt targets. CDN sends Access-Control-Allow-Origin: *. */
     addSrc(core.dsos, { url: 'https://data.stellarium.org/surveys/dso' }, 'dso')
     addSrc(core.landscapes, { url: '/skydata/landscapes/guereins', key: 'guereins' }, 'landscapes/guereins')
-    addSrc(core.milkyway, { url: '/skydata/surveys/milkyway' }, 'milkyway')
-    /* DSS colored HiPS photographic sky survey (deep-sky imagery). Same host the official
-     * Stellarium Web front-end uses; the engine handles HiPS fetching/tiling/fading itself. */
-    addSrc(core.dss, { url: 'https://alasky.cds.unistra.fr/DSS/DSSColor/' }, 'dss')
+    /* Stellarium renders milkyway HiPS above ~10° FOV and dss HiPS below ~20°.
+     * Point both modules at the selected survey so imagery remains visible at every zoom.
+     * The bundled WASM raises the wide module's mesh order to match DSS at the handoff. */
+    addSrc(core.milkyway, { url: survey === 'none' ? '/skydata/surveys/milkyway' : surveyUrl }, 'wide-survey')
+    addSrc(core.dss, { url: surveyUrl }, 'close-survey')
     addSrc(core.minor_planets, { url: '/skydata/mpcorb.dat', key: 'mpc_asteroids' }, 'mpcorb')
     addSrc(core.planets, { url: '/skydata/surveys/sso/moon', key: 'moon' }, 'sso/moon')
     addSrc(core.planets, { url: '/skydata/surveys/sso/sun', key: 'sun' }, 'sso/sun')
@@ -132,9 +148,9 @@
 
     try {
       core.constellations.show_only_pointed = false
-      core.atmosphere.visible = false
-      core.landscapes.visible = true
-      core.dsos.visible = true
+      core.atmosphere.visible = layerVisible('atmosphere', false)
+      core.landscapes.visible = layerVisible('landscapes', true)
+      core.dsos.visible = layerVisible('dsos', true)
       core.dsos.hints_visible = true
       /* Default 0 only labels the brightest Messiers at ~90° FOV. The engine
        * draws a DSO name when vmag ≤ hints_limit_mag − 1, and dark nebulae
@@ -146,7 +162,11 @@
         core.stars.hints_mag_offset = -1
       }
       core.center_hints_mag_offset = 0
-      core.dss.visible = true
+      core.dss.visible = survey !== 'none'
+      if (core.lines) {
+        if (core.lines.azimuthal) core.lines.azimuthal.visible = layerVisible('azimuthal', false)
+        if (core.lines.equatorial) core.lines.equatorial.visible = layerVisible('equatorial', false)
+      }
     } catch (err) { console.warn('[pomfret-stellarium] toggle defaults failed', err) }
 
     try {
@@ -171,12 +191,32 @@
     var postReady = function () {
       try {
         if (window.parent && window.parent !== window) {
-          window.parent.postMessage({ source: 'pomfret-stellarium', type: 'ready' }, '*')
+          window.parent.postMessage({ source: 'pomfret-stellarium', type: 'ready', epoch: viewEpoch }, '*')
         }
       } catch (_) {}
     }
     postReady()
     ;[100, 400, 1200, 3000].forEach(function (ms) { setTimeout(postReady, ms) })
+
+    /* Let the parent keep its previous canvas visible while this viewer fetches
+     * its first sky tiles. Engine readiness alone precedes imagery loading. */
+    var tileBase = survey === 'none' ? '/skydata/surveys/milkyway' : surveyUrl
+    var visualWaitStart = Date.now()
+    var visualTimer = setInterval(function () {
+      var hasTile = performance.getEntriesByType('resource').some(function (entry) {
+        return entry.name.indexOf(tileBase) !== -1 &&
+          (entry.name.indexOf('/Norder') !== -1 || entry.name.indexOf('/Allsky') !== -1)
+      })
+      if (!hasTile && Date.now() - visualWaitStart < 8000) return
+      clearInterval(visualTimer)
+      setTimeout(function () {
+        try {
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ source: 'pomfret-stellarium', type: 'visual-ready', epoch: viewEpoch }, '*')
+          }
+        } catch (_) {}
+      }, hasTile ? 600 : 0)
+    }, 100)
 
     /* Serialize core.selection getInfo(*) for Atlas info panel (obj_info.h ALL_INFO keys). */
     var POMFRET_INFO_LABELS = {
@@ -762,7 +802,7 @@
 
   try {
     var result = StelWebEngine({
-      wasmFile: '/stellarium/js/stellarium-web-engine.wasm',
+      wasmFile: '/stellarium/js/stellarium-web-engine.wasm?wide-mesh=4',
       canvas: canvas,
       translateFn: function (_domain, str) { return str },
       onReady: function (stel) { initStel(stel) },

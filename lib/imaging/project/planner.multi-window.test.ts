@@ -13,6 +13,7 @@ import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 import { getTonightSchedulingWindow } from '@/lib/sunrise-window'
 import { collectInProgressBoardOccupancy } from '@/lib/imaging/queue/in-progress-board-occupancy'
 import { subtractOccupiedFromFree } from '@/lib/imaging-queue-free-intervals'
+import { weatherCoverageOk } from '@/lib/tonight-weather-gate'
 import type { SessionBoardEntry } from '@/lib/imaging-session-board'
 
 function mockProject(): ImagingProject {
@@ -182,7 +183,7 @@ test('planTonightFilterFrames does not backfill leftover window with moon-blocke
   assert.equal(haRow.count, 10, 'all remaining Ha frames packed; RGB frames carry over')
 })
 
-test('planTonightSubSessions fills multiple clear spells and leftover time in a spell', () => {
+test('planTonightSubSessions keeps each planned run above 90% weather coverage across clear spells', () => {
   const project = mockProject()
   project.filterPlansTotal = [
     { filterName: 'L', exposureSeconds: 300, count: 80 },
@@ -200,7 +201,11 @@ test('planTonightSubSessions fills multiple clear spells and leftover time in a 
   ]
   const free = [{ startMs: windowStart, endMs: windowEnd }]
   const plans = planTonightSubSessions(project, free, weather, now)
-  assert.ok(plans.length >= 2, `expected sessions in both clear spells, got ${plans.length}`)
+  assert.ok(plans.length >= 1, 'expected at least one weather-permitted session')
+  for (const plan of plans) {
+    const startMs = Date.parse(plan.plannedStartIso)
+    assert.equal(weatherCoverageOk(weather, startMs, startMs + plan.durationSeconds * 1000), true)
+  }
   for (let i = 1; i < plans.length; i++) {
     const prevEnd =
       Date.parse(plans[i - 1]!.plannedStartIso) + plans[i - 1]!.durationSeconds * 1000

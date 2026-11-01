@@ -126,7 +126,7 @@ export function RemoteQueuePanel<T extends RemoteQueuePanelItem>({
                     >
                       Check progress
                     </button>
-                    {(item.status === 'pending' || item.status === 'scheduled') && (
+                    {(item.status === 'pending' || item.status === 'scheduled') && item.sessionType !== 'asteroid_occultation' && (
                       <button
                         type="button"
                         disabled={!actionsEnabled}

@@ -172,7 +172,7 @@ function buildUnscheduledReasons(input: {
       : 'Every remaining free interval is shorter than session duration before nautical dawn.')
   }
   if (input.failedByWeatherCoverage > 0) {
-    reasons.push('No remaining slot has weather-permitted coverage >= 80% of session duration.')
+    reasons.push('No remaining slot has weather-permitted coverage >= 90% of session duration.')
   }
   if (input.failedByMoon > 0) {
     const filters = input.moonBlockedFilterNames.length > 0 ? input.moonBlockedFilterNames.join(', ') : 'requested filters'
@@ -309,13 +309,13 @@ function fixedOccultationInsight(
   }
   const weatherCoveredMs = weatherPermittedCoverageMs(weatherPermittedIntervals, startMs, endMs)
   const durationMs = endMs - startMs
-  if (!weatherCoverageOk(weatherPermittedIntervals, startMs, endMs, 0.8)) {
+  if (!weatherCoverageOk(weatherPermittedIntervals, startMs, endMs)) {
     const pct = durationMs > 0 ? (weatherCoveredMs / durationMs) * 100 : 0
     return {
       status: 'unscheduled',
       plannedStartIso: null,
       reasons: [
-        `Weather-permitted coverage over the fixed occultation window is ${pct.toFixed(0)}% (required >= 80%).`,
+        `Weather-permitted coverage over the fixed occultation window is ${pct.toFixed(0)}% (required >= 90%).`,
       ],
     }
   }
@@ -567,7 +567,7 @@ export function computeScheduleInsight(
       if (endMs > interval.endMs || endMs > deadlineMs) return null
       const weatherCoveredMs = weatherPermittedCoverageMs(weatherPermittedIntervals, startMs, endMs)
       const weatherCoveragePct = durationMs > 0 ? (weatherCoveredMs / durationMs) * 100 : 0
-      if (!weatherCoverageOk(weatherPermittedIntervals, startMs, endMs, 0.8)) return null
+      if (!weatherCoverageOk(weatherPermittedIntervals, startMs, endMs)) return null
       if (hasRaDec && !altitudeSessionCoverageOk(req.raHours!, req.decDeg!, startMs, endMs)) return null
       if (moonBlockedForWindow(startMs, endMs).length > 0) return null
       return { startMs, endMs, riseAtMs, weatherCoveragePct, baselineStartMs }
@@ -589,7 +589,7 @@ export function computeScheduleInsight(
       const holder = freeIntervals.find((i) => startMs >= i.startMs && endMs <= i.endMs)
       if (!holder) return null
       const weatherCoveredMs = weatherPermittedCoverageMs(weatherPermittedIntervals, startMs, endMs)
-      if (!weatherCoverageOk(weatherPermittedIntervals, startMs, endMs, 0.8)) return null
+      if (!weatherCoverageOk(weatherPermittedIntervals, startMs, endMs)) return null
       if (hasRaDec && !altitudeSessionCoverageOk(req.raHours!, req.decDeg!, startMs, endMs)) {
         return null
       }
@@ -646,7 +646,7 @@ export function computeScheduleInsight(
           failedByIntervalLength += 1
           continue
         }
-        if (!weatherCoverageOk(weatherPermittedIntervals, startMs, endMs, 0.8)) {
+        if (!weatherCoverageOk(weatherPermittedIntervals, startMs, endMs)) {
           failedByWeatherCoverage += 1
           continue
         }
@@ -717,7 +717,7 @@ export function computeScheduleInsight(
           reasons.push(`Target reaches 30° at ${new Date(placementContext.riseAtMs).toISOString()}.`)
         }
         reasons.push(
-          `Weather-permitted coverage over session window is ${placementContext.weatherCoveragePct.toFixed(0)}% (required >= 80%).`
+          `Weather-permitted coverage over session window is ${placementContext.weatherCoveragePct.toFixed(0)}% (required >= 90%).`
         )
       }
       if (typeof req.raHours === 'number' && Number.isFinite(req.raHours) && typeof req.decDeg === 'number' && Number.isFinite(req.decDeg)) {

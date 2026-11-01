@@ -67,7 +67,7 @@ test('a still-future published start survives a slightly later re-placement', ()
     // Weather opens off the search grid, so re-placing lands two minutes later than the value the
     // row already carries. The published start still passes every rule, so it must win.
     const weather = [
-      { startMs: nowMs + 2 * 3600_000 + 6 * 60_000, endMs: nowMs + 5 * 3600_000 },
+      { startMs: nowMs + 2 * 3600_000 + 5 * 60_000, endMs: nowMs + 5 * 3600_000 },
     ]
     const published = new Date(nowMs + 2 * 3600_000 + 3 * 60_000).toISOString()
 

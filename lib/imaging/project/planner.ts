@@ -186,7 +186,7 @@ function buildProjectSubSessionScheduleReasons(input: {
   const earliestMs = Math.max(cursorMs, createdMs, nowMs, windowStartMs)
   if (placedStart > earliestMs + 5 * 60_000) {
     reasons.push(
-      `Not placed at ${formatScheduleEt(earliestMs)} ET: waiting for target altitude, ≥80% weather-permitted coverage, or a long enough free interval.`
+      `Not placed at ${formatScheduleEt(earliestMs)} ET: waiting for target altitude, ≥90% weather-permitted coverage, or a long enough free interval.`
     )
   }
 
@@ -201,7 +201,7 @@ function buildProjectSubSessionScheduleReasons(input: {
   const maxFrames = maxPack.filterPlansTonight.reduce((s, p) => s + p.count, 0)
   if (frameTotal < maxFrames) {
     reasons.push(
-      'Fewer frames than the free window could fit: placement requires ≥80% weather-permitted and 100% target-altitude (≥30°) coverage for the full run (may span multiple clear spells).'
+      'Fewer frames than the free window could fit: placement requires ≥90% weather-permitted and 100% target-altitude (≥30°) coverage for the full run (may span multiple clear spells).'
     )
   }
 
@@ -227,7 +227,7 @@ function buildProjectSubSessionScheduleReasons(input: {
       ? (altitudeAllowedCoverageMs(sky.raHours, sky.decDeg, placedStart, placedEnd) / durationMs) * 100
       : 0
   reasons.push(
-    `Coverage checks: weather-permitted ${weatherPct.toFixed(0)}% (≥80% required), target ≥30° ${altPct.toFixed(0)}% (100% required).`
+    `Coverage checks: weather-permitted ${weatherPct.toFixed(0)}% (≥90% required), target ≥30° ${altPct.toFixed(0)}% (100% required).`
   )
 
   return reasons
@@ -509,7 +509,7 @@ function findPlacementStart(
       startMs = riseAt
       const endMs = startMs + durationMs
       if (endMs > interval.endMs || endMs > deadlineMs) continue
-      if (!weatherCoverageOk(weatherPermittedIntervals, startMs, endMs, 0.8)) continue
+      if (!weatherCoverageOk(weatherPermittedIntervals, startMs, endMs)) continue
       if (!altitudeSessionCoverageOk(coords.raHours, coords.decDeg, startMs, endMs)) continue
       return startMs
     }
@@ -517,7 +517,7 @@ function findPlacementStart(
   return null
 }
 
-/** Place one sub-session in free time; may span multiple clear spells when ≥80% weather coverage holds. */
+/** Place one sub-session in free time; may span multiple clear spells when ≥90% weather coverage holds. */
 function placeSubSessionInFreeWindow(
   virtualProject: ImagingProject,
   usableFree: TimeInterval[],
@@ -678,7 +678,7 @@ function altitudeWindowsFor(
  *
  * Offer each clear spell and altitude window as its own sizing window so the smaller-but-earlier
  * block is at least on the table. These are hypotheses, not constraints — the full-interval
- * candidate stays, so a run may still span several clear spells at ≥80% coverage.
+ * candidate stays, so a run may still span several clear spells at ≥90% coverage.
  */
 function earlierSizingWindows(
   cursorMs: number,
@@ -1530,7 +1530,7 @@ export function explainWhyNoPlansTonight(
       const needH = (durationMs / 3600000).toFixed(1)
       const frames = draftPlans.reduce((s, p) => s + p.count, 0)
       reasons.push(
-        `${label}: cannot place ${frames} frame(s) (~${needH} h with overhead) in ${windowH} h free (weather ≥80%, altitude 100%; may span multiple clear spells).`
+        `${label}: cannot place ${frames} frame(s) (~${needH} h with overhead) in ${windowH} h free (weather ≥90%, altitude 100%; may span multiple clear spells).`
       )
       continue
     }

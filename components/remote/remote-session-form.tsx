@@ -468,37 +468,6 @@ export function RemoteSessionForm({
               >
                 Variable Star
               </button>
-              <button
-                type="button"
-                aria-pressed={sessionType === 'asteroid_occultation'}
-                onClick={() => {
-                  setEditingSessionId(null)
-                  setRequestName('')
-                  setRaHourPart('')
-                  setRaMinutePart('')
-                  setRaSecondPart('')
-                  setDecSign('+')
-                  setDecDegreePart('')
-                  setDecMinutePart('')
-                  setDecSecondPart('')
-                  setSessionPassword('')
-                  setCatalogQuery('')
-                  setCatalogLookupResult(null)
-                  setCatalogLookupError(null)
-                  setVariableStarPreviewStar(null)
-                  setVariableStarLastFoundName(null)
-                  setVariableStarLastFoundSource(null)
-                  setVariableStarListSelection('')
-                  setVariableStarFilterSelection([])
-                  setSelectedOccultationId('')
-                  setSessionType('asteroid_occultation')
-                  setOutputMode('raw_zip')
-                  setFilterPlans([{ filterName: 'L', count: '1', exposureSeconds: '1' }])
-                }}
-                className={sessionType === 'asteroid_occultation' ? glassPillToggleActiveMd : glassPillToggleIdleMd}
-              >
-                Asteroid Occultation
-              </button>
             </div>
             </div>
             {sessionType === 'dso' && (

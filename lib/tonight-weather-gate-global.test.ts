@@ -8,6 +8,7 @@ import {
   isHourWeatherPermitted,
   sessionWindowHourlyPrecipOk,
   weatherNotPermittedReasons,
+  weatherCoverageOk,
 } from '@/lib/tonight-weather-gate'
 
 function hour(sec: number, cloud: number) {
@@ -47,6 +48,21 @@ test('isHourWeatherPermitted passes when cloud rain wind are ok', () => {
     }),
     true
   )
+})
+
+test('session weather coverage requires 90%, including the final NINA delivery check', () => {
+  const startMs = Date.parse('2026-10-29T22:00:00.000Z')
+  const endMs = startMs + 100 * 60_000
+  const weather = (coveredMinutes: number) => ({
+    status: 'ok' as const,
+    permittedIntervals: [{ startMs, endMs: startMs + coveredMinutes * 60_000 }],
+    schedulingEndMs: endMs,
+  })
+
+  assert.equal(weatherCoverageOk(weather(89).permittedIntervals, startMs, endMs), false)
+  assert.match(deliveryWeatherBlockReason(weather(89), startMs, 100 * 60) ?? '', /below 90%/)
+  assert.equal(weatherCoverageOk(weather(90).permittedIntervals, startMs, endMs), true)
+  assert.equal(deliveryWeatherBlockReason(weather(90), startMs, 100 * 60), null)
 })
 
 test('global permitted ignores pre-dusk clear hours outside nautical gate', () => {
@@ -281,7 +297,7 @@ test('NINA delivery uses the latest site forecast and two-hour cutoff', () => {
   )
   assert.match(
     deliveryWeatherBlockReason({ ...weather, permittedIntervals: [] }, startMs, 3600) ?? '',
-    /below 80%/
+    /below 90%/
   )
 })
 

@@ -22,12 +22,22 @@ import {
   glassPillMd,
 } from '@/lib/glass-ui'
 import { PlanModeSwitch, type PlanMode } from './plan-mode-switch'
+import { PlanSurveySwitch, type SurveyMode } from './plan-survey-switch'
 import { PlanTimelineSlot } from './plan-timeline-slot'
 import { PlanSkyLayers, LAYER_ORDER, type LayerKey } from './plan-sky-layers'
 import { PlanFramingToolbar, PlanFrameOverlays } from './plan-framing-toolbar'
 import { PlanSelectionOverlay, type LiveSkyInfo } from './plan-selection-overlay'
 import { planSessionNameForRemote } from '@/lib/plan-target-name'
 import { buildEngineResolveCandidates } from '@/lib/plan-engine-search'
+
+type ViewerPosition = { azDeg: number; altDeg: number; fovDeg: number; dateIso: string }
+type ViewerSource = {
+  survey: SurveyMode
+  epoch: number
+  siteKey: string
+  position?: ViewerPosition
+  layers?: Record<LayerKey, boolean>
+}
 
 type WeatherPrediction = {
   ok: boolean
@@ -80,7 +90,6 @@ type StelLike = {
     landscapes?: LayerToggleTarget
     atmosphere?: LayerToggleTarget
     dsos?: LayerToggleTarget
-    dss?: LayerToggleTarget
     lines?: { azimuthal?: LayerToggleTarget; equatorial?: LayerToggleTarget }
   }
   getObj?: (name: string) => SweObj
@@ -163,7 +172,6 @@ function layerObj(stel: StelLike | null, k: LayerKey): LayerToggleTarget | null 
   if (!core) return null
   if (k === 'azimuthal') return core.lines?.azimuthal ?? null
   if (k === 'equatorial') return core.lines?.equatorial ?? null
-  if (k === 'dss') return core.dss ?? null
   return core[k] ?? null
 }
 
@@ -236,11 +244,21 @@ export default function PlanPage() {
   })
   const [viewerReady, setViewerReady] = useState(false)
   const [stelReady, setStelReady] = useState(false)
+  const [hasViewerInitialized, setHasViewerInitialized] = useState(false)
+  const [surveyMode, setSurveyMode] = useState<SurveyMode>('dss')
+  const [viewerSources, setViewerSources] = useState<[ViewerSource | null, ViewerSource | null]>([
+    { survey: 'dss', epoch: 0, siteKey: '' }, null,
+  ])
+  const [activeViewerSlot, setActiveViewerSlot] = useState(0)
+  const activeViewerSlotRef = useRef(0)
+  const pendingViewerSlotRef = useRef<number | null>(null)
+  const viewerSlotRefs = useRef<[HTMLIFrameElement | null, HTMLIFrameElement | null]>([null, null])
+  const viewerEpochRef = useRef(0)
+  const restoreLayersRef = useRef<Record<LayerKey, boolean> | null>(null)
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
     landscapes: true,
     atmosphere: false,
     dsos: true,
-    dss: true,
     azimuthal: false,
     equatorial: false,
   })
@@ -258,14 +276,29 @@ export default function PlanPage() {
   const [selectionInfo, setSelectionInfo] = useState<SelectionInfoPayload | null>(null)
   const [liveSkyInfo, setLiveSkyInfo] = useState<LiveSkyInfo>({ kind: 'view', center: null })
 
-  const viewerSrc = useMemo(
-    () =>
-      `/stellarium/engine.html?${new URLSearchParams({
+  const currentSiteKey = `${site.weatherLat}:${site.weatherLon}:${site.elevationMeters}`
+  const viewerSrc = useCallback((viewerSource: ViewerSource) => {
+      const params = new URLSearchParams({
         lat: String(site.weatherLat),
         lng: String(site.weatherLon),
         elev: String(site.elevationMeters),
-      }).toString()}`,
-    [site.weatherLat, site.weatherLon, site.elevationMeters],
+        survey: viewerSource.survey,
+        epoch: String(viewerSource.epoch),
+      })
+      if (viewerSource.siteKey === currentSiteKey && viewerSource.position) {
+        params.set('az', String(viewerSource.position.azDeg))
+        params.set('alt', String(viewerSource.position.altDeg))
+        params.set('fov', String(viewerSource.position.fovDeg))
+        params.set('date', viewerSource.position.dateIso)
+      }
+      if (viewerSource.layers) {
+        for (const layer of LAYER_ORDER) {
+          params.set(`layer_${layer}`, viewerSource.layers[layer] ? '1' : '0')
+        }
+      }
+      return `/stellarium/engine.html?${params.toString()}`
+    },
+    [site.weatherLat, site.weatherLon, site.elevationMeters, currentSiteKey],
   )
 
   const getStel = useCallback((): StelLike | null => {
@@ -291,9 +324,30 @@ export default function PlanPage() {
     const onMessage = (ev: MessageEvent) => {
       const d = ev?.data
       if (!d || typeof d !== 'object' || d.source !== 'pomfret-stellarium') return
-      if (d.type === 'ready') {
+      if (d.type === 'ready' && d.epoch === viewerEpochRef.current && pendingViewerSlotRef.current === null) {
         setStelReady(true)
+        setHasViewerInitialized(true)
         setViewerReady(true)
+      }
+      if (d.type === 'visual-ready' && d.epoch === viewerEpochRef.current && pendingViewerSlotRef.current !== null) {
+        const slot = pendingViewerSlotRef.current
+        const nextFrame = viewerSlotRefs.current[slot]
+        if (!nextFrame || ev.source !== nextFrame.contentWindow) return
+        pendingViewerSlotRef.current = null
+        activeViewerSlotRef.current = slot
+        iframeRef.current = nextFrame
+        setActiveViewerSlot(slot)
+        setStelReady(true)
+        setHasViewerInitialized(true)
+        setViewerReady(true)
+        window.setTimeout(() => {
+          if (activeViewerSlotRef.current !== slot || pendingViewerSlotRef.current !== null) return
+          setViewerSources((prev) => {
+            const next: [ViewerSource | null, ViewerSource | null] = [...prev]
+            next[1 - slot] = null
+            return next
+          })
+        }, 350)
       }
       if (d.type === 'selection-info') {
         const p = d.payload as SelectionInfoPayload | null | undefined
@@ -311,6 +365,7 @@ export default function PlanPage() {
       const win = iframeRef.current?.contentWindow as (Window & { stel?: unknown }) | null
       if (win?.stel) {
         setStelReady(true)
+        setHasViewerInitialized(true)
         setViewerReady(true)
         window.clearInterval(poll)
       } else if (++attempts > 120) {
@@ -326,6 +381,16 @@ export default function PlanPage() {
   useEffect(() => {
     if (!stelReady) return
     const stel = getStel()
+    const restore = restoreLayersRef.current
+    restoreLayersRef.current = null
+    if (restore) {
+      for (const k of LAYER_ORDER) {
+        const obj = layerObj(stel, k)
+        if (obj) obj.visible = restore[k]
+      }
+      setLayers(restore)
+      return
+    }
     setLayers((prev) => {
       const next = { ...prev }
       for (const k of LAYER_ORDER) {
@@ -334,7 +399,7 @@ export default function PlanPage() {
       }
       return next
     })
-  }, [stelReady, getStel])
+  }, [stelReady, activeViewerSlot, getStel])
 
   /* Pomfret engine overlays + framing mode bridge. */
   useEffect(() => {
@@ -356,7 +421,7 @@ export default function PlanPage() {
     } catch {
       /* ignore */
     }
-  }, [stelReady, alt30OverlayOn, orbitOverlayOn, planMode, skyLocked])
+  }, [stelReady, activeViewerSlot, alt30OverlayOn, orbitOverlayOn, planMode, skyLocked])
 
   const mosaicBaseInput = useMemo(() => {
     if (planMode !== 'framing' || !equipment || !stelReady) return null
@@ -973,6 +1038,41 @@ export default function PlanPage() {
     setLayers((prev) => ({ ...prev, [k]: v }))
   }
 
+  const reloadSurvey = (survey: SurveyMode) => {
+    if (pendingViewerSlotRef.current !== null) return
+    const core = getStel()?.core
+    if (!core) return
+    const observer = core.observer
+    const utcMs = observer?.utc == null ? NaN : (observer.utc - 40587) * 86400000
+    const position = observer && Number.isFinite(observer.yaw) && Number.isFinite(observer.pitch) &&
+      Number.isFinite(core.fov) && Number.isFinite(utcMs) && Math.abs(utcMs) < 8640000000000000
+      ? {
+          azDeg: observer.yaw! * 180 / Math.PI,
+          altDeg: observer.pitch! * 180 / Math.PI,
+          fovDeg: core.fov! * 180 / Math.PI,
+          dateIso: new Date(utcMs).toISOString(),
+        }
+      : undefined
+    const epoch = viewerEpochRef.current + 1
+    viewerEpochRef.current = epoch
+    const nextLayers = { ...layers }
+    restoreLayersRef.current = nextLayers
+    if (trackingSourceRef.current === 'engine-lock') trackingSourceRef.current = 'continuous'
+    setSelectionInfo(null)
+    const nextSlot = 1 - activeViewerSlotRef.current
+    pendingViewerSlotRef.current = nextSlot
+    setViewerSources((prev) => {
+      const next: [ViewerSource | null, ViewerSource | null] = [...prev]
+      next[nextSlot] = { survey, epoch, siteKey: currentSiteKey, position, layers: nextLayers }
+      return next
+    })
+    setSurveyMode(survey)
+  }
+
+  const selectSurvey = (mode: SurveyMode) => {
+    if (mode !== surveyMode) reloadSurvey(mode)
+  }
+
   const handleSearch = useCallback(async () => {
     const q = searchQuery.trim()
     if (!q) return
@@ -1237,51 +1337,55 @@ export default function PlanPage() {
          * the <main>'s py-8 top padding so the iframe abuts the sticky header's bottom border
          * with no visible "Atlas" title between them. */}
         <div className="relative -mt-8 ml-[calc(50%-50vw)] mr-[calc(50%-50vw)] w-screen overflow-hidden bg-black">
-          <iframe
-            ref={iframeRef}
-            src={viewerSrc}
-            title="Stellarium sky atlas"
-            onLoad={(e) => {
-              setViewerReady(true)
-              const w = e.currentTarget.contentWindow
-              if (!w) return
-              const nudge = () => {
-                try {
-                  w.dispatchEvent(new Event('resize'))
-                } catch {
-                  /* ignore */
-                }
-              }
-              nudge()
-              window.setTimeout(nudge, 100)
-              window.setTimeout(nudge, 500)
-              window.setTimeout(nudge, 1500)
-            }}
-            className="block h-[72vh] min-h-[520px] w-full overflow-hidden"
-            allow="accelerometer; autoplay; fullscreen; gyroscope; microphone; xr-spatial-tracking"
-          />
+          <div className="relative h-[72vh] min-h-[520px] w-full">
+            {viewerSources.map((source, slot) => source ? (
+              <iframe
+                key={slot}
+                ref={(node) => {
+                  viewerSlotRefs.current[slot] = node
+                  if (slot === activeViewerSlotRef.current) iframeRef.current = node
+                }}
+                src={viewerSrc(source)}
+                title="Stellarium sky atlas"
+                onLoad={(e) => {
+                  if (slot === activeViewerSlotRef.current) setViewerReady(true)
+                  const w = e.currentTarget.contentWindow
+                  if (!w) return
+                  const nudge = () => {
+                    try { w.dispatchEvent(new Event('resize')) } catch { /* ignore */ }
+                  }
+                  nudge()
+                  window.setTimeout(nudge, 100)
+                  window.setTimeout(nudge, 500)
+                  window.setTimeout(nudge, 1500)
+                }}
+                className={`absolute inset-0 h-full w-full overflow-hidden transition-opacity duration-300 ${slot === activeViewerSlot ? 'z-[1] opacity-100' : 'pointer-events-none z-0 opacity-0'}`}
+                allow="accelerometer; autoplay; fullscreen; gyroscope; microphone; xr-spatial-tracking"
+              />
+            ) : null)}
+          </div>
 
-          {/* Top-left overlay: search + buttons. Wide max-w + input min-w so the placeholder fits. */}
-          <div className="pointer-events-none absolute left-3 top-3 z-10 flex max-w-[min(calc(100vw-1.5rem),56rem)] flex-col gap-1 sm:max-w-[min(calc(100vw-1.5rem),72rem)]">
+          {/* Top-left overlay: search and mode controls. */}
+          <div className="pointer-events-none absolute left-3 top-3 z-10 flex max-w-[min(calc(100vw-1.5rem),56rem)] flex-col gap-1 sm:max-w-[min(calc(100vw-1.5rem),84rem)]">
             <form
               onSubmit={(e) => {
                 e.preventDefault()
                 void handleSearch()
               }}
-              className="pointer-events-auto flex min-w-0 flex-wrap items-center gap-2 sm:flex-nowrap"
+              className="pointer-events-auto flex min-w-0 flex-wrap items-center gap-2 xl:flex-nowrap"
             >
               <input
                 type="search"
                 enterKeyHint="search"
+                aria-label="Search sky target"
+                placeholder="Search"
                 value={searchQuery}
                 onChange={(e) => {
                   setSearchQuery(e.target.value)
                   if (searchError) setSearchError(null)
                 }}
-                placeholder="NGC 7000, IC 1396, LDN 1622, M31..."
-                title="Press Enter to search the sky"
                 disabled={!stelReady}
-                className="plan-glass-field glass-pill w-full min-w-0 flex-1 rounded-full px-3 py-2 text-left text-sm font-normal text-white placeholder:text-white/50 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto sm:min-w-[min(100%,30rem)]"
+                className="plan-glass-field glass-pill w-64 max-w-full shrink-0 rounded-full px-3 py-2 text-left text-sm font-normal text-white focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
               />
               <button
                 type="submit"
@@ -1290,7 +1394,10 @@ export default function PlanPage() {
               >
                 {searchLoading ? 'Searching...' : 'Search Target'}
               </button>
-              <PlanModeSwitch mode={planMode} onChange={setPlanMode} disabled={!stelReady} />
+              <div className="flex flex-wrap items-center gap-2 md:flex-nowrap">
+                <PlanModeSwitch mode={planMode} onChange={setPlanMode} disabled={!stelReady} />
+                <PlanSurveySwitch mode={surveyMode} onChange={selectSurvey} disabled={!stelReady || pendingViewerSlotRef.current !== null} />
+              </div>
               <button
                 type="button"
                 onClick={handleSendToRemote}
@@ -1317,7 +1424,7 @@ export default function PlanPage() {
             ) : null}
           </div>
 
-          {stelReady ? (
+          {hasViewerInitialized ? (
             <div className="pointer-events-none absolute bottom-3 left-3 z-10">
               <PlanSelectionOverlay selection={selectionInfo} live={liveSkyInfo} />
             </div>

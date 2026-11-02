@@ -40,6 +40,7 @@ import {
 import { projectAltitudeHoldIntervals } from '@/lib/imaging-project-altitude-hold'
 import {
   DSO_SESSION_OVERHEAD_SEC,
+  DSO_DITHER_OVERHEAD_SEC,
   dsoSessionOverheadSeconds,
 } from '@/lib/imaging-session-overhead'
 import { patchRequestScheduleInsight } from '@/lib/imaging-queue-store'
@@ -81,7 +82,8 @@ export type ProjectTonightPlan = {
   mosaicSubIndex?: number
 }
 
-const SESSION_OVERHEAD_BASE_MS = DSO_SESSION_OVERHEAD_SEC * 1000
+const sessionBaseOverheadMs = (project: ImagingProject) =>
+  (DSO_SESSION_OVERHEAD_SEC + (project.ditherEnabled === true ? DSO_DITHER_OVERHEAD_SEC : 0)) * 1000
 const PLACEMENT_STEP_MS = 5 * 60 * 1000
 function formatScheduleEt(ms: number): string {
   return new Date(ms).toLocaleString('en-US', {
@@ -275,6 +277,7 @@ export function planTonightFilterFrames(
     ]
     const ohOneSec = dsoSessionOverheadSeconds({
       filterPlans: trialOne,
+      ditherEnabled: project.ditherEnabled,
       raHours: coords.raHours,
       startMs: usableStartMs,
       imagingSeconds: (imagingMs + exposureMs) / 1000,
@@ -291,6 +294,7 @@ export function planTonightFilterFrames(
     ]
     const ohSec = dsoSessionOverheadSeconds({
       filterPlans: trialFull,
+      ditherEnabled: project.ditherEnabled,
       raHours: coords.raHours,
       startMs: usableStartMs,
       imagingSeconds: (imagingMs + countRemaining * exposureMs) / 1000,
@@ -312,6 +316,7 @@ export function planTonightFilterFrames(
     imagingMs +
     dsoSessionOverheadSeconds({
       filterPlans: filterPlansTonight,
+      ditherEnabled: project.ditherEnabled,
       raHours: coords.raHours,
       startMs: usableStartMs,
       imagingSeconds: imagingMs / 1000,
@@ -545,6 +550,7 @@ function placeSubSessionInFreeWindow(
       tonightDurationSecondsFromPlans(draftPlans, {
         raHours: coords.raHours,
         startMs: cursorMs,
+        ditherEnabled: virtualProject.ditherEnabled,
       }) * 1000
     const startMs = findPlacementStart(
       virtualProject,
@@ -581,6 +587,7 @@ function placeSubSessionInFreeWindow(
       tonightDurationSecondsFromPlans(finalPlans, {
         raHours: coords.raHours,
         startMs,
+        ditherEnabled: virtualProject.ditherEnabled,
       }) * 1000
     const refinedStart = findPlacementStart(
       virtualProject,
@@ -600,6 +607,7 @@ function placeSubSessionInFreeWindow(
         tonightDurationSecondsFromPlans(finalPlans, {
           raHours: coords.raHours,
           startMs: placedStart,
+          ditherEnabled: virtualProject.ditherEnabled,
         }) * 1000,
     }
   }
@@ -849,6 +857,7 @@ export function shouldKeepExistingDeliverableTonight(
     tonightDurationSecondsFromPlans(existing.filterPlansTonight, {
       startMs,
       raHours: sky.raHours,
+      ditherEnabled: project.ditherEnabled,
     }) *
       1000
   if (endMs <= startMs) return false
@@ -864,7 +873,7 @@ export function shouldKeepExistingDeliverableTonight(
   const window = getTonightSchedulingWindow(now)
   const windowStartMs = Math.max(nowMs, window.nauticalDuskUtc.getTime())
   const deadlineMs = window.nauticalDawnUtc.getTime()
-  const minWindowMs = minExposureMs(project) + SESSION_OVERHEAD_BASE_MS
+  const minWindowMs = minExposureMs(project) + sessionBaseOverheadMs(project)
   return hasSchedulableFreeTonight(
     freeIntervals,
     weatherPermittedIntervals,
@@ -926,7 +935,7 @@ function planMosaicInterleavedSubSessions(
   const windowStartMs = window.nauticalDuskUtc.getTime()
   const deadlineMs = window.nauticalDawnUtc.getTime()
   const strip = getTonightScheduleStrip(now)
-  const minWindowMs = minExposureMs(project) + SESSION_OVERHEAD_BASE_MS
+  const minWindowMs = minExposureMs(project) + sessionBaseOverheadMs(project)
 
   if (!hasSchedulableFreeTonight(freeIntervals, weatherPermittedIntervals, windowStartMs, deadlineMs, minWindowMs)) {
     return []
@@ -1075,6 +1084,7 @@ function planMosaicInterleavedSubSessions(
       durationSeconds: tonightDurationSecondsFromPlans(finalPlans, {
         startMs: placedStart,
         raHours: projectTargetCoordsForPanel(project, panelIndex).raHours,
+        ditherEnabled: project.ditherEnabled,
       }),
       scheduleReasons: buildProjectSubSessionScheduleReasons({
         project,
@@ -1164,6 +1174,7 @@ function reusePublishedSubStarts(
     const durationSeconds = tonightDurationSecondsFromPlans(plan.filterPlansTonight, {
       startMs: priorStartMs,
       raHours: coords.raHours,
+      ditherEnabled: project.ditherEnabled,
     })
     return {
       ...plan,
@@ -1191,7 +1202,7 @@ function planFreshTonightSubSessions(
   const windowStartMs = window.nauticalDuskUtc.getTime()
   const deadlineMs = window.nauticalDawnUtc.getTime()
   const strip = getTonightScheduleStrip(now)
-  const minWindowMs = minExposureMs(project) + SESSION_OVERHEAD_BASE_MS
+  const minWindowMs = minExposureMs(project) + sessionBaseOverheadMs(project)
 
   if (!hasSchedulableFreeTonight(freeIntervals, weatherPermittedIntervals, windowStartMs, deadlineMs, minWindowMs)) {
     return []
@@ -1296,6 +1307,7 @@ function planFreshTonightSubSessions(
       durationSeconds: tonightDurationSecondsFromPlans(finalPlans, {
         startMs: placedStart,
         raHours: projectTargetCoords(project).raHours,
+        ditherEnabled: project.ditherEnabled,
       }),
       scheduleReasons: buildProjectSubSessionScheduleReasons({
         project,
@@ -1379,6 +1391,7 @@ function subtractProjectSubsTonight(
       tonightDurationSecondsFromPlans(n.filterPlansTonight, {
         startMs,
         raHours: sky.raHours,
+        ditherEnabled: project.ditherEnabled,
       }) *
         1000
     if (endMs <= startMs) continue
@@ -1457,7 +1470,7 @@ export function explainWhyNoPlansTonight(
   const window = getTonightSchedulingWindow(now)
   const windowStartMs = window.nauticalDuskUtc.getTime()
   const deadlineMs = window.nauticalDawnUtc.getTime()
-  const minWindowMs = minExposureMs(project) + SESSION_OVERHEAD_BASE_MS
+  const minWindowMs = minExposureMs(project) + sessionBaseOverheadMs(project)
   if (!hasSchedulableFreeTonight(freeIntervals, weatherPermittedIntervals, windowStartMs, deadlineMs, minWindowMs)) {
     return [
       'No weather-permitted window overlaps nautical dusk–dawn tonight (after queue free time).',
@@ -1506,6 +1519,7 @@ export function explainWhyNoPlansTonight(
       tonightDurationSecondsFromPlans(draftPlans, {
         startMs: cursorMs,
         raHours: projectTargetCoords(project).raHours,
+        ditherEnabled: project.ditherEnabled,
       }) * 1000
     const riseAt = firstAltitudeAllowedTimeMs(projectTargetCoords(project).raHours, projectTargetCoords(project).decDeg, cursorMs, planningEndMs)
     if (riseAt == null) {

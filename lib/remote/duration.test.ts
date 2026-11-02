@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { DSO_SESSION_OVERHEAD_SEC } from '@/lib/imaging-session-overhead'
+import { DSO_DITHER_OVERHEAD_SEC, DSO_SESSION_OVERHEAD_SEC } from '@/lib/imaging-session-overhead'
 import { estimateDurationSecondsFromPlans } from './duration'
 
 test('estimateDurationSecondsFromPlans returns overhead when plans missing', () => {
@@ -13,4 +13,12 @@ test('estimateDurationSecondsFromPlans is at least overhead for real plans', () 
     { filterName: 'L', exposureSeconds: 300, count: 10 },
   ])
   assert.ok(sec >= DSO_SESSION_OVERHEAD_SEC)
+})
+
+test('Remote duration preview includes the DSO dither allowance', () => {
+  const plans = [{ filterName: 'Ha', exposureSeconds: 300, count: 4 }]
+  assert.equal(
+    estimateDurationSecondsFromPlans(plans, { ditherEnabled: true }) - estimateDurationSecondsFromPlans(plans),
+    DSO_DITHER_OVERHEAD_SEC
+  )
 })

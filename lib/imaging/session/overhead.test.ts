@@ -4,6 +4,7 @@ import {
   DSO_SESSION_OVERHEAD_SEC,
   DSO_MERIDIAN_FLIP_OVERHEAD_SEC,
   DSO_EXTRA_FILTER_OVERHEAD_SEC,
+  DSO_DITHER_OVERHEAD_SEC,
   VARIABLE_STAR_SESSION_OVERHEAD_SEC,
   VARIABLE_STAR_MERIDIAN_FLIP_OVERHEAD_SEC,
   distinctFiltersWithFrames,
@@ -55,6 +56,14 @@ test('dsoSessionDurationSeconds adds imaging to overhead', () => {
     dsoSessionDurationSeconds({ filterPlans: plans }),
     600 + DSO_SESSION_OVERHEAD_SEC
   )
+})
+
+test('DSO dithering adds exactly five minutes to a scheduled session', () => {
+  const plans = [{ filterName: 'Ha', exposureSeconds: 300, count: 10 }]
+  const withoutDither = dsoSessionDurationSeconds({ filterPlans: plans })
+  const withDither = dsoSessionDurationSeconds({ filterPlans: plans, ditherEnabled: true })
+  assert.equal(withDither - withoutDither, DSO_DITHER_OVERHEAD_SEC)
+  assert.equal(dsoSessionOverheadSeconds({ filterPlans: plans, ditherEnabled: false }), DSO_SESSION_OVERHEAD_SEC)
 })
 
 test('sessionCrossesMeridian detects HA sign change across meridian', () => {

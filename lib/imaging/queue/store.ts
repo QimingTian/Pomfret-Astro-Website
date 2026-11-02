@@ -57,6 +57,7 @@ export interface ImagingRequest {
   exposureSeconds: number
   count: number
   outputMode?: 'raw_zip' | 'stacked_master' | 'none'
+  ditherEnabled?: boolean
   cameraCoolingTempC?: number
   filterPlans?: Array<{ filterName: string; exposureSeconds: number; count: number }>
   /** Estimated session duration in seconds: sum(filter count * exposure) + DSO overhead. */
@@ -548,6 +549,7 @@ export interface CreateImagingInput {
   sessionPassword?: string
   userId?: string
   outputMode?: 'raw_zip' | 'stacked_master' | 'none'
+  ditherEnabled?: boolean
   cameraCoolingTempC?: number
   filterPlans?: Array<{ filterName: string; exposureSeconds: number | string; count: number | string }>
   firstName?: string | null
@@ -793,7 +795,7 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
             )
           )
         })()
-      : dsoSessionDurationSeconds({ filterPlans: normalizedFilterPlans })
+      : dsoSessionDurationSeconds({ filterPlans: normalizedFilterPlans, ditherEnabled: input.ditherEnabled === true })
 
   if (!projectMode) {
     const tonightWindow = getTonightAstronomicalNightWindow(new Date())
@@ -829,6 +831,7 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
       exposureCount: normalizedFilterPlans[0].count,
       pomfretQueueId: id,
       outputMode,
+      ditherEnabled: sequenceTemplate === 'dso' && input.ditherEnabled === true,
       cameraCoolingTempC: input.cameraCoolingTempC,
       templateKind: sequenceTemplate,
       targetName: target,
@@ -860,6 +863,7 @@ export async function createRequest(input: CreateImagingInput): Promise<ImagingR
     exposureSeconds: normalizedFilterPlans[0].exposureSeconds,
     count: normalizedFilterPlans[0].count,
     outputMode,
+    ditherEnabled: sequenceTemplate === 'dso' && input.ditherEnabled === true,
     cameraCoolingTempC: input.cameraCoolingTempC,
     filterPlans: normalizedFilterPlans,
     estimatedDurationSeconds,
@@ -1054,7 +1058,7 @@ export async function updatePendingRequestById(
               )
             )
           })()
-        : dsoSessionDurationSeconds({ filterPlans: normalizedFilterPlans })
+        : dsoSessionDurationSeconds({ filterPlans: normalizedFilterPlans, ditherEnabled: input.ditherEnabled ?? current.ditherEnabled })
   const projectMode =
     sequenceTemplate === 'asteroid_occultation'
       ? false
@@ -1078,6 +1082,7 @@ export async function updatePendingRequestById(
   }
 
   const cameraCoolingTempC = input.cameraCoolingTempC ?? current.cameraCoolingTempC
+  const ditherEnabled = sequenceTemplate === 'dso' && (input.ditherEnabled ?? current.ditherEnabled) === true
   const variableStarAmplitudeMag =
     sequenceTemplate === 'variable_star'
       ? (normalizeVariableStarAmplitudeMag(
@@ -1097,6 +1102,7 @@ export async function updatePendingRequestById(
       exposureCount: normalizedFilterPlans[0].count,
       pomfretQueueId: id,
       outputMode,
+      ditherEnabled,
       cameraCoolingTempC,
       templateKind: sequenceTemplate,
       targetName: target,
@@ -1127,6 +1133,7 @@ export async function updatePendingRequestById(
     exposureSeconds: normalizedFilterPlans[0].exposureSeconds,
     count: normalizedFilterPlans[0].count,
     outputMode,
+    ditherEnabled,
     cameraCoolingTempC,
     filterPlans: normalizedFilterPlans,
     estimatedDurationSeconds,

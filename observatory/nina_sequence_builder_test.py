@@ -60,6 +60,64 @@ class NinaSequenceBuilderTests(unittest.TestCase):
         self.assertIn("G", blob)
         self.assertGreaterEqual(blob.count("TakeManyExposures"), 3)
 
+    def test_dither_switch_on_run_jobs(self):
+        base = {
+            "raHoursDecimal": 20.9,
+            "decDegDecimal": 44.3,
+            "filterName": "L",
+            "exposureSeconds": 180,
+            "exposureCount": 6,
+            "pomfretQueueId": "dither-test",
+        }
+        cases = [
+            {"templateKind": "dso"},
+            {
+                "templateKind": "dso",
+                "filterPlans": [
+                    {"filterName": "L", "exposureSeconds": 180, "exposureCount": 6},
+                    {"filterName": "R", "exposureSeconds": 120, "exposureCount": 6},
+                ],
+            },
+            {"templateKind": "variable_star"},
+            {"templateKind": "asteroid_occultation"},
+        ]
+        for case in cases:
+            with self.subTest(case=case):
+                off = build_run_sequence({**base, **case, "ditherEnabled": False})
+                on = build_run_sequence({**base, **case, "ditherEnabled": True})
+                target_off = off["Items"]["$values"][1]["Items"]["$values"][0]
+                target_on = on["Items"]["$values"][1]["Items"]["$values"][0]
+                def trigger_owner(target):
+                    if case["templateKind"] != "variable_star":
+                        return target
+                    stack = [target]
+                    while stack:
+                        node = stack.pop()
+                        if isinstance(node, dict):
+                            if "NINA.Sequencer.SequenceItem.Imaging.SmartExposure" in node.get("$type", ""):
+                                return node
+                            stack.extend(node.values())
+                        elif isinstance(node, list):
+                            stack.extend(node)
+                    self.fail("Variable star SmartExposure not found")
+                owner_off = trigger_owner(target_off)
+                owner_on = trigger_owner(target_on)
+                self.assertFalse(any("DitherAfterExposures" in t["$type"] for t in owner_off["Triggers"]["$values"]))
+                triggers = [
+                    t for t in owner_on["Triggers"]["$values"]
+                    if "DitherAfterExposures" in t["$type"]
+                ]
+                if case["templateKind"] != "dso":
+                    self.assertEqual(len(triggers), 0)
+                    continue
+                self.assertEqual(len(triggers), 1)
+                trigger = triggers[0]
+                self.assertEqual(trigger["AfterExposures"], 3)
+                self.assertEqual(trigger["Parent"], {"$ref": owner_on["$id"]})
+                runner = trigger["TriggerRunner"]
+                self.assertIn("Guider.Dither", runner["Items"]["$values"][0]["$type"])
+                self.assertEqual(runner["Items"]["$values"][0]["Parent"], {"$ref": runner["$id"]})
+
     def test_estop_sets_session_type(self):
         root = build_estop_sequence("estop-1", "ESTOPPED")
         self.assertEqual(root["PomfretAstro"]["SessionType"], "estop")
@@ -98,10 +156,16 @@ class NinaSequenceBuilderTests(unittest.TestCase):
                 "exposureCount": 4,
                 "pomfretQueueId": "q2",
                 "templateKind": "dso",
+                "ditherEnabled": True,
             },
         }
         root = materialize_job(job)
         self.assertEqual(root["PomfretAstro"]["QueueId"], "q2")
+        target = root["Items"]["$values"][1]["Items"]["$values"][0]
+        self.assertTrue(any(
+            "DitherAfterExposures" in trigger["$type"] and trigger["AfterExposures"] == 3
+            for trigger in target["Triggers"]["$values"]
+        ))
 
     def test_parse_envelope(self):
         self.assertIsNone(parse_job_envelope({"$type": "NINA.Sequencer"}))

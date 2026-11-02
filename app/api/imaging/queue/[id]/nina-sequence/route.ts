@@ -51,6 +51,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
         pomfretQueueId: row.id,
         templateKind: imagingSequenceTemplate(row.sequenceTemplate),
         outputMode: row.outputMode,
+        ditherEnabled: row.ditherEnabled === true,
         cameraCoolingTempC: row.cameraCoolingTempC,
         targetName: row.target ?? undefined,
         variableStarSessionEndMs: scheduledSessionEndMs(row) ?? undefined,

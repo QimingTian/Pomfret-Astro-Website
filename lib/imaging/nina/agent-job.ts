@@ -141,6 +141,7 @@ export function sequenceParamsFromQueueRequest(r: ImagingRequest): NinaAgentRunP
     pomfretQueueId: r.id,
     templateKind,
     outputMode: r.outputMode as NinaSequenceParams['outputMode'],
+    ditherEnabled: templateKind === 'dso' && r.ditherEnabled === true,
     cameraCoolingTempC: r.cameraCoolingTempC,
     targetName: r.target ?? undefined,
     ...(templateKind === 'variable_star'
@@ -194,6 +195,7 @@ export function sequenceParamsFromProjectNight(
     pomfretQueueId: night.id,
     templateKind: 'dso',
     outputMode: project.outputMode as NinaSequenceParams['outputMode'],
+    ditherEnabled: project.ditherEnabled === true,
     cameraCoolingTempC: project.cameraCoolingTempC,
     targetName: project.target,
     filterPlans: plans.map((p) => ({

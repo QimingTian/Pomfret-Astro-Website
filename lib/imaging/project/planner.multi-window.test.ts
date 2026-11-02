@@ -80,6 +80,17 @@ test('planTonightSubSessions assigns increasing session indices', () => {
   }
 })
 
+test('project frame fitting reserves five minutes for dithering', () => {
+  const project = mockProject()
+  const startMs = Date.parse('2026-05-17T20:00:00.000Z')
+  const endMs = startMs + 2 * 3600_000
+  const withoutDither = planTonightFilterFrames(project, startMs, endMs)
+  const withDither = planTonightFilterFrames({ ...project, ditherEnabled: true }, startMs, endMs)
+  assert.ok(withoutDither.filterPlansTonight.length > 0)
+  assert.ok(withDither.filterPlansTonight.length > 0)
+  assert.ok(withDither.filterPlansTonight[0]!.count < withoutDither.filterPlansTonight[0]!.count)
+})
+
 test('project subs schedule after an in-progress single-night session', () => {
   const project = mockProject()
   const now = new Date('2026-05-19T01:30:00.000Z')

@@ -239,6 +239,7 @@ function sequenceJsonFor(r: ImagingRequest): string | null {
       pomfretQueueId: r.id,
       templateKind: imagingSequenceTemplate(r.sequenceTemplate),
       outputMode: r.outputMode,
+      ditherEnabled: r.ditherEnabled === true,
       cameraCoolingTempC: r.cameraCoolingTempC,
       targetName: r.target ?? undefined,
       variableStarSessionEndMs: scheduledSessionEndMs(r) ?? undefined,

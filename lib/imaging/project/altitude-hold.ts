@@ -23,7 +23,7 @@ type AltitudeHoldProject = Pick<ImagingProject, 'raHours' | 'decDeg' | 'remainin
   Partial<
     Pick<
       ImagingProject,
-      'nights' | 'mosaicMode' | 'mosaicPanels' | 'mosaicRemainingByPanel'
+      'nights' | 'mosaicMode' | 'mosaicPanels' | 'mosaicRemainingByPanel' | 'ditherEnabled'
     >
   >
 
@@ -107,6 +107,7 @@ function finalTonightSubSessionEndMs(
     const durationSeconds = tonightDurationSecondsFromPlans(night.filterPlansTonight, {
       startMs,
       raHours: project.raHours,
+      ditherEnabled: project.ditherEnabled,
     })
     if (durationSeconds <= 0) return null
     const endMs = startMs + durationSeconds * 1000

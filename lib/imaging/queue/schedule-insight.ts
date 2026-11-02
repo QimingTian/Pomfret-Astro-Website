@@ -33,6 +33,7 @@ export type SchedulePendingRow = {
   count: number
   filterPlans?: Array<{ filterName: string; exposureSeconds: number; count: number }>
   estimatedDurationSeconds?: number
+  ditherEnabled?: boolean
   status?: string
   plannedStartIso?: string | null
   /** Variable-star and occultation sessions are exempt from moon avoidance. */
@@ -207,6 +208,7 @@ export function estimateDurationSeconds(
     | 'count'
     | 'filterPlans'
     | 'estimatedDurationSeconds'
+    | 'ditherEnabled'
     | 'raHours'
     | 'plannedStartIso'
     | 'sequenceTemplate'
@@ -250,6 +252,10 @@ export function estimateDurationSeconds(
       : undefined
   const fromPlans = dsoSessionDurationSeconds({
     filterPlans: plans,
+    ditherEnabled:
+      req.sequenceTemplate !== 'variable_star' &&
+      req.sequenceTemplate !== 'asteroid_occultation' &&
+      req.ditherEnabled === true,
     raHours: typeof req.raHours === 'number' ? req.raHours : undefined,
     startMs,
   })

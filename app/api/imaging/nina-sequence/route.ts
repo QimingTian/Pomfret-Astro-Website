@@ -109,6 +109,7 @@ async function latestProjectNightWeatherBlockReason(
   const durationSeconds = tonightDurationSecondsFromPlans(night.filterPlansTonight, {
     startMs,
     raHours: sky.raHours,
+    ditherEnabled: project.ditherEnabled,
   })
   return latestDeliveryWeatherBlockReason(startMs, durationSeconds)
 }
@@ -130,6 +131,7 @@ function sequenceJsonFor(r: ImagingRequest): string | null {
       pomfretQueueId: r.id,
       templateKind: imagingSequenceTemplate(r.sequenceTemplate),
       outputMode: r.outputMode,
+      ditherEnabled: r.ditherEnabled === true,
       cameraCoolingTempC: r.cameraCoolingTempC,
       targetName: r.target ?? undefined,
       variableStarSessionEndMs: scheduledSessionEndMs(r) ?? undefined,
@@ -338,6 +340,7 @@ async function deliverProjectSubSessionJson(
         return tonightDurationSecondsFromPlans(nightRef.filterPlansTonight, {
           startMs,
           raHours: sky.raHours,
+          ditherEnabled: projectRef.ditherEnabled,
         })
       })(),
       plannedStartIso: nightRef.plannedStartIso ?? null,

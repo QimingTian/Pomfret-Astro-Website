@@ -9,6 +9,9 @@ export const DSO_MERIDIAN_FLIP_OVERHEAD_SEC = 15 * 60
 /** Extra per filter beyond the first (filter change + refocus). */
 export const DSO_EXTRA_FILTER_OVERHEAD_SEC = 5 * 60
 
+/** Extra scheduling allowance for a DSO sub-session with dithering enabled. */
+export const DSO_DITHER_OVERHEAD_SEC = 5 * 60
+
 /** Variable star: total = (N × 0.5 h block) + overhead; stripped when building NINA JSON. */
 export const VARIABLE_STAR_SESSION_OVERHEAD_SEC = 30 * 60
 
@@ -89,6 +92,7 @@ export type DsoOverheadFilterPlan = {
 
 export type DsoSessionOverheadInput = {
   filterPlans: DsoOverheadFilterPlan[]
+  ditherEnabled?: boolean
   /** Target RA (hours). With startMs, enables meridian-flip overhead. */
   raHours?: number
   /** Planned session start (ms). Without this, meridian flip is not added. */
@@ -142,7 +146,8 @@ export function imagingSecondsFromFilterPlans(filterPlans: DsoOverheadFilterPlan
  * DSO / project session overhead:
  *   60 min base
  * + 5 min × (distinctFilters − 1) when more than one filter
- * + 15 min if [start, start+imaging+base+filterExtra] crosses the meridian
+ * + 5 min when dithering is enabled
+ * + 15 min if the provisional session crosses the meridian
  *
  * Without startMs or raHours, meridian flip is omitted (form / queue submit estimates).
  */
@@ -150,7 +155,7 @@ export function dsoSessionOverheadSeconds(input: DsoSessionOverheadInput): numbe
   const filterCount = distinctFiltersWithFrames(input.filterPlans)
   const filterExtra =
     filterCount > 1 ? (filterCount - 1) * DSO_EXTRA_FILTER_OVERHEAD_SEC : 0
-  const baseAndFilters = DSO_SESSION_OVERHEAD_SEC + filterExtra
+  const baseAndFilters = DSO_SESSION_OVERHEAD_SEC + filterExtra + (input.ditherEnabled === true ? DSO_DITHER_OVERHEAD_SEC : 0)
 
   const imaging =
     input.imagingSeconds != null && Number.isFinite(input.imagingSeconds)

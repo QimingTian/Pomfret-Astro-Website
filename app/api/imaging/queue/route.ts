@@ -68,6 +68,7 @@ function queueCreatedAuditDetail(result: ImagingRequest): Record<string, unknown
     filter: result.sequenceTemplate === 'variable_star' ? 'G' : result.filter,
     estimatedDurationSeconds: result.estimatedDurationSeconds ?? null,
     outputMode: result.outputMode ?? 'raw_zip',
+    ditherEnabled: result.ditherEnabled === true,
     firstName: result.firstName ?? null,
     lastName: result.lastName ?? null,
     email: result.email ?? null,
@@ -185,6 +186,7 @@ export async function POST(request: NextRequest) {
         : b.outputMode === 'none'
           ? 'none'
           : 'raw_zip',
+    ditherEnabled: imagingSequenceTemplate(b.sessionType) === 'dso' && b.ditherEnabled === true,
     cameraCoolingTempC:
       b.cameraCoolingTempC === -10 || b.cameraCoolingTempC === 0 ? b.cameraCoolingTempC : -10,
     filterPlans: parsedFilterPlans,
@@ -261,6 +263,7 @@ export async function POST(request: NextRequest) {
       raHours: result.raHours,
       decDeg: result.decDeg,
       outputMode: result.outputMode ?? 'raw_zip',
+      ditherEnabled: result.ditherEnabled === true,
       ...(result.cameraCoolingTempC != null ? { cameraCoolingTempC: result.cameraCoolingTempC } : {}),
       filterPlans: result.filterPlans ?? [],
       estimatedDurationSeconds: result.estimatedDurationSeconds ?? 0,

@@ -26,6 +26,7 @@ export interface NinaSequenceParams {
   /** Echoed into JSON for NINA HTTP POST `queueId` (ignored by NINA if unused). */
   pomfretQueueId?: string
   outputMode?: 'raw_zip' | 'stacked_master' | 'none'
+  ditherEnabled?: boolean
   filterPlans?: Array<{
     filterName: string
     exposureSeconds: number
@@ -185,6 +186,53 @@ function nextId(root: Record<string, unknown>, used: Set<number>): string {
   const id = max + 1
   used.add(id)
   return String(id)
+}
+
+/** Match NINA's target-level “Dither after exposures” trigger from its exported sequence. */
+function addDitherTrigger(root: Record<string, unknown>, target: Record<string, unknown>, usedIds: Set<number>) {
+  const triggers = asArray(asRecord(target['Triggers'])['$values'])
+  if (triggers.some((trigger) => hasType(trigger, 'NINA.Sequencer.Trigger.Guider.DitherAfterExposures'))) return
+  const targetId = target['$id']
+  if (typeof targetId !== 'string') throw new Error('Template: target container has no $id')
+  const triggerId = nextId(root, usedIds)
+  const runnerId = nextId(root, usedIds)
+  triggers.push({
+    $id: triggerId,
+    $type: 'NINA.Sequencer.Trigger.Guider.DitherAfterExposures, NINA.Sequencer',
+    AfterExposures: 3,
+    Parent: { $ref: targetId },
+    TriggerRunner: {
+      $id: runnerId,
+      $type: 'NINA.Sequencer.Container.SequentialContainer, NINA.Sequencer',
+      Strategy: { $type: 'NINA.Sequencer.Container.ExecutionStrategy.SequentialStrategy, NINA.Sequencer' },
+      Name: null,
+      Conditions: {
+        $id: nextId(root, usedIds),
+        $type: 'System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Conditions.ISequenceCondition, NINA.Sequencer]], System.ObjectModel',
+        $values: [],
+      },
+      IsExpanded: true,
+      Items: {
+        $id: nextId(root, usedIds),
+        $type: 'System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.SequenceItem.ISequenceItem, NINA.Sequencer]], System.ObjectModel',
+        $values: [{
+          $id: nextId(root, usedIds),
+          $type: 'NINA.Sequencer.SequenceItem.Guider.Dither, NINA.Sequencer',
+          Parent: { $ref: runnerId },
+          ErrorBehavior: 0,
+          Attempts: 1,
+        }],
+      },
+      Triggers: {
+        $id: nextId(root, usedIds),
+        $type: 'System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Trigger.ISequenceTrigger, NINA.Sequencer]], System.ObjectModel',
+        $values: [],
+      },
+      Parent: null,
+      ErrorBehavior: 0,
+      Attempts: 1,
+    },
+  })
 }
 
 function buildFilterInfoObject(
@@ -587,7 +635,10 @@ export function buildNinaSequenceJson(params: NinaSequenceParams): string {
     for (let i = 0; i < normalizedPlans.length; i += 1) {
       const plan = normalizedPlans[i]
       const templateSegment = i === 0 ? firstBlock : repeatBlock
-      const clonedSegment = remapIdsInClone(root, usedIds, templateSegment) as unknown[]
+      // Later template blocks can refer to the first exposure's binning $id.
+      // Keep the first block's IDs; only additional copies need fresh IDs.
+      const clonedSegment =
+        i === 0 ? structuredClone(templateSegment) : remapIdsInClone(root, usedIds, templateSegment) as unknown[]
 
       const segSwitch = clonedSegment.find((v) => hasType(v, 'NINA.Sequencer.SequenceItem.FilterWheel.SwitchFilter'))
       if (!segSwitch || typeof segSwitch !== 'object') throw new Error('Template: SwitchFilter missing in cloned segment')
@@ -610,6 +661,17 @@ export function buildNinaSequenceJson(params: NinaSequenceParams): string {
     }
     rebuilt.push(...suffix)
     dsoItems['$values'] = rebuilt
+  }
+
+  if (templateKind === 'variable_star') {
+    const smartExposure = findFirstByType(dso, 'NINA.Sequencer.SequenceItem.Imaging.SmartExposure')
+    if (!smartExposure) throw new Error('Template: variable star SmartExposure not found')
+    const triggers = asArray(asRecord(smartExposure['Triggers'])['$values'])
+    const existing = triggers.find((trigger) => hasType(trigger, 'NINA.Sequencer.Trigger.Guider.DitherAfterExposures'))
+    if (!existing || typeof existing !== 'object') throw new Error('Template: variable star dither trigger not found')
+    triggers.splice(triggers.indexOf(existing), 1)
+  } else if (templateKind === 'dso' && params.ditherEnabled === true) {
+    addDitherTrigger(root, dso, usedIds)
   }
 
   const pomfretQueueId = params.pomfretQueueId?.trim() ?? ''

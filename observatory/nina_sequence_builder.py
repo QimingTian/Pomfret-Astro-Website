@@ -134,6 +134,57 @@ def _next_id(root: dict[str, Any], used: set[int]) -> str:
     return str(nxt)
 
 
+def _add_dither_trigger(root: dict[str, Any], target: dict[str, Any], used: set[int]) -> None:
+    """Attach NINA's exported dither-after-three-exposures trigger to the target."""
+    triggers = _as_array(_as_record(target.get("Triggers")).get("$values"))
+    if any(_has_type(t, "NINA.Sequencer.Trigger.Guider.DitherAfterExposures") for t in triggers):
+        return
+    target_id = target.get(ID_KEY)
+    if not isinstance(target_id, str):
+        raise ValueError("Template: target container has no $id")
+    trigger_id = _next_id(root, used)
+    runner_id = _next_id(root, used)
+    triggers.append({
+        ID_KEY: trigger_id,
+        TYPE_KEY: "NINA.Sequencer.Trigger.Guider.DitherAfterExposures, NINA.Sequencer",
+        "AfterExposures": 3,
+        "Parent": {REF_KEY: target_id},
+        "TriggerRunner": {
+            ID_KEY: runner_id,
+            TYPE_KEY: "NINA.Sequencer.Container.SequentialContainer, NINA.Sequencer",
+            "Strategy": {
+                TYPE_KEY: "NINA.Sequencer.Container.ExecutionStrategy.SequentialStrategy, NINA.Sequencer",
+            },
+            "Name": None,
+            "Conditions": {
+                ID_KEY: _next_id(root, used),
+                TYPE_KEY: "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Conditions.ISequenceCondition, NINA.Sequencer]], System.ObjectModel",
+                "$values": [],
+            },
+            "IsExpanded": True,
+            "Items": {
+                ID_KEY: _next_id(root, used),
+                TYPE_KEY: "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.SequenceItem.ISequenceItem, NINA.Sequencer]], System.ObjectModel",
+                "$values": [{
+                    ID_KEY: _next_id(root, used),
+                    TYPE_KEY: "NINA.Sequencer.SequenceItem.Guider.Dither, NINA.Sequencer",
+                    "Parent": {REF_KEY: runner_id},
+                    "ErrorBehavior": 0,
+                    "Attempts": 1,
+                }],
+            },
+            "Triggers": {
+                ID_KEY: _next_id(root, used),
+                TYPE_KEY: "System.Collections.ObjectModel.ObservableCollection`1[[NINA.Sequencer.Trigger.ISequenceTrigger, NINA.Sequencer]], System.ObjectModel",
+                "$values": [],
+            },
+            "Parent": None,
+            "ErrorBehavior": 0,
+            "Attempts": 1,
+        },
+    })
+
+
 def _build_filter_info(root: dict[str, Any], used: set[int], filter_name: str) -> dict[str, Any]:
     return {
         ID_KEY: _next_id(root, used),
@@ -523,7 +574,10 @@ def build_run_sequence(params: dict[str, Any]) -> dict[str, Any]:
         rebuilt: list[Any] = list(prefix)
         for i, plan in enumerate(plans):
             segment = copy.deepcopy(first_block if i == 0 else repeat_block)
-            segment = _remap_ids_in_clone(root, used, segment)
+            # Later template blocks refer to the first exposure's binning $id.
+            # Preserve the first block's IDs; remap only additional copies.
+            if i > 0:
+                segment = _remap_ids_in_clone(root, used, segment)
             seg_switch = next((v for v in segment if _has_type(v, "NINA.Sequencer.SequenceItem.FilterWheel.SwitchFilter")), None)
             seg_take = next((v for v in segment if _has_type(v, "NINA.Sequencer.SequenceItem.Imaging.TakeManyExposures")), None)
             if not isinstance(seg_switch, dict) or not isinstance(seg_take, dict):
@@ -542,6 +596,18 @@ def build_run_sequence(params: dict[str, Any]) -> dict[str, Any]:
             rebuilt.extend(segment)
         rebuilt.extend(suffix)
         dso_items["$values"] = rebuilt
+
+    if kind == "variable_star":
+        smart_exposure = _find_first_by_type(dso, "NINA.Sequencer.SequenceItem.Imaging.SmartExposure")
+        if smart_exposure is None:
+            raise ValueError("Template: variable star SmartExposure not found")
+        triggers = _as_array(_as_record(smart_exposure.get("Triggers")).get("$values"))
+        existing = next((t for t in triggers if _has_type(t, "NINA.Sequencer.Trigger.Guider.DitherAfterExposures")), None)
+        if existing is None:
+            raise ValueError("Template: variable star dither trigger not found")
+        triggers.remove(existing)
+    elif kind == "dso" and params.get("ditherEnabled") is True:
+        _add_dither_trigger(root, dso, used)
 
     queue_id = str(params.get("pomfretQueueId") or "").strip()
     site_id = str(params.get("siteId") or os.environ.get("OBSERVATORY_SITE_ID") or "pomfret").strip().lower() or "pomfret"

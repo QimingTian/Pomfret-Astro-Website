@@ -149,6 +149,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
         : b.outputMode === 'none'
           ? 'none'
           : 'raw_zip',
+    ditherEnabled: typeof b.ditherEnabled === 'boolean' ? b.ditherEnabled : undefined,
     cameraCoolingTempC:
       b.cameraCoolingTempC === -10 || b.cameraCoolingTempC === 0 ? b.cameraCoolingTempC : undefined,
     filterPlans: parsedFilterPlans,
@@ -218,6 +219,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       raHours: updated.raHours!,
       decDeg: updated.decDeg!,
       outputMode: updated.outputMode ?? 'raw_zip',
+      ditherEnabled: updated.ditherEnabled === true,
       ...(updated.cameraCoolingTempC != null ? { cameraCoolingTempC: updated.cameraCoolingTempC } : {}),
       filterPlans: updated.filterPlans,
       estimatedDurationSeconds: updated.estimatedDurationSeconds ?? 0,

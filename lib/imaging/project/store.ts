@@ -64,6 +64,7 @@ export type ImagingProject = {
   raHours: number
   decDeg: number
   outputMode: 'raw_zip' | 'stacked_master' | 'none'
+  ditherEnabled?: boolean
   cameraCoolingTempC?: number
   filterPlansTotal: FilterPlanRow[]
   remainingByFilter: FilterRemainingRow[]
@@ -382,7 +383,7 @@ export async function dropUndeliveredSubsBeforeNightKey(currentNightKey: string)
 /** Planned window end for a sub-session (planned start + duration, or frozen schedule bar end). */
 export function projectSubSessionWindowEndMs(
   night: ProjectNight,
-  opts?: { raHours?: number }
+  opts?: { raHours?: number; ditherEnabled?: boolean }
 ): number | null {
   if (night.plannedStartIso) {
     const startMs = Date.parse(night.plannedStartIso)
@@ -392,6 +393,7 @@ export function projectSubSessionWindowEndMs(
         tonightDurationSecondsFromPlans(night.filterPlansTonight, {
           startMs,
           raHours: opts?.raHours,
+          ditherEnabled: opts?.ditherEnabled,
         }) *
           1000
       )
@@ -668,6 +670,7 @@ export type CreateImagingProjectInput = {
   raHours: number
   decDeg: number
   outputMode: 'raw_zip' | 'stacked_master' | 'none'
+  ditherEnabled?: boolean
   cameraCoolingTempC?: number
   filterPlans: FilterPlanRow[]
   estimatedDurationSeconds: number
@@ -737,6 +740,7 @@ export async function createImagingProject(input: CreateImagingProjectInput): Pr
     raHours: input.raHours,
     decDeg: input.decDeg,
     outputMode: input.outputMode,
+    ditherEnabled: input.ditherEnabled === true,
     ...(input.cameraCoolingTempC != null ? { cameraCoolingTempC: input.cameraCoolingTempC } : {}),
     filterPlansTotal,
     remainingByFilter: perPanelPlans
@@ -778,6 +782,7 @@ export async function applyPendingProjectQueueEdit(
     raHours: number
     decDeg: number
     outputMode: 'raw_zip' | 'stacked_master' | 'none'
+    ditherEnabled?: boolean
     cameraCoolingTempC?: number
     filterPlans: FilterPlanRow[]
     estimatedDurationSeconds: number
@@ -842,6 +847,7 @@ export async function applyPendingProjectQueueEdit(
     raHours: input.raHours,
     decDeg: input.decDeg,
     outputMode: input.outputMode,
+    ditherEnabled: input.ditherEnabled === true,
     ...(input.cameraCoolingTempC != null ? { cameraCoolingTempC: input.cameraCoolingTempC } : {}),
     filterPlansTotal,
     remainingByFilter: perPanelPlans
@@ -895,6 +901,7 @@ export async function patchProject(
       | 'completedAt'
       | 'activePanelIndex'
       | 'mosaicRemainingByPanel'
+      | 'ditherEnabled'
     >
   >
 ): Promise<ImagingProject | undefined> {
@@ -943,6 +950,7 @@ export function buildNightNinaJson(
     exposureCount: first.count,
     pomfretQueueId: nightId,
     outputMode: project.outputMode,
+    ditherEnabled: project.ditherEnabled === true,
     cameraCoolingTempC: project.cameraCoolingTempC,
     templateKind: 'dso',
     targetName: project.target,
@@ -1307,6 +1315,7 @@ export type TonightDurationOpts = {
   raHours?: number
   /** Planned session start (ms). */
   startMs?: number
+  ditherEnabled?: boolean
 }
 
 export function tonightDurationSecondsFromPlans(
@@ -1318,6 +1327,7 @@ export function tonightDurationSecondsFromPlans(
     filterPlans: plans,
     raHours: opts?.raHours,
     startMs: opts?.startMs,
+    ditherEnabled: opts?.ditherEnabled,
   })
 }
 
@@ -1352,6 +1362,7 @@ export function collectTonightProjectSubSessionOccupancy(
       const durationSeconds = tonightDurationSecondsFromPlans(night.filterPlansTonight, {
         startMs,
         raHours: sky.raHours,
+        ditherEnabled: project.ditherEnabled,
       })
       if (durationSeconds <= 0) continue
       const endMs = startMs + durationSeconds * 1000

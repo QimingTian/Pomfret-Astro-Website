@@ -335,6 +335,7 @@ export default function RemotePage() {
       exposureSeconds?: number
       count?: number
       outputMode?: 'raw_zip' | 'stacked_master' | 'none'
+      ditherEnabled?: boolean
       cameraCoolingTempC?: -10 | 0
       estimatedDurationSeconds?: number
       filterPlans?: Array<{ filterName: string; exposureSeconds: number; count: number }>
@@ -407,6 +408,7 @@ export default function RemotePage() {
   const [decSecondPart, setDecSecondPart] = useState('')
   const [sessionPassword, setSessionPassword] = useState('')
   const [outputMode, setOutputMode] = useState<'raw_zip' | 'stacked_master' | 'none'>('raw_zip')
+  const [ditherEnabled, setDitherEnabled] = useState(false)
   const [cameraCoolingTempC, setCameraCoolingTempC] = useState<-10 | 0>(-10)
   const [ambientTempC, setAmbientTempC] = useState<number | null>(null)
 
@@ -1105,6 +1107,7 @@ export default function RemotePage() {
         raHours?: unknown
         decDeg?: unknown
         outputMode?: unknown
+        ditherEnabled?: unknown
         sessionType?: unknown
         occultationEventIso?: unknown
         occultationDurationSeconds?: unknown
@@ -1210,6 +1213,7 @@ export default function RemotePage() {
               if (x.outputMode === 'raw_zip' || x.outputMode === 'stacked_master') return 'raw_zip' as const
               return undefined
             })(),
+            ditherEnabled: x.ditherEnabled === true,
             cameraCoolingTempC:
               (x as Record<string, unknown>).cameraCoolingTempC === -10 || (x as Record<string, unknown>).cameraCoolingTempC === 0
                 ? ((x as Record<string, unknown>).cameraCoolingTempC as -10 | 0)
@@ -1704,15 +1708,15 @@ export default function RemotePage() {
         if (plans.length === 0) return null
         const normalized = normalize(plans)
         if (!normalized) return null
-        total += estimateDurationSecondsFromPlans(normalized)
+        total += estimateDurationSecondsFromPlans(normalized, { ditherEnabled })
       }
       return total
     }
     if (filterPlans.length === 0) return null
     const normalized = normalize(filterPlans)
     if (!normalized) return null
-    return estimateDurationSecondsFromPlans(normalized)
-  }, [sessionType, filterPlans, mosaicMode, mosaicDraft, panelFilterPlansById, selectedMosaicPanelId])
+    return estimateDurationSecondsFromPlans(normalized, { ditherEnabled })
+  }, [sessionType, filterPlans, mosaicMode, mosaicDraft, panelFilterPlansById, selectedMosaicPanelId, ditherEnabled])
 
   const canSaveRemoteSessionSpec = useMemo(() => {
     if (sessionType === 'asteroid_occultation') return false
@@ -1781,6 +1785,7 @@ export default function RemotePage() {
       decSecondPart,
       sessionPassword,
       outputMode: outputMode === 'none' ? 'none' : 'raw_zip',
+      ditherEnabled,
       cameraCoolingTempC,
       filterPlans: filterPlans.map((p) => ({ ...p })),
       variableStarBlockHours,
@@ -1800,6 +1805,7 @@ export default function RemotePage() {
     decSecondPart,
     sessionPassword,
     outputMode,
+    ditherEnabled,
     cameraCoolingTempC,
     filterPlans,
     variableStarBlockHours,
@@ -1829,6 +1835,7 @@ export default function RemotePage() {
       setDecSecondPart(form.decSecondPart)
       setSessionPassword(form.sessionPassword)
       setOutputMode(form.outputMode === 'none' ? 'none' : 'raw_zip')
+      setDitherEnabled(form.ditherEnabled === true)
       if (form.cameraCoolingTempC === 0 || form.cameraCoolingTempC === -10) {
         setCameraCoolingTempC(form.cameraCoolingTempC)
       }
@@ -2613,8 +2620,8 @@ export default function RemotePage() {
             })
           )
         : mosaicFilterPlansByPanel
-          ? mosaicFilterPlansByPanel.reduce((sum, plans) => sum + estimateDurationSecondsFromPlans(plans), 0)
-          : estimateDurationSecondsFromPlans(normalizedPlans)
+          ? mosaicFilterPlansByPanel.reduce((sum, plans) => sum + estimateDurationSecondsFromPlans(plans, { ditherEnabled }), 0)
+          : estimateDurationSecondsFromPlans(normalizedPlans, { ditherEnabled: sessionType === 'dso' && ditherEnabled })
 
     const variableStarAmplitudeMag =
       sessionType === 'variable_star' &&
@@ -2648,6 +2655,7 @@ export default function RemotePage() {
         whenClosedBehavior: 'queue_until_ready',
         ...(isLoggedIn && !sessionPassword.trim() ? {} : { sessionPassword }),
         outputMode: outputMode === 'none' ? 'none' : 'raw_zip',
+        ditherEnabled: sessionType === 'dso' && ditherEnabled,
         cameraCoolingTempC,
         estimatedDurationSeconds,
         sessionType,
@@ -2690,6 +2698,7 @@ export default function RemotePage() {
     setDecSecondPart('')
     setSessionPassword('')
     setOutputMode('raw_zip')
+    setDitherEnabled(false)
     setSessionType('dso')
     setProjectModeTri('off')
     setMosaicDraft(null)
@@ -2930,6 +2939,7 @@ export default function RemotePage() {
       setVariableStarBlockHours(1)
     }
     setOutputMode(item.outputMode === 'none' ? 'none' : 'raw_zip')
+    setDitherEnabled(item.ditherEnabled === true)
     if (item.cameraCoolingTempC === 0 || item.cameraCoolingTempC === -10) {
       setCameraCoolingTempC(item.cameraCoolingTempC)
     }
@@ -3010,6 +3020,7 @@ export default function RemotePage() {
     setRequestName(`${event.asteroid} occultation`)
     setSelectedOccultationId(event.id)
     setOutputMode('raw_zip')
+    setDitherEnabled(false)
     setCatalogLookupError(null)
     setCatalogLookupResult(null)
   }
@@ -3235,6 +3246,8 @@ export default function RemotePage() {
           setSessionPassword={setSessionPassword}
           outputMode={outputMode}
           setOutputMode={setOutputMode}
+          ditherEnabled={ditherEnabled}
+          setDitherEnabled={setDitherEnabled}
           projectModeTri={projectModeTri}
           setProjectModeTri={setProjectModeTri}
           enableMosaicMode={enableMosaicMode}

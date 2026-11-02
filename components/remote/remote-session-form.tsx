@@ -163,6 +163,8 @@ export type RemoteSessionFormProps = {
   setSessionPassword: Dispatch<SetStateAction<string>>
   outputMode: 'raw_zip' | 'stacked_master' | 'none'
   setOutputMode: Dispatch<SetStateAction<'raw_zip' | 'stacked_master' | 'none'>>
+  ditherEnabled: boolean
+  setDitherEnabled: Dispatch<SetStateAction<boolean>>
   projectModeTri: ProjectModeTri
   setProjectModeTri: Dispatch<SetStateAction<ProjectModeTri>>
   enableMosaicMode: () => void
@@ -269,6 +271,8 @@ export function RemoteSessionForm({
   setSessionPassword,
   outputMode,
   setOutputMode,
+  ditherEnabled,
+  setDitherEnabled,
   projectModeTri,
   setProjectModeTri,
   enableMosaicMode,
@@ -977,7 +981,28 @@ export function RemoteSessionForm({
               )}
             </div>
           )}
-          <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className={`sm:col-span-2 grid grid-cols-1 gap-4 ${sessionType === 'dso' ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
+            {sessionType === 'dso' && <div className="grid gap-2">
+              <span className="text-sm font-medium text-white">Dithering</span>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  aria-pressed={ditherEnabled}
+                  onClick={() => setDitherEnabled(true)}
+                  className={ditherEnabled ? glassPillToggleActive : glassPillToggleIdle}
+                >
+                  On
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={!ditherEnabled}
+                  onClick={() => setDitherEnabled(false)}
+                  className={!ditherEnabled ? glassPillToggleActive : glassPillToggleIdle}
+                >
+                  Off
+                </button>
+              </div>
+            </div>}
             <div className="grid gap-2">
               <span className="text-sm font-medium text-white">Output Type *</span>
               <div className="flex flex-wrap gap-2">

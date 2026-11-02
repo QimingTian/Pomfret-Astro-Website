@@ -8,6 +8,7 @@ type GalleryImage = { file: string; description: string; flagship?: boolean }
 
 const DEEP_SKY_IMAGES: GalleryImage[] = [
   { file: 'photo6.webp', description: 'W80 | 70h | SHO', flagship: true },
+  { file: 'photo9.webp', description: 'NGC 7822 | 62.5h | SHO' },
   { file: 'photo7.webp', description: 'M33 | 23.33h | LRGB' },
   { file: 'photo1.webp', description: 'M31 | 14.08h | LRGB' },
   { file: 'photo2.webp', description: 'IC1805 | 35h | SHO' },

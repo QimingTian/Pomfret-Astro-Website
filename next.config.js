@@ -1,19 +1,12 @@
+const { PERMANENT_REDIRECTS } = require('./lib/seo-redirects')
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
   async redirects() {
-    return [
-      {
-        source: '/',
-        destination: '/dashboard/about',
-        permanent: true,
-      },
-      {
-        source: '/dashboard/admin',
-        destination: '/dashboard/account',
-        permanent: true,
-      },
-    ]
+    // Edge/document 308s for crawlers and bookmarks. App Router pages mirror these
+    // via permanentRedirect for client-side navigations (next.config does not run then).
+    return PERMANENT_REDIRECTS.map((row) => ({ ...row, permanent: true }))
   },
   async headers() {
     // Without application/wasm, hosts often serve .wasm as octet-stream → browser downloads

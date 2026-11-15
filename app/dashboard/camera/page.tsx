@@ -1,5 +1,6 @@
-import { redirect } from 'next/navigation'
+import { permanentRedirect } from 'next/navigation'
+import { permanentLegacyDestination } from '@/lib/seo'
 
 export default function CameraPage() {
-  redirect('/dashboard/weather')
+  permanentRedirect(permanentLegacyDestination('/dashboard/camera'))
 }

@@ -1,5 +1,6 @@
-import { redirect } from 'next/navigation'
+import { permanentRedirect } from 'next/navigation'
+import { permanentLegacyDestination } from '@/lib/seo'
 
 export default function AtlasRedirectPage() {
-  redirect('/dashboard/plan')
+  permanentRedirect(permanentLegacyDestination('/dashboard/atlas'))
 }

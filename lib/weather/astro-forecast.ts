@@ -31,6 +31,19 @@ export type AstroForecastSnapshot = {
     humidity: number | null
     cloudCover: number | null
     windKmh: number | null
+    timeSec?: number | null
+    feelsLikeC?: number | null
+    dewPointC?: number | null
+    cloudLow?: number | null
+    cloudMid?: number | null
+    cloudHigh?: number | null
+    windGustKmh?: number | null
+    windDirectionDeg?: number | null
+    precipitationMm?: number | null
+    rainMm?: number | null
+    snowfallCm?: number | null
+    pressureHpa?: number | null
+    visibilityM?: number | null
   }
   hours: AstroTimelineHour[]
   astroBlocks: AstroTimelineBlock[]
@@ -39,10 +52,23 @@ export type AstroForecastSnapshot = {
 
 type OpenMeteoResponse = {
   current?: {
+    time?: number
     temperature_2m?: number
     relative_humidity_2m?: number
     cloud_cover?: number
     wind_speed_10m?: number
+    apparent_temperature?: number
+    dew_point_2m?: number
+    cloud_cover_low?: number
+    cloud_cover_mid?: number
+    cloud_cover_high?: number
+    wind_gusts_10m?: number
+    wind_direction_10m?: number
+    precipitation?: number
+    rain?: number
+    snowfall?: number
+    pressure_msl?: number
+    visibility?: number
   }
   hourly?: {
     time?: number[]
@@ -149,7 +175,7 @@ async function fetchOpenMeteo(site: ObservatorySite): Promise<OpenMeteoResponse>
   const url =
     'https://api.open-meteo.com/v1/forecast' +
     `?latitude=${site.weatherLat}&longitude=${site.weatherLon}` +
-    '&current=temperature_2m,relative_humidity_2m,cloud_cover,wind_speed_10m' +
+    '&current=temperature_2m,relative_humidity_2m,cloud_cover,wind_speed_10m,apparent_temperature,dew_point_2m,cloud_cover_low,cloud_cover_mid,cloud_cover_high,wind_gusts_10m,wind_direction_10m,precipitation,rain,snowfall,pressure_msl,visibility' +
     '&hourly=cloud_cover,precipitation_probability,wind_speed_10m' +
     '&daily=sunrise,sunset&forecast_days=2&timezone=auto&timeformat=unixtime'
 
@@ -199,10 +225,23 @@ export async function fetchAstroForecast(site?: ObservatorySite): Promise<AstroF
     return {
       ok: true,
       current: {
+        timeSec: openMeteo.current?.time ?? null,
         tempC: openMeteo.current?.temperature_2m ?? null,
         humidity: openMeteo.current?.relative_humidity_2m ?? null,
         cloudCover: openMeteo.current?.cloud_cover ?? null,
         windKmh: openMeteo.current?.wind_speed_10m ?? null,
+        feelsLikeC: openMeteo.current?.apparent_temperature ?? null,
+        dewPointC: openMeteo.current?.dew_point_2m ?? null,
+        cloudLow: openMeteo.current?.cloud_cover_low ?? null,
+        cloudMid: openMeteo.current?.cloud_cover_mid ?? null,
+        cloudHigh: openMeteo.current?.cloud_cover_high ?? null,
+        windGustKmh: openMeteo.current?.wind_gusts_10m ?? null,
+        windDirectionDeg: openMeteo.current?.wind_direction_10m ?? null,
+        precipitationMm: openMeteo.current?.precipitation ?? null,
+        rainMm: openMeteo.current?.rain ?? null,
+        snowfallCm: openMeteo.current?.snowfall ?? null,
+        pressureHpa: openMeteo.current?.pressure_msl ?? null,
+        visibilityM: openMeteo.current?.visibility ?? null,
       },
       hours: withAstro.hours,
       astroBlocks: withAstro.blocks,

@@ -91,6 +91,26 @@ test('project frame fitting reserves five minutes for dithering', () => {
   assert.ok(withDither.filterPlansTonight[0]!.count < withoutDither.filterPlansTonight[0]!.count)
 })
 
+test('project frame fitting does not reserve a flip for unscheduled remaining Ha frames', () => {
+  const project = mockProject()
+  project.raHours = 5.43549722
+  project.decDeg = 42.95401389
+  project.ditherEnabled = true
+  project.filterPlansTotal = [
+    { filterName: 'H', exposureSeconds: 300, count: 552 },
+    { filterName: 'R', exposureSeconds: 300, count: 36 },
+  ]
+  project.remainingByFilter = [
+    { filterName: 'H', exposureSeconds: 300, countRemaining: 465 },
+    { filterName: 'R', exposureSeconds: 300, countRemaining: 36 },
+  ]
+  const startMs = Date.parse('2026-11-04T01:42:40.594Z')
+  const windowMs = 150 * 60_000
+  const plan = planTonightFilterFrames(project, startMs, startMs + windowMs)
+  assert.deepEqual(plan.filterPlansTonight, [{ filterName: 'H', exposureSeconds: 300, count: 17 }])
+  assert.equal(plan.durationMs, windowMs)
+})
+
 test('project subs schedule after an in-progress single-night session', () => {
   const project = mockProject()
   const now = new Date('2026-05-19T01:30:00.000Z')

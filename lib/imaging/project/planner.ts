@@ -284,24 +284,33 @@ export function planTonightFilterFrames(
     })
     if (windowMs < imagingMs + exposureMs + ohOneSec * 1000) break
 
-    const trialFull: FilterPlanRow[] = [
-      ...filterPlansTonight,
-      {
-        filterName: total.filterName,
-        exposureSeconds: total.exposureSeconds,
-        count: countRemaining,
-      },
-    ]
-    const ohSec = dsoSessionOverheadSeconds({
-      filterPlans: trialFull,
-      ditherEnabled: project.ditherEnabled,
-      raHours: coords.raHours,
-      startMs: usableStartMs,
-      imagingSeconds: (imagingMs + countRemaining * exposureMs) / 1000,
-    })
-    const roomForThisFilterMs = windowMs - imagingMs - ohSec * 1000
-    const maxFrames = Math.floor(roomForThisFilterMs / exposureMs)
-    const framesTonight = Math.min(countRemaining, maxFrames)
+    // A meridian flip depends on the frames actually scheduled in this window.
+    // Sizing overhead against all remaining project frames can add a flip that
+    // this short session never reaches, leaving room for a later filter instead.
+    let low = 1
+    let high = Math.min(countRemaining, Math.floor((windowMs - imagingMs) / exposureMs))
+    let framesTonight = 0
+    while (low <= high) {
+      const candidateCount = Math.floor((low + high) / 2)
+      const candidateImagingMs = imagingMs + candidateCount * exposureMs
+      const candidatePlans: FilterPlanRow[] = [
+        ...filterPlansTonight,
+        { filterName: total.filterName, exposureSeconds: total.exposureSeconds, count: candidateCount },
+      ]
+      const overheadSec = dsoSessionOverheadSeconds({
+        filterPlans: candidatePlans,
+        ditherEnabled: project.ditherEnabled,
+        raHours: coords.raHours,
+        startMs: usableStartMs,
+        imagingSeconds: candidateImagingMs / 1000,
+      })
+      if (candidateImagingMs + overheadSec * 1000 <= windowMs) {
+        framesTonight = candidateCount
+        low = candidateCount + 1
+      } else {
+        high = candidateCount - 1
+      }
+    }
     if (framesTonight <= 0) continue
 
     filterPlansTonight.push({
@@ -687,6 +696,10 @@ function altitudeWindowsFor(
  * Offer each clear spell and altitude window as its own sizing window so the smaller-but-earlier
  * block is at least on the table. These are hypotheses, not constraints — the full-interval
  * candidate stays, so a run may still span several clear spells at ≥90% coverage.
+ *
+ * Production weather arrives as hourly slices. Merge them into continuous clear spells first —
+ * otherwise every hour is shorter than session overhead (60 min + dither) and gets discarded,
+ * which silently undoes the v8.2.0 "use the clear evening" fix.
  */
 function earlierSizingWindows(
   cursorMs: number,
@@ -696,6 +709,7 @@ function earlierSizingWindows(
   minWindowMs: number
 ): Array<{ startMs: number; endMs: number }> {
   const out: Array<{ startMs: number; endMs: number }> = []
+  const clearSpells = mergeAdjacentIntervals(weatherPermittedIntervals)
   const push = (rawStartMs: number, rawEndMs: number) => {
     const startMs = Math.max(rawStartMs, cursorMs)
     const endMs = Math.min(rawEndMs, limitMs)
@@ -705,7 +719,7 @@ function earlierSizingWindows(
   }
   for (const alt of altitudeWindows) {
     push(alt.startMs, alt.endMs)
-    for (const spell of weatherPermittedIntervals) {
+    for (const spell of clearSpells) {
       push(Math.max(alt.startMs, spell.startMs), Math.min(alt.endMs, spell.endMs))
     }
   }

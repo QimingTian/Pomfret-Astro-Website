@@ -105,3 +105,32 @@ test('planTonightSubSessions leaves a clear spell alone when it cannot earn its 
     `expected the single run in the long clear spell, got ${plans[0]!.plannedStartIso}`
   )
 })
+
+test('planTonightSubSessions uses the clear evening when weather is hourly (production shape)', () => {
+  // Same gap as the M33 night, but as Open-Meteo-style 1-hour slices. Session overhead is 60 min
+  // (+ dither), so unmerged hours are each shorter than minWindowMs and used to be discarded —
+  // which made v8.2.0's earlier-sizing path a no-op on real forecasts.
+  const { windowStart, windowEnd } = tonight()
+  const gapStart = Date.parse('2026-09-17T04:20:00.000Z') // 12:20 AM ET
+  const gapEnd = Date.parse('2026-09-17T06:00:00.000Z') // 2 AM ET
+  const weather: Array<{ startMs: number; endMs: number }> = []
+  for (let t = windowStart; t < gapStart; t += 3600_000) {
+    weather.push({ startMs: t, endMs: Math.min(t + 3600_000, gapStart) })
+  }
+  for (let t = gapEnd; t < windowEnd; t += 3600_000) {
+    weather.push({ startMs: t, endMs: Math.min(t + 3600_000, windowEnd) })
+  }
+  const free = [{ startMs: windowStart, endMs: windowEnd }]
+
+  const plans = planTonightSubSessions(m33ShoProject(), free, weather, NOON_ET)
+
+  assert.ok(plans.length >= 2, `expected evening + late subs from hourly weather, got ${plans.length}`)
+  assert.ok(
+    Date.parse(plans[0]!.plannedEndIso) <= gapStart,
+    `first session must fit inside the clear evening, ends ${plans[0]!.plannedEndIso}`
+  )
+  assert.ok(
+    totalFrames(plans) > 40,
+    `hourly weather must still beat the old single late block; got ${totalFrames(plans)}`
+  )
+})

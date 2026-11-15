@@ -5,6 +5,7 @@ import {
   auditLogDetailFields,
   auditLogHeadline,
   auditLogLineFailed,
+  auditLogListTimeLabel,
   auditLogRowVisible,
   type AuditLogRowLike,
 } from '@/lib/admin-audit-log-display'
@@ -14,9 +15,11 @@ type Props = {
   entries: AuditLogRow[]
   loading: boolean
   error: string | null
+  /** Observatory IANA timezone for list/detail clocks. */
+  timeZone: string
 }
 
-export function AdminActivityLogPanel({ entries, loading, error }: Props) {
+export function AdminActivityLogPanel({ entries, loading, error, timeZone }: Props) {
   const [selected, setSelected] = useState<AuditLogRow | null>(null)
 
   const closeDetail = useCallback(() => setSelected(null), [])
@@ -41,9 +44,7 @@ export function AdminActivityLogPanel({ entries, loading, error }: Props) {
             {entries.filter(auditLogRowVisible).map((row) => {
               const failed = auditLogLineFailed(row)
               const headline = auditLogHeadline(row)
-              const timeLabel = Number.isFinite(Date.parse(row.at))
-                ? new Date(row.at).toLocaleTimeString()
-                : row.at
+              const timeLabel = auditLogListTimeLabel(row.at, timeZone)
               return (
                 <button
                   key={row.id}
@@ -92,7 +93,7 @@ export function AdminActivityLogPanel({ entries, loading, error }: Props) {
               </button>
             </div>
             <div className="overflow-y-auto p-4 space-y-3 font-mono text-xs">
-              {auditLogDetailFields(selected as AuditLogRowLike).map((field) => (
+              {auditLogDetailFields(selected as AuditLogRowLike, timeZone).map((field) => (
                 <div key={field.label}>
                   <p className="text-gray-500 uppercase tracking-wide text-[10px] mb-0.5">
                     {field.label}

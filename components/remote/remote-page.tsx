@@ -1690,6 +1690,8 @@ export default function RemotePage() {
 
   const dsoEstimatedDurationPreviewSeconds = useMemo(() => {
     if (sessionType !== 'dso') return null
+    // Dither +5m is a per-session scheduling pad — only for single-night estimates, not project totals.
+    const ditherForEstimate = ditherEnabled && !projectMode
     const normalize = (plans: FilterPlanFormRow[]) => {
       const normalized: Array<{ filterName: string; count: number; exposureSeconds: number }> = []
       for (const plan of plans) {
@@ -1714,15 +1716,24 @@ export default function RemotePage() {
         if (plans.length === 0) return null
         const normalized = normalize(plans)
         if (!normalized) return null
-        total += estimateDurationSecondsFromPlans(normalized, { ditherEnabled })
+        total += estimateDurationSecondsFromPlans(normalized, { ditherEnabled: ditherForEstimate })
       }
       return total
     }
     if (filterPlans.length === 0) return null
     const normalized = normalize(filterPlans)
     if (!normalized) return null
-    return estimateDurationSecondsFromPlans(normalized, { ditherEnabled })
-  }, [sessionType, filterPlans, mosaicMode, mosaicDraft, panelFilterPlansById, selectedMosaicPanelId, ditherEnabled])
+    return estimateDurationSecondsFromPlans(normalized, { ditherEnabled: ditherForEstimate })
+  }, [
+    sessionType,
+    filterPlans,
+    mosaicMode,
+    mosaicDraft,
+    panelFilterPlansById,
+    selectedMosaicPanelId,
+    ditherEnabled,
+    projectMode,
+  ])
 
   const canSaveRemoteSessionSpec = useMemo(() => {
     if (sessionType === 'asteroid_occultation') return false
@@ -2614,6 +2625,8 @@ export default function RemotePage() {
 
     const { nauticalDuskUtc } = getTonightSchedulingWindow(new Date(scheduleNowMs))
     const vsPick = variableStarDurationPick
+    // Dither +5m is per single session only; project/mosaic totals omit it.
+    const ditherForEstimate = sessionType === 'dso' && ditherEnabled && !projectMode
     const estimatedDurationSeconds =
       sessionType === 'asteroid_occultation' && selectedOccultation
         ? selectedOccultation.estimatedDurationSeconds
@@ -2626,8 +2639,11 @@ export default function RemotePage() {
             })
           )
         : mosaicFilterPlansByPanel
-          ? mosaicFilterPlansByPanel.reduce((sum, plans) => sum + estimateDurationSecondsFromPlans(plans, { ditherEnabled }), 0)
-          : estimateDurationSecondsFromPlans(normalizedPlans, { ditherEnabled: sessionType === 'dso' && ditherEnabled })
+          ? mosaicFilterPlansByPanel.reduce(
+              (sum, plans) => sum + estimateDurationSecondsFromPlans(plans, { ditherEnabled: ditherForEstimate }),
+              0
+            )
+          : estimateDurationSecondsFromPlans(normalizedPlans, { ditherEnabled: ditherForEstimate })
 
     const variableStarAmplitudeMag =
       sessionType === 'variable_star' &&

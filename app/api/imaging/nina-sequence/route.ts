@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { sendSessionStartedEmail } from '@/lib/imaging-completion-email'
+import { projectSubSessionEmailTarget } from '@/lib/imaging-project-night-email'
 import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 import { currentObservatorySiteId } from '@/lib/observatory-site-scope'
 import {
@@ -352,7 +353,7 @@ async function deliverProjectSubSessionJson(
 
     void sendSessionStartedEmail({
       queueId: nightRef.id,
-      target: projectRef.target,
+      target: projectSubSessionEmailTarget(projectRef.target, nightRef),
       email: projectRef.email,
       firstName: projectRef.firstName,
       startedAtIso,

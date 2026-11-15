@@ -3,6 +3,8 @@ import { sendSessionFailedEmail } from '@/lib/imaging-completion-email'
 import {
   notifyProjectNightCompletionEmail,
   notifyProjectNightFailedEmail,
+  projectFilterProgressEmailLines,
+  projectNightMailContext,
 } from '@/lib/imaging-project-night-email'
 import { publishProgress } from '@/lib/imaging-progress-live'
 import { parseProjectNightSubId } from '@/lib/imaging-project-ids'
@@ -206,12 +208,10 @@ export async function adminMarkSessionComplete(sessionId: string): Promise<{ ok:
       detail: { sessionId, projectId: match.project.id, nightIndex: match.night.nightIndex },
     })
     notifyProjectNightCompletionEmail(
-      {
-        queueId: sessionId,
-        target: match.project.target,
-        email: match.project.email,
-        firstName: match.project.firstName,
-      },
+      projectNightMailContext(result.project, match.night, {
+        filterProgressLines: projectFilterProgressEmailLines(result.project),
+        projectFinished: result.projectCompleted,
+      }),
       new Date().toISOString()
     )
     if (result.projectCompleted) {
@@ -338,12 +338,7 @@ export async function adminMarkSessionFailed(sessionId: string): Promise<{ ok: t
       detail: { sessionId, projectId: match.project.id, nightIndex: match.night.nightIndex },
     })
     notifyProjectNightFailedEmail(
-      {
-        queueId: sessionId,
-        target: match.project.target,
-        email: match.project.email,
-        firstName: match.project.firstName,
-      },
+      projectNightMailContext(match.project, match.night),
       new Date().toISOString()
     )
     await lockObservatoryAfterSessionFailure(ADMIN_MARK_SESSION_FAILED_REASON)

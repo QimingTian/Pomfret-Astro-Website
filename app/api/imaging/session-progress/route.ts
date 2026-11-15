@@ -2,7 +2,11 @@ import { NextRequest } from 'next/server'
 import { logMissingProductionSecret, observatorySecretConfigured } from '@/lib/production-secrets'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { sendCompletionEmail } from '@/lib/imaging-completion-email'
-import { notifyProjectNightCompletionEmail } from '@/lib/imaging-project-night-email'
+import {
+  notifyProjectNightCompletionEmail,
+  projectFilterProgressEmailLines,
+  projectNightMailContext,
+} from '@/lib/imaging-project-night-email'
 import { publishProgress } from '@/lib/imaging-progress-live'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import { parseProjectNightSubId } from '@/lib/imaging-project-ids'
@@ -231,12 +235,10 @@ export async function POST(request: NextRequest) {
             detail: { id: queueId, projectId: match.project.id, target: match.project.target },
           })
           notifyProjectNightCompletionEmail(
-            {
-              queueId,
-              target: match.project.target,
-              email: match.project.email,
-              firstName: match.project.firstName,
-            },
+            projectNightMailContext(result.project, match.night, {
+              filterProgressLines: projectFilterProgressEmailLines(result.project),
+              projectFinished: result.projectCompleted,
+            }),
             completedAtIso
           )
           if (result.projectCompleted) {

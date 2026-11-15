@@ -149,13 +149,30 @@ function stringish(v: unknown): string {
   return JSON.stringify(v, null, 2)
 }
 
+/** List-row clock in the observatory's IANA timezone (not the viewer's browser). */
+export function auditLogListTimeLabel(at: string, timeZone: string): string {
+  const ms = Date.parse(at)
+  if (!Number.isFinite(ms)) return at
+  return new Date(ms).toLocaleTimeString(undefined, { timeZone })
+}
+
 /** Flatten detail for the detail modal (reasons expanded, nested JSON pretty). */
-export function auditLogDetailFields(row: AuditLogRowLike): AuditDetailField[] {
+export function auditLogDetailFields(
+  row: AuditLogRowLike,
+  timeZone?: string
+): AuditDetailField[] {
+  const ms = Date.parse(row.at)
+  const siteLocal =
+    Number.isFinite(ms) && timeZone
+      ? new Date(ms).toLocaleString(undefined, { timeZone, timeZoneName: 'short' })
+      : Number.isFinite(ms)
+        ? new Date(ms).toLocaleString()
+        : row.at
   const fields: AuditDetailField[] = [
     { label: 'Time (UTC)', value: row.at.replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC') },
     {
-      label: 'Time (local)',
-      value: Number.isFinite(Date.parse(row.at)) ? new Date(row.at).toLocaleString() : row.at,
+      label: 'Time (site)',
+      value: siteLocal,
     },
     { label: 'Kind', value: row.kind },
     { label: 'Message', value: row.message },

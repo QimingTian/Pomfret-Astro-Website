@@ -78,6 +78,8 @@ const DEMO_DETAIL: QueueRow = {
   raHours: 20.981,
   decDeg: 44.53,
   outputMode: 'raw_zip',
+  ditherEnabled: true,
+  cameraCoolingTempC: -10,
   estimatedDurationSeconds: 4 * 3600,
   sessionType: 'dso',
   filterPlans: [
@@ -457,6 +459,22 @@ export function SessionProgressMonitor() {
                             .map((p) => `${p.filterName} (${p.count} × ${p.exposureSeconds}s)`)
                             .join(' · ')
                         : '—'}
+                  </dd>
+                  <dd className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-white">
+                    <span>
+                      Dithering:{' '}
+                      {detail.sessionType === 'variable_star'
+                        ? 'Off'
+                        : detail.ditherEnabled == null
+                          ? '—'
+                          : detail.ditherEnabled
+                            ? 'On'
+                            : 'Off'}
+                    </span>
+                    <span>
+                      Camera temperature target:{' '}
+                      {typeof detail.cameraCoolingTempC === 'number' ? `${detail.cameraCoolingTempC}°C` : '—'}
+                    </span>
                   </dd>
                 </div>
               </dl>

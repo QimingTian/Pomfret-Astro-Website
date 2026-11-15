@@ -62,6 +62,7 @@ export async function GET(request: NextRequest) {
     count?: number
     outputMode?: 'raw_zip' | 'stacked_master' | 'none'
     ditherEnabled?: boolean
+    cameraCoolingTempC?: number
     estimatedDurationSeconds?: number
     filterPlans?: Array<{ filterName: string; exposureSeconds: number; count: number }>
     plannedStartIso?: string | null
@@ -156,6 +157,7 @@ export async function GET(request: NextRequest) {
       count: p.filterPlansTotal[0]?.count,
       outputMode: p.outputMode,
       ditherEnabled: p.ditherEnabled === true,
+      cameraCoolingTempC: p.cameraCoolingTempC,
       estimatedDurationSeconds: p.estimatedDurationSeconds,
       filterPlans: p.filterPlansTotal,
       plannedStartIso:
@@ -235,6 +237,7 @@ export async function GET(request: NextRequest) {
       count: p.count,
       outputMode: p.outputMode,
       ditherEnabled: p.ditherEnabled === true,
+      cameraCoolingTempC: p.cameraCoolingTempC,
       estimatedDurationSeconds:
         typeof p.estimatedDurationSeconds === 'number' && Number.isFinite(p.estimatedDurationSeconds)
           ? p.estimatedDurationSeconds

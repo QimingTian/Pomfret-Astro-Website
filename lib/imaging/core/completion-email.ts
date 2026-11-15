@@ -6,6 +6,10 @@ type CompletionEmailInput = {
   email?: string | null
   firstName?: string | null
   completedAtIso: string
+  /** Project-wide per-filter progress lines, e.g. `Ha -- 250/300`. */
+  filterProgressLines?: string[]
+  /** True when this sub-session finished the whole project. */
+  projectFinished?: boolean
 }
 
 function env(name: string): string {
@@ -46,20 +50,41 @@ export async function sendCompletionEmail(input: CompletionEmailInput): Promise<
   const completedLocal = new Date(input.completedAtIso).toLocaleString('en-US', { timeZone: currentObservatorySite().timezone })
   const targetSafe = escapeHtml(input.target)
   const queueIdSafe = escapeHtml(input.queueId)
+  const progressLines = (input.filterProgressLines ?? [])
+    .map((line) => line.trim())
+    .filter(Boolean)
   const subject = `Pomfret Astro session completed: ${input.target}`
-  const text = [
+  const textParts = [
     greet,
     '',
     `Your imaging session has completed.`,
     `Target: ${input.target}`,
     `Session ID: ${input.queueId}`,
     `Completed: ${completedLocal} (${currentObservatorySite().timezone})`,
+  ]
+  if (progressLines.length > 0) {
+    textParts.push('', 'Progress:')
+    for (const line of progressLines) textParts.push(`  ${line}`)
+  }
+  if (input.projectFinished) {
+    textParts.push('', 'This project is finished.')
+  }
+  textParts.push(
     '',
     'You can return to the Remote dashboard to check/download results.',
     '',
     'Clear skies,',
-    'Pomfret Astro',
-  ].join('\n')
+    'Pomfret Astro'
+  )
+  const text = textParts.join('\n')
+
+  const progressHtml =
+    progressLines.length > 0
+      ? `<li><strong>Progress:</strong><ul>${progressLines
+          .map((line) => `<li>${escapeHtml(line)}</li>`)
+          .join('')}</ul></li>`
+      : ''
+  const finishedHtml = input.projectFinished ? `<p><strong>This project is finished.</strong></p>` : ''
 
   const html = `
     <p>${greet}</p>
@@ -68,7 +93,9 @@ export async function sendCompletionEmail(input: CompletionEmailInput): Promise<
       <li><strong>Target:</strong> ${targetSafe}</li>
       <li><strong>Session ID:</strong> ${queueIdSafe}</li>
       <li><strong>Completed:</strong> ${completedLocal} (${currentObservatorySite().timezone})</li>
+      ${progressHtml}
     </ul>
+    ${finishedHtml}
     <p>You can return to the Remote dashboard to check/download results.</p>
     <p>Clear skies,<br/>Pomfret Astro</p>
   `

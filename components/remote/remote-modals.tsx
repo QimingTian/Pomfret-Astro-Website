@@ -38,6 +38,7 @@ export type RemoteModalQueueItem = {
   exposureSeconds?: number
   count?: number
   outputMode?: 'raw_zip' | 'stacked_master' | 'none'
+  ditherEnabled?: boolean
   cameraCoolingTempC?: -10 | 0
   estimatedDurationSeconds?: number
   filterPlans?: Array<{ filterName: string; exposureSeconds: number; count: number }>

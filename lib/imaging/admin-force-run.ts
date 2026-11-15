@@ -10,6 +10,7 @@ import {
 } from '@/lib/imaging/nina/agent-job'
 import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { sendSessionStartedEmail } from '@/lib/imaging-completion-email'
+import { projectSubSessionEmailTarget } from '@/lib/imaging-project-night-email'
 import { parseProjectNightSubId } from '@/lib/imaging-project-ids'
 import {
   buildNightNinaJson,
@@ -340,7 +341,7 @@ async function deliverForceRunProjectSub(
     await boardMarkDownloaded(project.id)
     void sendSessionStartedEmail({
       queueId: night.id,
-      target: project.target,
+      target: projectSubSessionEmailTarget(project.target, night),
       email: project.email,
       firstName: project.firstName,
       startedAtIso,

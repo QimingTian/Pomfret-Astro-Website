@@ -37,7 +37,7 @@ const pillIdleBlock = glassPillToggleIdleBlock
 
 export function AdminDashboardGrid({ user }: { user: PublicMemberUser }) {
   const t = useAdminTools()
-  const { adminSiteId, showAllSkyCamera } = useAdminSiteScope()
+  const { adminSiteId, adminSite, showAllSkyCamera } = useAdminSiteScope()
 
   if (t.member.status === 'loading') {
     return <p className="text-sm text-gray-400">Loading…</p>
@@ -223,6 +223,7 @@ export function AdminDashboardGrid({ user }: { user: PublicMemberUser }) {
               entries={t.logEntries}
               loading={t.logLoading}
               error={t.logError}
+              timeZone={adminSite.timezone}
             />
           </DashboardPanel>
         }

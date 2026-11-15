@@ -2,8 +2,11 @@ import { appendAuditLog } from '@/lib/imaging-audit-log'
 import { sendSessionFailedEmail } from '@/lib/imaging-completion-email'
 // import { sendObservatoryDisconnectedAlertEmail } from '@/lib/observatory-alert-email'
 import { publishProgress } from '@/lib/imaging-progress-live'
-import { listProjects, markNightFailed } from '@/lib/imaging-project-store'
-import { notifyProjectNightFailedEmail } from '@/lib/imaging-project-night-email'
+import { getProjectByNightSubId, listProjects, markNightFailed } from '@/lib/imaging-project-store'
+import {
+  notifyProjectNightFailedEmail,
+  projectNightMailContext,
+} from '@/lib/imaging-project-night-email'
 import { getInProgressProjectNightSubId } from '@/lib/imaging-session-progress-queue'
 import {
   boardFailAllInProgress,
@@ -141,18 +144,29 @@ async function notifySessionFailed(snapshot: FailedBoardSnapshot, reason: string
     detail: { id: queueId, boardId: snapshot.id, reason },
   })
 
-  const mailCtx = {
+  if (board?.projectMode && queueId !== snapshot.id) {
+    const nightMatch = await getProjectByNightSubId(queueId)
+    notifyProjectNightFailedEmail(
+      nightMatch
+        ? projectNightMailContext(nightMatch.project, nightMatch.night)
+        : {
+            queueId,
+            target: snapshot.target,
+            email: snapshot.email,
+            firstName: snapshot.firstName,
+          },
+      snapshot.failedAt
+    )
+    return
+  }
+
+  void sendSessionFailedEmail({
     queueId,
     target: snapshot.target,
     email: snapshot.email,
     firstName: snapshot.firstName,
-  }
-  if (board?.projectMode && queueId !== snapshot.id) {
-    notifyProjectNightFailedEmail(mailCtx, snapshot.failedAt)
-    return
-  }
-
-  void sendSessionFailedEmail({ ...mailCtx, failedAtIso: snapshot.failedAt }).then((result) => {
+    failedAtIso: snapshot.failedAt,
+  }).then((result) => {
     if (!result.sent) {
       return appendAuditLog({
         kind: 'session.progress',
@@ -193,12 +207,7 @@ export async function failInProgressProjectSubSessions(reason: string): Promise<
         detail: { sessionId: night.id, projectId: project.id, reason },
       })
       notifyProjectNightFailedEmail(
-        {
-          queueId: night.id,
-          target: project.target,
-          email: project.email,
-          firstName: project.firstName,
-        },
+        projectNightMailContext(project, night),
         new Date().toISOString()
       )
     }

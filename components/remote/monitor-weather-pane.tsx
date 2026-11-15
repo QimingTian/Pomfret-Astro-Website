@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { observatorySiteFetch, useObservatorySite } from '@/components/observatory-site-provider'
 import type { AstroForecastSnapshot } from '@/lib/weather/astro-forecast'
+import { glassSurface } from '@/lib/glass-ui'
 
 function metric(value: number | null | undefined, unit: string, digits = 0): string {
   return typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(digits)}${unit}` : '—'
@@ -46,11 +47,14 @@ export function MonitorWeatherPane() {
   ]
 
   return (
-    <div className="h-full min-h-0 w-full overflow-y-auto">
+    <div className="flex h-full min-h-0 w-full flex-col items-center justify-center overflow-y-auto">
       {forecast?.error ? <p className="mb-2 text-xs text-red-400">{forecast.error}</p> : null}
-      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+      <div className="grid w-full max-w-lg grid-cols-2 gap-2 sm:grid-cols-3">
         {metrics.map(([label, value]) => (
-          <div key={label} className="rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-2">
+          <div
+            key={label}
+            className={`glass-pill ${glassSurface} flex flex-col items-start px-3 py-2.5 text-left`}
+          >
             <p className="text-[10px] uppercase tracking-wide text-white/45">{label}</p>
             <p className="text-sm font-medium text-white">{value}</p>
           </div>

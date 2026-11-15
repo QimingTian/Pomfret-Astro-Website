@@ -6,6 +6,7 @@ export type TerminalSessionLike = {
   createdAt: string
   nightKey?: string
   plannedStartIso?: string | null
+  completedAt?: string | null
   failedAt?: string | null
   scheduleStripNightKey?: string | null
   scheduleBarStartMs?: number | null
@@ -14,16 +15,32 @@ export type TerminalSessionLike = {
   filterPlans?: Array<{ filterName: string; exposureSeconds: number; count: number }>
 }
 
+/** Prefer complete/fail timestamps over a stale predicted bar end (early finish overlap fix). */
+function terminalEndMsFromItem(item: TerminalSessionLike): number | null {
+  if (item.status === 'completed' && item.completedAt) {
+    const t = Date.parse(item.completedAt)
+    if (Number.isFinite(t)) return t
+  }
+  if (item.status === 'failed' && item.failedAt) {
+    const t = Date.parse(item.failedAt)
+    if (Number.isFinite(t)) return t
+  }
+  return null
+}
+
 export function serverScheduleBarForNight(
   item: TerminalSessionLike,
   nightKey: string
 ): { startMs: number; endMs: number } | null {
   if (item.scheduleStripNightKey !== nightKey) return null
   const startMs = item.scheduleBarStartMs
-  const endMs = item.scheduleBarEndMs
-  if (typeof startMs !== 'number' || typeof endMs !== 'number' || !Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+  const storedEndMs = item.scheduleBarEndMs
+  if (typeof startMs !== 'number' || typeof storedEndMs !== 'number' || !Number.isFinite(startMs) || !Number.isFinite(storedEndMs)) {
     return null
   }
+  const terminalEndMs = terminalEndMsFromItem(item)
+  const endMs =
+    terminalEndMs != null ? Math.max(terminalEndMs, startMs + 60_000) : storedEndMs
   if (endMs <= startMs) return null
   return { startMs, endMs }
 }
@@ -142,11 +159,9 @@ export function fallbackPlacementForTerminalSession(
 
   let s = Math.max(startMs, windowStartMs)
   let e = Math.min(s + durationMs, schedulingDeadlineMs)
-  if (item.status === 'failed' && item.failedAt) {
-    const failMs = Date.parse(item.failedAt)
-    if (Number.isFinite(failMs)) {
-      e = Math.min(e, failMs, schedulingDeadlineMs)
-    }
+  const terminalEndMs = terminalEndMsFromItem(item)
+  if (terminalEndMs != null) {
+    e = Math.min(Math.max(terminalEndMs, s + 60_000), schedulingDeadlineMs)
   }
   if (e <= s) {
     s = Math.max(windowStartMs, schedulingDeadlineMs - 5 * 60 * 1000)

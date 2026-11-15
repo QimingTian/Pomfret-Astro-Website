@@ -350,6 +350,7 @@ export default function RemotePage() {
       occultationDurationSeconds?: number | null
       occultationEventId?: string | null
       variableStarAmplitudeMag?: number | null
+      completedAt?: string | null
       failedAt?: string | null
       scheduleStripNightKey?: string | null
       scheduleBarStartMs?: number | null
@@ -374,6 +375,7 @@ export default function RemotePage() {
         scheduleStripNightKey?: string | null
         scheduleBarStartMs?: number | null
         scheduleBarEndMs?: number | null
+        completedAt?: string | null
         failedAt?: string | null
         estimatedDurationSeconds?: number
         filterPlans?: Array<{ filterName: string; exposureSeconds: number; count: number }>
@@ -1120,6 +1122,7 @@ export default function RemotePage() {
         downloadPath?: unknown
         hasPreview?: unknown
         previewPath?: unknown
+        completedAt?: unknown
         failedAt?: unknown
         scheduleStripNightKey?: unknown
         scheduleBarStartMs?: unknown
@@ -1255,6 +1258,7 @@ export default function RemotePage() {
             downloadPath: typeof x.downloadPath === 'string' ? x.downloadPath : undefined,
             hasPreview: x.hasPreview === true,
             previewPath: typeof x.previewPath === 'string' ? x.previewPath : undefined,
+            completedAt: typeof x.completedAt === 'string' ? x.completedAt : null,
             failedAt: typeof x.failedAt === 'string' ? x.failedAt : null,
             scheduleStripNightKey: typeof x.scheduleStripNightKey === 'string' ? x.scheduleStripNightKey : null,
             scheduleBarStartMs:
@@ -1330,6 +1334,7 @@ export default function RemotePage() {
                         typeof rec.scheduleBarEndMs === 'number' && Number.isFinite(rec.scheduleBarEndMs)
                           ? rec.scheduleBarEndMs
                           : null,
+                      completedAt: typeof rec.completedAt === 'string' ? rec.completedAt : null,
                       failedAt: typeof rec.failedAt === 'string' ? rec.failedAt : null,
                       estimatedDurationSeconds:
                         typeof rec.estimatedDurationSeconds === 'number' &&
@@ -1668,6 +1673,7 @@ export default function RemotePage() {
             plannedStartIso: night.plannedStartIso ?? null,
             estimatedDurationSeconds: night.estimatedDurationSeconds,
             filterPlans: night.filterPlans,
+            completedAt: night.completedAt ?? null,
             failedAt: night.failedAt ?? null,
             scheduleStripNightKey: night.scheduleStripNightKey ?? null,
             scheduleBarStartMs: night.scheduleBarStartMs ?? null,

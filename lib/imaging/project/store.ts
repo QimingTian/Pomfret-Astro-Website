@@ -11,7 +11,8 @@ import { REDIS_LIVE_KEYS } from '@/lib/db/data-plane'
 import { kvEnabled, kvGetString, kvSetJson } from '@/lib/kv-rest'
 import { currentObservatorySiteId, scopedKvKey } from '@/lib/observatory-site-scope'
 import type { ObservatorySiteId } from '@/lib/observatory-sites'
-import type { ScheduleBarPlacement } from '@/lib/imaging-schedule-bar'
+import { snapScheduleBarEndMs, type ScheduleBarPlacement } from '@/lib/imaging-schedule-bar'
+import { getTonightScheduleStrip } from '@/lib/schedule-strip'
 
 export type ProjectStatus = 'pending' | 'scheduled' | 'in_progress' | 'completed' | 'failed'
 export type ProjectNightStatus = 'planned' | 'scheduled' | 'on_hold' | 'in_progress' | 'completed' | 'failed'
@@ -1134,6 +1135,36 @@ export async function markNightInProgress(projectId: string, nightSubId: string)
   await patchProject(projectId, { status: 'in_progress', nights })
 }
 
+/** Keep start; rewrite end to the complete/fail signal so the strip does not overlap the next sub. */
+function withTerminalScheduleBarEnd(night: ProjectNight, terminalIso: string): ProjectNight {
+  const terminalEndMs = Date.parse(terminalIso)
+  if (
+    !Number.isFinite(terminalEndMs) ||
+    typeof night.scheduleBarStartMs !== 'number' ||
+    !Number.isFinite(night.scheduleBarStartMs)
+  ) {
+    return night
+  }
+  const strip = getTonightScheduleStrip(new Date(terminalEndMs))
+  if (
+    typeof night.scheduleStripNightKey === 'string' &&
+    night.scheduleStripNightKey.trim() &&
+    night.scheduleStripNightKey !== strip.nightKey
+  ) {
+    return night
+  }
+  return {
+    ...night,
+    scheduleStripNightKey: night.scheduleStripNightKey?.trim() ? night.scheduleStripNightKey : strip.nightKey,
+    scheduleBarStartMs: night.scheduleBarStartMs,
+    scheduleBarEndMs: snapScheduleBarEndMs(
+      night.scheduleBarStartMs,
+      terminalEndMs,
+      strip.schedulingDeadlineMs
+    ),
+  }
+}
+
 export async function markNightCompleted(
   projectId: string,
   nightSubId: string
@@ -1179,7 +1210,9 @@ export async function markNightCompleted(
   }
 
   const nights = project.nights.map((n) =>
-    n.id === nightSubId ? { ...n, status: 'completed' as const, completedAt } : n
+    n.id === nightSubId
+      ? withTerminalScheduleBarEnd({ ...n, status: 'completed' as const, completedAt }, completedAt)
+      : n
   )
 
   const framesLeft = remainingFramesTotal({
@@ -1212,7 +1245,9 @@ export async function markNightFailed(
   if (!project) return
   const failedAt = new Date().toISOString()
   const nights = project.nights.map((n) =>
-    n.id === nightSubId ? { ...n, status: 'failed' as const, failedAt } : n
+    n.id === nightSubId
+      ? withTerminalScheduleBarEnd({ ...n, status: 'failed' as const, failedAt }, failedAt)
+      : n
   )
   await patchProject(projectId, { nights, status: 'in_progress' })
   /* Real failures re-enable sticky auto-hold; ESTOP's own fails preserve a prior clear-ack. */

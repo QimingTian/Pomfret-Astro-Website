@@ -2,6 +2,7 @@ import {
   estimateSessionDurationMs,
   fallbackScheduleBarPlacement,
   hasAnyFrozenScheduleBar,
+  snapScheduleBarEndMs,
   type ScheduleBarPlacement,
 } from '@/lib/imaging-schedule-bar'
 import { getTonightScheduleStrip } from '@/lib/schedule-strip'
@@ -179,23 +180,34 @@ async function freezeScheduleBarOnTerminal(
   const idx = prev.findIndex((e) => e.id === id)
   if (idx === -1) return
   const entry = prev[idx]!
-  // Already frozen on any strip night — do not rewrite onto "tonight" after the calendar flips.
-  if (hasAnyFrozenScheduleBar(entry)) return
-
   const strip = getTonightScheduleStrip(now)
+  // Frozen on a prior strip night — never rewrite onto "tonight" after the calendar flips.
+  if (hasAnyFrozenScheduleBar(entry) && entry.scheduleStripNightKey !== strip.nightKey) return
+
   let bar: ScheduleBarPlacement
   if (
     typeof entry.scheduleBarStartMs === 'number' &&
     Number.isFinite(entry.scheduleBarStartMs) &&
-    entry.scheduleStripNightKey === strip.nightKey
+    (entry.scheduleStripNightKey == null ||
+      entry.scheduleStripNightKey === '' ||
+      entry.scheduleStripNightKey === strip.nightKey)
   ) {
+    // Snap predicted in-progress end to the actual complete/fail signal (early or late).
     bar = {
       nightKey: strip.nightKey,
       startMs: entry.scheduleBarStartMs,
-      endMs: Math.min(Math.max(terminalEndMs, entry.scheduleBarStartMs + 60_000), strip.schedulingDeadlineMs),
+      endMs: snapScheduleBarEndMs(entry.scheduleBarStartMs, terminalEndMs, strip.schedulingDeadlineMs),
     }
   } else {
     bar = fallbackScheduleBarPlacement(entry, terminalEndMs, now)
+  }
+
+  if (
+    entry.scheduleStripNightKey === bar.nightKey &&
+    entry.scheduleBarStartMs === bar.startMs &&
+    entry.scheduleBarEndMs === bar.endMs
+  ) {
+    return
   }
 
   const next = [...prev]

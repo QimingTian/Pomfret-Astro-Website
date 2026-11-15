@@ -94,3 +94,15 @@ export function hasAnyFrozenScheduleBar(entry: SessionBoardEntry): boolean {
   if (typeof nightKey !== 'string' || !nightKey.trim()) return false
   return readScheduleBarFromEntry(entry, nightKey) != null
 }
+
+/**
+ * Actual complete/fail time for a schedule bar end. Keeps a 60s minimum length and never past the
+ * strip deadline. Used when a predicted in-progress bar must snap to the ending signal.
+ */
+export function snapScheduleBarEndMs(
+  startMs: number,
+  terminalEndMs: number,
+  schedulingDeadlineMs: number
+): number {
+  return Math.min(Math.max(terminalEndMs, startMs + 60_000), schedulingDeadlineMs)
+}

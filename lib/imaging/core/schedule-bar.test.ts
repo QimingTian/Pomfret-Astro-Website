@@ -3,6 +3,7 @@ import test from 'node:test'
 import {
   hasAnyFrozenScheduleBar,
   hasFrozenScheduleBar,
+  snapScheduleBarEndMs,
   type ScheduleBarPlacement,
 } from './schedule-bar'
 import type { SessionBoardEntry } from '@/lib/imaging-session-board'
@@ -50,4 +51,21 @@ test('terminal bar placement type requires positive interval', () => {
     endMs: 2,
   }
   assert.ok(bar.endMs > bar.startMs)
+})
+
+test('snapScheduleBarEndMs uses the terminal signal and keeps a 60s minimum', () => {
+  const startMs = Date.parse('2026-11-16T01:00:00.000Z')
+  const earlyEnd = Date.parse('2026-11-16T03:00:00.000Z')
+  const lateEnd = Date.parse('2026-11-16T08:00:00.000Z')
+  const deadline = Date.parse('2026-11-16T10:00:00.000Z')
+  assert.equal(snapScheduleBarEndMs(startMs, earlyEnd, deadline), earlyEnd)
+  assert.equal(snapScheduleBarEndMs(startMs, lateEnd, deadline), lateEnd)
+  assert.equal(
+    snapScheduleBarEndMs(startMs, startMs + 10_000, deadline),
+    startMs + 60_000
+  )
+  assert.equal(
+    snapScheduleBarEndMs(startMs, Date.parse('2026-11-16T11:00:00.000Z'), deadline),
+    deadline
+  )
 })

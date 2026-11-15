@@ -44,6 +44,26 @@ test('serverScheduleBarForNight rejects wrong nightKey and invalid bar', () => {
   )
 })
 
+test('serverScheduleBarForNight snaps predicted end to completedAt', () => {
+  const startMs = Date.parse('2026-11-16T01:00:00.000Z')
+  const predictedEnd = Date.parse('2026-11-16T06:00:00.000Z')
+  const completedAt = '2026-11-16T03:30:00.000Z'
+  assert.deepEqual(
+    serverScheduleBarForNight(
+      {
+        ...baseItem,
+        status: 'completed',
+        completedAt,
+        scheduleStripNightKey: '2026-11-15',
+        scheduleBarStartMs: startMs,
+        scheduleBarEndMs: predictedEnd,
+      },
+      '2026-11-15'
+    ),
+    { startMs, endMs: Date.parse(completedAt) }
+  )
+})
+
 test('clipPlacementAroundOccupied treats a closed window like an earlier session', () => {
   const closed = { startMs: 7_000, endMs: 10_000 }
   assert.deepEqual(clipPlacementAroundOccupied(7_000, 16_000, [closed]), { startMs: 10_000, endMs: 16_000 })

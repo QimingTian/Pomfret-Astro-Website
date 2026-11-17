@@ -82,3 +82,19 @@ export async function loadMemberSavedSessionById(
   if (!res.ok || data?.ok !== true || !data.session) return null
   return data.session as MemberSavedSessionApiEntry
 }
+
+export async function deleteMemberSavedSessionById(
+  id: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const trimmed = id.trim()
+  if (!trimmed) return { ok: false, error: 'id is required' }
+  const res = await fetch(`/api/member/saved-sessions?id=${encodeURIComponent(trimmed)}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok || data?.ok !== true) {
+    return { ok: false, error: typeof data.error === 'string' ? data.error : 'Delete failed' }
+  }
+  return { ok: true }
+}

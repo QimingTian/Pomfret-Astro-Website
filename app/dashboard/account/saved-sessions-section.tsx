@@ -12,7 +12,10 @@ import {
 import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
 import { DashboardPanel } from '@/app/dashboard/account/dashboard-panel'
-import { buildRemoteRunSavedSessionUrl } from '@/lib/remote-saved-session'
+import {
+  buildRemoteRunSavedSessionUrl,
+  deleteMemberSavedSessionById,
+} from '@/lib/remote-saved-session'
 
 type SavedRow = {
   id: string
@@ -30,6 +33,7 @@ export function SavedSessionsSection({
 }) {
   const [sessions, setSessions] = useState<SavedRow[]>([])
   const [loading, setLoading] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const loadSessions = useCallback(async () => {
@@ -61,6 +65,24 @@ export function SavedSessionsSection({
     void loadSessions()
   }, [loadSessions])
 
+  async function deleteSession(row: SavedRow) {
+    if (!window.confirm(`Delete saved session “${row.name}”? This cannot be undone.`)) return
+    setDeletingId(row.id)
+    setError(null)
+    try {
+      const result = await deleteMemberSavedSessionById(row.id)
+      if (!result.ok) {
+        setError(result.error || 'Could not delete saved session.')
+        return
+      }
+      setSessions((prev) => prev.filter((s) => s.id !== row.id))
+    } catch {
+      setError('Could not delete saved session.')
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   const body = (
     <>
       {error && <p className="text-sm text-red-400">{error}</p>}
@@ -77,12 +99,19 @@ export function SavedSessionsSection({
                 <p className="font-medium text-white">{s.name}</p>
                 <p className="mt-1 text-xs text-gray-400">Updated {new Date(s.updatedAt).toLocaleString()}</p>
               </div>
-              <Link
-                href={buildRemoteRunSavedSessionUrl(s.id)}
-                className={`shrink-0 ${glassPillSm}`}
-              >
-                Run this session
-              </Link>
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <Link href={buildRemoteRunSavedSessionUrl(s.id)} className={glassPillSm}>
+                  Run this session
+                </Link>
+                <button
+                  type="button"
+                  className={`${glassPillDangerSm} disabled:opacity-40`}
+                  disabled={deletingId === s.id}
+                  onClick={() => void deleteSession(s)}
+                >
+                  {deletingId === s.id ? 'Deleting…' : 'Delete'}
+                </button>
+              </div>
             </li>
           ))}
         </ul>

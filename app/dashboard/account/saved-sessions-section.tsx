@@ -1,14 +1,6 @@
 'use client'
 
-import {
-  glassPillDangerSm,
-  glassPillLg,
-  glassPillLgWide,
-  glassPillMd,
-  glassPillSm,
-  glassPillSuccessSm,
-  glassPillXs,
-} from '@/lib/glass-ui'
+import { glassPillDangerSm, glassPillSm } from '@/lib/glass-ui'
 import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
 import { DashboardPanel } from '@/app/dashboard/account/dashboard-panel'

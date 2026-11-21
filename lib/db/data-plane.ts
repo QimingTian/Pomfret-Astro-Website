@@ -5,7 +5,7 @@
  * Postgres holds a write-through backup of the same docs, used only when a Redis key
  * is missing (never when the key exists as an empty list).
  *
- * Postgres is LIVE for members, gallery, equipment, R2 maps, saved sessions, and
+ * Postgres is LIVE for members, equipment, R2 maps, saved sessions, and
  * member session history. When DATABASE_URL is set, those stores must not prefer Redis.
  *
  * Redis also holds ephemeral ops keys (observatory pulse, ESTOP, login cookies, live
@@ -28,7 +28,6 @@ export const POSTGRES_LIVE = [
   'site_policies',
   'membership_applications',
   'guest_site_access',
-  'gallery_submissions',
   'imaging_equipment',
   'r2_object_map',
   'member_saved_sessions',

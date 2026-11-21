@@ -88,7 +88,7 @@ flowchart LR
 | `AI Models/`, `observatory/models/` | Model documentation and site-side assets. |
 | `docs/`, `.github/workflows/`, `scripts/` | Product/operations notes, CI, catalog refresh, migrations, and maintenance. |
 
-The web application uses **Next.js 14, React 18, and TypeScript** on Vercel. Frequently updated imaging state lives in **Upstash Redis**; **Postgres** holds accounts, memberships, policies, gallery records, and longer-lived history; **Cloudflare R2** stores session files and previews. The Windows agent talks to the server over authenticated HTTP and to NINA and observatory hardware locally.
+The web application uses **Next.js 14, React 18, and TypeScript** on Vercel. Frequently updated imaging state lives in **Upstash Redis**; **Postgres** holds accounts, memberships, policies, and longer-lived history; **Cloudflare R2** stores session files and previews. Public curated imagery is published on **`/explore`** (indexable object pages + sitemap) for discovery; the in-app **Our Data** page remains at `/dashboard/gallery`. The Windows agent talks to the server over authenticated HTTP and to NINA and observatory hardware locally.
 
 The website decides when and what to observe. Templates and the local agent turn a delivered job into NINA steps. A web deployment does **not** update the Windows agent or Raspberry Pi.
 
@@ -143,7 +143,7 @@ The agent polls `/api/imaging/nina-sequence` with its site context and queue cre
 
 A delivered job describes the site, target, filters, exposures, and session identity. The Windows agent builds NINA JSON from templates, performs configured local power and warmup steps, launches NINA, and posts progress. The session board tracks active and terminal work; project accounting updates remaining frames. Mount samples and live previews support the Remote display.
 
-The agent uploads outputs and previews to **R2** and reports object keys to the server. Authorized downloads use short-lived signed links rather than exposing storage credentials. A cron-protected cleanup route runs daily. Short-lived board/project state is cleaned sooner than member history and gallery records; check configured retention before treating the service as a permanent archive.
+The agent uploads outputs and previews to **R2** and reports object keys to the server. Authorized downloads use short-lived signed links rather than exposing storage credentials. A cron-protected cleanup route runs daily. Short-lived board/project state is cleaned sooner than member history; check configured retention before treating the service as a permanent archive.
 
 Pomfret’s all-sky camera supplies a stream, status, and **ASC AI v2** sky/rain inference. The model is a ResNet18 ensemble of full-frame and crop views. Its output contributes to readiness and weather safety only when current and applicable. Camera, AI, radar, and satellite views are site-dependent.
 

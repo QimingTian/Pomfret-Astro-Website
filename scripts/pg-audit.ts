@@ -143,10 +143,6 @@ async function main() {
   const pgAudit = (await sql.query('SELECT id FROM audit_log')) as Array<{ id: string }>
   issues.push(...diffIds('audit', sortedIds(audit.map((e) => e.id)), sortedIds(pgAudit.map((e) => e.id))))
 
-  const gallery = (await kvGetJson<{ submissions?: Array<{ id: string }> }>('gallery-submissions'))?.submissions ?? []
-  const pgGallery = (await sql.query('SELECT id FROM gallery_submissions')) as Array<{ id: string }>
-  issues.push(...diffIds('gallery', sortedIds(gallery.map((s) => s.id)), sortedIds(pgGallery.map((s) => s.id))))
-
   const windows = (await kvGetJson<{ windows?: Array<{ id: string }> }>('imaging-admin-closed-windows'))?.windows ?? []
   const pgWindows = (await sql.query('SELECT id FROM admin_closed_windows')) as Array<{ id: string }>
   issues.push(...diffIds('closed-windows', sortedIds(windows.map((w) => w.id)), sortedIds(pgWindows.map((w) => w.id))))

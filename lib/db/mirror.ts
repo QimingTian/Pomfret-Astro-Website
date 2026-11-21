@@ -5,7 +5,6 @@ import { sameJson, stripNinaJsonFromProjectDocument } from '@/lib/db/skip-unchan
 import {
   adminClosedWindows,
   auditLog,
-  gallerySubmissions,
   imagingEquipment,
   imagingProjects,
   imagingRequestPayloads,
@@ -363,38 +362,6 @@ export async function mirrorAuditLog(rows: AuditRow[]): Promise<void> {
             detail: row.detail ?? null,
           },
         })
-    }
-  })
-}
-
-type GalleryRow = { id: string; userId: string; status: string; createdAt: string }
-
-export async function mirrorGallerySubmissions(rows: GalleryRow[]): Promise<void> {
-  await withDatabaseMirror('gallery', async () => {
-    const db = getDb()
-    const sid = membershipSiteId()
-    const ids = rows.map((r) => r.id)
-    for (const row of rows) {
-      await db
-        .insert(gallerySubmissions)
-        .values({
-          id: row.id,
-          siteId: sid,
-          userId: row.userId,
-          status: row.status,
-          createdAt: row.createdAt,
-          document: JSON.parse(JSON.stringify(row)) as Record<string, unknown>,
-        })
-        .onConflictDoUpdate({
-          target: gallerySubmissions.id,
-          set: {
-            status: row.status,
-            document: JSON.parse(JSON.stringify(row)) as Record<string, unknown>,
-          },
-        })
-    }
-    if (ids.length > 0) {
-      await db.delete(gallerySubmissions).where(not(inArray(gallerySubmissions.id, ids)))
     }
   })
 }

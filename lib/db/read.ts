@@ -4,7 +4,6 @@ import { getDb, postgresReadsEnabled } from '@/lib/db'
 import {
   adminClosedWindows,
   auditLog,
-  gallerySubmissions,
   imagingEquipment,
   imagingProjects,
   imagingRequests,
@@ -97,7 +96,6 @@ export async function loadJsonDocumentsFromPostgres<T extends { id: string }>(
     | 'queue'
     | 'projects'
     | 'board'
-    | 'gallery'
     | 'windows'
     | 'audit'
 ): Promise<T[] | null> {
@@ -121,13 +119,6 @@ export async function loadJsonDocumentsFromPostgres<T extends { id: string }>(
     if (kind === 'board') {
       const rows = await db.select().from(sessionBoard)
       return rows.filter((r) => r.siteId === site).map((r) => r.document as T)
-    }
-    if (kind === 'gallery') {
-      // Gallery stays Pomfret until share rules are site-scoped.
-      const rows = await db.select().from(gallerySubmissions)
-      return rows
-        .filter((r) => r.siteId === DEFAULT_OBSERVATORY_SITE_ID)
-        .map((r) => r.document as T)
     }
     if (kind === 'windows') {
       const rows = await db

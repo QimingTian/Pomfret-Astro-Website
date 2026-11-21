@@ -17,9 +17,9 @@ test('hot imaging docs have Redis live keys the website must not delete', () => 
   assert.equal(isRedisLiveKey('member-users'), false)
 })
 
-test('members and gallery are Postgres-live, not Redis-live', () => {
+test('members are Postgres-live, not Redis-live', () => {
   assert.ok(POSTGRES_LIVE.includes('users'))
-  assert.ok(POSTGRES_LIVE.includes('gallery_submissions'))
+  assert.ok(!(POSTGRES_LIVE as readonly string[]).includes('gallery_submissions'))
   assert.ok(!(POSTGRES_LIVE as readonly string[]).includes('imaging_requests'))
   assert.ok(POSTGRES_HOT_BACKUP.includes('imaging_projects'))
 })

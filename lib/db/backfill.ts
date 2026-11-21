@@ -3,7 +3,6 @@ import { kvEnabled, kvGetJson, kvGetString } from '@/lib/kv-rest'
 import {
   mirrorAdminClosedWindows,
   mirrorAuditLog,
-  mirrorGallerySubmissions,
   mirrorImagingEquipment,
   mirrorImagingProjects,
   mirrorImagingQueue,
@@ -36,20 +35,6 @@ export async function backfillPostgresFromKv(): Promise<{ ok: true; skipped?: st
   const membersDoc = await kvPresent<{ users?: MemberUser[] }>('member-users')
   const members = membersDoc?.users ?? []
   if (membersDoc) await mirrorMembers(members)
-
-  const galleryDoc = await kvPresent<{ submissions?: Array<Record<string, unknown>> }>('gallery-submissions')
-  if (galleryDoc) {
-    const gallery = galleryDoc.submissions ?? []
-    await mirrorGallerySubmissions(
-      gallery.map((s) => ({
-        id: String(s.id),
-        userId: String(s.userId),
-        status: String(s.status),
-        createdAt: String(s.createdAt),
-        ...s,
-      })) as Parameters<typeof mirrorGallerySubmissions>[0]
-    )
-  }
 
   for (const site of OBSERVATORY_SITES) {
     await withObservatorySiteAsync(site.id, async () => {

@@ -13,7 +13,6 @@ const COLD_LEFTOVER_KEYS = [
   'member-users',
   'member-email-index',
   'member-username-index',
-  'gallery-submissions',
   'pomfret:imaging-equipment',
   'imaging-r2-object-map',
   'imaging-r2-preview-map',
@@ -62,7 +61,6 @@ async function main() {
     UNION ALL SELECT 'projects', count(*)::int FROM imaging_projects
     UNION ALL SELECT 'board', count(*)::int FROM session_board
     UNION ALL SELECT 'audit', count(*)::int FROM audit_log
-    UNION ALL SELECT 'gallery', count(*)::int FROM gallery_submissions
     UNION ALL SELECT 'equipment', count(*)::int FROM imaging_equipment
     UNION ALL SELECT 'r2', count(*)::int FROM r2_object_map
     UNION ALL SELECT 'saved', count(*)::int FROM member_saved_sessions

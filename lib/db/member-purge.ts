@@ -2,7 +2,6 @@ import { eq } from 'drizzle-orm'
 
 import { getDb, isDatabaseConfigured, withDatabaseMirror } from '@/lib/db'
 import {
-  gallerySubmissions,
   guestSiteAccess,
   memberSavedSessions,
   memberSessionHistory,
@@ -21,7 +20,6 @@ export async function purgeMemberUserFromPostgres(userId: string): Promise<void>
     await db.delete(guestSiteAccess).where(eq(guestSiteAccess.userId, userId))
     await db.delete(memberSavedSessions).where(eq(memberSavedSessions.userId, userId))
     await db.delete(memberSessionHistory).where(eq(memberSessionHistory.userId, userId))
-    await db.delete(gallerySubmissions).where(eq(gallerySubmissions.userId, userId))
     await db.delete(users).where(eq(users.id, userId))
   })
 }

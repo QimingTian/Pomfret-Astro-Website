@@ -285,6 +285,28 @@ export function AboutHome() {
           </p>
         </AboutEditorialSection>
 
+        <AboutEditorialSection title="Our Data">
+          <p className="text-white">
+            Browse curated deep-sky and photometry images from the Network—including the North America
+            Nebula (NGC 7000 / W80), galaxies, and more.
+          </p>
+          <p>
+            <a
+              href="/explore"
+              className="text-white underline decoration-white/35 underline-offset-[3px] transition-colors hover:decoration-white/70"
+            >
+              Explore Our Data
+            </a>
+            {' · '}
+            <a
+              href="/explore/w80"
+              className="text-white underline decoration-white/35 underline-offset-[3px] transition-colors hover:decoration-white/70"
+            >
+              North America Nebula (W80)
+            </a>
+          </p>
+        </AboutEditorialSection>
+
         <AboutEditorialSection title="Join">
           <p className="text-white">
             Pomfret Astro Network welcomes people from around the world—whether you operate an observatory

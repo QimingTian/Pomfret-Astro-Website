@@ -153,4 +153,24 @@ test('evaluateObservatoryReadyWeather uses ASC sky clear and rain with Open-Mete
   assert.equal(isAscCloudGateApplicable({ stale: true }, false), false)
   assert.equal(isAscCloudGateApplicable({ sky: 'clear' }, true), false)
   assert.equal(isAscCloudGateApplicable({ sky: 'clear' }, false), true)
+  // Camera down / empty status → not applicable (Open-Meteo fallback)
+  assert.equal(isAscCloudGateApplicable(null, false), false)
+  assert.equal(isAscCloudGateApplicable(undefined, false), false)
+  assert.equal(isAscCloudGateApplicable({}, false), false)
+  assert.equal(
+    isAscCloudGateApplicable({ rain: { detected: false, confidence: 0.1, label: 'No Rain' } }, false),
+    true
+  )
+  // When ASC gate is not applicable (e.g. Pi/tunnel down), Open-Meteo cloud can Ready.
+  assert.equal(
+    evaluateObservatoryReadyWeather({
+      ascSkyClear: null,
+      openMeteoCloudCoverPercent: 5,
+      rainDetected: false,
+      windSpeedMs: 4,
+      precipProbabilityPercent: 0,
+      ascGateApplicable: false,
+    }),
+    true
+  )
 })

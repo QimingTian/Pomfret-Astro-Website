@@ -131,7 +131,7 @@ Weather-safety ESTOP has four signal paths:
 - **Observed storms:** fresh thunder/lightning in METAR/SPECI reports from stations within **45 km**, or applicable official **NWS** or **MeteoAlarm** severe-storm warnings. The radius describes the reporting station’s location, not necessarily the storm’s distance from the dome.
 - **Forecast approach:** Open-Meteo WMO thunderstorm codes **95, 96, or 99** at eight points on a **20 km ring** around the site for the current or next hour. **This ring is still active**; it is one input, not the whole weather policy.
 - **Site forecast:** current-hour Open-Meteo precipitation probability **>20%**.
-- **All-sky rain:** rain detected with confidence **≥0.99** when ASC inference is applicable. Stale or suspended camera inference is not used as a live rain signal.
+- **All-sky rain:** rain detected with confidence **≥0.99** when ASC inference is applicable. Unreachable, stale, or suspended camera inference is not used as a live rain signal; Ready and weather-safety clear then fall back to Open-Meteo.
 
 The automatic arm path has a **45-second debounce**. Arming holds remaining work, fails active sessions, and locks the observatory for emergency closure. Only a **weather-origin** ESTOP can clear automatically: the stop must be complete and required inputs must stay free of arm threats for **20 continuous minutes**. A new threat or unavailable required input resets the clear period. Administrator-initiated and session-failure ESTOPs require operator action.
 

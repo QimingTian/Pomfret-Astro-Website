@@ -181,6 +181,8 @@ export default function AllSkyCameraView({
   /** null = unknown / fetch failed; true = Safe; false = Unsafe (observed nearby or 20 km forecast ring). */
   const [stormSafe, setStormSafe] = useState<boolean | null>(null)
   const [sequenceActive, setSequenceActive] = useState(false)
+  /** null = not polled yet; false = /camera/status unreachable (tunnel/Pi down). */
+  const [cameraConnected, setCameraConnected] = useState<boolean | null>(null)
 
   useEffect(() => {
     setNow(new Date())
@@ -296,6 +298,7 @@ export default function AllSkyCameraView({
       setGain(null)
       setAscSky(null)
       setRaining(null)
+      setCameraConnected(false)
       return
     }
     let cancelled = false
@@ -306,7 +309,17 @@ export default function AllSkyCameraView({
           credentials: 'omit',
           cache: 'no-store',
         })
-        if (!res.ok || cancelled) return
+        if (cancelled) return
+        if (!res.ok) {
+          setCameraConnected(false)
+          setLastFrameAt(null)
+          setExposureUs(null)
+          setGain(null)
+          setAscSky(null)
+          setRaining(null)
+          return
+        }
+        setCameraConnected(true)
         const data = (await res.json()) as {
           sensors?: {
             allSkyCam?: {
@@ -379,7 +392,14 @@ export default function AllSkyCameraView({
           }
         }
       } catch {
-        /* keep previous */
+        if (!cancelled) {
+          setCameraConnected(false)
+          setLastFrameAt(null)
+          setExposureUs(null)
+          setGain(null)
+          setAscSky(null)
+          setRaining(null)
+        }
       }
     }
     void tick()
@@ -390,8 +410,11 @@ export default function AllSkyCameraView({
     }
   }, [streamURL])
 
+  const cameraDisconnected = cameraConnected === false
+  const ascFeedUnavailable = sequenceActive || cameraDisconnected
+
   const overlay = useMemo(() => {
-    const ascUnavailable = sequenceActive
+    const ascUnavailable = ascFeedUnavailable
     const obsText = observatoryOverlayStatusLabel(observatoryStatus)
     const obsValueRed = observatoryOverlayStatusIsRed(observatoryStatus)
 
@@ -588,7 +611,7 @@ export default function AllSkyCameraView({
       </div>
     )
   }, [
-    sequenceActive,
+    ascFeedUnavailable,
     now,
     lastFrameAt,
     exposureUs,
@@ -607,7 +630,13 @@ export default function AllSkyCameraView({
     overlayMode,
   ])
 
-  const sequenceMessage = (
+  const feedUnavailableMessage = sequenceActive
+    ? 'All Sky Camera Is Executing A Sequence.'
+    : cameraDisconnected
+      ? 'All Sky Camera Is Disconnected.'
+      : null
+
+  const feedUnavailableOverlay = feedUnavailableMessage ? (
     <div
       className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center bg-black px-4"
       role="status"
@@ -617,10 +646,10 @@ export default function AllSkyCameraView({
         className="text-center text-base font-semibold text-white sm:text-lg"
         style={overlayTextShadowStyle}
       >
-        All Sky Camera Is Executing A Sequence.
+        {feedUnavailableMessage}
       </p>
     </div>
-  )
+  ) : null
 
   if (overlayMode === 'timestamp') {
     return (
@@ -633,7 +662,9 @@ export default function AllSkyCameraView({
             height: 'min(100%, calc(100cqw * 9 / 16))',
           }}
         >
-          {sequenceActive ? sequenceMessage : <MJPEGStream url={streamURL} minimal natural={false} fill />}
+          {feedUnavailableOverlay ?? (
+            <MJPEGStream url={streamURL} minimal natural={false} fill />
+          )}
           {overlay}
         </div>
       </div>
@@ -644,9 +675,11 @@ export default function AllSkyCameraView({
     <div className={fill ? 'flex h-full min-h-0 w-full flex-col' : 'flex h-full flex-col'}>
       <div className="min-h-0 flex-1">
         <div className={`${streamAreaClass} ${fill ? 'h-full min-h-0' : 'min-h-[400px]'}`}>
-          {sequenceActive ? sequenceMessage : <MJPEGStream url={streamURL} minimal natural={!fill} fill={false} />}
+          {feedUnavailableOverlay ?? (
+            <MJPEGStream url={streamURL} minimal natural={!fill} fill={false} />
+          )}
           {overlay}
-          {sequenceActive ? null : <AscCompassRose />}
+          {ascFeedUnavailable ? null : <AscCompassRose />}
         </div>
       </div>
     </div>

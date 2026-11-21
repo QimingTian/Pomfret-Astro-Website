@@ -455,15 +455,12 @@ export async function evaluateWeatherSafetyThreat(): Promise<WeatherSafetyThreat
 
 /**
  * Instantaneous sensor snapshot is clear for auto-unlock.
- * Pomfret (ASC): Open-Meteo available + ASC gate applicable + no threat.
- * Non-ASC sites: Open-Meteo available + no threat (ASC not required).
+ * Open-Meteo must be available with no active threat. ASC rain (when the gate
+ * applies) is already folded into `threat`; when ASC is unreachable/stale/busy,
+ * Open-Meteo clear is the fallback — same rule as Ready weather.
  */
 export function isWeatherSafetyClearForAutoUnlock(snap: WeatherSafetySensorSnapshot): boolean {
-  if (!snap.openMeteoAvailable || snap.threat != null) return false
-  if (siteHasAllSkyCamera(currentObservatorySiteId())) {
-    return snap.ascGateApplicable
-  }
-  return true
+  return snap.openMeteoAvailable && snap.threat == null
 }
 
 /** True when a continuous clear window has lasted at least the hold duration. */
@@ -610,7 +607,7 @@ async function clearWeatherSafetyEmergencyStop(
   await writeClearSinceMs(null)
 
   const clearSensorsDesc = siteHasAllSkyCamera(currentObservatorySiteId())
-    ? 'Open-Meteo and ASC, no storm / precip / ASC rain'
+    ? 'Open-Meteo clear (ASC when available), no storm / precip / ASC rain'
     : 'Open-Meteo, no storm / precip'
   await appendAuditLog({
     kind: 'emergency_stop',
@@ -675,7 +672,8 @@ async function maybeClearWeatherSafetyEmergencyStop(
  * Weather-safety ESTOP loop:
  * - Arm during nautical night on observed or forecast thunderstorm / site precip >20% / (Pomfret) ASC rain ≥99%.
  * - Auto-clear weather-safety ESTOP once STOPPED and sensors stay continuously clear for 20 min
- *   (Pomfret: Open-Meteo + ASC; other sites: Open-Meteo only).
+ *   (Open-Meteo clear + no threat; ASC rain is part of threat when the ASC gate applies,
+ *   otherwise Open-Meteo alone is the fallback).
  * Manual / session-failure ESTOP is never auto-cleared.
  */
 export async function maybeArmWeatherSafetyEmergencyStop(): Promise<WeatherSafetyArmResult> {

@@ -241,7 +241,7 @@ test('pickWeatherSafetyThreat returns null when clear', () => {
   assert.equal(threat, null)
 })
 
-test('isWeatherSafetyClearForAutoUnlock requires Open-Meteo and ASC both available and clear', () => {
+test('isWeatherSafetyClearForAutoUnlock requires Open-Meteo clear; ASC optional when unavailable', () => {
   assert.equal(
     isWeatherSafetyClearForAutoUnlock({
       threat: null,
@@ -258,13 +258,14 @@ test('isWeatherSafetyClearForAutoUnlock requires Open-Meteo and ASC both availab
     }),
     false
   )
+  // ASC down / stale / sequence → Open-Meteo fallback (same as Ready)
   assert.equal(
     isWeatherSafetyClearForAutoUnlock({
       threat: null,
       openMeteoAvailable: true,
       ascGateApplicable: false,
     }),
-    false
+    true
   )
   assert.equal(
     isWeatherSafetyClearForAutoUnlock({

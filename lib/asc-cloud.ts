@@ -74,14 +74,25 @@ function allSkySequenceStatusUrlFromStatusUrl(statusUrl: string): string {
   }
 }
 
-/** True when ASC cloud/rain may gate observatory Ready (not stale, sequence idle). */
+/**
+ * True when ASC cloud/rain may gate observatory Ready / ESTOP.
+ * Not applicable when the camera is unreachable, inference is missing/unusable,
+ * marked stale, or a long ASC sequence is active — callers then fall back to Open-Meteo.
+ */
 export function isAscCloudGateApplicable(
   ascCloud: AscCloudInference | null | undefined,
   sequenceActive: boolean
 ): boolean {
   if (sequenceActive) return false
-  if (ascCloud?.stale === true) return false
-  return true
+  if (!ascCloud || typeof ascCloud !== 'object') return false
+  if (ascCloud.stale === true) return false
+  const sky = ascCloud.sky
+  if (sky === 'clear' || sky === 'cloudy') return true
+  const cloud = ascCloud.cloudCoverPercent
+  if (cloud != null && Number.isFinite(cloud)) return true
+  // Rain-only payloads can still drive ESTOP / Ready rain checks.
+  if (ascCloud.rain && typeof ascCloud.rain.detected === 'boolean') return true
+  return false
 }
 
 export async function fetchAllSkyCamGateState(statusUrl?: string | null): Promise<{
@@ -131,7 +142,7 @@ export function evaluateObservatoryReadyWeather(args: {
   rainDetected: boolean | undefined
   windSpeedMs: number
   precipProbabilityPercent?: number | null | undefined
-  /** When false, skip ASC cloud/rain (sequence active or stale inference). */
+  /** When false, skip ASC cloud/rain (unreachable, sequence active, or stale/unusable inference). */
   ascGateApplicable?: boolean
 }): boolean {
   const ascGateApplicable = args.ascGateApplicable !== false

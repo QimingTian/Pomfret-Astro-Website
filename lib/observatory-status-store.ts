@@ -241,7 +241,8 @@ async function fetchWeatherAllowed(now = Date.now()): Promise<boolean> {
       rainDetected = ascCloud?.rain?.detected === true
       ascStaleReason = ascGateApplicable
         ? null
-        : (ascCloud?.staleReason ?? (gate.sequenceActive ? 'sequence_active' : 'stale'))
+        : (ascCloud?.staleReason ??
+          (gate.sequenceActive ? 'sequence_active' : ascCloud == null ? 'unavailable' : 'stale'))
       ascFrameIso = ascCloud?.frameIso ?? null
       ascModelPhase = ascCloud?.modelPhase ?? null
       ascLastError = ascCloud?.lastError ?? null

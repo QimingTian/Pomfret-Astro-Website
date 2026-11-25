@@ -292,7 +292,7 @@ export function AboutHome() {
           </p>
           <p>
             <a
-              href="/explore"
+              href="/dashboard/gallery"
               className="text-white underline decoration-white/35 underline-offset-[3px] transition-colors hover:decoration-white/70"
             >
               Explore Our Data

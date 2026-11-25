@@ -1,38 +1,48 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { glassPillToggleActiveMd, glassPillToggleIdleMd } from '@/lib/glass-ui'
-import {
-  type PublicDataCategory,
-  publicDataAltText,
-  publicDataByCategory,
-  publicDataGallerySrc,
-  publicDataGalleryThumb,
-} from '@/lib/public-data-catalog'
 
-function categoryFromParam(raw: string | null): PublicDataCategory {
+type GalleryImage = { file: string; description: string; flagship?: boolean }
+
+const DEEP_SKY_IMAGES: GalleryImage[] = [
+  { file: 'photo6.webp', description: 'W80 | 70h | SHO', flagship: true },
+  { file: 'photo9.webp', description: 'NGC 7822 | 62.5h | SHO' },
+  { file: 'photo7.webp', description: 'M33 | 23.33h | LRGB' },
+  { file: 'photo1.webp', description: 'M31 | 14.08h | LRGB' },
+  { file: 'photo2.webp', description: 'IC1805 | 35h | SHO' },
+  { file: 'photo3.webp', description: 'Markarians Chain | 14.16h RGB + 11h Ha | HaRGB' },
+  { file: 'photo4.webp', description: 'M101 | 12.5h LRGB + 5h Ha | HaLRGB' },
+  { file: 'photo8.webp', description: 'SN 2026aaiv | 24.8min | L' },
+]
+
+const PHOTOMETRY_IMAGES: GalleryImage[] = [
+  { file: 'photo5.webp', description: 'XZ Dra | RR Lyrae' },
+]
+
+type DataCategory = 'deep_sky' | 'photometry'
+
+function categoryFromParam(raw: string | null): DataCategory {
   if (raw === 'photometry') return 'photometry'
   return 'deep_sky'
 }
 
 export default function DataPage() {
   const router = useRouter()
-  const [category, setCategory] = useState<PublicDataCategory>('deep_sky')
+  const [category, setCategory] = useState<DataCategory>('deep_sky')
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
 
-  const entries = publicDataByCategory(category)
+  const entries = category === 'deep_sky' ? DEEP_SKY_IMAGES : PHOTOMETRY_IMAGES
   const images = entries.map((entry) => ({
-    src: publicDataGallerySrc(entry),
+    src: `/gallery/${entry.file}`,
     // Tiles load a 1600 px thumbnail (npm run build:gallery-thumbs). Pointing them at the
     // full-size files decoded the whole gallery at once — enough bitmap to have mobile Safari
     // kill the tab with "a problem repeatedly occurred".
-    thumb: publicDataGalleryThumb(entry),
-    alt: publicDataAltText(entry),
-    description: entry.caption,
+    thumb: `/gallery/${entry.file.replace(/\.webp$/, '-thumb.webp')}`,
+    alt: entry.description,
+    description: entry.description,
     flagship: entry.flagship === true,
-    slug: entry.slug,
   }))
 
   useEffect(() => {
@@ -53,7 +63,7 @@ export default function DataPage() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [selectedIndex])
 
-  const selectCategory = (next: PublicDataCategory) => {
+  const selectCategory = (next: DataCategory) => {
     setCategory(next)
     const params = new URLSearchParams(window.location.search)
     if (next === 'deep_sky') params.delete('category')
@@ -68,15 +78,7 @@ export default function DataPage() {
 
   return (
     <div className="flex h-full flex-col lg:-ml-3">
-      <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
-        <h1 className="text-2xl font-semibold text-apple-dark dark:text-white">Our Data</h1>
-        <Link
-          href="/explore"
-          className="text-sm text-apple-blue hover:underline dark:text-sky-400"
-        >
-          Public Explore
-        </Link>
-      </div>
+      <h1 className="text-2xl font-semibold text-apple-dark dark:text-white mb-4">Our Data</h1>
       <div className="flex flex-wrap gap-2 mb-2">
         <button
           type="button"
@@ -96,20 +98,20 @@ export default function DataPage() {
       <div className="flex-1 pb-8 min-h-0">
         <div className="mt-6">
           {images.length > 0 ? (
-            <div className="grid gap-0 grid-cols-1 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               {images.map((img, index) => (
                 <div
                   key={img.src}
                   className={
                     img.flagship
-                      ? 'relative overflow-visible sm:col-span-2 sm:row-span-2'
-                      : 'relative overflow-visible'
+                      ? 'relative overflow-hidden rounded-lg sm:col-span-2 sm:row-span-2'
+                      : 'relative overflow-hidden rounded-lg'
                   }
                 >
                   <button
                     type="button"
                     onClick={() => openImage(index)}
-                    className="group relative block h-full w-full overflow-visible text-left"
+                    className="group relative block h-full w-full overflow-hidden text-left"
                   >
                     <div
                       className={
@@ -150,13 +152,6 @@ export default function DataPage() {
               onClick={(e) => e.stopPropagation()}
             />
             <p className="text-white text-sm sm:text-base text-center">{selectedImage.description}</p>
-            <Link
-              href={`/explore/${selectedImage.slug}`}
-              className="text-sm text-sky-300 hover:underline"
-              onClick={(e) => e.stopPropagation()}
-            >
-              Open public Explore page
-            </Link>
           </div>
         </div>
       )}

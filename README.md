@@ -88,7 +88,7 @@ flowchart LR
 | `AI Models/`, `observatory/models/` | Model documentation and site-side assets. |
 | `docs/`, `.github/workflows/`, `scripts/` | Product/operations notes, CI, catalog refresh, migrations, and maintenance. |
 
-The web application uses **Next.js 14, React 18, and TypeScript** on Vercel. Frequently updated imaging state lives in **Upstash Redis**; **Postgres** holds accounts, memberships, policies, and longer-lived history; **Cloudflare R2** stores session files and previews. Public curated imagery is published on **`/explore`** (indexable object pages + sitemap) for discovery; the in-app **Our Data** page remains at `/dashboard/gallery`. The Windows agent talks to the server over authenticated HTTP and to NINA and observatory hardware locally.
+The web application uses **Next.js 14, React 18, and TypeScript** on Vercel. Frequently updated imaging state lives in **Upstash Redis**; **Postgres** holds accounts, memberships, policies, and longer-lived history; **Cloudflare R2** stores session files and previews. The Windows agent talks to the server over authenticated HTTP and to NINA and observatory hardware locally.
 
 The website decides when and what to observe. Templates and the local agent turn a delivered job into NINA steps. A web deployment does **not** update the Windows agent or Raspberry Pi.
 

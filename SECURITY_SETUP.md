@@ -36,7 +36,7 @@ On the observatory PC only, set **Windows user or system environment variables**
 
 NINA Ground Station HTTP auth password = Vercel `NINA_SESSION_PROGRESS_BASIC_PASSWORD` (stored in NINA, not in git).
 
-Mount Telemetry plugin **Shared secret** = Vercel `NINA_MOUNT_TELEMETRY_SECRET` (stored in NINA plugin settings, not in git).
+Pomfret Astro Network plugin **Shared secret** = Vercel `NINA_MOUNT_TELEMETRY_SECRET` (stored in NINA plugin settings, not in git). Mount pointing and safety-monitor status share one `POST /api/imaging/mount-pointing` (safety nested when connected). `POST /api/imaging/safety-monitor` remains available for direct updates/debug and uses the same secret.
 
 Then pull latest code and **restart** `python nina_agent.py` (new shells pick up env vars).
 

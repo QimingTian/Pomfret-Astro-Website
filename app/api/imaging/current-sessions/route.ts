@@ -305,6 +305,10 @@ export async function GET(request: NextRequest) {
         exposureSeconds: b.exposureSeconds,
         count: b.count,
         outputMode: b.outputMode,
+        ditherEnabled: b.ditherEnabled === true,
+        ...(typeof b.cameraCoolingTempC === 'number' && Number.isFinite(b.cameraCoolingTempC)
+          ? { cameraCoolingTempC: b.cameraCoolingTempC }
+          : {}),
         estimatedDurationSeconds:
           typeof b.estimatedDurationSeconds === 'number' && Number.isFinite(b.estimatedDurationSeconds)
             ? b.estimatedDurationSeconds

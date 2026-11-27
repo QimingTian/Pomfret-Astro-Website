@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { mountTelemetryPostAuthorized } from '@/lib/mount-telemetry-auth'
 import { imagingCorsOptions, withImagingCors } from '@/lib/imaging-queue-auth'
 import { getMountPointingSample, setMountPointingSample, type MountPointingPayload } from '@/lib/mount-pointing-store'
+import { parseSafetyMonitorPayload, setSafetyMonitorSample } from '@/lib/safety-monitor-store'
 import { isWithinDaytimeClosedWindow } from '@/lib/sunrise-window'
 import { runWithRequestSite } from '@/lib/imaging/run-with-request-site'
 
@@ -117,6 +118,23 @@ export async function POST(request: NextRequest) {
   mountPostLastAcceptedAt.set(stationKey, now)
 
   const stored = await setMountPointingSample(payload.stationId, payload)
+
+  // Optional piggybacked safety-monitor block from Pomfret Astro Network plugin (same HTTP call).
+  const rawSafety = (raw as Record<string, unknown>).safetyMonitor
+  if (rawSafety && typeof rawSafety === 'object' && !Array.isArray(rawSafety)) {
+    const nested = rawSafety as Record<string, unknown>
+    const safetyBody: Record<string, unknown> = {
+      ...nested,
+      stationId: nested.stationId ?? payload.stationId,
+      pluginVersion: nested.pluginVersion ?? payload.pluginVersion,
+      clientUtc: nested.clientUtc ?? payload.clientUtc,
+    }
+    const safety = parseSafetyMonitorPayload(safetyBody)
+    if (safety) {
+      await setSafetyMonitorSample(safety.stationId ?? payload.stationId, safety)
+    }
+  }
+
   return withImagingCors({ ok: true as const, receivedAtUtc: stored.receivedAtUtc }, 200, NO_STORE_HEADERS)
   })
 }

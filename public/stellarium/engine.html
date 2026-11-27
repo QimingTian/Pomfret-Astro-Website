@@ -96,10 +96,10 @@
     }
     addSrc(core.stars, { url: '/skydata/stars' }, 'stars')
     addSrc(core.skycultures, { url: '/skydata/skycultures/western', key: 'western' }, 'skycultures/western')
-    /* Full Stellarium Web DSO HiPS (NGC/IC/Messier/LDN/LBN/Barnard/Sharpless, orders 0–3).
-     * Local /skydata/dso is the engine test subset (order 0 only, ~500 KB) — too sparse
-     * to hunt targets. CDN sends Access-Control-Allow-Origin: *. */
-    addSrc(core.dsos, { url: 'https://data.stellarium.org/surveys/dso' }, 'dso')
+    /* DSO HiPS: the old CDN (data.stellarium.org/surveys/dso) now 404s, so we ship the
+     * bundled order-0 survey. Sharpless / other faint catalogs get labels from
+     * /stellarium/catalog-labels.json (GeoJSON Point titles) below. */
+    addSrc(core.dsos, { url: '/skydata/dso' }, 'dso')
     addSrc(core.landscapes, { url: '/skydata/landscapes/guereins', key: 'guereins' }, 'landscapes/guereins')
     /* Stellarium renders milkyway HiPS above ~10° FOV and dss HiPS below ~20°.
      * Point both modules at the selected survey so imagery remains visible at every zoom.
@@ -154,14 +154,14 @@
       core.dsos.hints_visible = true
       /* Default 0 only labels the brightest Messiers at ~90° FOV. The engine
        * draws a DSO name when vmag ≤ hints_limit_mag − 1, and dark nebulae
-       * without Vmag use display mag 16 — offset 12 is what makes NGC/IC/LDN
-       * usable for target hunting without waiting for a deep zoom. */
-      core.dsos.hints_mag_offset = 12
+       * without Vmag use display mag 16 — offset 20 keeps NGC/IC/LDN/Messier
+       * readable while hunting at moderate zoom. */
+      core.dsos.hints_mag_offset = 20
       if (core.stars) {
         core.stars.hints_visible = true
         core.stars.hints_mag_offset = -1
       }
-      core.center_hints_mag_offset = 0
+      core.center_hints_mag_offset = 2
       core.dss.visible = survey !== 'none'
       if (core.lines) {
         if (core.lines.azimuthal) core.lines.azimuthal.visible = layerVisible('azimuthal', false)
@@ -422,11 +422,15 @@
       })
     } catch (_) {}
 
-    /* --- Pomfret overlays: 30° altitude circle + dashed trajectory for selection ---
-     * Off by default; parent Atlas toggles via postMessage (overlay-alt30 / overlay-orbit). */
+    /* --- Pomfret overlays: 30° altitude circle + trajectory ---
+     * Off by default; parent Atlas toggles via postMessage
+     * (overlay-alt30 / overlay-orbit). */
     var pomfretOverlayLayer = null
     var pomfretAlt30Geo = null
     var pomfretTrajGeo = null
+    var pomfretCatalogLabelsGeo = null
+    var pomfretCatalogLabelsData = null
+    var pomfretCatalogLabelsVisible = false
     var pomfretTrajTimer = null
     var pomfretShowAlt30 = false
     var pomfretShowOrbit = false
@@ -476,6 +480,61 @@
       if (!pomfretTrajGeo) return
       if (lay) { try { lay.remove(pomfretTrajGeo) } catch (_) {} }
       pomfretTrajGeo = null
+    }
+
+    function pomfretRemoveCatalogLabels () {
+      var lay = pomfretOverlayLayer
+      if (!pomfretCatalogLabelsGeo) return
+      if (lay) { try { lay.remove(pomfretCatalogLabelsGeo) } catch (_) {} }
+      pomfretCatalogLabelsGeo = null
+      pomfretCatalogLabelsVisible = false
+    }
+
+    /* Sharpless (and future catalog) Point titles. Gated by FOV so wide sky stays clean. */
+    function pomfretRefreshCatalogLabels () {
+      var fovDeg = 90
+      try {
+        if (core && typeof core.fov === 'number') fovDeg = core.fov / DD2R
+      } catch (_) {}
+      var want = !!(pomfretCatalogLabelsData && pomfretCatalogLabelsData.features &&
+        pomfretCatalogLabelsData.features.length && fovDeg <= 55)
+      if (!want) {
+        pomfretRemoveCatalogLabels()
+        return
+      }
+      if (pomfretCatalogLabelsVisible && pomfretCatalogLabelsGeo) return
+      var lay = pomfretEnsureLayer()
+      if (!lay) return
+      pomfretRemoveCatalogLabels()
+      try {
+        var g = stel.createObj('geojson', {})
+        g.data = pomfretCatalogLabelsData
+        g.frame = stel.FRAME_ICRF
+        lay.add(g)
+        pomfretCatalogLabelsGeo = g
+        pomfretCatalogLabelsVisible = true
+      } catch (err) {
+        console.warn('[pomfret-stellarium] catalog labels geojson failed', err)
+      }
+    }
+
+    function pomfretLoadCatalogLabels () {
+      try {
+        fetch('/stellarium/catalog-labels.json')
+          .then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status)
+            return r.json()
+          })
+          .then(function (data) {
+            pomfretCatalogLabelsData = data
+            pomfretRefreshCatalogLabels()
+          })
+          .catch(function (err) {
+            console.warn('[pomfret-stellarium] catalog-labels.json load failed', err)
+          })
+      } catch (err) {
+        console.warn('[pomfret-stellarium] catalog-labels fetch failed', err)
+      }
     }
 
     function pomfretSelId (sel) {
@@ -693,6 +752,14 @@
         } catch (_) {}
       })
     } catch (_) {}
+
+    /* Catalog Point labels appear once FOV is tight enough to hunt nebulae. */
+    try {
+      core.change && core.change('fov', function () {
+        try { pomfretRefreshCatalogLabels() } catch (_) {}
+      })
+    } catch (_) {}
+    pomfretLoadCatalogLabels()
 
     setTimeout(function () {
       try {

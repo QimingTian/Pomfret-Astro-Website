@@ -34,6 +34,10 @@ export type SessionBoardEntry = {
   outputMode?: 'raw_zip' | 'stacked_master' | 'none'
   filterPlans?: Array<{ filterName: string; exposureSeconds: number; count: number }>
   estimatedDurationSeconds?: number
+  /** Carried from the queue so Check progress still shows On/Off after consume. */
+  ditherEnabled?: boolean
+  /** Carried from the queue (°C); Check progress shows this after consume. */
+  cameraCoolingTempC?: number
   /** Planned strip start carried from the queue so Remote does not fall back to createdAt. */
   plannedStartIso?: string | null
   completedAt?: string
@@ -100,6 +104,10 @@ function normalizeEntries(raw: unknown): SessionBoardEntry[] {
       ((e as SessionBoardEntry).filterPlans == null || Array.isArray((e as SessionBoardEntry).filterPlans)) &&
       ((e as SessionBoardEntry).estimatedDurationSeconds == null ||
         typeof (e as SessionBoardEntry).estimatedDurationSeconds === 'number') &&
+      ((e as SessionBoardEntry).ditherEnabled == null ||
+        typeof (e as SessionBoardEntry).ditherEnabled === 'boolean') &&
+      ((e as SessionBoardEntry).cameraCoolingTempC == null ||
+        typeof (e as SessionBoardEntry).cameraCoolingTempC === 'number') &&
       ((e as SessionBoardEntry).plannedStartIso == null ||
         typeof (e as SessionBoardEntry).plannedStartIso === 'string') &&
       ((e as SessionBoardEntry).completedAt == null || typeof (e as SessionBoardEntry).completedAt === 'string') &&
@@ -297,6 +305,8 @@ export async function boardUpsertInProgress(input: {
   outputMode?: 'raw_zip' | 'stacked_master' | 'none'
   filterPlans?: Array<{ filterName: string; exposureSeconds: number; count: number }>
   estimatedDurationSeconds?: number
+  ditherEnabled?: boolean
+  cameraCoolingTempC?: number
   plannedStartIso?: string | null
   sessionPasswordHash?: string
   userId?: string
@@ -329,6 +339,10 @@ export async function boardUpsertInProgress(input: {
     outputMode: input.outputMode,
     filterPlans: input.filterPlans,
     estimatedDurationSeconds: input.estimatedDurationSeconds,
+    ...(typeof input.ditherEnabled === 'boolean' ? { ditherEnabled: input.ditherEnabled } : {}),
+    ...(typeof input.cameraCoolingTempC === 'number' && Number.isFinite(input.cameraCoolingTempC)
+      ? { cameraCoolingTempC: input.cameraCoolingTempC }
+      : {}),
     plannedStartIso,
     completedAt: undefined,
     downloadedAt: undefined,

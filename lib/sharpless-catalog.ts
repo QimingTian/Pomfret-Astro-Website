@@ -1,5 +1,8 @@
 import catalog from './sharpless-j2000.json'
 
+/** Atlas sky labels: after editing entries, regenerate
+ * `public/stellarium/catalog-labels.json` from this file (Point GeoJSON titles). */
+
 const positions = new Map<number, { raHours: number; decDeg: number }>(
   catalog.entries.map(([number, raHours, decDeg]) => [number, { raHours, decDeg }]),
 )

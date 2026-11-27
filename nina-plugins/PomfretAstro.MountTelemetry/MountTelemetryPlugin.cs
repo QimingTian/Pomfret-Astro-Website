@@ -18,7 +18,10 @@ namespace PomfretAstro.MountTelemetry {
         private readonly MountTelemetryPublisher _publisher;
 
         [ImportingConstructor]
-        public MountTelemetryPlugin(ITelescopeMediator telescopeMediator) {
+        public MountTelemetryPlugin(
+            ITelescopeMediator telescopeMediator,
+            ISafetyMonitorMediator safetyMonitorMediator
+        ) {
 
             if (Settings.Default.UpdateSettings) {
                 Settings.Default.Upgrade();
@@ -26,7 +29,7 @@ namespace PomfretAstro.MountTelemetry {
                 CoreUtil.SaveSettings(Settings.Default);
             }
 
-            _publisher = new MountTelemetryPublisher(telescopeMediator);
+            _publisher = new MountTelemetryPublisher(telescopeMediator, safetyMonitorMediator);
         }
 
         public override Task Teardown() {

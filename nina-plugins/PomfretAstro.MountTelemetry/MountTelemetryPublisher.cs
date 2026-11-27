@@ -1,4 +1,5 @@
 using NINA.Core.Utility;
+using NINA.Equipment.Equipment.MySafetyMonitor;
 using NINA.Equipment.Equipment.MyTelescope;
 using NINA.Equipment.Interfaces.Mediator;
 using PomfretAstro.MountTelemetry.Properties;
@@ -13,14 +14,21 @@ using System.Threading.Tasks;
 namespace PomfretAstro.MountTelemetry {
 
     /// <summary>
-    /// Subscribes to telescope mediator updates and POSTs JSON to the configured API on an interval.
+    /// Subscribes to telescope + safety-monitor mediators.
+    /// Mount POSTs to the configured URL; when the safety monitor is (or was just)
+    /// connected, its status is piggybacked on the same mount JSON — no extra HTTP call.
     /// </summary>
-    public sealed class MountTelemetryPublisher : ITelescopeConsumer {
+    public sealed class MountTelemetryPublisher : ITelescopeConsumer, ISafetyMonitorConsumer {
         private static readonly HttpClient Http = CreateHttpClient();
 
         private readonly ITelescopeMediator _telescopeMediator;
-        private readonly object _postSync = new object();
-        private DateTime _lastPostUtc = DateTime.MinValue;
+        private readonly ISafetyMonitorMediator _safetyMonitorMediator;
+        private readonly object _mountPostSync = new object();
+        private readonly object _safetySync = new object();
+        private DateTime _lastMountPostUtc = DateTime.MinValue;
+        private SafetyMonitorInfo? _latestSafety;
+        private bool _safetyWasConnected;
+        private bool _pendingSafetyDisconnectReport;
         private volatile bool _disposed;
 
         private static HttpClient CreateHttpClient() {
@@ -30,9 +38,14 @@ namespace PomfretAstro.MountTelemetry {
             return c;
         }
 
-        public MountTelemetryPublisher(ITelescopeMediator telescopeMediator) {
+        public MountTelemetryPublisher(
+            ITelescopeMediator telescopeMediator,
+            ISafetyMonitorMediator safetyMonitorMediator
+        ) {
             _telescopeMediator = telescopeMediator ?? throw new ArgumentNullException(nameof(telescopeMediator));
+            _safetyMonitorMediator = safetyMonitorMediator ?? throw new ArgumentNullException(nameof(safetyMonitorMediator));
             _telescopeMediator.RegisterConsumer(this);
+            _safetyMonitorMediator.RegisterConsumer(this);
         }
 
         public void UpdateDeviceInfo(TelescopeInfo deviceInfo) {
@@ -44,33 +57,50 @@ namespace PomfretAstro.MountTelemetry {
 
             var interval = Math.Max(2000, Settings.Default.PostIntervalMilliseconds);
             var now = DateTime.UtcNow;
-            lock (_postSync) {
-                if ((now - _lastPostUtc).TotalMilliseconds < interval) return;
-                _lastPostUtc = now;
+            lock (_mountPostSync) {
+                if ((now - _lastMountPostUtc).TotalMilliseconds < interval) return;
+                _lastMountPostUtc = now;
             }
 
-            _ = PostAsync(deviceInfo, url);
+            _ = PostMountAsync(deviceInfo, url);
         }
 
-        private async Task PostAsync(TelescopeInfo info, string url) {
-            try {
-                var payload = BuildPayload(info);
-                var json = JsonSerializer.Serialize(payload, SerializerOptions);
-                using var req = new HttpRequestMessage(HttpMethod.Post, url) {
-                    Content = new StringContent(json, Encoding.UTF8, "application/json"),
-                };
-                var secret = Settings.Default.SharedSecret?.Trim() ?? string.Empty;
-                if (secret.Length > 0) {
-                    req.Headers.TryAddWithoutValidation("Authorization", "Bearer " + secret);
-                    req.Headers.TryAddWithoutValidation("x-nina-mount-telemetry-secret", secret);
-                }
+        public void UpdateDeviceInfo(SafetyMonitorInfo deviceInfo) {
+            if (_disposed || deviceInfo == null) return;
 
-                using var resp = await Http.SendAsync(req).ConfigureAwait(false);
-                if (!resp.IsSuccessStatusCode) {
-                    Logger.Warning($"Mount telemetry POST failed: {(int)resp.StatusCode} {resp.ReasonPhrase}");
+            lock (_safetySync) {
+                var connected = deviceInfo.Connected;
+                if (_safetyWasConnected && !connected) {
+                    _pendingSafetyDisconnectReport = true;
                 }
+                _safetyWasConnected = connected;
+                _latestSafety = deviceInfo;
+            }
+        }
+
+        private async Task PostMountAsync(TelescopeInfo info, string url) {
+            try {
+                var payload = BuildMountPayload(info);
+                await SendJsonAsync(url, payload).ConfigureAwait(false);
             } catch (Exception ex) {
                 Logger.Error(ex);
+            }
+        }
+
+        private static async Task SendJsonAsync(string url, object payload) {
+            var json = JsonSerializer.Serialize(payload, SerializerOptions);
+            using var req = new HttpRequestMessage(HttpMethod.Post, url) {
+                Content = new StringContent(json, Encoding.UTF8, "application/json"),
+            };
+            var secret = Settings.Default.SharedSecret?.Trim() ?? string.Empty;
+            if (secret.Length > 0) {
+                req.Headers.TryAddWithoutValidation("Authorization", "Bearer " + secret);
+                req.Headers.TryAddWithoutValidation("x-nina-mount-telemetry-secret", secret);
+            }
+
+            using var resp = await Http.SendAsync(req).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode) {
+                Logger.Warning($"Pomfret Astro Network POST failed ({url}): {(int)resp.StatusCode} {resp.ReasonPhrase}");
             }
         }
 
@@ -79,16 +109,21 @@ namespace PomfretAstro.MountTelemetry {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         };
 
-        private static TelemetryDto BuildPayload(TelescopeInfo info) {
+        private static string? PluginVersionString() {
             var v = Assembly.GetExecutingAssembly().GetName().Version;
-            var versionStr = v == null ? null : $"{v.Major}.{v.Minor}.{v.Build}";
+            return v == null ? null : $"{v.Major}.{v.Minor}.{v.Build}";
+        }
 
+        private static string? StationIdOrNull() {
             var station = Settings.Default.StationId?.Trim() ?? string.Empty;
+            return station.Length > 0 ? station : null;
+        }
 
-            return new TelemetryDto {
+        private MountTelemetryDto BuildMountPayload(TelescopeInfo info) {
+            return new MountTelemetryDto {
                 Source = "pomfret-mount-telemetry",
-                PluginVersion = versionStr,
-                StationId = station.Length > 0 ? station : null,
+                PluginVersion = PluginVersionString(),
+                StationId = StationIdOrNull(),
                 Connected = info.Connected,
                 RaHours = Fin(info.RightAscension),
                 DecDeg = Fin(info.Declination),
@@ -102,6 +137,41 @@ namespace PomfretAstro.MountTelemetry {
                 SideOfPier = info.SideOfPier.ToString(),
                 Epoch = info.EquatorialSystem.ToString(),
                 ClientUtc = DateTime.UtcNow.ToString("o"),
+                SafetyMonitor = TakeSafetyMonitorForMountPost(),
+            };
+        }
+
+        /// <summary>
+        /// Include safety when connected, or once after disconnect so the site is not left on a stale Safe.
+        /// </summary>
+        private SafetyTelemetryDto? TakeSafetyMonitorForMountPost() {
+            SafetyMonitorInfo? info;
+            bool pendingDisconnect;
+            lock (_safetySync) {
+                info = _latestSafety;
+                pendingDisconnect = _pendingSafetyDisconnectReport;
+                if (pendingDisconnect) _pendingSafetyDisconnectReport = false;
+            }
+            if (info == null) return null;
+
+            if (info.Connected) {
+                return BuildSafetyNested(info, forceDisconnected: false);
+            }
+            if (pendingDisconnect) {
+                return BuildSafetyNested(info, forceDisconnected: true);
+            }
+            return null;
+        }
+
+        private static SafetyTelemetryDto BuildSafetyNested(SafetyMonitorInfo info, bool forceDisconnected) {
+            var connected = forceDisconnected ? false : info.Connected;
+            return new SafetyTelemetryDto {
+                Source = "pomfret-safety-monitor",
+                Connected = connected,
+                IsSafe = connected ? info.IsSafe : (bool?)null,
+                Name = string.IsNullOrWhiteSpace(info.Name) ? null : info.Name,
+                DisplayName = string.IsNullOrWhiteSpace(info.DisplayName) ? null : info.DisplayName,
+                DeviceId = string.IsNullOrWhiteSpace(info.DeviceId) ? null : info.DeviceId,
             };
         }
 
@@ -110,7 +180,7 @@ namespace PomfretAstro.MountTelemetry {
             return value;
         }
 
-        private sealed class TelemetryDto {
+        private sealed class MountTelemetryDto {
             public string? Source { get; set; }
             public string? PluginVersion { get; set; }
             public string? StationId { get; set; }
@@ -127,6 +197,16 @@ namespace PomfretAstro.MountTelemetry {
             public string? SideOfPier { get; set; }
             public string? Epoch { get; set; }
             public string? ClientUtc { get; set; }
+            public SafetyTelemetryDto? SafetyMonitor { get; set; }
+        }
+
+        private sealed class SafetyTelemetryDto {
+            public string? Source { get; set; }
+            public bool Connected { get; set; }
+            public bool? IsSafe { get; set; }
+            public string? Name { get; set; }
+            public string? DisplayName { get; set; }
+            public string? DeviceId { get; set; }
         }
 
         public void Dispose() {
@@ -134,6 +214,11 @@ namespace PomfretAstro.MountTelemetry {
             _disposed = true;
             try {
                 _telescopeMediator.RemoveConsumer(this);
+            } catch (Exception ex) {
+                Logger.Error(ex);
+            }
+            try {
+                _safetyMonitorMediator.RemoveConsumer(this);
             } catch (Exception ex) {
                 Logger.Error(ex);
             }

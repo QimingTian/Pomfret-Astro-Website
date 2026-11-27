@@ -29,7 +29,6 @@ import { PlanFramingToolbar, PlanFrameOverlays } from './plan-framing-toolbar'
 import { PlanSelectionOverlay, type LiveSkyInfo } from './plan-selection-overlay'
 import { planSessionNameForRemote } from '@/lib/plan-target-name'
 import { buildEngineResolveCandidates } from '@/lib/plan-engine-search'
-
 type ViewerPosition = { azDeg: number; altDeg: number; fovDeg: number; dateIso: string }
 type ViewerSource = {
   survey: SurveyMode
@@ -406,6 +405,7 @@ export default function PlanPage() {
     if (!stelReady) return
     const w = iframeRef.current?.contentWindow
     if (!w) return
+
     try {
       w.postMessage({ source: 'pomfret-atlas', type: 'overlay-alt30', visible: alt30OverlayOn }, '*')
       w.postMessage({ source: 'pomfret-atlas', type: 'overlay-orbit', visible: orbitOverlayOn }, '*')
@@ -421,7 +421,14 @@ export default function PlanPage() {
     } catch {
       /* ignore */
     }
-  }, [stelReady, activeViewerSlot, alt30OverlayOn, orbitOverlayOn, planMode, skyLocked])
+  }, [
+    stelReady,
+    activeViewerSlot,
+    alt30OverlayOn,
+    orbitOverlayOn,
+    planMode,
+    skyLocked,
+  ])
 
   const mosaicBaseInput = useMemo(() => {
     if (planMode !== 'framing' || !equipment || !stelReady) return null

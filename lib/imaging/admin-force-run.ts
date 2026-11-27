@@ -334,6 +334,10 @@ async function deliverForceRunProjectSub(
         raHours: sky.raHours,
       }),
       plannedStartIso: night.plannedStartIso ?? null,
+      ditherEnabled: project.ditherEnabled === true,
+      ...(typeof project.cameraCoolingTempC === 'number' && Number.isFinite(project.cameraCoolingTempC)
+        ? { cameraCoolingTempC: project.cameraCoolingTempC }
+        : {}),
       sessionPasswordHash: project.sessionPasswordHash,
       userId: project.userId,
       projectMode: true,
@@ -431,6 +435,10 @@ async function deliverForceRunQueueRow(row: ImagingRequest): Promise<NextRespons
     outputMode: consumed.outputMode,
     filterPlans: consumed.filterPlans,
     estimatedDurationSeconds: consumed.estimatedDurationSeconds,
+    ditherEnabled: consumed.ditherEnabled === true,
+    ...(typeof consumed.cameraCoolingTempC === 'number' && Number.isFinite(consumed.cameraCoolingTempC)
+      ? { cameraCoolingTempC: consumed.cameraCoolingTempC }
+      : {}),
     plannedStartIso: consumed.plannedStartIso ?? null,
     sessionPasswordHash: consumed.sessionPasswordHash,
     userId: consumed.userId,

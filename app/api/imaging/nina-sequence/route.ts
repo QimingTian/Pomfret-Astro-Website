@@ -345,6 +345,10 @@ async function deliverProjectSubSessionJson(
         })
       })(),
       plannedStartIso: nightRef.plannedStartIso ?? null,
+      ditherEnabled: projectRef.ditherEnabled === true,
+      ...(typeof projectRef.cameraCoolingTempC === 'number' && Number.isFinite(projectRef.cameraCoolingTempC)
+        ? { cameraCoolingTempC: projectRef.cameraCoolingTempC }
+        : {}),
       sessionPasswordHash: projectRef.sessionPasswordHash,
       userId: projectRef.userId,
       projectMode: true,
@@ -808,6 +812,10 @@ export async function GET(request: NextRequest) {
     outputMode: consumed.outputMode,
     filterPlans: consumed.filterPlans,
     estimatedDurationSeconds: consumed.estimatedDurationSeconds,
+    ditherEnabled: consumed.ditherEnabled === true,
+    ...(typeof consumed.cameraCoolingTempC === 'number' && Number.isFinite(consumed.cameraCoolingTempC)
+      ? { cameraCoolingTempC: consumed.cameraCoolingTempC }
+      : {}),
     plannedStartIso: consumed.plannedStartIso ?? null,
     sessionPasswordHash: consumed.sessionPasswordHash,
     userId: consumed.userId,

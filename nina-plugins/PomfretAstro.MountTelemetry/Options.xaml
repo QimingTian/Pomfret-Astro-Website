@@ -4,9 +4,9 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <DataTemplate x:Key="PomfretMountTelemetry_Options">
         <StackPanel Orientation="Vertical">
-            <Label Content="Pomfret mount telemetry" FontWeight="Bold" Margin="0,4,0,0" />
+            <Label Content="Pomfret Astro Network" FontWeight="Bold" Margin="0,4,0,0" />
             <CheckBox Content="Enable HTTP telemetry" IsChecked="{Binding TelemetryEnabled}" Margin="0,8,0,0" />
-            <Label Content="POST URL (must include /api/imaging/mount-pointing)" Margin="0,8,0,0" />
+            <Label Content="POST URL (must include /api/imaging/mount-pointing; safety status is included in the same POST when connected)" Margin="0,8,0,0" />
             <TextBox Text="{Binding ApiEndpoint, UpdateSourceTrigger=PropertyChanged}" MinWidth="400" />
             <Label Content="Minimum interval between POSTs (ms)" Margin="0,8,0,0" />
             <TextBox Text="{Binding PostIntervalMilliseconds, UpdateSourceTrigger=PropertyChanged}" MinWidth="120" HorizontalAlignment="Left" />
